@@ -369,7 +369,7 @@ static bool NeedsGCAfterCC() {
 }
 
 class nsJSEnvironmentObserver final : public nsIObserver {
-  ~nsJSEnvironmentObserver() {}
+  ~nsJSEnvironmentObserver() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -530,8 +530,7 @@ class ScriptErrorEvent : public Runnable {
       JS::Rooted<JSObject*> stackGlobal(rootingCx);
       xpc::FindExceptionStackForConsoleReport(win, mError, mErrorStack, &stack,
                                               &stackGlobal);
-      mReport->LogToConsoleWithStack(stack, stackGlobal,
-                                     JS::ExceptionTimeWarpTarget(mError));
+      mReport->LogToConsoleWithStack(stack, stackGlobal);
     }
 
     return NS_OK;
@@ -1206,7 +1205,7 @@ static inline js::SliceBudget BudgetFromDuration(TimeDuration duration) {
 
 static void FireForgetSkippable(uint32_t aSuspected, bool aRemoveChildless,
                                 TimeStamp aDeadline) {
-  AUTO_PROFILER_TRACING(
+  AUTO_PROFILER_TRACING_MARKER(
       "CC", aDeadline.IsNull() ? "ForgetSkippable" : "IdleForgetSkippable",
       GCCC);
   TimeStamp startTimeStamp = TimeStamp::Now();
@@ -1542,8 +1541,8 @@ void nsJSContext::RunCycleCollectorSlice(TimeStamp aDeadline) {
     return;
   }
 
-  AUTO_PROFILER_TRACING("CC", aDeadline.IsNull() ? "CCSlice" : "IdleCCSlice",
-                        GCCC);
+  AUTO_PROFILER_TRACING_MARKER(
+      "CC", aDeadline.IsNull() ? "CCSlice" : "IdleCCSlice", GCCC);
 
   AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorSlice", GCCC);
 
@@ -1882,7 +1881,7 @@ static bool CCRunnerFired(TimeStamp aDeadline) {
       MOZ_ASSERT(!didDoWork);
 
       sCCRunnerState = CCRunnerState::LateTimer;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case CCRunnerState::LateTimer:
       if (!ShouldTriggerCC(suspected)) {

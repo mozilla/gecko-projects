@@ -6,9 +6,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DocumentChannelParent.h"
+#include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/ClientInfo.h"
 
 extern mozilla::LazyLogModule gDocumentChannelLog;
 #define LOG(fmt) MOZ_LOG(gDocumentChannelLog, mozilla::LogLevel::Verbose, fmt)
+
+using namespace mozilla::dom;
 
 namespace mozilla {
 namespace net {
@@ -17,8 +21,8 @@ DocumentChannelParent::DocumentChannelParent(BrowserParent* aBrowser,
                                              nsILoadContext* aLoadContext,
                                              PBOverrideStatus aOverrideStatus) {
   LOG(("DocumentChannelParent ctor [this=%p]", this));
-  mParent =
-      new DocumentLoadListener(aBrowser, aLoadContext, aOverrideStatus, this);
+  mParent = new DocumentLoadListener(aBrowser->GetBrowsingContext(),
+                                     aLoadContext, aOverrideStatus, this);
 }
 
 DocumentChannelParent::~DocumentChannelParent() {
@@ -35,17 +39,25 @@ bool DocumentChannelParent::Init(BrowserParent* aBrowser,
   RefPtr<class LoadInfo> loadInfo;
   nsresult rv = mozilla::ipc::LoadInfoArgsToLoadInfo(Some(aArgs.loadInfo()),
                                                      getter_AddRefs(loadInfo));
+
+  Maybe<ClientInfo> clientInfo;
+  if (aArgs.initialClientInfo().isSome()) {
+    clientInfo.emplace(ClientInfo(aArgs.initialClientInfo().ref()));
+  }
+
+  RefPtr<BrowsingContext> bc;
+  loadInfo->GetTargetBrowsingContext(getter_AddRefs(bc));
+
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   rv = NS_ERROR_UNEXPECTED;
-  if (!mParent->Open(
-          aBrowser, loadState, loadInfo, aArgs.initiatorType().ptrOr(nullptr),
-          aArgs.loadFlags(), aArgs.loadType(), aArgs.cacheKey(),
-          aArgs.isActive(), aArgs.isTopLevelDoc(),
-          aArgs.hasNonEmptySandboxingFlags(), aArgs.topWindowURI(),
-          aArgs.contentBlockingAllowListPrincipal(), aArgs.customUserAgent(),
-          aArgs.channelId(), aArgs.asyncOpenTime(), aArgs.documentOpenFlags(),
-          aArgs.pluginsAllowed(), &rv)) {
+  if (!mParent->Open(bc->Canonical(), aBrowser->GetBrowsingContext(), loadState,
+                     loadInfo, aArgs.loadFlags(), aArgs.loadType(),
+                     aArgs.cacheKey(), aArgs.isActive(), aArgs.isTopLevelDoc(),
+                     aArgs.hasNonEmptySandboxingFlags(), aArgs.channelId(),
+                     aArgs.asyncOpenTime(), aArgs.documentOpenFlags(),
+                     aArgs.pluginsAllowed(), aArgs.timing().refOr(nullptr),
+                     std::move(clientInfo), aArgs.outerWindowId(), &rv)) {
     return SendFailedAsyncOpen(rv);
   }
 
@@ -55,6 +67,10 @@ bool DocumentChannelParent::Init(BrowserParent* aBrowser,
 RefPtr<PDocumentChannelParent::RedirectToRealChannelPromise>
 DocumentChannelParent::RedirectToRealChannel(uint32_t aRedirectFlags,
                                              uint32_t aLoadFlags) {
+  if (!CanSend()) {
+    return PDocumentChannelParent::RedirectToRealChannelPromise::
+        CreateAndReject(ResponseRejectReason::ChannelClosed, __func__);
+  }
   RedirectToRealChannelArgs args;
   mParent->SerializeRedirectData(args, false, aRedirectFlags, aLoadFlags);
   return SendRedirectToRealChannel(args);

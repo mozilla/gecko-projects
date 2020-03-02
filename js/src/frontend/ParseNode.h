@@ -10,9 +10,11 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Variant.h"
 
+#include <iterator>
+
+#include "frontend/Stencil.h"
 #include "frontend/Token.h"
 #include "util/Text.h"
-#include "vm/BigIntType.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/JSContext.h"
 #include "vm/Printer.h"
@@ -42,9 +44,13 @@
 //   garbage-collected.
 
 namespace js {
+
+class ArrayObject;
+
 namespace frontend {
 
 class ParseContext;
+struct CompilationInfo;
 class ParserSharedBase;
 class FullParseHandler;
 class FunctionBox;
@@ -67,6 +73,10 @@ class BigIntBox;
   F(PropertyNameExpr, NameNode)                                  \
   F(DotExpr, PropertyAccess)                                     \
   F(ElemExpr, PropertyByValue)                                   \
+  F(OptionalDotExpr, OptionalPropertyAccess)                     \
+  F(OptionalChain, UnaryNode)                                    \
+  F(OptionalElemExpr, OptionalPropertyByValue)                   \
+  F(OptionalCallExpr, BinaryNode)                                \
   F(ArrayExpr, ListNode)                                         \
   F(Elision, NullaryNode)                                        \
   F(StatementList, ListNode)                                     \
@@ -110,6 +120,7 @@ class BigIntBox;
   F(DeleteNameExpr, UnaryNode)                                   \
   F(DeletePropExpr, UnaryNode)                                   \
   F(DeleteElemExpr, UnaryNode)                                   \
+  F(DeleteOptionalChainExpr, UnaryNode)                          \
   F(DeleteExpr, UnaryNode)                                       \
   F(TryStmt, TernaryNode)                                        \
   F(Catch, BinaryNode)                                           \
@@ -245,9 +256,7 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
 /*
  * <Definitions>
  * Function (FunctionNode)
- *   funbox: ptr to js::FunctionBox holding function object containing arg and
- *           var properties.  We create the function object at parse (not emit)
- *           time to specialize arg and var bytecodes early.
+ *   funbox: ptr to js::FunctionBox
  *   body: ParamsBody or null for lazily-parsed function, ordinarily;
  *         ParseNodeKind::LexicalScope for implicit function in genexpr
  *   syntaxKind: the syntax of the function
@@ -442,7 +451,25 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
  *          * DeleteNameExpr: Name expr
  *          * DeletePropExpr: Dot expr
  *          * DeleteElemExpr: Elem expr
+ *          * DeleteOptionalChainExpr: Member expr
  *          * DeleteExpr: Member expr
+ * DeleteOptionalChainExpr (UnaryNode)
+ *   kid: expression that's evaluated, then the overall delete evaluates to
+ *        true; If constant folding occurs, Elem expr may become Dot expr.
+ *        OptionalElemExpr does not get folded into OptionalDot.
+ * OptionalChain (UnaryNode)
+ *   kid: expression that is evaluated. Contains optional nodes such as
+ *        OptionalElemExpr, OptionalDotExpr, and OptionalCall, which
+ *        shortcircuit and return Undefined without evaluating the rest of the
+ *        expression of the node is nullish. Also can contain nodes such as
+ *        DotExpr, ElemExpr, NameExpr CallExpr, etc. These are evaluated
+ *        normally.
+ *          * OptionalDotExpr: Dot expr with jump
+ *          * OptionalElemExpr: Elem expr with jump
+ *          * OptionalCallExpr: Call expr with jump
+ *          * DotExpr: Dot expr without jump
+ *          * ElemExpr: Elem expr without jump
+ *          * CallExpr: Call expr without jump
  * PropertyNameExpr (NameNode)
  *   atom: property name being accessed
  * DotExpr (PropertyAccess)
@@ -543,6 +570,10 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
   MACRO(ForNode, ForNodeType, asFor)                                         \
   MACRO(PropertyAccess, PropertyAccessType, asPropertyAccess)                \
   MACRO(PropertyByValue, PropertyByValueType, asPropertyByValue)             \
+  MACRO(OptionalPropertyAccess, OptionalPropertyAccessType,                  \
+        asOptionalPropertyAccess)                                            \
+  MACRO(OptionalPropertyByValue, OptionalPropertyByValueType,                \
+        OptionalasPropertyByValue)                                           \
   MACRO(SwitchStatement, SwitchStatementType, asSwitchStatement)             \
                                                                              \
   MACRO(FunctionNode, FunctionNodeType, asFunction)                          \
@@ -553,6 +584,7 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
   MACRO(ListNode, ListNodeType, asList)                                      \
   MACRO(CallSiteNode, CallSiteNodeType, asCallSite)                          \
   MACRO(CallNode, CallNodeType, asCallNode)                                  \
+  MACRO(CallNode, OptionalCallNodeType, asOptionalCallNode)                  \
                                                                              \
   MACRO(LoopControlStatement, LoopControlStatementType,                      \
         asLoopControlStatement)                                              \
@@ -586,7 +618,7 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
 FOR_EACH_PARSENODE_SUBCLASS(DECLARE_CLASS)
 #undef DECLARE_CLASS
 
-enum class FunctionSyntaxKind {
+enum class FunctionSyntaxKind : uint8_t {
   // A non-arrow function expression.
   Expression,
 
@@ -738,18 +770,6 @@ class ParseNode {
   // True iff this is a for-in/of loop variable declaration (var/let/const).
   inline bool isForLoopDeclaration() const;
 
-  enum AllowConstantObjects {
-    DontAllowObjects = 0,
-    AllowObjects,
-    ForCopyOnWriteArray
-  };
-
-  MOZ_MUST_USE bool getConstantValue(JSContext* cx,
-                                     AllowConstantObjects allowObjects,
-                                     MutableHandleValue vp,
-                                     Value* compare = nullptr,
-                                     size_t ncompare = 0,
-                                     NewObjectKind newKind = TenuredObject);
   inline bool isConstant();
 
   template <class NodeType>
@@ -1322,6 +1342,13 @@ class ListNode : public ParseNode {
     explicit iterator(ParseNode* node) : node_(node) {}
 
    public:
+    // Implement std::iterator_traits.
+    using iterator_category = std::input_iterator_tag;
+    using value_type = ParseNode*;
+    using difference_type = ptrdiff_t;
+    using pointer = ParseNode**;
+    using reference = ParseNode*&;
+
     bool operator==(const iterator& other) const {
       return node_ == other.node_;
     }
@@ -1522,67 +1549,32 @@ class NumericLiteral : public ParseNode {
   void setValue(double v) { value_ = v; }
 
   void setDecimalPoint(DecimalPoint d) { decimalPoint_ = d; }
-};
 
-// This owns a set of characters guaranteed to parse into a BigInt via
-// ParseBigIntLiteral. Used to avoid allocating the BigInt on the
-// GC heap during parsing.
-class BigIntCreationData {
-  UniqueTwoByteChars buf_;
-  size_t length_ = 0;
-
- public:
-  BigIntCreationData() = default;
-
-  MOZ_MUST_USE bool init(JSContext* cx, const Vector<char16_t, 32>& buf) {
-#ifdef DEBUG
-    // Assert we have no separators; if we have a separator then the algorithm
-    // used in BigInt::literalIsZero will be incorrect.
-    for (char16_t c : buf) {
-      MOZ_ASSERT(c != '_');
-    }
-#endif
-    length_ = buf.length();
-    buf_ = js::DuplicateString(cx, buf.begin(), buf.length());
-    return buf_ != nullptr;
-  }
-
-  BigInt* createBigInt(JSContext* cx) {
-    mozilla::Range<const char16_t> source(buf_.get(), length_);
-
-    return js::ParseBigIntLiteral(cx, source);
-  }
-
-  bool isZero() {
-    mozilla::Range<const char16_t> source(buf_.get(), length_);
-    return js::BigIntLiteralIsZero(source);
-  }
+  // Return the decimal string representation of this numeric literal.
+  JSAtom* toAtom(JSContext* cx) const;
 };
 
 class BigIntLiteral : public ParseNode {
-  mozilla::Variant<mozilla::Nothing, BigIntCreationData, BigIntBox*> data_;
+  // BigIntLiterals hold onto a CompilationInfo reference to avoid
+  // having to plumb CompilationInfo through FoldConstants.
+  struct Deferred {
+    CompilationInfo& compilationInfo;
+    BigIntIndex index;
+  };
+  mozilla::Variant<Deferred, BigIntBox*> data_;
 
   BigIntBox* box() const { return data_.as<BigIntBox*>(); }
 
  public:
   BigIntLiteral(BigIntBox* bibox, const TokenPos& pos)
+      : ParseNode(ParseNodeKind::BigIntExpr, pos), data_(bibox) {}
+
+  explicit BigIntLiteral(BigIntIndex index, CompilationInfo& compilationInfo,
+                         const TokenPos& pos)
       : ParseNode(ParseNodeKind::BigIntExpr, pos),
-        data_(mozilla::AsVariant(bibox)) {}
+        data_(Deferred{compilationInfo, index}) {}
 
-  // Used to allocate a BigIntCreationData in two phase initialization to enusre
-  // clear ownership of data in an allocation failure.
-  explicit BigIntLiteral(const TokenPos& pos)
-      : ParseNode(ParseNodeKind::BigIntExpr, pos),
-        data_(AsVariant(mozilla::Nothing())) {}
-
-  void init(BigIntCreationData data) {
-    data_ = mozilla::AsVariant(std::move(data));
-  }
-
-  bool isDeferred() {
-    MOZ_ASSERT(!data_.is<mozilla::Nothing>());
-    return data_.is<BigIntCreationData>();
-  }
+  bool isDeferred() { return data_.is<Deferred>(); }
 
   static bool test(const ParseNode& node) {
     return node.isKind(ParseNodeKind::BigIntExpr);
@@ -1599,22 +1591,19 @@ class BigIntLiteral : public ParseNode {
   void dumpImpl(GenericPrinter& out, int indent);
 #endif
 
+  BigIntIndex index() { return data_.as<Deferred>().index; }
+
   // Get the contained BigInt value: Assumes it was created with one,
   // and cannot be used when deferred allocation mode is enabled.
   BigInt* value();
 
   // Get the contained BigIntValue, or parse it from the creation data
   // Can be used when deferred allocation mode is enabled.
-  BigInt* getOrCreateBigInt(JSContext* cx) {
-    if (data_.is<BigIntBox*>()) {
-      return value();
-    }
-    return data_.as<BigIntCreationData>().createBigInt(cx);
-  }
+  BigInt* getOrCreate(JSContext* cx);
 
-  BigIntCreationData creationData() {
-    return std::move(data_.as<BigIntCreationData>());
-  }
+  // Return the decimal string representation of this BigInt literal.
+  JSAtom* toAtom(JSContext* cx);
+
   bool isZero();
 };
 
@@ -1652,8 +1641,6 @@ class LexicalScopeNode : public ParseNode {
     // the rest of the frontend also depends on.
     return Handle<LexicalScope::Data*>::fromMarkedLocation(&bindings);
   }
-
-  void clearScopeBindings() { this->bindings = nullptr; }
 
   ParseNode* scopeBody() const { return body; }
 
@@ -1892,49 +1879,22 @@ class BooleanLiteral : public NullaryNode {
   }
 };
 
-// This owns a set of characters, previously syntax checked as a RegExp. Used
-// to avoid allocating the RegExp on the GC heap during parsing.
-class RegExpCreationData {
-  UniquePtr<char16_t[], JS::FreePolicy> buf_;
-  size_t length_ = 0;
-  JS::RegExpFlags flags_;
-
- public:
-  RegExpCreationData() = default;
-
-  MOZ_MUST_USE bool init(JSContext* cx, mozilla::Range<const char16_t> range,
-                         JS::RegExpFlags flags) {
-    length_ = range.length();
-    buf_ = js::DuplicateString(cx, range.begin().get(), range.length());
-    if (!buf_) {
-      return false;
-    }
-    flags_ = flags;
-    return true;
-  }
-
-  RegExpObject* createRegExp(JSContext* cx) const;
-};
-
 class RegExpLiteral : public ParseNode {
-  mozilla::Variant<mozilla::Nothing, ObjectBox*, RegExpCreationData> data_;
+  mozilla::Variant<ObjectBox*, RegExpIndex> data_;
 
  public:
   RegExpLiteral(ObjectBox* reobj, const TokenPos& pos)
       : ParseNode(ParseNodeKind::RegExpExpr, pos), data_(reobj) {}
 
-  explicit RegExpLiteral(const TokenPos& pos)
-      : ParseNode(ParseNodeKind::RegExpExpr, pos), data_(mozilla::Nothing()) {}
+  RegExpLiteral(RegExpIndex dataIndex, const TokenPos& pos)
+      : ParseNode(ParseNodeKind::RegExpExpr, pos), data_(dataIndex) {}
 
-  void init(RegExpCreationData data) {
-    data_ = mozilla::AsVariant(std::move(data));
-  }
-
-  bool isDeferred() const { return data_.is<RegExpCreationData>(); }
+  bool isDeferred() const { return data_.is<RegExpIndex>(); }
 
   ObjectBox* objbox() const { return data_.as<ObjectBox*>(); }
 
-  RegExpObject* getOrCreate(JSContext* cx) const;
+  RegExpObject* getOrCreate(JSContext* cx,
+                            CompilationInfo& compilationInfo) const;
 
 #ifdef DEBUG
   void dumpImpl(GenericPrinter& out, int indent);
@@ -1951,30 +1911,32 @@ class RegExpLiteral : public ParseNode {
     return true;
   }
 
-  RegExpCreationData& creationData() { return data_.as<RegExpCreationData>(); }
+  RegExpIndex index() { return data_.as<RegExpIndex>(); }
 };
 
-class PropertyAccess : public BinaryNode {
+class PropertyAccessBase : public BinaryNode {
  public:
   /*
    * PropertyAccess nodes can have any expression/'super' as left-hand
    * side, but the name must be a ParseNodeKind::PropertyName node.
    */
-  PropertyAccess(ParseNode* lhs, NameNode* name, uint32_t begin, uint32_t end)
-      : BinaryNode(ParseNodeKind::DotExpr, TokenPos(begin, end), lhs, name) {
+  PropertyAccessBase(ParseNodeKind kind, ParseNode* lhs, NameNode* name,
+                     uint32_t begin, uint32_t end)
+      : BinaryNode(kind, TokenPos(begin, end), lhs, name) {
     MOZ_ASSERT(lhs);
     MOZ_ASSERT(name);
   }
 
+  ParseNode& expression() const { return *left(); }
+
   static bool test(const ParseNode& node) {
-    bool match = node.isKind(ParseNodeKind::DotExpr);
+    bool match = node.isKind(ParseNodeKind::DotExpr) ||
+                 node.isKind(ParseNodeKind::OptionalDotExpr);
     MOZ_ASSERT_IF(match, node.is<BinaryNode>());
     MOZ_ASSERT_IF(match, node.as<BinaryNode>().right()->isKind(
                              ParseNodeKind::PropertyNameExpr));
     return match;
   }
-
-  ParseNode& expression() const { return *left(); }
 
   NameNode& key() const { return right()->as<NameNode>(); }
 
@@ -1988,6 +1950,21 @@ class PropertyAccess : public BinaryNode {
   PropertyName& name() const {
     return *right()->as<NameNode>().atom()->asPropertyName();
   }
+};
+
+class PropertyAccess : public PropertyAccessBase {
+ public:
+  PropertyAccess(ParseNode* lhs, NameNode* name, uint32_t begin, uint32_t end)
+      : PropertyAccessBase(ParseNodeKind::DotExpr, lhs, name, begin, end) {
+    MOZ_ASSERT(lhs);
+    MOZ_ASSERT(name);
+  }
+
+  static bool test(const ParseNode& node) {
+    bool match = node.isKind(ParseNodeKind::DotExpr);
+    MOZ_ASSERT_IF(match, node.is<PropertyAccessBase>());
+    return match;
+  }
 
   bool isSuper() const {
     // ParseNodeKind::SuperBase cannot result from any expression syntax.
@@ -1995,15 +1972,32 @@ class PropertyAccess : public BinaryNode {
   }
 };
 
-class PropertyByValue : public BinaryNode {
+class OptionalPropertyAccess : public PropertyAccessBase {
  public:
-  PropertyByValue(ParseNode* lhs, ParseNode* propExpr, uint32_t begin,
-                  uint32_t end)
-      : BinaryNode(ParseNodeKind::ElemExpr, TokenPos(begin, end), lhs,
-                   propExpr) {}
+  OptionalPropertyAccess(ParseNode* lhs, NameNode* name, uint32_t begin,
+                         uint32_t end)
+      : PropertyAccessBase(ParseNodeKind::OptionalDotExpr, lhs, name, begin,
+                           end) {
+    MOZ_ASSERT(lhs);
+    MOZ_ASSERT(name);
+  }
 
   static bool test(const ParseNode& node) {
-    bool match = node.isKind(ParseNodeKind::ElemExpr);
+    bool match = node.isKind(ParseNodeKind::OptionalDotExpr);
+    MOZ_ASSERT_IF(match, node.is<PropertyAccessBase>());
+    return match;
+  }
+};
+
+class PropertyByValueBase : public BinaryNode {
+ public:
+  PropertyByValueBase(ParseNodeKind kind, ParseNode* lhs, ParseNode* propExpr,
+                      uint32_t begin, uint32_t end)
+      : BinaryNode(kind, TokenPos(begin, end), lhs, propExpr) {}
+
+  static bool test(const ParseNode& node) {
+    bool match = node.isKind(ParseNodeKind::ElemExpr) ||
+                 node.isKind(ParseNodeKind::OptionalElemExpr);
     MOZ_ASSERT_IF(match, node.is<BinaryNode>());
     return match;
   }
@@ -2011,8 +2005,36 @@ class PropertyByValue : public BinaryNode {
   ParseNode& expression() const { return *left(); }
 
   ParseNode& key() const { return *right(); }
+};
+
+class PropertyByValue : public PropertyByValueBase {
+ public:
+  PropertyByValue(ParseNode* lhs, ParseNode* propExpr, uint32_t begin,
+                  uint32_t end)
+      : PropertyByValueBase(ParseNodeKind::ElemExpr, lhs, propExpr, begin,
+                            end) {}
+
+  static bool test(const ParseNode& node) {
+    bool match = node.isKind(ParseNodeKind::ElemExpr);
+    MOZ_ASSERT_IF(match, node.is<PropertyByValueBase>());
+    return match;
+  }
 
   bool isSuper() const { return left()->isKind(ParseNodeKind::SuperBase); }
+};
+
+class OptionalPropertyByValue : public PropertyByValueBase {
+ public:
+  OptionalPropertyByValue(ParseNode* lhs, ParseNode* propExpr, uint32_t begin,
+                          uint32_t end)
+      : PropertyByValueBase(ParseNodeKind::OptionalElemExpr, lhs, propExpr,
+                            begin, end) {}
+
+  static bool test(const ParseNode& node) {
+    bool match = node.isKind(ParseNodeKind::OptionalElemExpr);
+    MOZ_ASSERT_IF(match, node.is<PropertyByValueBase>());
+    return match;
+  }
 };
 
 /*
@@ -2020,6 +2042,8 @@ class PropertyByValue : public BinaryNode {
  * TaggedTemplate.
  */
 class CallSiteNode : public ListNode {
+  MOZ_MUST_USE ArrayObject* getArrayValue(JSContext* cx, ListNode* cookedOrRaw);
+
  public:
   explicit CallSiteNode(uint32_t begin)
       : ListNode(ParseNodeKind::CallSiteObj, TokenPos(begin, begin + 1)) {}
@@ -2030,8 +2054,12 @@ class CallSiteNode : public ListNode {
     return match;
   }
 
-  MOZ_MUST_USE bool getRawArrayValue(JSContext* cx, MutableHandleValue vp) {
-    return head()->getConstantValue(cx, AllowObjects, vp);
+  MOZ_MUST_USE ArrayObject* getCookedArrayValue(JSContext* cx) {
+    return getArrayValue(cx, this);
+  }
+
+  MOZ_MUST_USE ArrayObject* getRawArrayValue(JSContext* cx) {
+    return getArrayValue(cx, rawNodes());
   }
 
   ListNode* rawNodes() const {
@@ -2057,6 +2085,7 @@ class CallNode : public BinaryNode {
   static bool test(const ParseNode& node) {
     bool match = node.isKind(ParseNodeKind::CallExpr) ||
                  node.isKind(ParseNodeKind::SuperCallExpr) ||
+                 node.isKind(ParseNodeKind::OptionalCallExpr) ||
                  node.isKind(ParseNodeKind::TaggedTemplateExpr) ||
                  node.isKind(ParseNodeKind::CallImportExpr) ||
                  node.isKind(ParseNodeKind::NewExpr);
@@ -2099,13 +2128,14 @@ class ClassMethod : public BinaryNode {
 };
 
 class ClassField : public BinaryNode {
+  bool isStatic_;
+
  public:
-  ClassField(ParseNode* name, ParseNode* initializer)
+  ClassField(ParseNode* name, ParseNode* initializer, bool isStatic)
       : BinaryNode(ParseNodeKind::ClassField,
-                   initializer == nullptr
-                       ? name->pn_pos
-                       : TokenPos::box(name->pn_pos, initializer->pn_pos),
-                   name, initializer) {}
+                   TokenPos::box(name->pn_pos, initializer->pn_pos), name,
+                   initializer),
+        isStatic_(isStatic) {}
 
   static bool test(const ParseNode& node) {
     bool match = node.isKind(ParseNodeKind::ClassField);
@@ -2115,9 +2145,9 @@ class ClassField : public BinaryNode {
 
   ParseNode& name() const { return *left(); }
 
-  FunctionNode* initializer() const {
-    return right() ? &right()->as<FunctionNode>() : nullptr;
-  }
+  FunctionNode* initializer() const { return &right()->as<FunctionNode>(); }
+
+  bool isStatic() const { return isStatic_; }
 };
 
 class PropertyDefinition : public BinaryNode {

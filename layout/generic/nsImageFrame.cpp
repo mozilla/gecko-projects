@@ -17,6 +17,7 @@
 #include "mozilla/Encoding.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
+#include "mozilla/dom/ImageTracker.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
@@ -179,6 +180,15 @@ bool nsImageFrame::ShouldShowBrokenImageIcon() const {
     return false;
   }
 
+  // <img alt=""> is special, and it shouldn't draw the broken image icon,
+  // unlike the no-alt attribute or non-empty-alt-attribute case.
+  if (auto* image = HTMLImageElement::FromNode(mContent)) {
+    const nsAttrValue* alt = image->GetParsedAttr(nsGkAtoms::alt);
+    if (alt && alt->IsEmptyString()) {
+      return false;
+    }
+  }
+
   // check for broken images. valid null images (eg. img src="") are
   // not considered broken because they have no image requests
   if (nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest()) {
@@ -270,12 +280,10 @@ void nsImageFrame::DestroyFrom(nsIFrame* aDestructRoot,
     // deregister with our refresh driver.
     imageLoader->FrameDestroyed(this);
     imageLoader->RemoveNativeObserver(mListener);
-  } else {
-    if (mContentURLRequest) {
-      nsLayoutUtils::DeregisterImageRequest(PresContext(), mContentURLRequest,
-                                            &mContentURLRequestRegistered);
-      mContentURLRequest->Cancel(NS_BINDING_ABORTED);
-    }
+  } else if (mContentURLRequest) {
+    nsLayoutUtils::DeregisterImageRequest(PresContext(), mContentURLRequest,
+                                          &mContentURLRequestRegistered);
+    mContentURLRequest->Cancel(NS_BINDING_ABORTED);
   }
 
   // set the frame to null so we don't send messages to a dead object.
@@ -333,7 +341,9 @@ void nsImageFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 
   mListener = new nsImageListener(this);
 
-  if (!gIconLoad) LoadIcons(PresContext());
+  if (!gIconLoad) {
+    LoadIcons(PresContext());
+  }
 
   if (mKind == Kind::ImageElement) {
     nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(aContent);
@@ -362,11 +372,12 @@ void nsImageFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
       contentIndex = static_cast<GeneratedImageContent*>(aContent)->Index();
     }
     MOZ_RELEASE_ASSERT(contentIndex < styleContent->ContentCount());
-    MOZ_RELEASE_ASSERT(styleContent->ContentAt(contentIndex).GetType() ==
-                       StyleContentType::Image);
-    if (auto* proxy = styleContent->ContentAt(contentIndex).GetImage()) {
-      proxy->Clone(mListener, mContent->OwnerDoc(),
-                   getter_AddRefs(mContentURLRequest));
+    MOZ_RELEASE_ASSERT(styleContent->ContentAt(contentIndex).IsUrl());
+    auto& url = const_cast<StyleComputedUrl&>(
+        styleContent->ContentAt(contentIndex).AsUrl());
+    Document* doc = PresContext()->Document();
+    if (imgRequestProxy* proxy = url.GetImage()) {
+      proxy->Clone(mListener, doc, getter_AddRefs(mContentURLRequest));
       SetupForContentURLRequest();
     }
   }
@@ -479,8 +490,7 @@ bool nsImageFrame::UpdateIntrinsicSize() {
   return mIntrinsicSize != oldIntrinsicSize;
 }
 
-static AspectRatio ComputeAspectRatio(imgIContainer* aImage,
-                                      bool aHasRequest,
+static AspectRatio ComputeAspectRatio(imgIContainer* aImage, bool aHasRequest,
                                       const nsImageFrame& aFrame) {
   const ComputedStyle& style = *aFrame.Style();
   if (style.StyleDisplay()->IsContainSize()) {
@@ -622,7 +632,7 @@ bool nsImageFrame::ShouldCreateImageFrameFor(const Element& aElement,
     return true;
   }
 
-  if (aStyle.StyleUIReset()->mForceBrokenImageIcon) {
+  if (aStyle.StyleUIReset()->mMozForceBrokenImageIcon) {
     return true;
   }
 
@@ -712,8 +722,7 @@ void nsImageFrame::UpdateImage(imgIRequest* aRequest, imgIContainer* aImage) {
   }
   // NOTE(emilio): Intentionally using `|` instead of `||` to avoid
   // short-circuiting.
-  bool intrinsicSizeChanged =
-      UpdateIntrinsicSize() | UpdateIntrinsicRatio();
+  bool intrinsicSizeChanged = UpdateIntrinsicSize() | UpdateIntrinsicRatio();
   if (!GotInitialReflow()) {
     return;
   }
@@ -725,6 +734,11 @@ void nsImageFrame::UpdateImage(imgIRequest* aRequest, imgIContainer* aImage) {
     // Now we need to reflow if we have an unconstrained size and have
     // already gotten the initial reflow.
     if (!(mState & IMAGE_SIZECONSTRAINED)) {
+#ifdef ACCESSIBILITY
+      if (nsAccessibilityService* accService = GetAccService()) {
+        accService->NotifyOfImageSizeAvailable(PresShell(), mContent);
+      }
+#endif
       PresShell()->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
                                     NS_FRAME_IS_DIRTY);
     } else if (PresShell()->IsActive()) {
@@ -1246,7 +1260,7 @@ void nsImageFrame::DisplayAltText(nsPresContext* aPresContext,
 struct nsRecessedBorder : public nsStyleBorder {
   nsRecessedBorder(nscoord aBorderWidth, nsPresContext* aPresContext)
       : nsStyleBorder(*aPresContext->Document()) {
-    NS_FOR_CSS_SIDES(side) {
+    for (const auto side : mozilla::AllPhysicalSides()) {
       BorderColorFor(side) = StyleColor::Black();
       mBorder.Side(side) = aBorderWidth;
       // Note: use SetBorderStyle here because we want to affect
@@ -1355,8 +1369,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedback(gfxContext& aRenderingContext,
     // Assert that we're not drawing a border-image here; if we were, we
     // couldn't ignore the ImgDrawResult that PaintBorderWithStyleBorder
     // returns.
-    MOZ_ASSERT(recessedBorder.mBorderImageSource.GetType() ==
-               eStyleImageType_Null);
+    MOZ_ASSERT(recessedBorder.mBorderImageSource.IsNone());
 
     Unused << nsCSSRendering::PaintBorderWithStyleBorder(
         PresContext(), aRenderingContext, this, inner, inner, recessedBorder,
@@ -1538,8 +1551,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
     // Assert that we're not drawing a border-image here; if we were, we
     // couldn't ignore the ImgDrawResult that PaintBorderWithStyleBorder
     // returns.
-    MOZ_ASSERT(recessedBorder.mBorderImageSource.GetType() ==
-               eStyleImageType_Null);
+    MOZ_ASSERT(recessedBorder.mBorderImageSource.IsNone());
 
     nsRect rect = nsRect(aPt, GetSize());
     Unused << nsCSSRendering::CreateWebRenderCommandsForBorderWithStyleBorder(
@@ -1561,14 +1573,10 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
       inner, PresContext()->AppUnitsPerDevPixel());
   auto wrBounds = wr::ToLayoutRect(bounds);
 
-  // Draw image
-  ImgDrawResult result = ImgDrawResult::NOT_READY;
-
   // Check if we should display image placeholders
-  if (!ShouldShowBrokenImageIcon() || !gIconLoad->mPrefShowPlaceholders ||
-      (isLoading && !gIconLoad->mPrefShowLoadingPlaceholder)) {
-    result = ImgDrawResult::SUCCESS;
-  } else {
+  if (ShouldShowBrokenImageIcon() && gIconLoad->mPrefShowPlaceholders &&
+      (!isLoading || gIconLoad->mPrefShowLoadingPlaceholder)) {
+    ImgDrawResult result = ImgDrawResult::NOT_READY;
     nscoord size = nsPresContext::CSSPixelsToAppUnits(ICON_SIZE);
     imgIRequest* request = isLoading ? nsImageFrame::gIconLoad->mLoadingImage
                                      : nsImageFrame::gIconLoad->mBrokenImage;
@@ -2324,7 +2332,7 @@ Maybe<nsIFrame::Cursor> nsImageFrame::GetCursor(const nsPoint& aPoint) {
   // get styles out of the blue and expect to trigger image loads for those.
   areaStyle->StartImageLoads(*PresContext()->Document());
 
-  StyleCursorKind kind = areaStyle->StyleUI()->mCursor;
+  StyleCursorKind kind = areaStyle->StyleUI()->mCursor.keyword;
   if (kind == StyleCursorKind::Auto) {
     kind = StyleCursorKind::Default;
   }

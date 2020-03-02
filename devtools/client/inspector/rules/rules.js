@@ -14,18 +14,6 @@ const OutputParser = require("devtools/client/shared/output-parser");
 const { PrefObserver } = require("devtools/client/shared/prefs");
 const ElementStyle = require("devtools/client/inspector/rules/models/element-style");
 const RuleEditor = require("devtools/client/inspector/rules/views/rule-editor");
-const {
-  VIEW_NODE_FONT_TYPE,
-  VIEW_NODE_IMAGE_URL_TYPE,
-  VIEW_NODE_INACTIVE_CSS,
-  VIEW_NODE_LOCATION_TYPE,
-  VIEW_NODE_PROPERTY_TYPE,
-  VIEW_NODE_SELECTOR_TYPE,
-  VIEW_NODE_SHAPE_POINT_TYPE,
-  VIEW_NODE_SHAPE_SWATCH,
-  VIEW_NODE_VALUE_TYPE,
-  VIEW_NODE_VARIABLE_TYPE,
-} = require("devtools/client/inspector/shared/node-types");
 const TooltipsOverlay = require("devtools/client/inspector/shared/tooltips-overlay");
 const {
   createChild,
@@ -50,6 +38,12 @@ loader.lazyRequireGetter(
   this,
   "ClassListPreviewer",
   "devtools/client/inspector/rules/views/class-list-previewer"
+);
+loader.lazyRequireGetter(
+  this,
+  "getNodeInfo",
+  "devtools/client/inspector/rules/utils/utils",
+  true
 );
 loader.lazyRequireGetter(
   this,
@@ -90,7 +84,6 @@ const FILTER_PROP_RE = /\s*([^:\s]*)\s*:\s*(.*?)\s*;?$/;
 // This is used to parse the filter search value to see if the filter
 // should be strict or not
 const FILTER_STRICT_RE = /\s*`(.*?)`\s*$/;
-const INSET_POINT_TYPES = ["top", "right", "bottom", "left"];
 
 /**
  * Our model looks like this:
@@ -288,10 +281,6 @@ CssRuleView.prototype = {
     return this._dummyElement;
   },
 
-  get emulationFront() {
-    return this._emulationFront;
-  },
-
   // Get the highlighters overlay from the Inspector.
   get highlighters() {
     if (!this._highlighters) {
@@ -405,15 +394,28 @@ CssRuleView.prototype = {
   },
 
   /**
-   * Initializes the emulation front and enable the print and color scheme simulation
+   * Initializes the content-viewer front and enable the print and color scheme simulation
    * if they are supported in the current target.
    */
   async _initSimulationFeatures() {
-    // In order to query if the emulation actor's print and color simulation methods are
-    // supported, we have to call the emulation front so that the actor is lazily loaded.
+    // In order to query if the content-viewer actor's print and color simulation methods are
+    // supported, we have to call the content-viewer front so that the actor is lazily loaded.
     // This allows us to use `actorHasMethod`. Please see `getActorDescription` for more
     // information.
-    this._emulationFront = await this.currentTarget.getFront("emulation");
+    try {
+      this.contentViewerFront = await this.currentTarget.getFront(
+        "contentViewer"
+      );
+    } catch (e) {
+      console.error(e);
+    }
+
+    // Bug 1606852: For backwards compatibility, we need to get the emulation actor. The ContentViewer
+    // actor is only available in Firefox 73 or newer. We can remove this call when Firefox 73
+    // is on release.
+    if (!this.contentViewerFront) {
+      this.contentViewerFront = await this.currentTarget.getFront("emulation");
+    }
 
     if (!this.currentTarget.chrome) {
       this.printSimulationButton.removeAttribute("hidden");
@@ -426,14 +428,22 @@ CssRuleView.prototype = {
     // Show the color scheme simulation toggle button if:
     // - The feature pref is enabled.
     // - Color scheme simulation is supported for the current target.
+    const isEmulateColorSchemeSupported =
+      (await this.currentTarget.actorHasMethod(
+        "contentViewer",
+        "getEmulatedColorScheme"
+      )) ||
+      // Bug 1606852: We can removed this check when Firefox 73 is on release.
+      (await this.currentTarget.actorHasMethod(
+        "emulation",
+        "getEmulatedColorScheme"
+      ));
+
     if (
       Services.prefs.getBoolPref(
         "devtools.inspector.color-scheme-simulation.enabled"
       ) &&
-      (await this.currentTarget.actorHasMethod(
-        "emulation",
-        "getEmulatedColorScheme"
-      ))
+      isEmulateColorSchemeSupported
     ) {
       this.colorSchemeSimulationButton.removeAttribute("hidden");
       this.colorSchemeSimulationButton.addEventListener(
@@ -448,145 +458,15 @@ CssRuleView.prototype = {
    *
    * @param {DOMNode} node
    *        The node which we want information about
-   * @return {Object} The type information object contains the following props:
-   * - view {String} Always "rule" to indicate the rule view.
+   * @return {Object|null} containing the following props:
    * - type {String} One of the VIEW_NODE_XXX_TYPE const in
-   *   client/inspector/shared/node-types
-   * - value {Object} Depends on the type of the node
-   * returns null of the node isn't anything we care about
+   *   client/inspector/shared/node-types.
+   * - rule {Rule} The Rule object.
+   * - value {Object} Depends on the type of the node.
+   * Otherwise, returns null if the node isn't anything we care about.
    */
-  // eslint-disable-next-line complexity
   getNodeInfo: function(node) {
-    if (!node) {
-      return null;
-    }
-
-    let type, value;
-    const classes = node.classList;
-    const prop = getParentTextProperty(node);
-
-    if (classes.contains("ruleview-propertyname") && prop) {
-      type = VIEW_NODE_PROPERTY_TYPE;
-      value = {
-        property: node.textContent,
-        value: getPropertyNameAndValue(node).value,
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        pseudoElement: prop.rule.pseudoElement,
-        sheetHref: prop.rule.domRule.href,
-        textProperty: prop,
-      };
-    } else if (classes.contains("ruleview-propertyvalue") && prop) {
-      type = VIEW_NODE_VALUE_TYPE;
-      value = {
-        property: getPropertyNameAndValue(node).name,
-        value: node.textContent,
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        pseudoElement: prop.rule.pseudoElement,
-        sheetHref: prop.rule.domRule.href,
-        textProperty: prop,
-      };
-    } else if (classes.contains("ruleview-font-family") && prop) {
-      type = VIEW_NODE_FONT_TYPE;
-      value = {
-        property: getPropertyNameAndValue(node).name,
-        value: getPropertyNameAndValue(node).value,
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        pseudoElement: prop.rule.pseudoElement,
-        sheetHref: prop.rule.domRule.href,
-        textProperty: prop,
-      };
-    } else if (classes.contains("ruleview-shape-point") && prop) {
-      type = VIEW_NODE_SHAPE_POINT_TYPE;
-      value = {
-        property: getPropertyNameAndValue(node).name,
-        value: node.textContent,
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        pseudoElement: prop.rule.pseudoElement,
-        sheetHref: prop.rule.domRule.href,
-        textProperty: prop,
-        toggleActive: getShapeToggleActive(node),
-        point: getShapePoint(node),
-      };
-    } else if (classes.contains("ruleview-unused-warning") && prop) {
-      type = VIEW_NODE_INACTIVE_CSS;
-      value = prop.isUsed();
-    } else if (classes.contains("ruleview-shapeswatch") && prop) {
-      type = VIEW_NODE_SHAPE_SWATCH;
-      value = {
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        textProperty: prop,
-      };
-    } else if (
-      (classes.contains("ruleview-variable") ||
-        classes.contains("ruleview-unmatched-variable")) &&
-      prop
-    ) {
-      type = VIEW_NODE_VARIABLE_TYPE;
-      value = {
-        property: getPropertyNameAndValue(node).name,
-        value: node.textContent,
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        pseudoElement: prop.rule.pseudoElement,
-        sheetHref: prop.rule.domRule.href,
-        textProperty: prop,
-        variable: node.dataset.variable,
-      };
-    } else if (
-      classes.contains("theme-link") &&
-      !classes.contains("ruleview-rule-source") &&
-      prop
-    ) {
-      type = VIEW_NODE_IMAGE_URL_TYPE;
-      value = {
-        property: getPropertyNameAndValue(node).name,
-        value: node.parentNode.textContent,
-        url: node.href,
-        enabled: prop.enabled,
-        overridden: prop.overridden,
-        pseudoElement: prop.rule.pseudoElement,
-        sheetHref: prop.rule.domRule.href,
-        textProperty: prop,
-      };
-    } else if (
-      classes.contains("ruleview-selector-unmatched") ||
-      classes.contains("ruleview-selector-matched") ||
-      classes.contains("ruleview-selectorcontainer") ||
-      classes.contains("ruleview-selector") ||
-      classes.contains("ruleview-selector-attribute") ||
-      classes.contains("ruleview-selector-pseudo-class") ||
-      classes.contains("ruleview-selector-pseudo-class-lock")
-    ) {
-      type = VIEW_NODE_SELECTOR_TYPE;
-      value = this._getRuleEditorForNode(node).selectorText.textContent;
-    } else if (
-      classes.contains("ruleview-rule-source") ||
-      classes.contains("ruleview-rule-source-label")
-    ) {
-      type = VIEW_NODE_LOCATION_TYPE;
-      const rule = this._getRuleEditorForNode(node).rule;
-      value = rule.sheet && rule.sheet.href ? rule.sheet.href : rule.title;
-    } else {
-      return null;
-    }
-
-    return {
-      view: "rule",
-      type,
-      value,
-    };
-  },
-
-  /**
-   * Retrieve the RuleEditor instance.
-   */
-  _getRuleEditorForNode: function(node) {
-    return node.closest(".ruleview-rule")._ruleEditor;
+    return getNodeInfo(node, this._elementStyle);
   },
 
   /**
@@ -847,7 +727,7 @@ CssRuleView.prototype = {
     }
 
     // Clean-up for print simulation.
-    if (this._emulationFront) {
+    if (this.contentViewerFront) {
       this.colorSchemeSimulationButton.removeEventListener(
         "click",
         this._onToggleColorSchemeSimulation
@@ -857,11 +737,11 @@ CssRuleView.prototype = {
         this._onTogglePrintSimulation
       );
 
-      this._emulationFront.destroy();
+      this.contentViewerFront.destroy();
 
       this.colorSchemeSimulationButton = null;
       this.printSimulationButton = null;
-      this._emulationFront = null;
+      this.contentViewerFront = null;
     }
 
     this.tooltips.destroy();
@@ -1739,7 +1619,7 @@ CssRuleView.prototype = {
   },
 
   async _onToggleColorSchemeSimulation() {
-    const currentState = await this.emulationFront.getEmulatedColorScheme();
+    const currentState = await this.contentViewerFront.getEmulatedColorScheme();
     const index = COLOR_SCHEMES.indexOf(currentState);
     const nextState = COLOR_SCHEMES[(index + 1) % COLOR_SCHEMES.length];
 
@@ -1749,19 +1629,19 @@ CssRuleView.prototype = {
       this.colorSchemeSimulationButton.removeAttribute("state");
     }
 
-    await this.emulationFront.setEmulatedColorScheme(nextState);
+    await this.contentViewerFront.setEmulatedColorScheme(nextState);
     this.refreshPanel();
   },
 
   async _onTogglePrintSimulation() {
-    const enabled = await this.emulationFront.getIsPrintSimulationEnabled();
+    const enabled = await this.contentViewerFront.getIsPrintSimulationEnabled();
 
     if (!enabled) {
       this.printSimulationButton.classList.add("checked");
-      await this.emulationFront.startPrintMediaSimulation();
+      await this.contentViewerFront.startPrintMediaSimulation();
     } else {
       this.printSimulationButton.classList.remove("checked");
-      await this.emulationFront.stopPrintMediaSimulation(false);
+      await this.contentViewerFront.stopPrintMediaSimulation(false);
     }
 
     // Refresh the current element's rules in the panel.
@@ -1963,128 +1843,6 @@ CssRuleView.prototype = {
     return false;
   },
 };
-
-/**
- * Helper functions
- */
-
-/**
- * Walk up the DOM from a given node until a parent property holder is found.
- * For elements inside the computed property list, the non-computed parent
- * property holder will be returned
- *
- * @param {DOMNode} node
- *        The node to start from
- * @return {DOMNode} The parent property holder node, or null if not found
- */
-function getParentTextPropertyHolder(node) {
-  while (true) {
-    if (!node || !node.classList) {
-      return null;
-    }
-    if (node.classList.contains("ruleview-property")) {
-      return node;
-    }
-    node = node.parentNode;
-  }
-}
-
-/**
- * For any given node, find the TextProperty it is in if any
- * @param {DOMNode} node
- *        The node to start from
- * @return {TextProperty}
- */
-function getParentTextProperty(node) {
-  const parent = getParentTextPropertyHolder(node);
-  if (!parent) {
-    return null;
-  }
-
-  const propValue = parent.querySelector(".ruleview-propertyvalue");
-  if (!propValue) {
-    return null;
-  }
-
-  return propValue.textProperty;
-}
-
-/**
- * Walker up the DOM from a given node until a parent property holder is found,
- * and return the textContent for the name and value nodes.
- * Stops at the first property found, so if node is inside the computed property
- * list, the computed property will be returned
- *
- * @param {DOMNode} node
- *        The node to start from
- * @return {Object} {name, value}
- */
-function getPropertyNameAndValue(node) {
-  while (true) {
-    if (!node || !node.classList) {
-      return null;
-    }
-    // Check first for ruleview-computed since it's the deepest
-    if (
-      node.classList.contains("ruleview-computed") ||
-      node.classList.contains("ruleview-property")
-    ) {
-      return {
-        name: node.querySelector(".ruleview-propertyname").textContent,
-        value: node.querySelector(".ruleview-propertyvalue").textContent,
-      };
-    }
-    node = node.parentNode;
-  }
-}
-
-/**
- * Walk up the DOM from a given node until a parent property holder is found,
- * and return an active shape toggle if one exists.
- *
- * @param {DOMNode} node
- *        The node to start from
- * @returns {DOMNode} The active shape toggle node, if one exists.
- */
-function getShapeToggleActive(node) {
-  while (true) {
-    if (!node || !node.classList) {
-      return null;
-    }
-    // Check first for ruleview-computed since it's the deepest
-    if (
-      node.classList.contains("ruleview-computed") ||
-      node.classList.contains("ruleview-property")
-    ) {
-      return node.querySelector(".ruleview-shapeswatch.active");
-    }
-    node = node.parentNode;
-  }
-}
-
-/**
- * Get the point associated with a shape point node.
- *
- * @param {DOMNode} node
- *        A shape point node
- * @returns {String} The point associated with the given node.
- */
-function getShapePoint(node) {
-  const classList = node.classList;
-  let point = node.dataset.point;
-  // Inset points use classes instead of data because a single span can represent
-  // multiple points.
-  const insetClasses = [];
-  classList.forEach(className => {
-    if (INSET_POINT_TYPES.includes(className)) {
-      insetClasses.push(className);
-    }
-  });
-  if (insetClasses.length > 0) {
-    point = insetClasses.join(",");
-  }
-  return point;
-}
 
 function RuleViewTool(inspector, window) {
   this.inspector = inspector;

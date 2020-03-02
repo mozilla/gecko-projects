@@ -12,7 +12,6 @@
 
 #include "prlock.h"
 #include "mozilla/RefPtr.h"
-#include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsPIDOMWindow.h"
 #include "nsIUUIDGenerator.h"
@@ -40,6 +39,7 @@
 #include "VideoSegment.h"
 #include "mozilla/dom/RTCStatsReportBinding.h"
 #include "mozilla/PeerIdentity.h"
+#include "RTCStatsIdGenerator.h"
 #include "RTCStatsReport.h"
 
 namespace test {
@@ -394,11 +394,14 @@ class PeerConnectionImpl final
     delete[] tmp;
   }
 
-  void GetCurrentLocalDescription(nsAString& aSDP);
-  void GetPendingLocalDescription(nsAString& aSDP);
+  void GetCurrentLocalDescription(nsAString& aSDP) const;
+  void GetPendingLocalDescription(nsAString& aSDP) const;
 
-  void GetCurrentRemoteDescription(nsAString& aSDP);
-  void GetPendingRemoteDescription(nsAString& aSDP);
+  void GetCurrentRemoteDescription(nsAString& aSDP) const;
+  void GetPendingRemoteDescription(nsAString& aSDP) const;
+
+  dom::Nullable<bool> GetCurrentOfferer() const;
+  dom::Nullable<bool> GetPendingOfferer() const;
 
   NS_IMETHODIMP SignalingState(mozilla::dom::RTCSignalingState* aState);
 
@@ -452,12 +455,10 @@ class PeerConnectionImpl final
   // Called to retreive the list of parsing errors.
   const std::vector<std::string>& GetSdpParseErrors();
 
-  // Sets the RTC Signaling State
-  void SetSignalingState_m(mozilla::dom::RTCSignalingState aSignalingState,
-                           bool rollback = false);
+  // Gets the RTC Signaling State of the JSEP session
+  dom::RTCSignalingState GetSignalingState() const;
 
-  // Updates the RTC signaling state based on the JsepSession state
-  void UpdateSignalingState(bool rollback = false);
+  void OnSetDescriptionSuccess(bool rollback);
 
   bool IsClosed() const;
   // called when DTLS connects; we only need this once
@@ -569,6 +570,13 @@ class PeerConnectionImpl final
   std::string mLocalRequestedSDP;
   std::string mRemoteRequestedSDP;
 
+  std::string mPendingLocalDescription;
+  std::string mPendingRemoteDescription;
+  std::string mCurrentLocalDescription;
+  std::string mCurrentRemoteDescription;
+  Maybe<bool> mPendingOfferer;
+  Maybe<bool> mCurrentOfferer;
+
   // DTLS fingerprint
   std::string mFingerprint;
   std::string mRemoteFingerprint;
@@ -664,6 +672,8 @@ class PeerConnectionImpl final
   std::vector<std::string> mRawTrickledCandidates;
 
   dom::RTCStatsTimestampMaker mTimestampMaker;
+
+  RefPtr<RTCStatsIdGenerator> mIdGenerator;
 
  public:
   // these are temporary until the DataChannel Listen/Connect API is removed

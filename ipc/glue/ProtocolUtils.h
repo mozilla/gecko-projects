@@ -24,7 +24,6 @@
 #include "mozilla/ipc/Shmem.h"
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/ipc/MessageLink.h"
-#include "mozilla/recordreplay/ChildIPC.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MozPromise.h"
@@ -389,7 +388,7 @@ class IToplevelProtocol : public IProtocol {
  protected:
   explicit IToplevelProtocol(const char* aName, ProtocolId aProtoId,
                              Side aSide);
-  ~IToplevelProtocol();
+  ~IToplevelProtocol() = default;
 
  public:
   // Shadow methods on IProtocol which are implemented directly on toplevel
@@ -406,18 +405,8 @@ class IToplevelProtocol : public IProtocol {
   bool IsTrackingSharedMemory(Shmem::SharedMemory* aSegment);
   bool DestroySharedMemory(Shmem& aShmem);
 
-  MessageChannel* GetIPCChannel() {
-    if (mMiddlemanChannelOverride) {
-      return mMiddlemanChannelOverride;
-    }
-    return &mChannel;
-  }
-  const MessageChannel* GetIPCChannel() const {
-    if (mMiddlemanChannelOverride) {
-      return mMiddlemanChannelOverride;
-    }
-    return &mChannel;
-  }
+  MessageChannel* GetIPCChannel() { return &mChannel; }
+  const MessageChannel* GetIPCChannel() const { return &mChannel; }
 
   // NOTE: The target actor's Manager must already be set.
   void SetEventTargetForActorInternal(IProtocol* aActor,
@@ -431,17 +420,12 @@ class IToplevelProtocol : public IProtocol {
   ProcessId OtherPid() const;
   void SetOtherProcessId(base::ProcessId aOtherPid);
 
-  // Toplevel protocol specific methods.
-  void SetTransport(UniquePtr<Transport> aTrans) { mTrans = std::move(aTrans); }
-
-  Transport* GetTransport() const { return mTrans.get(); }
-
   virtual void OnChannelClose() = 0;
   virtual void OnChannelError() = 0;
   virtual void ProcessingError(Result aError, const char* aMsgName) {}
   virtual void OnChannelConnected(int32_t peer_pid) {}
 
-  bool Open(mozilla::ipc::Transport* aTransport, base::ProcessId aOtherPid,
+  bool Open(UniquePtr<Transport> aTransport, base::ProcessId aOtherPid,
             MessageLoop* aThread = nullptr,
             mozilla::ipc::Side aSide = mozilla::ipc::UnknownSide);
 
@@ -450,10 +434,6 @@ class IToplevelProtocol : public IProtocol {
 
   bool Open(MessageChannel* aChannel, nsIEventTarget* aEventTarget,
             mozilla::ipc::Side aSide = mozilla::ipc::UnknownSide);
-
-  bool OpenWithAsyncPid(mozilla::ipc::Transport* aTransport,
-                        MessageLoop* aThread = nullptr,
-                        mozilla::ipc::Side aSide = mozilla::ipc::UnknownSide);
 
   // Open a toplevel actor such that both ends of the actor's channel are on
   // the same thread. This method should be called on the thread to perform
@@ -529,13 +509,6 @@ class IToplevelProtocol : public IProtocol {
 
   already_AddRefed<nsIEventTarget> GetMessageEventTarget(const Message& aMsg);
 
-  void SetMiddlemanIPCChannel(MessageChannel* aChannel) {
-    // Middleman processes sometimes need to change the channel used by a
-    // protocol.
-    MOZ_RELEASE_ASSERT(recordreplay::IsMiddleman());
-    mMiddlemanChannelOverride = aChannel;
-  }
-
  protected:
   // Override this method in top-level protocols to change the event target
   // for a new actor (and its sub-actors).
@@ -556,7 +529,6 @@ class IToplevelProtocol : public IProtocol {
 
   int32_t NextId();
 
-  UniquePtr<Transport> mTrans;
   base::ProcessId mOtherPid;
 
   // NOTE NOTE NOTE
@@ -570,12 +542,6 @@ class IToplevelProtocol : public IProtocol {
   // things.
   Mutex mEventTargetMutex;
   IDMap<nsCOMPtr<nsIEventTarget>> mEventTargetMap;
-
-  // In the middleman process for recordreplay, we override the channel which
-  // should be used by an actor. Due to this, we need to hold a separate pointer
-  // here which can be used to specify that we shouldn't send messages to our
-  // mChannel actor member. FIXME: This should probably be removed.
-  MessageChannel* mMiddlemanChannelOverride;
 
   MessageChannel mChannel;
 };
@@ -756,28 +722,19 @@ class Endpoint {
   // be used to send and receive messages. The endpoint becomes invalid.
   bool Bind(PFooSide* aActor) {
     MOZ_RELEASE_ASSERT(mValid);
-    if (mMyPid != base::GetCurrentProcId()) {
-      // These pids must match, unless we are recording or replaying, in
-      // which case the parent process will have supplied the pid for the
-      // middleman process instead. Fix this here. If we're replaying
-      // we'll see the pid of the middleman used while recording.
-      MOZ_RELEASE_ASSERT(recordreplay::IsRecordingOrReplaying());
-      MOZ_RELEASE_ASSERT(recordreplay::IsReplaying() ||
-                         mMyPid == recordreplay::child::MiddlemanProcessId());
-      mMyPid = base::GetCurrentProcId();
-    }
+    MOZ_RELEASE_ASSERT(mMyPid == base::GetCurrentProcId());
 
-    UniquePtr<Transport> t = mozilla::ipc::OpenDescriptor(mTransport, mMode);
-    if (!t) {
+    UniquePtr<Transport> transport =
+        mozilla::ipc::OpenDescriptor(mTransport, mMode);
+    if (!transport) {
       return false;
     }
     if (!aActor->Open(
-            t.get(), mOtherPid, XRE_GetIOMessageLoop(),
+            std::move(transport), mOtherPid, XRE_GetIOMessageLoop(),
             mMode == Transport::MODE_SERVER ? ParentSide : ChildSide)) {
       return false;
     }
     mValid = false;
-    aActor->SetTransport(std::move(t));
     return true;
   }
 

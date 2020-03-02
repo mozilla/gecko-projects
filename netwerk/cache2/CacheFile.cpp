@@ -2,19 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "CacheLog.h"
 #include "CacheFile.h"
+
+#include <algorithm>
+#include <utility>
 
 #include "CacheFileChunk.h"
 #include "CacheFileInputStream.h"
 #include "CacheFileOutputStream.h"
-#include "nsThreadUtils.h"
+#include "CacheLog.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Move.h"
-#include <algorithm>
+#include "mozilla/Telemetry.h"
 #include "nsComponentManagerUtils.h"
 #include "nsProxyRelease.h"
-#include "mozilla/Telemetry.h"
+#include "nsThreadUtils.h"
 
 // When CACHE_CHUNKS is defined we always cache unused chunks in mCacheChunks.
 // When it is not defined, we always release the chunks ASAP, i.e. we cache
@@ -316,7 +317,7 @@ nsresult CacheFile::OnChunkRead(nsresult aResult, CacheFileChunk* aChunk) {
     MOZ_ASSERT(aChunk->mRefCnt == 2);
     aChunk->mActiveChunk = false;
     ReleaseOutsideLock(
-        RefPtr<CacheFileChunkListener>(aChunk->mFile.forget()).forget());
+        RefPtr<CacheFileChunkListener>(std::move(aChunk->mFile)));
 
     DebugOnly<bool> removed = mDiscardedChunks.RemoveElement(aChunk);
     MOZ_ASSERT(removed);
@@ -361,7 +362,7 @@ nsresult CacheFile::OnChunkWritten(nsresult aResult, CacheFileChunk* aChunk) {
     MOZ_ASSERT(aChunk->mRefCnt == 2);
     aChunk->mActiveChunk = false;
     ReleaseOutsideLock(
-        RefPtr<CacheFileChunkListener>(aChunk->mFile.forget()).forget());
+        RefPtr<CacheFileChunkListener>(std::move(aChunk->mFile)));
 
     DebugOnly<bool> removed = mDiscardedChunks.RemoveElement(aChunk);
     MOZ_ASSERT(removed);
@@ -547,12 +548,12 @@ nsresult CacheFile::OnFileOpened(CacheFileHandle* aHandle, nsresult aResult) {
         // Write all cached chunks, otherwise they may stay unwritten.
         for (auto iter = mCachedChunks.Iter(); !iter.Done(); iter.Next()) {
           uint32_t idx = iter.Key();
-          const RefPtr<CacheFileChunk>& chunk = iter.Data();
+          RefPtr<CacheFileChunk>& chunk = iter.Data();
 
           LOG(("CacheFile::OnFileOpened() - write [this=%p, idx=%u, chunk=%p]",
                this, idx, chunk.get()));
 
-          mChunks.Put(idx, chunk);
+          mChunks.Put(idx, RefPtr{chunk});
           chunk->mFile = this;
           chunk->mActiveChunk = true;
 
@@ -560,7 +561,7 @@ nsresult CacheFile::OnFileOpened(CacheFileHandle* aHandle, nsresult aResult) {
 
           // This would be cleaner if we had an nsRefPtr constructor that took
           // a RefPtr<Derived>.
-          ReleaseOutsideLock(RefPtr<nsISupports>(chunk));
+          ReleaseOutsideLock(std::move(chunk));
 
           iter.Remove();
         }
@@ -983,6 +984,8 @@ nsresult CacheFile::OpenAlternativeOutputStream(
 }
 
 nsresult CacheFile::SetMemoryOnly() {
+  CacheFileAutoLock lock(this);
+
   LOG(("CacheFile::SetMemoryOnly() mMemoryOnly=%d [this=%p]", mMemoryOnly,
        this));
 
@@ -1166,7 +1169,7 @@ nsresult CacheFile::SetFrecency(uint32_t aFrecency) {
 
   if (mHandle && !mHandle->IsDoomed())
     CacheFileIOManager::UpdateIndexEntry(mHandle, &aFrecency, nullptr, nullptr,
-                                         nullptr, nullptr, nullptr, 0);
+                                         nullptr, nullptr);
 
   mMetadata->SetFrecency(aFrecency);
   return NS_OK;
@@ -1215,9 +1218,8 @@ nsresult CacheFile::SetNetworkTimes(uint64_t aOnStartTime,
       aOnStopTime <= kIndexTimeOutOfBound ? aOnStopTime : kIndexTimeOutOfBound;
 
   if (mHandle && !mHandle->IsDoomed()) {
-    CacheFileIOManager::UpdateIndexEntry(mHandle, nullptr, nullptr,
-                                         &onStartTime16, &onStopTime16, nullptr,
-                                         nullptr, 0);
+    CacheFileIOManager::UpdateIndexEntry(
+        mHandle, nullptr, nullptr, &onStartTime16, &onStopTime16, nullptr);
   }
   return NS_OK;
 }
@@ -1272,54 +1274,7 @@ nsresult CacheFile::SetContentType(uint8_t aContentType) {
 
   if (mHandle && !mHandle->IsDoomed()) {
     CacheFileIOManager::UpdateIndexEntry(mHandle, nullptr, nullptr, nullptr,
-                                         nullptr, &aContentType, nullptr, 0);
-  }
-  return NS_OK;
-}
-
-nsresult CacheFile::AddBaseDomainAccess(uint32_t aSiteID) {
-  CacheFileAutoLock lock(this);
-
-  nsresult rv;
-
-  LOG(("CacheFile::AddBaseDomainAccess() this=%p, siteID=%u", this, aSiteID));
-
-  MOZ_ASSERT(mMetadata);
-  NS_ENSURE_TRUE(mMetadata, NS_ERROR_UNEXPECTED);
-
-  uint32_t trID = CacheObserver::TelemetryReportID();
-  uint16_t siteIDCount = 0;
-  bool siteIDFound = false;
-  const char* elem = mMetadata->GetElement("eTLD1Access");
-  if (elem) {
-    rv = CacheFileUtils::ParseBaseDomainAccessInfo(elem, trID, &aSiteID,
-                                                   &siteIDFound, &siteIDCount);
-    if (NS_FAILED(rv)) {
-      // Ignore existing element, it's not valid anymore.
-      elem = nullptr;
-    } else if (siteIDFound) {
-      // Access from this site is already logged, nothing to do here.
-      return NS_OK;
-    }
-  }
-
-  PostWriteTimer();
-
-  // This site accessed this element for the first time within this telemetry
-  // report ID. Add it and update count of accessing site in the index.
-  ++siteIDCount;
-
-  nsAutoCString newElem;
-  CacheFileUtils::BuildOrAppendBaseDomainAccessInfo(elem, trID, aSiteID,
-                                                    newElem);
-  rv = mMetadata->SetElement("eTLD1Access", newElem.get());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (mHandle && !mHandle->IsDoomed()) {
-    CacheFileIOManager::UpdateIndexEntry(mHandle, nullptr, nullptr, nullptr,
-                                         nullptr, nullptr, &siteIDCount, trID);
+                                         nullptr, &aContentType);
   }
   return NS_OK;
 }
@@ -1350,7 +1305,7 @@ nsresult CacheFile::SetAltMetadata(const char* aAltMetadata) {
 
   if (mHandle && !mHandle->IsDoomed()) {
     CacheFileIOManager::UpdateIndexEntry(mHandle, nullptr, &hasAltData, nullptr,
-                                         nullptr, nullptr, nullptr, 0);
+                                         nullptr, nullptr);
   }
   return rv;
 }
@@ -1483,7 +1438,7 @@ nsresult CacheFile::GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
     // Preloader calls this method to preload only non-loaded chunks.
     MOZ_ASSERT(aCaller != PRELOADER, "Unexpected!");
 
-    mChunks.Put(aIndex, chunk);
+    mChunks.Put(aIndex, RefPtr{chunk});
     mCachedChunks.Remove(aIndex);
     chunk->mFile = this;
     chunk->mActiveChunk = true;
@@ -1517,7 +1472,7 @@ nsresult CacheFile::GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
     }
 
     chunk = new CacheFileChunk(this, aIndex, aCaller == WRITER);
-    mChunks.Put(aIndex, chunk);
+    mChunks.Put(aIndex, RefPtr{chunk});
     chunk->mActiveChunk = true;
 
     LOG(
@@ -1550,7 +1505,7 @@ nsresult CacheFile::GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
     if (aCaller == WRITER) {
       // this listener is going to write to the chunk
       chunk = new CacheFileChunk(this, aIndex, true);
-      mChunks.Put(aIndex, chunk);
+      mChunks.Put(aIndex, RefPtr{chunk});
       chunk->mActiveChunk = true;
 
       LOG(("CacheFile::GetChunkLocked() - Created new empty chunk %p [this=%p]",
@@ -1756,7 +1711,7 @@ nsresult CacheFile::DeactivateChunk(CacheFileChunk* aChunk) {
     if (aChunk->mDiscardedChunk) {
       aChunk->mActiveChunk = false;
       ReleaseOutsideLock(
-          RefPtr<CacheFileChunkListener>(aChunk->mFile.forget()).forget());
+          RefPtr<CacheFileChunkListener>(std::move(aChunk->mFile)));
 
       DebugOnly<bool> removed = mDiscardedChunks.RemoveElement(aChunk);
       MOZ_ASSERT(removed);
@@ -1838,11 +1793,10 @@ void CacheFile::RemoveChunkInternal(CacheFileChunk* aChunk, bool aCacheChunk) {
   AssertOwnsLock();
 
   aChunk->mActiveChunk = false;
-  ReleaseOutsideLock(
-      RefPtr<CacheFileChunkListener>(aChunk->mFile.forget()).forget());
+  ReleaseOutsideLock(RefPtr<CacheFileChunkListener>(std::move(aChunk->mFile)));
 
   if (aCacheChunk) {
-    mCachedChunks.Put(aChunk->Index(), aChunk);
+    mCachedChunks.Put(aChunk->Index(), RefPtr{aChunk});
   }
 
   mChunks.Remove(aChunk->Index());
@@ -2112,7 +2066,7 @@ static uint32_t StatusToTelemetryEnum(nsresult aStatus) {
 }
 
 void CacheFile::RemoveInput(CacheFileInputStream* aInput, nsresult aStatus) {
-  CacheFileAutoLock lock(this);
+  AssertOwnsLock();
 
   LOG(("CacheFile::RemoveInput() [this=%p, input=%p, status=0x%08" PRIx32 "]",
        this, aInput, static_cast<uint32_t>(aStatus)));
@@ -2290,7 +2244,7 @@ void CacheFile::NotifyListenersAboutOutputRemoval() {
   // First fail all chunk listeners that wait for non-existent chunk
   for (auto iter = mChunkListeners.Iter(); !iter.Done(); iter.Next()) {
     uint32_t idx = iter.Key();
-    nsAutoPtr<ChunkListeners>& listeners = iter.Data();
+    auto listeners = iter.UserData();
 
     LOG(
         ("CacheFile::NotifyListenersAboutOutputRemoval() - fail "
@@ -2300,7 +2254,11 @@ void CacheFile::NotifyListenersAboutOutputRemoval() {
     RefPtr<CacheFileChunk> chunk;
     mChunks.Get(idx, getter_AddRefs(chunk));
     if (chunk) {
-      MOZ_ASSERT(!chunk->IsReady());
+      // Skip these listeners because the chunk is being read. We don't have
+      // assertion here to check its state because it might be already in READY
+      // state while CacheFile::OnChunkRead() is waiting on Cache I/O thread for
+      // a lock so the listeners hasn't been notified yet. In any case, the
+      // listeners will be notified from CacheFile::OnChunkRead().
       continue;
     }
 
@@ -2378,9 +2336,7 @@ bool CacheFile::IsDoomed() {
 }
 
 bool CacheFile::IsWriteInProgress() {
-  // Returns true when there is a potentially unfinished write operation.
-  // Not using lock for performance reasons.  mMetadata is never released
-  // during life time of CacheFile.
+  CacheFileAutoLock lock(this);
 
   bool result = false;
 
@@ -2396,6 +2352,8 @@ bool CacheFile::IsWriteInProgress() {
 
 bool CacheFile::EntryWouldExceedLimit(int64_t aOffset, int64_t aSize,
                                       bool aIsAltData) {
+  CacheFileAutoLock lock(this);
+
   if (mSkipSizeCheck || aSize < 0) {
     return false;
   }
@@ -2512,7 +2470,7 @@ nsresult CacheFile::PadChunkWithZeroes(uint32_t aChunkIdx) {
 
   CacheFileChunkWriteHandle hnd = chunk->GetWriteHandle(kChunkSize);
   if (!hnd.Buf()) {
-    ReleaseOutsideLock(chunk.forget());
+    ReleaseOutsideLock(std::move(chunk));
     SetError(NS_ERROR_OUT_OF_MEMORY);
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -2521,7 +2479,7 @@ nsresult CacheFile::PadChunkWithZeroes(uint32_t aChunkIdx) {
   memset(hnd.Buf() + offset, 0, kChunkSize - offset);
   hnd.UpdateDataSize(offset, kChunkSize - offset);
 
-  ReleaseOutsideLock(chunk.forget());
+  ReleaseOutsideLock(std::move(chunk));
 
   return NS_OK;
 }
@@ -2582,17 +2540,8 @@ nsresult CacheFile::InitIndexEntry() {
     contentType = n64;
   }
 
-  uint32_t trID = CacheObserver::TelemetryReportID();
-  const char* siteIDInfo = mMetadata->GetElement("eTLD1Access");
-  uint16_t siteIDCount = 0;
-  if (siteIDInfo) {
-    CacheFileUtils::ParseBaseDomainAccessInfo(siteIDInfo, trID, nullptr,
-                                              nullptr, &siteIDCount);
-  }
-
-  rv = CacheFileIOManager::UpdateIndexEntry(mHandle, &frecency, &hasAltData,
-                                            &onStartTime, &onStopTime,
-                                            &contentType, &siteIDCount, trID);
+  rv = CacheFileIOManager::UpdateIndexEntry(
+      mHandle, &frecency, &hasAltData, &onStartTime, &onStopTime, &contentType);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;

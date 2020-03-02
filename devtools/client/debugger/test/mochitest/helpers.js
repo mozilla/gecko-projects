@@ -569,7 +569,6 @@ function isSelectedFrameSelected(dbg, state) {
 async function clearDebuggerPreferences(prefs = []) {
   resetSchemaVersion();
   asyncStorage.clear();
-  Services.prefs.clearUserPref("devtools.recordreplay.enabled");
   Services.prefs.clearUserPref("devtools.debugger.alphabetize-outline");
   Services.prefs.clearUserPref("devtools.debugger.pause-on-exceptions");
   Services.prefs.clearUserPref("devtools.debugger.pause-on-caught-exceptions");
@@ -596,8 +595,12 @@ async function clearDebuggerPreferences(prefs = []) {
  */
 
 async function initDebugger(url, ...sources) {
+  return initDebuggerWithAbsoluteURL(EXAMPLE_URL + url, ...sources);
+}
+
+async function initDebuggerWithAbsoluteURL(url, ...sources) {
   await clearDebuggerPreferences();
-  const toolbox = await openNewTabAndToolbox(EXAMPLE_URL + url, "jsdebugger");
+  const toolbox = await openNewTabAndToolbox(url, "jsdebugger");
   const dbg = createDebuggerContext(toolbox);
 
   await waitForSources(dbg, ...sources);
@@ -1085,9 +1088,7 @@ function invokeInTab(fnc, ...args) {
   return ContentTask.spawn(
     gBrowser.selectedBrowser,
     { fnc, args },
-    function({ fnc, args }) {
-      return content.wrappedJSObject[fnc](...args);
-    }
+    ({ fnc, args }) => content.wrappedJSObject[fnc](...args)
   );
 }
 
@@ -1126,6 +1127,8 @@ const startKey = isMac
 
 const keyMappings = {
   close: { code: "w", modifiers: cmdOrCtrl },
+  commandKeyDown: {code: "VK_META", modifiers: {type: "keydown"}},
+  commandKeyUp: {code: "VK_META", modifiers: {type: "keyup"}},
   debugger: { code: "s", modifiers: shiftOrAlt },
   // test conditional panel shortcut
   toggleCondPanel: { code: "b", modifiers: cmdShift },
@@ -1274,6 +1277,7 @@ const selectors = {
   expressionInput: ".expressions-list  input.input-expression",
   expressionNodes: ".expressions-list .tree-node",
   expressionPlus: ".watch-expressions-pane button.plus",
+  expressionRefresh: ".watch-expressions-pane button.refresh",
   scopesHeader: ".scopes-pane ._header",
   breakpointItem: i => `.breakpoints-list div:nth-of-type(${i})`,
   breakpointLabel: i => `${selectors.breakpointItem(i)} .breakpoint-label`,
@@ -1295,6 +1299,7 @@ const selectors = {
   },
   columnBreakpoints: ".column-breakpoint",
   scopes: ".scopes-list",
+  scopeNodes: ".scopes-list .object-label",
   scopeNode: i => `.scopes-list .tree-node:nth-child(${i}) .object-label`,
   scopeValue: i =>
     `.scopes-list .tree-node:nth-child(${i}) .object-delimiter + *`,
@@ -1371,6 +1376,9 @@ const selectors = {
   addSetWatchpoint: "#node-menu-add-set-watchpoint",
   removeWatchpoint: "#node-menu-remove-watchpoint",
   logEventsCheckbox: ".events-header input",
+  previewPopupInvokeGetterButton: ".preview-popup .invoke-getter",
+  previewPopupObjectNumber: ".preview-popup .objectBox-number",
+  previewPopupObjectObject: ".preview-popup .objectBox-object",
 };
 
 function getSelector(elementName, ...args) {
@@ -1677,6 +1685,21 @@ async function hoverAtPos(dbg, pos) {
   InspectorUtils.addPseudoClassLock(tokenEl, ":hover");
 }
 
+async function closePreviewAtPos(dbg, line, column) {
+  const pos = { line, ch: column - 1 };
+  const tokenEl = await getTokenFromPosition(dbg, pos);
+
+  if (!tokenEl) {
+    return false;
+  }
+
+  InspectorUtils.removePseudoClassLock(tokenEl, ":hover");
+
+  const gutterEl = await getEditorLineGutter(dbg, line);
+  EventUtils.synthesizeMouseAtCenter(gutterEl, { type: "mousemove" }, dbg.win);
+  await waitUntil(() => findElement(dbg, "previewPopup") == null);
+}
+
 // tryHovering will hover at a position every second until we
 // see a preview element (popup, tooltip) appear. Once it appears,
 // it considers it a success.
@@ -1931,6 +1954,30 @@ function evaluateExpressionInConsole(hud, expression) {
 
 function waitForInspectorPanelChange(dbg) {
   return dbg.toolbox.getPanelWhenReady("inspector");
+}
+
+function getEagerEvaluationElement(hud) {
+  return hud.ui.outputNode.querySelector(".eager-evaluation-result");
+}
+
+async function waitForEagerEvaluationResult(hud, text) {
+  await waitUntil(() => {
+    const elem = getEagerEvaluationElement(hud);
+    if (elem) {
+      if (text instanceof RegExp) {
+        return text.test(elem.innerText);
+      }
+      return elem.innerText == text;
+    }
+    return false;
+  });
+  ok(true, `Got eager evaluation result ${text}`);
+}
+
+function setInputValue(hud, value) {
+  const onValueSet = hud.jsterm.once("set-input-value");
+  hud.jsterm._setValue(value);
+  return onValueSet;
 }
 
 const { PromiseTestUtils } = ChromeUtils.import(

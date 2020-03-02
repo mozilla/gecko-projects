@@ -128,6 +128,7 @@ void RenderThread::ShutDownTask(layers::SynchronousTask* aTask) {
 
   ClearAllBlobImageResources();
   ClearSharedGL();
+  ClearSharedSurfacePool();
 }
 
 // static
@@ -414,7 +415,7 @@ void RenderThread::RunEvent(wr::WindowId aWindowId,
 }
 
 static void NotifyDidRender(layers::CompositorBridgeParent* aBridge,
-                            RefPtr<WebRenderPipelineInfo> aInfo,
+                            RefPtr<const WebRenderPipelineInfo> aInfo,
                             VsyncId aCompositeStartId,
                             TimeStamp aCompositeStart, TimeStamp aRenderStart,
                             TimeStamp aEnd, bool aRender,
@@ -428,10 +429,10 @@ static void NotifyDidRender(layers::CompositorBridgeParent* aBridge,
 
   auto info = aInfo->Raw();
 
-  for (uintptr_t i = 0; i < info.epochs.length; i++) {
-    aBridge->NotifyPipelineRendered(
-        info.epochs.data[i].pipeline_id, info.epochs.data[i].epoch,
-        aCompositeStartId, aCompositeStart, aRenderStart, aEnd, &aStats);
+  for (const auto& epoch : info.epochs) {
+    aBridge->NotifyPipelineRendered(epoch.pipeline_id, epoch.epoch,
+                                    aCompositeStartId, aCompositeStart,
+                                    aRenderStart, aEnd, &aStats);
   }
 
   if (aBridge->GetWrBridge()) {
@@ -453,7 +454,7 @@ void RenderThread::UpdateAndRender(
     const Maybe<gfx::IntSize>& aReadbackSize,
     const Maybe<wr::ImageFormat>& aReadbackFormat,
     const Maybe<Range<uint8_t>>& aReadbackBuffer, bool aHadSlowFrame) {
-  AUTO_PROFILER_TRACING("Paint", "Composite", GRAPHICS);
+  AUTO_PROFILER_TRACING_MARKER("Paint", "Composite", GRAPHICS);
   MOZ_ASSERT(IsInRenderThread());
   MOZ_ASSERT(aRender || aReadbackBuffer.isNothing());
 
@@ -483,7 +484,7 @@ void RenderThread::UpdateAndRender(
   renderer->CheckGraphicsResetStatus();
 
   TimeStamp end = TimeStamp::Now();
-  RefPtr<WebRenderPipelineInfo> info = renderer->FlushPipelineInfo();
+  RefPtr<const WebRenderPipelineInfo> info = renderer->FlushPipelineInfo();
 
   layers::CompositorThreadHolder::Loop()->PostTask(
       NewRunnableFunction("NotifyDidRenderRunnable", &NotifyDidRender,
@@ -492,7 +493,8 @@ void RenderThread::UpdateAndRender(
 
   if (latestFrameId.IsValid()) {
     auto recorderIt = mCompositionRecorders.find(aWindowId);
-    if (recorderIt != mCompositionRecorders.end()) {
+    if (recorderIt != mCompositionRecorders.end() &&
+        renderer->EnsureAsyncScreenshot()) {
       recorderIt->second->MaybeRecordFrame(renderer->GetRenderer(), info.get());
     }
   }
@@ -849,9 +851,25 @@ gl::GLContext* RenderThread::SharedGL() {
 
 void RenderThread::ClearSharedGL() {
   MOZ_ASSERT(IsInRenderThread());
+  if (mSurfacePool) {
+    mSurfacePool->DestroyGLResourcesForContext(mSharedGL);
+  }
   mShaders = nullptr;
   mSharedGL = nullptr;
 }
+
+RefPtr<layers::SurfacePool> RenderThread::SharedSurfacePool() {
+#ifdef XP_MACOSX
+  if (!mSurfacePool) {
+    size_t poolSizeLimit =
+        StaticPrefs::gfx_webrender_compositor_surface_pool_size_AtStartup();
+    mSurfacePool = layers::SurfacePool::Create(poolSizeLimit);
+  }
+#endif
+  return mSurfacePool;
+}
+
+void RenderThread::ClearSharedSurfacePool() { mSurfacePool = nullptr; }
 
 WebRenderShaders::WebRenderShaders(gl::GLContext* gl,
                                    WebRenderProgramCache* programCache) {
@@ -861,13 +879,6 @@ WebRenderShaders::WebRenderShaders(gl::GLContext* gl,
 
 WebRenderShaders::~WebRenderShaders() {
   wr_shaders_delete(mShaders, mGL.get());
-}
-
-WebRenderPipelineInfo::WebRenderPipelineInfo(wr::WrPipelineInfo aPipelineInfo)
-    : mPipelineInfo(aPipelineInfo) {}
-
-WebRenderPipelineInfo::~WebRenderPipelineInfo() {
-  wr_pipeline_info_delete(mPipelineInfo);
 }
 
 WebRenderThreadPool::WebRenderThreadPool(bool low_priority) {
@@ -913,7 +924,8 @@ static already_AddRefed<gl::GLContext> CreateGLContextANGLE() {
   }
 
   auto* egl = gl::GLLibraryEGL::Get();
-  auto flags = gl::CreateContextFlags::PREFER_ES3;
+  gl::CreateContextFlags flags = gl::CreateContextFlags::PREFER_ES3 |
+                                 gl::CreateContextFlags::PREFER_ROBUSTNESS;
 
   if (egl->IsExtensionSupported(
           gl::GLLibraryEGL::MOZ_create_context_provoking_vertex_dont_care)) {
@@ -1035,17 +1047,18 @@ void wr_schedule_render(mozilla::wr::WrWindowId aWindowId,
 
 static void NotifyDidSceneBuild(RefPtr<layers::CompositorBridgeParent> aBridge,
                                 const nsTArray<wr::RenderRoot>& aRenderRoots,
-                                RefPtr<wr::WebRenderPipelineInfo> aInfo) {
+                                RefPtr<const wr::WebRenderPipelineInfo> aInfo) {
   aBridge->NotifyDidSceneBuild(aRenderRoots, aInfo);
 }
 
 void wr_finished_scene_build(mozilla::wr::WrWindowId aWindowId,
                              const mozilla::wr::WrDocumentId* aDocumentIds,
                              size_t aDocumentIdsCount,
-                             mozilla::wr::WrPipelineInfo aInfo) {
+                             mozilla::wr::WrPipelineInfo* aInfo) {
   RefPtr<mozilla::layers::CompositorBridgeParent> cbp = mozilla::layers::
       CompositorBridgeParent::GetCompositorBridgeParentFromWindowId(aWindowId);
-  RefPtr<wr::WebRenderPipelineInfo> info = new wr::WebRenderPipelineInfo(aInfo);
+  RefPtr<wr::WebRenderPipelineInfo> info = new wr::WebRenderPipelineInfo();
+  info->Raw() = std::move(*aInfo);
   if (cbp) {
     nsTArray<wr::RenderRoot> renderRoots;
     renderRoots.SetLength(aDocumentIdsCount);

@@ -17,6 +17,7 @@
 #include "mozilla/Monitor.h"
 #include "mozilla/RecursiveMutex.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/StaticPrefs_apz.h"
 #include "mozilla/UniquePtr.h"
 #include "InputData.h"
@@ -26,7 +27,6 @@
 #include "Layers.h"  // for Layer::ScrollDirection
 #include "LayersTypes.h"
 #include "mozilla/gfx/Matrix.h"
-#include "nsIScrollableFrame.h"
 #include "nsRegion.h"
 #include "nsTArray.h"
 #include "PotentialCheckerboardDurationTracker.h"
@@ -554,6 +554,10 @@ class AsyncPanZoomController {
   const FrameMetrics& Metrics() const;
   FrameMetrics& Metrics();
 
+  // Helper function to compare root frame metrics and update them
+  // Returns true when the metrics have changed and were updated.
+  bool UpdateRootFrameMetricsIfChanged(FrameMetrics& metrics);
+
  private:
   // Get whether the horizontal content of the honoured target of auto-dir
   // scrolling starts from right to left. If you don't know of auto-dir
@@ -839,6 +843,17 @@ class AsyncPanZoomController {
   void TrackTouch(const MultiTouchInput& aEvent);
 
   /**
+   * Register the start of a touch or pan gesture at the given position and
+   * time.
+   */
+  void StartTouch(const ParentLayerPoint& aPoint, uint32_t aTimestampMs);
+
+  /**
+   * Register the end of a touch or pan gesture at the given time.
+   */
+  void EndTouch(uint32_t aTimestampMs);
+
+  /**
    * Utility function to send updated FrameMetrics to Gecko so that it can paint
    * the displayport area. Calls into GeckoContentController to do the actual
    * work. This call will use the current metrics. If this function is called
@@ -1045,6 +1060,8 @@ class AsyncPanZoomController {
   ExternalPoint mStartTouch;
 
   Maybe<CompositionPayload> mCompositedScrollPayload;
+
+  // Accessing mScrollPayload needs to be protected by mRecursiveMutex
   Maybe<CompositionPayload> mScrollPayload;
 
   friend class Axis;
@@ -1131,6 +1148,9 @@ class AsyncPanZoomController {
    * amount.
    * The transform can have both scroll and zoom components; the caller can
    * request just one or the other, or both, via the |aComponents| parameter.
+   * When only the eLayout component is requested, the returned translation
+   * should really be a LayerPoint, rather than a ParentLayerPoint, as it will
+   * not be scaled by the asynchronous zoom.
    */
   AsyncTransform GetCurrentAsyncTransform(
       AsyncTransformConsumer aMode,
@@ -1155,6 +1175,11 @@ class AsyncPanZoomController {
   ParentLayerRect GetCompositionBounds() const {
     RecursiveMutexAutoLock lock(mRecursiveMutex);
     return mScrollMetadata.GetMetrics().GetCompositionBounds();
+  }
+
+  LayoutDeviceToLayerScale2D GetCumulativeResolution() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+    return mScrollMetadata.GetMetrics().GetCumulativeResolution();
   }
 
  private:
@@ -1278,6 +1303,7 @@ class AsyncPanZoomController {
   /**
    * Internal helpers for checking general state of this apzc.
    */
+  bool IsInTransformingState() const;
   static bool IsTransformingState(PanZoomState aState);
 
   /* ===================================================================
@@ -1629,12 +1655,12 @@ class AsyncPanZoomController {
   CSSPoint mTestAsyncScrollOffset;
   // Extra zoom to include in the aync zoom for testing
   LayerToParentLayerScale mTestAsyncZoom;
-  int mTestAttributeAppliers : 8;
+  uint8_t mTestAttributeAppliers;
   // Flag to track whether or not the APZ transform is not used. This
   // flag is recomputed for every composition frame.
-  bool mAsyncTransformAppliedToContent : 1;
+  bool mAsyncTransformAppliedToContent;
   // Flag to track whether or not this APZC has ever async key scrolled.
-  bool mTestHasAsyncKeyScrolled : 1;
+  bool mTestHasAsyncKeyScrolled;
 
   /* ===================================================================
    * The functions and members in this section are used for checkerboard
@@ -1668,7 +1694,7 @@ class AsyncPanZoomController {
   // |aUnit| affects the snapping behaviour (see ScrollSnapUtils::
   // GetSnapPointForDestination).
   // Returns true iff. a target snap point was found.
-  bool MaybeAdjustDeltaForScrollSnapping(nsIScrollableFrame::ScrollUnit aUnit,
+  bool MaybeAdjustDeltaForScrollSnapping(ScrollUnit aUnit,
                                          ParentLayerPoint& aDelta,
                                          CSSPoint& aStartPosition);
 
@@ -1697,7 +1723,7 @@ class AsyncPanZoomController {
   // GetSnapPointForDestination). It should generally be determined by the
   // type of event that's triggering the scroll.
   Maybe<CSSPoint> FindSnapPointNear(const CSSPoint& aDestination,
-                                    nsIScrollableFrame::ScrollUnit aUnit);
+                                    ScrollUnit aUnit);
 };
 
 }  // namespace layers

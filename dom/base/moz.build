@@ -121,6 +121,7 @@ if CONFIG['MOZ_WEBRTC']:
     ]
 
 EXPORTS.mozilla += [
+    'CallState.h',
     'ContentIterator.h',
     'CORSMode.h',
     'FlushType.h',
@@ -138,6 +139,7 @@ EXPORTS.mozilla.dom += [
     '!UseCounterList.h',
     '!UseCounterWorkerList.h',
     'AbstractRange.h',
+    'AncestorIterator.h',
     'AnonymousContent.h',
     'Attr.h',
     'BarProps.h',
@@ -181,6 +183,7 @@ EXPORTS.mozilla.dom += [
     'Element.h',
     'ElementInlines.h',
     'EventSource.h',
+    'FilteredNodeIterator.h',
     'FormData.h',
     'FragmentOrElement.h',
     'FromParser.h',
@@ -210,6 +213,7 @@ EXPORTS.mozilla.dom += [
     'ParentProcessMessageManager.h',
     'PlacesBookmark.h',
     'PlacesBookmarkAddition.h',
+    'PlacesBookmarkRemoved.h',
     'PlacesEvent.h',
     'PlacesObservers.h',
     'PlacesVisit.h',
@@ -233,6 +237,7 @@ EXPORTS.mozilla.dom += [
     'StructuredCloneHolder.h',
     'StructuredCloneTags.h',
     'StructuredCloneTester.h',
+    'StyledRange.h',
     'StyleSheetList.h',
     'SubtleCrypto.h',
     'SyncMessageSender.h',
@@ -405,6 +410,7 @@ UNIFIED_SOURCES += [
     'StructuredCloneBlob.cpp',
     'StructuredCloneHolder.cpp',
     'StructuredCloneTester.cpp',
+    'StyledRange.cpp',
     'StyleSheetList.cpp',
     'SubtleCrypto.cpp',
     'TabGroup.cpp',
@@ -542,9 +548,11 @@ if CONFIG['MOZ_X11']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
 
 GeneratedFile('UseCounterList.h', script='gen-usecounters.py',
+              py2=True,
               entry_point='use_counter_list', inputs=['UseCounters.conf'])
 
 GeneratedFile('UseCounterWorkerList.h', script='gen-usecounters.py',
+              py2=True,
               entry_point='use_counter_list', inputs=['UseCountersWorker.conf'])
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):

@@ -21,7 +21,6 @@ from manifest import (
     validate_test_ini,
 )
 
-
 # some test details (test INIs)
 VALID_MANIFESTS = [{
     # page load test with local playback
@@ -30,7 +29,7 @@ VALID_MANIFESTS = [{
     'apps': 'firefox',
     'lower_is_better': True,
     'manifest': 'valid_details_0',
-    'measure': 'fnbpaint, fcp',
+    'measure': ['fnbpaint', 'fcp'],
     'page_cycles': 25,
     'playback': 'mitmproxy',
     'playback_binary_manifest': 'binary.manifest',

@@ -11,18 +11,15 @@
 # shell because `''':'`, `':'` and `:` are all equivalent, and `:` is a no-op.
 ''':'
 py2commands="
-    addtest
     analyze
     android
     android-emulator
     artifact
     awsy-test
-    bootstrap
     browsertime
     build
     build-backend
     buildsymbols
-    busted
     cargo
     check-spidermonkey
     clang-format
@@ -36,12 +33,12 @@ py2commands="
     empty-makefiles
     file-info
     firefox-ui-functional
-    fluent-migration-test
     geckodriver
     geckodriver-test
     geckoview-junit
     gradle
     gtest
+    hazards
     ide
     import-pr
     install

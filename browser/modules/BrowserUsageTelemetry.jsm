@@ -95,6 +95,9 @@ const URLBAR_SELECTED_RESULT_TYPES = {
   extension: 10,
   "preloaded-top-site": 11,
   tip: 12,
+  topsite: 13,
+  // There's no more space in this histogram, next addition must define a new
+  // one.
 };
 
 /**
@@ -300,7 +303,7 @@ let URICountListener = {
     if (gRecentVisitedOriginsExpiry) {
       let timeoutId = setTimeout(() => {
         this._domain24hrSet.delete(baseDomain);
-        this._timeouts.remove(timeoutId);
+        this._timeouts.delete(timeoutId);
       }, gRecentVisitedOriginsExpiry * 1000);
       this._timeouts.add(timeoutId);
     }

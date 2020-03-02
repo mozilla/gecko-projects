@@ -10,6 +10,7 @@
 
 #include "mozilla/widget/mozwayland.h"
 #include "mozilla/widget/gtk-primary-selection-client-protocol.h"
+#include "mozilla/widget/idle-inhibit-unstable-v1-client-protocol.h"
 
 #include "base/message_loop.h"  // for MessageLoop
 #include "base/task.h"          // for NewRunnableMethod, etc
@@ -59,6 +60,9 @@ class nsWaylandDisplay {
   gtk_primary_selection_device_manager* GetPrimarySelectionDeviceManager(void) {
     return mPrimarySelectionDeviceManager;
   };
+  zwp_idle_inhibit_manager_v1* GetIdleInhibitManager(void) {
+    return mIdleInhibitManager;
+  }
 
   void SetShm(wl_shm* aShm);
   void SetCompositor(wl_compositor* aCompositor);
@@ -67,6 +71,7 @@ class nsWaylandDisplay {
   void SetSeat(wl_seat* aSeat);
   void SetPrimarySelectionDeviceManager(
       gtk_primary_selection_device_manager* aPrimarySelectionDeviceManager);
+  void SetIdleInhibitManager(zwp_idle_inhibit_manager_v1* aIdleInhibitManager);
 
   void Shutdown();
 
@@ -83,9 +88,10 @@ class nsWaylandDisplay {
                          uint32_t mModifierLo);
   static bool IsDMABufEnabled();
   static bool IsDMABufBasicEnabled();
-
-  // See WindowSurfaceWayland::CacheMode for details.
-  int GetRenderingCacheModePref() { return mRenderingCacheModePref; };
+  static bool IsDMABufTexturesEnabled();
+  static bool IsDMABufWebGLEnabled();
+  static bool IsDMABufVAAPIEnabled();
+  static int GetRenderingCacheModePref();
 
  private:
   bool ConfigureGbm();
@@ -101,6 +107,7 @@ class nsWaylandDisplay {
   wl_shm* mShm;
   wl_callback* mSyncCallback;
   gtk_primary_selection_device_manager* mPrimarySelectionDeviceManager;
+  zwp_idle_inhibit_manager_v1* mIdleInhibitManager;
   wl_registry* mRegistry;
   zwp_linux_dmabuf_v1* mDmabuf;
   gbm_device* mGbmDevice;
@@ -109,11 +116,8 @@ class nsWaylandDisplay {
   GbmFormat mARGBFormat;
   bool mGdmConfigured;
   bool mExplicitSync;
-  static bool mIsDMABufEnabled;
-  static int mIsDMABufPrefState;
-  static int mIsDMABufPrefBasicCompositorState;
-  static bool mIsDMABufConfigured;
-  static int mRenderingCacheModePref;
+  static bool sIsDMABufEnabled;
+  static bool sIsDMABufConfigured;
 };
 
 void WaylandDispatchDisplays();

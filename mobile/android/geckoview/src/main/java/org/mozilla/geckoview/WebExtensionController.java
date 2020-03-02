@@ -1,6 +1,7 @@
 package org.mozilla.geckoview;
 
 import android.support.annotation.AnyThread;
+import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
@@ -13,15 +14,20 @@ import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import static org.mozilla.geckoview.WebExtension.InstallException.ErrorCodes.ERROR_USER_CANCELED;
+
 public class WebExtensionController {
     private final static String LOGTAG = "WebExtension";
 
+    private DebuggerDelegate mDebuggerDelegate;
     private PromptDelegate mPromptDelegate;
     private final WebExtension.Listener mListener;
 
@@ -46,6 +52,16 @@ public class WebExtensionController {
 
     private static class ExtensionStore {
         final private Map<String, WebExtension> mData = new HashMap<>();
+        private Observer mObserver;
+
+        interface Observer {
+            /***
+             * This event is fired every time a new extension object is created by the store.
+             *
+             * @param extension the newly-created extension object
+             */
+            void onNewExtension(final WebExtension extension);
+        }
 
         public GeckoResult<WebExtension> get(final String id) {
             final WebExtension extension = mData.get(id);
@@ -60,11 +76,16 @@ public class WebExtensionController {
 
                 return result.then(ext -> {
                     mData.put(ext.id, ext);
+                    mObserver.onNewExtension(ext);
                     return GeckoResult.fromValue(ext);
                 });
             }
 
             return GeckoResult.fromValue(extension);
+        }
+
+        public void setObserver(final Observer observer) {
+            mObserver = observer;
         }
 
         public void remove(final String id) {
@@ -90,7 +111,8 @@ public class WebExtensionController {
 
     // Avoids exposing listeners to the API
     private class Internals implements BundleEventListener,
-            WebExtension.Port.Observer {
+            WebExtension.Port.Observer,
+            ExtensionStore.Observer {
         @Override
         // BundleEventListener
         public void handleMessage(final String event, final GeckoBundle message,
@@ -118,6 +140,11 @@ public class WebExtensionController {
             }
 
             mPendingPortMessages.remove(port.id);
+        }
+
+        @Override
+        public void onNewExtension(final WebExtension extension) {
+            extension.setDelegateController(new DelegateController(extension));
         }
     }
 
@@ -232,20 +259,54 @@ public class WebExtensionController {
             return null;
         }
 
-        /*
-        TODO: Bug 1599581
+        /**
+         * Called whenever an updated extension has new permissions. This is intended as an
+         * opportunity for the app to prompt the user for the new permissions required by
+         * this extension.
+         *
+         * @param currentlyInstalled The {@link WebExtension} that is currently installed.
+         * @param updatedExtension The {@link WebExtension} that will replace the previous extension.
+         * @param newPermissions The new permissions that are needed.
+         * @param newOrigins The new origins that are needed.
+         *
+         * @return A {@link GeckoResult} that completes to either {@link AllowOrDeny#ALLOW ALLOW}
+         *         if this extension should be update or {@link AllowOrDeny#DENY DENY} if
+         *         this extension should not be update. A null value will be interpreted as
+         *         {@link AllowOrDeny#DENY DENY}.
+         */
+        @Nullable
         default GeckoResult<AllowOrDeny> onUpdatePrompt(
-                WebExtension currentlyInstalled,
-                WebExtension updatedExtension,
-                String[] newPermissions) {
+                @NonNull WebExtension currentlyInstalled,
+                @NonNull WebExtension updatedExtension,
+                @NonNull String[] newPermissions,
+                @NonNull String[] newOrigins) {
             return null;
         }
+
+        /*
         TODO: Bug 1601420
         default GeckoResult<AllowOrDeny> onOptionalPrompt(
                 WebExtension extension,
                 String[] optionalPermissions) {
             return null;
         } */
+    }
+
+    public interface DebuggerDelegate {
+        /**
+         * Called whenever the list of installed extensions has been modified using the debugger
+         * with tools like web-ext.
+         *
+         * This is intended as an opportunity to refresh the list of installed extensions using
+         * {@link WebExtensionController#list} and to set delegates on the new {@link WebExtension}
+         * objects, e.g. using {@link WebExtension#setActionDelegate} and
+         * {@link WebExtension#setMessageDelegate}.
+         *
+         * @see <a href="https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext">
+         *     Getting started with web-ext</a>
+         */
+        @UiThread
+        default void onExtensionListUpdated() {}
     }
 
     /**
@@ -285,8 +346,36 @@ public class WebExtensionController {
         mPromptDelegate = delegate;
     }
 
+    /**
+     * Set the {@link DebuggerDelegate} for this instance. This delegate will receive updates
+     * about extension changes using developer tools.
+     *
+     * @param delegate the Delegate instance
+     */
+    @UiThread
+    public void setDebuggerDelegate(final @NonNull DebuggerDelegate delegate) {
+        if (delegate == null && mDebuggerDelegate != null) {
+            EventDispatcher.getInstance().unregisterUiThreadListener(
+                    mInternals,
+                    "GeckoView:WebExtension:DebuggerListUpdated"
+            );
+        } else if (delegate != null && mDebuggerDelegate == null) {
+            EventDispatcher.getInstance().registerUiThreadListener(
+                    mInternals,
+                    "GeckoView:WebExtension:DebuggerListUpdated"
+            );
+        }
+
+        mDebuggerDelegate = delegate;
+    }
+
     private static class WebExtensionResult extends GeckoResult<WebExtension>
             implements EventCallback {
+        /** These states should match gecko's AddonManager.STATE_* constants. */
+        private static class StateCodes {
+            public static final int STATE_CANCELED = 12;
+        }
+
         private final String mFieldName;
 
         public WebExtensionResult(final String fieldName) {
@@ -295,6 +384,10 @@ public class WebExtensionController {
 
         @Override
         public void sendSuccess(final Object response) {
+            if (response == null) {
+                complete(null);
+                return;
+            }
             final GeckoBundle bundle = (GeckoBundle) response;
             complete(new WebExtension(bundle.getBundle(mFieldName)));
         }
@@ -304,7 +397,11 @@ public class WebExtensionController {
             if (response instanceof GeckoBundle
                     && ((GeckoBundle) response).containsKey("installError")) {
                 final GeckoBundle bundle = (GeckoBundle) response;
-                final int errorCode = bundle.getInt("installError");
+                int errorCode = bundle.getInt("installError");
+                final int installState = bundle.getInt("state");
+                if (errorCode == 0 && installState == StateCodes.STATE_CANCELED) {
+                    errorCode = ERROR_USER_CANCELED;
+                }
                 completeExceptionally(new WebExtension.InstallException(errorCode));
             } else {
                 completeExceptionally(new Exception(response.toString()));
@@ -411,12 +508,49 @@ public class WebExtensionController {
         return result;
     }
 
-    // TODO: Bug 1599585 make public
-    GeckoResult<WebExtension> enable(final WebExtension extension) {
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({ EnableSource.USER })
+    @interface EnableSources {}
+
+    /** Contains the possible values for the <code>source</code> parameter in {@link #enable} and
+     * {@link #disable}. */
+    public static class EnableSource {
+        /** Action has been requested by the user. */
+        public final static int USER = 1;
+
+        /** Action requested by the app itself, e.g. to disable an extension that is
+         * not supported in this version of the app. */
+        public final static int APP = 2;
+
+        static String toString(final @EnableSources int flag) {
+            if (flag == USER) {
+                return  "user";
+            } else if (flag == APP) {
+                return "app";
+            } else {
+                throw new IllegalArgumentException("Value provided in flags is not valid.");
+            }
+        }
+    }
+
+    /**
+     * Enable an extension that has been disabled. If the extension is already enabled, this
+     * method has no effect.
+     *
+     * @param extension The {@link WebExtension} to be enabled.
+     * @param source The agent that initiated this action, e.g. if the action has been initiated
+     *               by the user,use {@link EnableSource#USER}.
+     * @return the new {@link WebExtension} instance, updated to reflect the enablement.
+     */
+    @AnyThread
+    @NonNull
+    public GeckoResult<WebExtension> enable(final @NonNull WebExtension extension,
+                                            final @EnableSources int source) {
         final WebExtensionResult result = new WebExtensionResult("extension");
 
-        final GeckoBundle bundle = new GeckoBundle(1);
+        final GeckoBundle bundle = new GeckoBundle(2);
         bundle.putString("webExtensionId", extension.id);
+        bundle.putString("source", EnableSource.toString(source));
 
         EventDispatcher.getInstance().dispatch("GeckoView:WebExtension:Enable",
                 bundle, result);
@@ -427,12 +561,24 @@ public class WebExtensionController {
         });
     }
 
-    // TODO: Bug 1599585 make public
-    GeckoResult<WebExtension> disable(final WebExtension extension) {
+    /**
+     * Disable an extension that is enabled. If the extension is already disabled, this
+     * method has no effect.
+     *
+     * @param extension The {@link WebExtension} to be disabled.
+     * @param source The agent that initiated this action, e.g. if the action has been initiated
+     *               by the user, use {@link EnableSource#USER}.
+     * @return the new {@link WebExtension} instance, updated to reflect the disablement.
+     */
+    @AnyThread
+    @NonNull
+    public GeckoResult<WebExtension> disable(final @NonNull WebExtension extension,
+                                             final @EnableSources int source) {
         final WebExtensionResult result = new WebExtensionResult("extension");
 
-        final GeckoBundle bundle = new GeckoBundle(1);
+        final GeckoBundle bundle = new GeckoBundle(2);
         bundle.putString("webExtensionId", extension.id);
+        bundle.putString("source", EnableSource.toString(source));
 
         EventDispatcher.getInstance().dispatch("GeckoView:WebExtension:Disable",
                 bundle, result);
@@ -477,8 +623,31 @@ public class WebExtensionController {
         return result;
     }
 
-    // TODO: Bug 1599581 make public
-    GeckoResult<WebExtension> update(final WebExtension extension) {
+    /**
+     * Update a web extension.
+     *
+     * When checking for an update, GeckoView will download the update manifest that is defined by the
+     * web extension's manifest property
+     * <a href="https://extensionworkshop.com/documentation/manage/updating-your-extension/">browser_specific_settings.gecko.update_url</a>.
+     * If an update is found it will be downloaded and installed. If the extension needs any new
+     * permissions the {@link PromptDelegate#updatePrompt} will be triggered.
+     *
+     * More information about the update manifest format is available
+     * <a href="https://extensionworkshop.com/documentation/manage/updating-your-extension/#manifest-structure">here</a>.
+     *
+     * @param extension The extension to update.
+     *
+     * @return A {@link GeckoResult} that will complete when the update process finishes. If an
+     *         update is found and installed successfully, the GeckoResult will return the updated
+     *         {@link WebExtension}. If no update is available, null will be returned. If the updated
+     *         extension requires new permissions, the {@link PromptDelegate#installPrompt}
+     *         will be called.
+     *
+     * @see PromptDelegate#updatePrompt
+     */
+    @AnyThread
+    @NonNull
+    public GeckoResult<WebExtension> update(final @NonNull WebExtension extension) {
         final WebExtensionResult result = new WebExtensionResult("extension");
 
         final GeckoBundle bundle = new GeckoBundle(1);
@@ -488,7 +657,9 @@ public class WebExtensionController {
                 bundle, result);
 
         return result.then(newExtension -> {
-            registerWebExtension(newExtension);
+            if (newExtension != null) {
+                registerWebExtension(newExtension);
+            }
             return GeckoResult.fromValue(newExtension);
         });
     }
@@ -497,6 +668,7 @@ public class WebExtensionController {
         mListener = new WebExtension.Listener(runtime);
         mPendingPortMessages = new MultiMap<>();
         mPendingMessages = new MultiMap<>();
+        mExtensions.setObserver(mInternals);
     }
 
     /* package */ void registerWebExtension(final WebExtension webExtension) {
@@ -528,6 +700,14 @@ public class WebExtensionController {
             return;
         } else if ("GeckoView:WebExtension:InstallPrompt".equals(event)) {
             installPrompt(bundle, callback);
+            return;
+        } else if ("GeckoView:WebExtension:UpdatePrompt".equals(event)) {
+            updatePrompt(bundle, callback);
+            return;
+        } else if ("GeckoView:WebExtension:DebuggerListUpdated".equals(event)) {
+            if (mDebuggerDelegate != null) {
+                mDebuggerDelegate.onExtensionListUpdated();
+            }
             return;
         }
 
@@ -593,12 +773,47 @@ public class WebExtensionController {
         }
 
         promptResponse.accept(allowOrDeny -> {
-            GeckoBundle response = new GeckoBundle(1);
-            if (AllowOrDeny.ALLOW.equals(allowOrDeny)) {
-                response.putBoolean("allow", true);
-            } else {
-                response.putBoolean("allow", false);
+            final GeckoBundle response = new GeckoBundle(1);
+            response.putBoolean("allow", AllowOrDeny.ALLOW.equals(allowOrDeny));
+            callback.sendSuccess(response);
+        });
+    }
+
+    private void updatePrompt(final GeckoBundle message, final EventCallback callback) {
+        final GeckoBundle currentBundle = message.getBundle("currentlyInstalled");
+        final GeckoBundle updatedBundle = message.getBundle("updatedExtension");
+        final String[] newPermissions = message.getStringArray("newPermissions");
+        final String[] newOrigins = message.getStringArray("newOrigins");
+        if (currentBundle == null || updatedBundle == null) {
+            if (BuildConfig.DEBUG) {
+                throw new RuntimeException("Missing bundle");
             }
+
+            Log.e(LOGTAG, "Missing bundle");
+            return;
+        }
+
+        final WebExtension currentExtension = new WebExtension(currentBundle);
+        currentExtension.setDelegateController(new DelegateController(currentExtension));
+
+        final WebExtension updatedExtension = new WebExtension(updatedBundle);
+        updatedExtension.setDelegateController(new DelegateController(updatedExtension));
+
+        if (mPromptDelegate == null) {
+            Log.e(LOGTAG, "Tried to update extension " + currentExtension.id +
+                    " but no delegate is registered");
+            return;
+        }
+
+        final GeckoResult<AllowOrDeny> promptResponse = mPromptDelegate.onUpdatePrompt(
+                currentExtension, updatedExtension, newPermissions, newOrigins);
+        if (promptResponse == null) {
+            return;
+        }
+
+        promptResponse.accept(allowOrDeny -> {
+            final GeckoBundle response = new GeckoBundle(1);
+            response.putBoolean("allow", AllowOrDeny.ALLOW.equals(allowOrDeny));
             callback.sendSuccess(response);
         });
     }
@@ -642,6 +857,20 @@ public class WebExtensionController {
         });
     }
 
+    /**
+     * Notifies extensions about a active tab change over the `tabs.onActivated` event.
+     *
+     * @param session The {@link GeckoSession} of the newly selected session/tab.
+     * @param active true if the tab became active, false if the tab became inactive.
+     */
+    @AnyThread
+    public void setTabActive(@NonNull final GeckoSession session, final boolean active) {
+        final GeckoBundle bundle = new GeckoBundle(1);
+        bundle.putBoolean("active", active);
+        session.getEventDispatcher().dispatch(
+            "GeckoView:WebExtension:SetTabActive",
+            bundle);
+    }
 
     /* package */ void unregisterWebExtension(final WebExtension webExtension) {
         mExtensions.remove(webExtension.id);

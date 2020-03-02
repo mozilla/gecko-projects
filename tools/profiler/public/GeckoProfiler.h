@@ -60,16 +60,19 @@
 #  define PROFILER_ADD_MARKER(markerName, categoryPair)
 #  define PROFILER_ADD_MARKER_WITH_PAYLOAD(markerName, categoryPair, \
                                            PayloadType, payloadArgs)
-#  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, \
-                                      count, cache, timings, redirect, ...)
+#  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end,  \
+                                      count, cache, innerWindowID, timings, \
+                                      redirect, ...)
 
-#  define PROFILER_TRACING(categoryString, markerName, categoryPair, kind)
-#  define PROFILER_TRACING_DOCSHELL(categoryString, markerName, categoryPair, \
-                                    kind, docshell)
-#  define AUTO_PROFILER_TRACING(categoryString, markerName, categoryPair)
-#  define AUTO_PROFILER_TRACING_DOCSHELL(categoryString, markerName, \
-                                         categoryPair, docShell)
-#  define AUTO_PROFILER_TEXT_MARKER_CAUSE(markerName, text, categoryPair, cause)
+#  define PROFILER_TRACING_MARKER(categoryString, markerName, categoryPair, \
+                                  kind)
+#  define PROFILER_TRACING_MARKER_DOCSHELL(categoryString, markerName, \
+                                           categoryPair, kind, docshell)
+#  define AUTO_PROFILER_TRACING_MARKER(categoryString, markerName, categoryPair)
+#  define AUTO_PROFILER_TRACING_MARKER_DOCSHELL(categoryString, markerName, \
+                                                categoryPair, docShell)
+#  define AUTO_PROFILER_TEXT_MARKER_CAUSE(markerName, text, categoryPair, \
+                                          innerWindowID, cause)
 #  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL(markerName, text, categoryPair, \
                                              docShell)
 #  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE( \
@@ -262,8 +265,7 @@ class RacyFeatures {
   // We combine the active bit with the feature bits so they can be read or
   // written in a single atomic operation. Accesses to this atomic are not
   // recorded by web replay as they may occur at non-deterministic points.
-  static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed,
-                         recordreplay::Behavior::DontPreserve>
+  static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed>
       sActiveAndFeatures;
 };
 
@@ -309,10 +311,15 @@ void profiler_init_threadmanager();
 // Call this after the nsThreadManager is Init()ed
 #  define AUTO_PROFILER_INIT2 mozilla::AutoProfilerInit2 PROFILER_RAII
 
+enum class IsFastShutdown {
+  No,
+  Yes,
+};
+
 // Clean up the profiler module, stopping it if required. This function may
 // also save a shutdown profile if requested. No profiler calls should happen
 // after this point and all profiling stack labels should have been popped.
-void profiler_shutdown();
+void profiler_shutdown(IsFastShutdown aIsFastShutdown = IsFastShutdown::No);
 
 // Start the profiler -- initializing it first if necessary -- with the
 // selected options. Stops and restarts the profiler if it is already active.
@@ -826,14 +833,16 @@ void profiler_add_marker_for_thread(
 enum class NetworkLoadType { LOAD_START, LOAD_STOP, LOAD_REDIRECT };
 
 #  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end,  \
-                                      count, cache, timings, redirect, ...) \
+                                      count, cache, innerWindowID, timings, \
+                                      redirect, ...)                        \
     profiler_add_network_marker(uri, pri, channel, type, start, end, count, \
-                                cache, timings, redirect, ##__VA_ARGS__)
+                                cache, innerWindowID, timings, redirect,    \
+                                ##__VA_ARGS__)
 
 void profiler_add_network_marker(
     nsIURI* aURI, int32_t aPriority, uint64_t aChannelId, NetworkLoadType aType,
     mozilla::TimeStamp aStart, mozilla::TimeStamp aEnd, int64_t aCount,
-    mozilla::net::CacheDisposition aCacheDisposition,
+    mozilla::net::CacheDisposition aCacheDisposition, uint64_t aInnerWindowID,
     const mozilla::net::TimingStruct* aTimings = nullptr,
     nsIURI* aRedirectURI = nullptr, UniqueProfilerBacktrace aSource = nullptr);
 
@@ -854,32 +863,34 @@ mozilla::Maybe<uint64_t> profiler_get_inner_window_id_from_docshell(
 // Adds a tracing marker to the profile. A no-op if the profiler is inactive or
 // in privacy mode.
 
-#  define PROFILER_TRACING(categoryString, markerName, categoryPair, kind) \
-    profiler_tracing(categoryString, markerName,                           \
-                     JS::ProfilingCategoryPair::categoryPair, kind)
-#  define PROFILER_TRACING_DOCSHELL(categoryString, markerName, categoryPair, \
-                                    kind, docShell)                           \
-    profiler_tracing(categoryString, markerName,                              \
-                     JS::ProfilingCategoryPair::categoryPair, kind,           \
-                     profiler_get_inner_window_id_from_docshell(docShell))
+#  define PROFILER_TRACING_MARKER(categoryString, markerName, categoryPair, \
+                                  kind)                                     \
+    profiler_tracing_marker(categoryString, markerName,                     \
+                            JS::ProfilingCategoryPair::categoryPair, kind)
+#  define PROFILER_TRACING_MARKER_DOCSHELL(categoryString, markerName,       \
+                                           categoryPair, kind, docShell)     \
+    profiler_tracing_marker(                                                 \
+        categoryString, markerName, JS::ProfilingCategoryPair::categoryPair, \
+        kind, profiler_get_inner_window_id_from_docshell(docShell))
 
-void profiler_tracing(
+void profiler_tracing_marker(
     const char* aCategoryString, const char* aMarkerName,
     JS::ProfilingCategoryPair aCategoryPair, TracingKind aKind,
     const mozilla::Maybe<uint64_t>& aInnerWindowID = mozilla::Nothing());
-void profiler_tracing(
+void profiler_tracing_marker(
     const char* aCategoryString, const char* aMarkerName,
     JS::ProfilingCategoryPair aCategoryPair, TracingKind aKind,
     UniqueProfilerBacktrace aCause,
     const mozilla::Maybe<uint64_t>& aInnerWindowID = mozilla::Nothing());
 
 // Adds a START/END pair of tracing markers.
-#  define AUTO_PROFILER_TRACING(categoryString, markerName, categoryPair)    \
+#  define AUTO_PROFILER_TRACING_MARKER(categoryString, markerName,           \
+                                       categoryPair)                         \
     mozilla::AutoProfilerTracing PROFILER_RAII(                              \
         categoryString, markerName, JS::ProfilingCategoryPair::categoryPair, \
         mozilla::Nothing())
-#  define AUTO_PROFILER_TRACING_DOCSHELL(categoryString, markerName,         \
-                                         categoryPair, docShell)             \
+#  define AUTO_PROFILER_TRACING_MARKER_DOCSHELL(categoryString, markerName,  \
+                                                categoryPair, docShell)      \
     mozilla::AutoProfilerTracing PROFILER_RAII(                              \
         categoryString, markerName, JS::ProfilingCategoryPair::categoryPair, \
         profiler_get_inner_window_id_from_docshell(docShell))
@@ -930,10 +941,10 @@ class MOZ_RAII AutoProfilerTextMarker {
 };
 
 #  define AUTO_PROFILER_TEXT_MARKER_CAUSE(markerName, text, categoryPair, \
-                                          cause)                          \
+                                          innerWindowID, cause)           \
     AutoProfilerTextMarker PROFILER_RAII(                                 \
         markerName, text, JS::ProfilingCategoryPair::categoryPair,        \
-        mozilla::Nothing(), cause)
+        innerWindowID, cause)
 
 #  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL(markerName, text, categoryPair, \
                                              docShell)                       \
@@ -1093,9 +1104,7 @@ class ProfilingStackOwner {
 
   class ProfilingStack mProfilingStack;
 
-  mutable Atomic<int32_t, MemoryOrdering::ReleaseAcquire,
-                 recordreplay::Behavior::DontPreserve>
-      mRefCnt;
+  mutable Atomic<int32_t, MemoryOrdering::ReleaseAcquire> mRefCnt;
 };
 
 // This class creates a non-owning ProfilingStack reference. Objects of this
@@ -1171,8 +1180,8 @@ class MOZ_RAII AutoProfilerTracing {
         mCategoryPair(aCategoryPair),
         mInnerWindowID(aInnerWindowID) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    profiler_tracing(mCategoryString, mMarkerName, aCategoryPair,
-                     TRACING_INTERVAL_START, mInnerWindowID);
+    profiler_tracing_marker(mCategoryString, mMarkerName, aCategoryPair,
+                            TRACING_INTERVAL_START, mInnerWindowID);
   }
 
   AutoProfilerTracing(const char* aCategoryString, const char* aMarkerName,
@@ -1185,14 +1194,14 @@ class MOZ_RAII AutoProfilerTracing {
         mCategoryPair(aCategoryPair),
         mInnerWindowID(aInnerWindowID) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    profiler_tracing(mCategoryString, mMarkerName, aCategoryPair,
-                     TRACING_INTERVAL_START, std::move(aBacktrace),
-                     mInnerWindowID);
+    profiler_tracing_marker(mCategoryString, mMarkerName, aCategoryPair,
+                            TRACING_INTERVAL_START, std::move(aBacktrace),
+                            mInnerWindowID);
   }
 
   ~AutoProfilerTracing() {
-    profiler_tracing(mCategoryString, mMarkerName, mCategoryPair,
-                     TRACING_INTERVAL_END, mInnerWindowID);
+    profiler_tracing_marker(mCategoryString, mMarkerName, mCategoryPair,
+                            TRACING_INTERVAL_END, mInnerWindowID);
   }
 
  protected:

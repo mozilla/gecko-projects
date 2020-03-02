@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import unicode_literals
+from __future__ import unicode_literals, absolute_import, print_function
 
 import os
 import re
@@ -100,7 +100,9 @@ class ReftestManifest(object):
                 lines = fh.read().splitlines()
 
         urlprefix = ''
-        for line in lines:
+        defaults = []
+        for i, line in enumerate(lines):
+            lineno = i + 1
             line = line.decode('utf-8')
 
             # Entire line is a comment.
@@ -116,8 +118,12 @@ class ReftestManifest(object):
                 continue
 
             items = line.split()
-            annotations = []
+            if items[0] == "defaults":
+                defaults = items[1:]
+                continue
 
+            items = defaults + items
+            annotations = []
             for i in range(len(items)):
                 item = items[i]
 
@@ -134,11 +140,13 @@ class ReftestManifest(object):
                         mdir, m.group(1))))
                     continue
 
+                if i < len(defaults):
+                    raise ValueError("Error parsing manifest {}, line {}: "
+                                     "Invalid defaults token '{}'".format(
+                                        path, lineno, item))
+
                 if item == 'url-prefix':
                     urlprefix = items[i+1]
-                    break
-
-                if item == 'default-preferences':
                     break
 
                 if item == 'include':

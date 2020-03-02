@@ -20,6 +20,7 @@
 namespace mozilla {
 namespace net {
 
+class HttpConnectionUDP;
 class Http3Stream;
 class QuicSocketControl;
 
@@ -48,7 +49,7 @@ class Http3Session final : public nsAHttpTransaction,
 
   Http3Session();
   nsresult Init(const nsACString& aOrigin, nsISocketTransport* aSocketTransport,
-                nsHttpConnection* readerWriter);
+                HttpConnectionUDP* readerWriter);
 
   bool IsConnected() const { return mState == CONNECTED; }
   bool IsClosing() const { return (mState == CLOSING || mState == CLOSED); }
@@ -72,9 +73,6 @@ class Http3Session final : public nsAHttpTransaction,
                                           uint32_t*, bool*) final;
   MOZ_MUST_USE nsresult WriteSegmentsAgain(nsAHttpSegmentWriter*, uint32_t,
                                            uint32_t*, bool*) final;
-
-  bool ResponseTimeoutEnabled() const final { return true; }
-  PRIntervalTime ResponseTimeout() final;
 
   // The folowing functions are used by Http3Stream:
   nsresult TryActivating(const nsACString& aMethod, const nsACString& aScheme,
@@ -150,13 +148,14 @@ class Http3Session final : public nsAHttpTransaction,
   bool mCleanShutdown;
   bool mGoawayReceived;
   bool mShouldClose;
+  bool mIsClosedByNeqo;
   nsresult mError;
   bool mBeforeConnectedError;
   uint64_t mCurrentForegroundTabOuterContentWindowId;
 
   nsTArray<uint8_t> mPacketToSend;
 
-  RefPtr<nsHttpConnection> mSegmentReaderWriter;
+  RefPtr<HttpConnectionUDP> mSegmentReaderWriter;
 
   // The underlying socket transport object is needed to propogate some events
   RefPtr<nsISocketTransport> mSocketTransport;

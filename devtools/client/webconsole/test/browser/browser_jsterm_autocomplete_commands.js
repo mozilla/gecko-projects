@@ -21,9 +21,8 @@ add_task(async function() {
   await onPopUpOpen;
 
   const expectedCommands = [":help", ":screenshot"];
-  is(
-    getPopupItems(autocompletePopup).join("\n"),
-    expectedCommands.join("\n"),
+  ok(
+    hasExactPopupLabels(autocompletePopup, expectedCommands),
     "popup contains expected commands"
   );
 
@@ -62,7 +61,3 @@ add_task(async function() {
   EventUtils.synthesizeKey("KEY_Tab");
   is(getInputValue(hud), ":help", "Tab key correctly completes :help");
 });
-
-function getPopupItems(popup) {
-  return popup.items.map(item => item.label);
-}

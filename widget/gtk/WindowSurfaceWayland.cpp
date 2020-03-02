@@ -436,7 +436,7 @@ already_AddRefed<gfx::DrawTarget> WindowBackBufferShm::Lock() {
 WindowBackBufferDMABuf::WindowBackBufferDMABuf(
     WindowSurfaceWayland* aWindowSurfaceWayland, int aWidth, int aHeight)
     : WindowBackBuffer(aWindowSurfaceWayland) {
-  mDMAbufSurface = WaylandDMABufSurface::CreateDMABufSurface(
+  mDMAbufSurface = WaylandDMABufSurfaceRGBA::CreateDMABufSurface(
       aWidth, aHeight, DMABUF_ALPHA | DMABUF_CREATE_WL_BUFFER);
   LOGWAYLAND(
       ("WindowBackBufferDMABuf::WindowBackBufferDMABuf [%p] Created DMABuf "
@@ -805,6 +805,10 @@ already_AddRefed<gfx::DrawTarget> WindowSurfaceWayland::Lock(
   mBufferCommitAllowed = false;
 
   LayoutDeviceIntRect lockedScreenRect = mWindow->GetBounds();
+  // The window bounds of popup windows contains relative position to
+  // the transient window. We need to remove that effect because by changing
+  // position of the popup window the buffer has not changed its size.
+  lockedScreenRect.x = lockedScreenRect.y = 0;
   gfx::IntRect lockSize = aRegion.GetBounds().ToUnknownRect();
 
   bool isTransparentPopup =

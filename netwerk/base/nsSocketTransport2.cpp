@@ -16,7 +16,6 @@
 #include "nsProxyInfo.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "plstr.h"
 #include "prerr.h"
@@ -278,7 +277,7 @@ void nsSocketInputStream::OnSocketReady(nsresult condition) {
 
     // ignore event if only waiting for closure and not closed.
     if (NS_FAILED(mCondition) || !(mCallbackFlags & WAIT_CLOSURE_ONLY)) {
-      callback = mCallback.forget();
+      callback = std::move(mCallback);
       mCallbackFlags = 0;
     }
   }
@@ -510,7 +509,7 @@ void nsSocketOutputStream::OnSocketReady(nsresult condition) {
 
     // ignore event if only waiting for closure and not closed.
     if (NS_FAILED(mCondition) || !(mCallbackFlags & WAIT_CLOSURE_ONLY)) {
-      callback = mCallback.forget();
+      callback = std::move(mCallback);
       mCallbackFlags = 0;
     }
   }
@@ -776,6 +775,13 @@ nsresult nsSocketTransport::Init(const nsTArray<nsCString>& types,
     mPort = port;
   }
 
+  // A subtle check we don't enter this method more than once for the socket
+  // transport lifetime.  Disable on TSan builds to prevent race checking, we
+  // don't want an atomic here for perf reasons!
+#ifndef MOZ_TSAN
+  MOZ_ASSERT(!mPortRemappingApplied);
+#endif  // !MOZ_TSAN
+
   if (proxyInfo) {
     mHttpsProxy = proxyInfo->IsHTTPS();
   }
@@ -1038,6 +1044,9 @@ nsresult nsSocketTransport::ResolveHost() {
     dnsFlags |= nsIDNSService::RESOLVE_DISABLE_IPV4;
   if (mConnectionFlags & nsSocketTransport::DISABLE_TRR)
     dnsFlags |= nsIDNSService::RESOLVE_DISABLE_TRR;
+
+  dnsFlags |= nsIDNSService::GetFlagsFromTRRMode(
+      nsISocketTransport::GetTRRModeFromFlags(mConnectionFlags));
 
   NS_ASSERTION(!(dnsFlags & nsIDNSService::RESOLVE_DISABLE_IPV6) ||
                    !(dnsFlags & nsIDNSService::RESOLVE_DISABLE_IPV4),
@@ -1604,24 +1613,13 @@ nsresult nsSocketTransport::InitiateSocket() {
 
   nsCOMPtr<nsISSLSocketControl> secCtrl = do_QueryInterface(mSecInfo);
   if (usingSSL && secCtrl && SSLTokensCache::IsEnabled()) {
-    PRIntn val;
-    // If SSL_NO_CACHE option was set, we must not use the cache
-    if (SSL_OptionGet(fd, SSL_NO_CACHE, &val) == SECSuccess && val == 0) {
-      nsTArray<uint8_t> token;
-      nsAutoCString peerId;
-      secCtrl->GetPeerId(peerId);
-      nsresult rv2 = SSLTokensCache::Get(peerId, token);
-      if (NS_SUCCEEDED(rv2) && token.Length() != 0) {
-        SECStatus srv =
-            SSL_SetResumptionToken(fd, token.Elements(), token.Length());
-        if (srv == SECFailure) {
-          SOCKET_LOG(("Setting token failed with NSS error %d [id=%s]",
-                      PORT_GetError(), PromiseFlatCString(peerId).get()));
-          SSLTokensCache::Remove(peerId);
-        }
-      }
+    rv = secCtrl->SetResumptionTokenFromExternalCache();
+    if (NS_FAILED(rv)) {
+      SOCKET_LOG(("SetResumptionTokenFromExternalCache failed [rv=%" PRIx32
+                  "]\n",
+                  static_cast<uint32_t>(rv)));
+      return rv;
     }
-
     SSL_SetResumptionTokenCallback(fd, &StoreResumptionToken, this);
     mSSLCallbackSet = true;
   }
@@ -2168,6 +2166,17 @@ void nsSocketTransport::OnSocketEvent(uint32_t type, nsresult status,
   switch (type) {
     case MSG_ENSURE_CONNECT:
       SOCKET_LOG(("  MSG_ENSURE_CONNECT\n"));
+
+      // Apply port remapping here so that we do it on the socket thread and
+      // before we process the resolved DNS name or create the socket the first
+      // time.
+      if (!mPortRemappingApplied) {
+        mPortRemappingApplied = true;
+
+        mSocketTransportService->ApplyPortRemap(&mPort);
+        mSocketTransportService->ApplyPortRemap(&mOriginPort);
+      }
+
       //
       // ensure that we have created a socket, attached it, and have a
       // connection.
@@ -2831,7 +2840,7 @@ nsSocketTransport::Bind(NetAddr* aLocalAddr) {
     return NS_ERROR_FAILURE;
   }
 
-  mBindAddr = new NetAddr();
+  mBindAddr = MakeUnique<NetAddr>();
   memcpy(mBindAddr.get(), aLocalAddr, sizeof(NetAddr));
 
   return NS_OK;

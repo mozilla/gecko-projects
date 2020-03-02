@@ -11,6 +11,7 @@
 
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/ComputedStyleInlines.h"
+#include "mozilla/EnumeratedRange.h"
 
 #include "nsRect.h"
 #include "nsBidiUtils.h"
@@ -52,6 +53,10 @@ enum LogicalSide : uint8_t {
   eLogicalSideIStart = (eLogicalAxisInline << 1) | eLogicalEdgeStart,  // 0x2
   eLogicalSideIEnd = (eLogicalAxisInline << 1) | eLogicalEdgeEnd       // 0x3
 };
+constexpr auto AllLogicalSides() {
+  return mozilla::MakeInclusiveEnumeratedRange(eLogicalSideBStart,
+                                               eLogicalSideIEnd);
+}
 
 enum LogicalCorner {
   eLogicalCornerBStartIStart = 0,
@@ -442,9 +447,9 @@ class WritingMode {
       MOZ_ASSERT(StyleWritingMode::VERTICAL.bits == 0x01 &&
                      StyleWritingMode::VERTICAL_LR.bits == 0x04,
                  "unexpected mask values");
-      const auto wm = static_cast<uint8_t>(
+      const uint8_t wm =
           ((mWritingMode & StyleWritingMode::VERTICAL_LR).bits >> 1) |
-          (mWritingMode & StyleWritingMode::VERTICAL).bits);
+          (mWritingMode & StyleWritingMode::VERTICAL).bits;
       return PhysicalSideForBlockAxis(wm, GetEdge(aSide));
     }
 
@@ -1227,6 +1232,37 @@ class LogicalMargin {
     return aAxis == eLogicalAxisInline ? IStartEnd(aWM) : BStartEnd(aWM);
   }
 
+  nscoord Side(LogicalSide aSide, WritingMode aWM) const {
+    switch (aSide) {
+      case eLogicalSideBStart:
+        return BStart(aWM);
+      case eLogicalSideBEnd:
+        return BEnd(aWM);
+      case eLogicalSideIStart:
+        return IStart(aWM);
+      case eLogicalSideIEnd:
+        return IEnd(aWM);
+    }
+
+    MOZ_ASSERT_UNREACHABLE("We should handle all sides!");
+    return BStart(aWM);
+  }
+  nscoord& Side(LogicalSide aSide, WritingMode aWM) {
+    switch (aSide) {
+      case eLogicalSideBStart:
+        return BStart(aWM);
+      case eLogicalSideBEnd:
+        return BEnd(aWM);
+      case eLogicalSideIStart:
+        return IStart(aWM);
+      case eLogicalSideIEnd:
+        return IEnd(aWM);
+    }
+
+    MOZ_ASSERT_UNREACHABLE("We should handle all sides!");
+    return BStart(aWM);
+  }
+
   /*
    * Return margin values for line-relative sides, as defined in
    * http://www.w3.org/TR/css-writing-modes-3/#line-directions:
@@ -1927,29 +1963,53 @@ class LogicalRect {
 };
 
 template <typename T>
-const T& StyleRect<T>::Get(mozilla::WritingMode aWM,
-                           mozilla::LogicalSide aSide) const {
+const T& StyleRect<T>::Get(WritingMode aWM, LogicalSide aSide) const {
   return Get(aWM.PhysicalSide(aSide));
 }
 
 template <typename T>
-const T& StyleRect<T>::GetIStart(mozilla::WritingMode aWM) const {
-  return Get(aWM, mozilla::eLogicalSideIStart);
+const T& StyleRect<T>::GetIStart(WritingMode aWM) const {
+  return Get(aWM, eLogicalSideIStart);
 }
 
 template <typename T>
-const T& StyleRect<T>::GetBStart(mozilla::WritingMode aWM) const {
-  return Get(aWM, mozilla::eLogicalSideBStart);
+const T& StyleRect<T>::GetBStart(WritingMode aWM) const {
+  return Get(aWM, eLogicalSideBStart);
 }
 
 template <typename T>
-const T& StyleRect<T>::GetIEnd(mozilla::WritingMode aWM) const {
-  return Get(aWM, mozilla::eLogicalSideIEnd);
+const T& StyleRect<T>::GetIEnd(WritingMode aWM) const {
+  return Get(aWM, eLogicalSideIEnd);
 }
 
 template <typename T>
-const T& StyleRect<T>::GetBEnd(mozilla::WritingMode aWM) const {
-  return Get(aWM, mozilla::eLogicalSideBEnd);
+const T& StyleRect<T>::GetBEnd(WritingMode aWM) const {
+  return Get(aWM, eLogicalSideBEnd);
+}
+
+template <typename T>
+T& StyleRect<T>::Get(WritingMode aWM, LogicalSide aSide) {
+  return Get(aWM.PhysicalSide(aSide));
+}
+
+template <typename T>
+T& StyleRect<T>::GetIStart(WritingMode aWM) {
+  return Get(aWM, eLogicalSideIStart);
+}
+
+template <typename T>
+T& StyleRect<T>::GetBStart(WritingMode aWM) {
+  return Get(aWM, eLogicalSideBStart);
+}
+
+template <typename T>
+T& StyleRect<T>::GetIEnd(WritingMode aWM) {
+  return Get(aWM, eLogicalSideIEnd);
+}
+
+template <typename T>
+T& StyleRect<T>::GetBEnd(WritingMode aWM) {
+  return Get(aWM, eLogicalSideBEnd);
 }
 
 }  // namespace mozilla

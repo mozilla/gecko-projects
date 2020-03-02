@@ -67,7 +67,6 @@ class GeckoViewNavigation extends GeckoViewModule {
       "GeckoView:PurgeHistory",
     ]);
 
-    this.messageManager.addMessageListener("Browser:LoadURI", this);
     this._initialAboutBlank = true;
 
     debug`sessionContextId=${this.settings.sessionContextId}`;
@@ -88,7 +87,7 @@ class GeckoViewNavigation extends GeckoViewModule {
   }
 
   // Bundle event handler.
-  onEvent(aEvent, aData, aCallback) {
+  async onEvent(aEvent, aData, aCallback) {
     debug`onEvent: event=${aEvent}, data=${aData}`;
 
     switch (aEvent) {
@@ -116,7 +115,7 @@ class GeckoViewNavigation extends GeckoViewModule {
         }
 
         if (flags & (1 << 2)) {
-          navFlags |= Ci.nsIWebNavigation.LOAD_FLAGS_EXTERNAL;
+          navFlags |= Ci.nsIWebNavigation.LOAD_FLAGS_FROM_EXTERNAL;
         }
 
         if (flags & (1 << 3)) {
@@ -135,11 +134,8 @@ class GeckoViewNavigation extends GeckoViewModule {
           navFlags |= Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY;
         }
 
-        if (this.settings.useMultiprocess) {
-          this.moduleManager.updateRemoteTypeForURI(uri);
-        }
-
         let triggeringPrincipal, referrerInfo, csp;
+        let parsedUri;
         if (referrerSessionId) {
           const referrerWindow = Services.ww.getWindowByName(
             referrerSessionId,
@@ -159,7 +155,7 @@ class GeckoViewNavigation extends GeckoViewModule {
           );
         } else {
           try {
-            const parsedUri = Services.io.newURI(uri);
+            parsedUri = Services.io.newURI(uri);
             if (
               parsedUri.schemeIs("about") ||
               parsedUri.schemeIs("data") ||
@@ -225,7 +221,8 @@ class GeckoViewNavigation extends GeckoViewModule {
         // referring session, the referrerInfo is null.
         //
         // csp is only present if we have a referring document, null otherwise.
-        this.browser.loadURI(uri, {
+        this.loadURI({
+          uri: parsedUri ? parsedUri.spec : uri,
           flags: navFlags,
           referrerInfo,
           triggeringPrincipal,
@@ -250,36 +247,40 @@ class GeckoViewNavigation extends GeckoViewModule {
     }
   }
 
-  // Message manager event handler.
-  receiveMessage(aMsg) {
-    debug`receiveMessage: ${aMsg.name}`;
+  async loadURI({
+    uri,
+    flags,
+    referrerInfo,
+    triggeringPrincipal,
+    headers,
+    csp,
+  }) {
+    if (!this.moduleManager.shouldLoadInThisProcess(uri)) {
+      referrerInfo = E10SUtils.serializeReferrerInfo(referrerInfo);
+      triggeringPrincipal = E10SUtils.serializePrincipal(triggeringPrincipal);
+      csp = E10SUtils.serializeCSP(csp);
 
-    switch (aMsg.name) {
-      case "Browser:LoadURI":
-        // This is triggered by E10SUtils.redirectLoad(), and means
-        // we may need to change the remoteness of our browser and
-        // load the URI.
-        const {
-          uri,
-          flags,
-          referrerInfo,
-          triggeringPrincipal,
-        } = aMsg.data.loadOptions;
-
-        this.moduleManager.updateRemoteTypeForURI(uri);
-
-        this.browser.loadURI(uri, {
-          flags,
-          referrerInfo: E10SUtils.deserializeReferrerInfo(referrerInfo),
-          triggeringPrincipal: E10SUtils.deserializePrincipal(
-            triggeringPrincipal
-          ),
-        });
-        break;
+      this.moduleManager.updateRemoteAndNavigate(uri, {
+        referrerInfo,
+        triggeringPrincipal,
+        headers,
+        csp,
+        flags,
+        uri,
+      });
+      return;
     }
+
+    this.browser.loadURI(uri, {
+      flags,
+      referrerInfo,
+      triggeringPrincipal,
+      csp,
+      headers,
+    });
   }
 
-  waitAndSetupWindow(aSessionId, { opener, nextRemoteTabId }) {
+  waitAndSetupWindow(aSessionId, { opener, nextRemoteTabId, forceNotRemote }) {
     if (!aSessionId) {
       return Promise.resolve(null);
     }
@@ -299,12 +300,12 @@ class GeckoViewNavigation extends GeckoViewModule {
             }
 
             if (opener) {
-              if (aSubject.browser.hasAttribute("remote")) {
-                // We cannot start in remote mode when we have an opener.
-                aSubject.browser.setAttribute("remote", "false");
-                aSubject.browser.removeAttribute("remoteType");
-              }
               aSubject.browser.presetOpenerWindow(opener);
+            }
+            if (forceNotRemote && aSubject.browser.hasAttribute("remote")) {
+              // We cannot start in remote mode when we have an opener.
+              aSubject.browser.setAttribute("remote", "false");
+              aSubject.browser.removeAttribute("remoteType");
             }
             Services.obs.removeObserver(handler, "geckoview-window-created");
             resolve(aSubject);
@@ -330,6 +331,14 @@ class GeckoViewNavigation extends GeckoViewModule {
       uri: aUri ? aUri.displaySpec : "",
     };
 
+    // If we have an opener, that means that the caller is expecting access
+    // to the nsIDOMWindow of the opened tab right away. For e10s windows,
+    // this means forcing the newly opened browser to be non-remote so that
+    // we can hand back the nsIDOMWindow. The XULBrowserWindow.shouldLoadURI
+    // will do the job of shuttling off the newly opened browser to run in
+    // the right process once it starts loading a URI.
+    const forceNotRemote = !!aOpener;
+
     let browser = undefined;
     this.eventDispatcher
       .sendRequestForResult(message)
@@ -338,6 +347,7 @@ class GeckoViewNavigation extends GeckoViewModule {
           opener:
             aFlags & Ci.nsIBrowserDOMWindow.OPEN_NO_OPENER ? null : aOpener,
           nextRemoteTabId: aNextRemoteTabId,
+          forceNotRemote,
         });
       })
       .then(

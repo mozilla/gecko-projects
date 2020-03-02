@@ -95,6 +95,10 @@
 #  include "mozilla/Hal.h"
 #endif
 
+#if defined(XP_WIN)
+#  include "mozilla/WindowsVersion.h"
+#endif
+
 #include "mozilla/EMEUtils.h"
 #include "mozilla/DetailedPromise.h"
 #include "mozilla/Unused.h"
@@ -228,7 +232,11 @@ void Navigator::Invalidate() {
   }
 
   mMediaCapabilities = nullptr;
-  mMediaSession = nullptr;
+
+  if (mMediaSession) {
+    mMediaSession->Shutdown();
+    mMediaSession = nullptr;
+  }
 
   mAddonManager = nullptr;
 
@@ -246,7 +254,7 @@ void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
     nsIDocShell* docshell = window->GetDocShell();
     nsString customUserAgent;
     if (docshell) {
-      docshell->GetCustomUserAgent(customUserAgent);
+      docshell->GetBrowsingContext()->GetCustomUserAgent(customUserAgent);
 
       if (!customUserAgent.IsEmpty()) {
         aUserAgent = customUserAgent;
@@ -639,7 +647,7 @@ class VibrateWindowListener : public nsIDOMEventListener {
   NS_DECL_NSIDOMEVENTLISTENER
 
  private:
-  virtual ~VibrateWindowListener() {}
+  virtual ~VibrateWindowListener() = default;
 
   nsWeakPtr mWindow;
   nsWeakPtr mDocument;
@@ -847,14 +855,14 @@ void Navigator::CheckProtocolHandlerAllowed(const nsAString& aScheme,
     aHandlerURI->GetSpec(spec);
     nsPrintfCString message("Permission denied to add %s as a protocol handler",
                             spec.get());
-    aRv.ThrowDOMException(NS_ERROR_DOM_SECURITY_ERR, message);
+    aRv.ThrowSecurityError(message);
   };
 
   auto raisePermissionDeniedScheme = [&] {
     nsPrintfCString message(
         "Permission denied to add a protocol handler for %s",
         NS_ConvertUTF16toUTF8(aScheme).get());
-    aRv.ThrowDOMException(NS_ERROR_DOM_SECURITY_ERR, message);
+    aRv.ThrowSecurityError(message);
   };
 
   if (!aDocumentURI || !aHandlerURI) {
@@ -867,8 +875,7 @@ void Navigator::CheckProtocolHandlerAllowed(const nsAString& aScheme,
   // If the uri doesn't contain '%s', it won't be a good handler - the %s
   // gets replaced with the handled URI.
   if (!FindInReadable(NS_LITERAL_CSTRING("%s"), spec)) {
-    aRv.ThrowDOMException(NS_ERROR_DOM_SYNTAX_ERR,
-                          "Handler URI does not contain \"%s\".");
+    aRv.ThrowSyntaxError("Handler URI does not contain \"%s\".");
     return;
   }
 
@@ -1026,7 +1033,7 @@ Geolocation* Navigator::GetGeolocation(ErrorResult& aRv) {
 }
 
 class BeaconStreamListener final : public nsIStreamListener {
-  ~BeaconStreamListener() {}
+  ~BeaconStreamListener() = default;
 
  public:
   BeaconStreamListener() : mLoadGroup(nullptr) {}
@@ -1048,8 +1055,7 @@ BeaconStreamListener::OnStartRequest(nsIRequest* aRequest) {
   // release the loadgroup first
   mLoadGroup = nullptr;
 
-  aRequest->Cancel(NS_ERROR_NET_INTERRUPT);
-  return NS_BINDING_ABORTED;
+  return NS_ERROR_ABORT;
 }
 
 NS_IMETHODIMP
@@ -1138,8 +1144,7 @@ bool Navigator::SendBeaconInternal(const nsAString& aUrl,
 
   // Spec disallows any schemes save for HTTP/HTTPs
   if (!uri->SchemeIs("http") && !uri->SchemeIs("https")) {
-    aRv.ThrowTypeError<MSG_INVALID_URL_SCHEME>(NS_LITERAL_STRING("Beacon"),
-                                               aUrl);
+    aRv.ThrowTypeError<MSG_INVALID_URL_SCHEME>(u"Beacon", aUrl);
     return false;
   }
 
@@ -1361,10 +1366,8 @@ Promise* Navigator::Share(const ShareData& aData, ErrorResult& aRv) {
   bool someMemberPassed = aData.mTitle.WasPassed() || aData.mText.WasPassed() ||
                           aData.mUrl.WasPassed();
   if (!someMemberPassed) {
-    nsAutoString message;
-    nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                       "WebShareAPI_NeedOneMember", message);
-    aRv.ThrowTypeError<MSG_MISSING_REQUIRED_DICTIONARY_MEMBER>(message);
+    aRv.ThrowTypeError(
+        u"Must have a title, text, or url in the ShareData dictionary");
     return nullptr;
   }
 
@@ -1519,7 +1522,7 @@ void Navigator::FinishGetVRDisplays(bool isWebVRSupportedInwindow, Promise* p) {
   // response, it's possible that the Window can be torn down before this
   // call. In that case, the Window's cyclic references to VR objects are
   // also torn down and should not be recreated via
-  // NotifyVREventListenerAdded.
+  // NotifyHasXRSession.
   nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(mWindow);
   if (win->IsDying()) {
     // The Window has been torn down, so there is no further work that can
@@ -1563,7 +1566,7 @@ void Navigator::GetActiveVRDisplays(
    * GetActiveVRDisplays should only enumerate displays that
    * are already active without causing any other hardware to be
    * activated.
-   * We must not call nsGlobalWindow::NotifyVREventListenerAdded here,
+   * We must not call nsGlobalWindow::NotifyHasXRSession here,
    * as that would cause enumeration and activation of other VR hardware.
    * Activating VR hardware is intrusive to the end user, as it may
    * involve physically powering on devices that the user did not
@@ -1608,7 +1611,7 @@ void Navigator::NotifyActiveVRDisplaysChanged() {
 VRServiceTest* Navigator::RequestVRServiceTest() {
   // Ensure that the Mock VR devices are not released prematurely
   nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(mWindow);
-  win->NotifyVREventListenerAdded();
+  win->NotifyHasXRSession();
 
   if (!mVRServiceTest) {
     mVRServiceTest = VRServiceTest::CreateTestService(mWindow);
@@ -1707,6 +1710,19 @@ bool Navigator::HasUserMediaSupport(JSContext* cx, JSObject* obj) {
           StaticPrefs::media_peerconnection_enabled()) &&
          (IsSecureContextOrObjectIsFromSecureContext(cx, obj) ||
           StaticPrefs::media_devices_insecure_enabled());
+}
+
+/* static */
+bool Navigator::HasShareSupport(JSContext* cx, JSObject* obj) {
+  if (!Preferences::GetBool("dom.webshare.enabled")) {
+    return false;
+  }
+#if defined(XP_WIN) && !defined(__MINGW32__)
+  // The first public build that supports ShareCanceled API
+  return IsWindows10BuildOrLater(18956);
+#else
+  return true;
+#endif
 }
 
 /* static */
@@ -2003,6 +2019,10 @@ dom::MediaSession* Navigator::MediaSession() {
     mMediaSession = new dom::MediaSession(GetWindow());
   }
   return mMediaSession;
+}
+
+bool Navigator::HasCreatedMediaSession() const {
+  return mMediaSession != nullptr;
 }
 
 Clipboard* Navigator::Clipboard() {

@@ -139,7 +139,7 @@ nsresult IDBFactory::CreateForWindow(nsPIDOMWindowInner* aWindow,
   MOZ_ASSERT(aFactory);
 
   nsCOMPtr<nsIPrincipal> principal;
-  nsresult rv = AllowedForWindowInternal(aWindow, getter_AddRefs(principal));
+  nsresult rv = AllowedForWindowInternal(aWindow, &principal);
 
   if (rv == NS_ERROR_DOM_NOT_SUPPORTED_ERR) {
     NS_WARNING("IndexedDB is not permitted in a third-party window.");
@@ -156,8 +156,8 @@ nsresult IDBFactory::CreateForWindow(nsPIDOMWindowInner* aWindow,
 
   MOZ_ASSERT(principal);
 
-  nsAutoPtr<PrincipalInfo> principalInfo(new PrincipalInfo());
-  rv = PrincipalToPrincipalInfo(principal, principalInfo);
+  auto principalInfo = MakeUnique<PrincipalInfo>();
+  rv = PrincipalToPrincipalInfo(principal, principalInfo.get());
   if (NS_WARN_IF(NS_FAILED(rv))) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -202,7 +202,7 @@ nsresult IDBFactory::CreateForMainThreadJS(nsIGlobalObject* aGlobal,
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  nsAutoPtr<PrincipalInfo> principalInfo(new PrincipalInfo());
+  auto principalInfo = MakeUnique<PrincipalInfo>();
   nsIPrincipal* principal = sop->GetEffectiveStoragePrincipal();
   MOZ_ASSERT(principal);
   bool isSystem;
@@ -210,7 +210,7 @@ nsresult IDBFactory::CreateForMainThreadJS(nsIGlobalObject* aGlobal,
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  nsresult rv = PrincipalToPrincipalInfo(principal, principalInfo);
+  nsresult rv = PrincipalToPrincipalInfo(principal, principalInfo.get());
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -219,7 +219,8 @@ nsresult IDBFactory::CreateForMainThreadJS(nsIGlobalObject* aGlobal,
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  rv = CreateForMainThreadJSInternal(aGlobal, principalInfo, aFactory);
+  rv = CreateForMainThreadJSInternal(aGlobal, std::move(principalInfo),
+                                     aFactory);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -238,22 +239,19 @@ nsresult IDBFactory::CreateForWorker(nsIGlobalObject* aGlobal,
   MOZ_ASSERT(aGlobal);
   MOZ_ASSERT(aPrincipalInfo.type() != PrincipalInfo::T__None);
 
-  nsAutoPtr<PrincipalInfo> principalInfo(new PrincipalInfo(aPrincipalInfo));
-
   nsresult rv =
-      CreateInternal(aGlobal, principalInfo, aInnerWindowID, aFactory);
+      CreateInternal(aGlobal, MakeUnique<PrincipalInfo>(aPrincipalInfo),
+                     aInnerWindowID, aFactory);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
-  MOZ_ASSERT(!principalInfo);
 
   return NS_OK;
 }
 
 // static
 nsresult IDBFactory::CreateForMainThreadJSInternal(
-    nsIGlobalObject* aGlobal, nsAutoPtr<PrincipalInfo>& aPrincipalInfo,
+    nsIGlobalObject* aGlobal, UniquePtr<PrincipalInfo> aPrincipalInfo,
     IDBFactory** aFactory) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aGlobal);
@@ -265,8 +263,8 @@ nsresult IDBFactory::CreateForMainThreadJSInternal(
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  nsresult rv =
-      CreateInternal(aGlobal, aPrincipalInfo, /* aInnerWindowID */ 0, aFactory);
+  nsresult rv = CreateInternal(aGlobal, std::move(aPrincipalInfo),
+                               /* aInnerWindowID */ 0, aFactory);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -276,7 +274,7 @@ nsresult IDBFactory::CreateForMainThreadJSInternal(
 
 // static
 nsresult IDBFactory::CreateInternal(nsIGlobalObject* aGlobal,
-                                    nsAutoPtr<PrincipalInfo>& aPrincipalInfo,
+                                    UniquePtr<PrincipalInfo> aPrincipalInfo,
                                     uint64_t aInnerWindowID,
                                     IDBFactory** aFactory) {
   MOZ_ASSERT(aGlobal);
@@ -293,7 +291,7 @@ nsresult IDBFactory::CreateInternal(nsIGlobalObject* aGlobal,
   }
 
   RefPtr<IDBFactory> factory = new IDBFactory();
-  factory->mPrincipalInfo = aPrincipalInfo.forget();
+  factory->mPrincipalInfo = std::move(aPrincipalInfo);
   factory->mGlobal = aGlobal;
   factory->mEventTarget = GetCurrentThreadEventTarget();
   factory->mInnerWindowID = aInnerWindowID;
@@ -311,8 +309,8 @@ bool IDBFactory::AllowedForWindow(nsPIDOMWindowInner* aWindow) {
 }
 
 // static
-nsresult IDBFactory::AllowedForWindowInternal(nsPIDOMWindowInner* aWindow,
-                                              nsIPrincipal** aPrincipal) {
+nsresult IDBFactory::AllowedForWindowInternal(
+    nsPIDOMWindowInner* aWindow, nsCOMPtr<nsIPrincipal>* aPrincipal) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
 
@@ -344,7 +342,7 @@ nsresult IDBFactory::AllowedForWindowInternal(nsPIDOMWindowInner* aWindow,
   }
 
   if (principal->IsSystemPrincipal()) {
-    principal.forget(aPrincipal);
+    *aPrincipal = std::move(principal);
     return NS_OK;
   }
 
@@ -363,7 +361,7 @@ nsresult IDBFactory::AllowedForWindowInternal(nsPIDOMWindowInner* aWindow,
   }
 
   if (aPrincipal) {
-    principal.forget(aPrincipal);
+    *aPrincipal = std::move(principal);
   }
   return NS_OK;
 }
@@ -397,10 +395,6 @@ void IDBFactory::UpdateActiveTransactionCount(int32_t aDelta) {
   MOZ_DIAGNOSTIC_ASSERT(aDelta > 0 || (mActiveTransactionCount + aDelta) <
                                           mActiveTransactionCount);
   mActiveTransactionCount += aDelta;
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(mGlobal);
-  if (window) {
-    window->UpdateActiveIndexedDBTransactionCount(aDelta);
-  }
 }
 
 void IDBFactory::UpdateActiveDatabaseCount(int32_t aDelta) {
@@ -422,27 +416,22 @@ bool IDBFactory::IsChrome() const {
   return mPrincipalInfo->type() == PrincipalInfo::TSystemPrincipalInfo;
 }
 
-void IDBFactory::IncrementParentLoggingRequestSerialNumber() {
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(mBackgroundActor);
-
-  mBackgroundActor->SendIncrementLoggingRequestSerialNumber();
-}
-
-already_AddRefed<IDBOpenDBRequest> IDBFactory::Open(JSContext* aCx,
-                                                    const nsAString& aName,
-                                                    uint64_t aVersion,
-                                                    CallerType aCallerType,
-                                                    ErrorResult& aRv) {
+RefPtr<IDBOpenDBRequest> IDBFactory::Open(JSContext* aCx,
+                                          const nsAString& aName,
+                                          uint64_t aVersion,
+                                          CallerType aCallerType,
+                                          ErrorResult& aRv) {
   return OpenInternal(aCx,
                       /* aPrincipal */ nullptr, aName,
                       Optional<uint64_t>(aVersion), Optional<StorageType>(),
                       /* aDeleting */ false, aCallerType, aRv);
 }
 
-already_AddRefed<IDBOpenDBRequest> IDBFactory::Open(
-    JSContext* aCx, const nsAString& aName, const IDBOpenDBOptions& aOptions,
-    CallerType aCallerType, ErrorResult& aRv) {
+RefPtr<IDBOpenDBRequest> IDBFactory::Open(JSContext* aCx,
+                                          const nsAString& aName,
+                                          const IDBOpenDBOptions& aOptions,
+                                          CallerType aCallerType,
+                                          ErrorResult& aRv) {
   if (!IsChrome() && aOptions.mStorage.WasPassed()) {
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(mGlobal);
     if (window && window->GetExtantDoc()) {
@@ -472,7 +461,7 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::Open(
                       /* aDeleting */ false, aCallerType, aRv);
 }
 
-already_AddRefed<IDBOpenDBRequest> IDBFactory::DeleteDatabase(
+RefPtr<IDBOpenDBRequest> IDBFactory::DeleteDatabase(
     JSContext* aCx, const nsAString& aName, const IDBOpenDBOptions& aOptions,
     CallerType aCallerType, ErrorResult& aRv) {
   return OpenInternal(aCx,
@@ -508,7 +497,7 @@ int16_t IDBFactory::Cmp(JSContext* aCx, JS::Handle<JS::Value> aFirst,
   return Key::CompareKeys(first, second);
 }
 
-already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenForPrincipal(
+RefPtr<IDBOpenDBRequest> IDBFactory::OpenForPrincipal(
     JSContext* aCx, nsIPrincipal* aPrincipal, const nsAString& aName,
     uint64_t aVersion, SystemCallerGuarantee aGuarantee, ErrorResult& aRv) {
   MOZ_ASSERT(aPrincipal);
@@ -523,7 +512,7 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenForPrincipal(
                       /* aDeleting */ false, aGuarantee, aRv);
 }
 
-already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenForPrincipal(
+RefPtr<IDBOpenDBRequest> IDBFactory::OpenForPrincipal(
     JSContext* aCx, nsIPrincipal* aPrincipal, const nsAString& aName,
     const IDBOpenDBOptions& aOptions, SystemCallerGuarantee aGuarantee,
     ErrorResult& aRv) {
@@ -539,7 +528,7 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenForPrincipal(
                       /* aDeleting */ false, aGuarantee, aRv);
 }
 
-already_AddRefed<IDBOpenDBRequest> IDBFactory::DeleteForPrincipal(
+RefPtr<IDBOpenDBRequest> IDBFactory::DeleteForPrincipal(
     JSContext* aCx, nsIPrincipal* aPrincipal, const nsAString& aName,
     const IDBOpenDBOptions& aOptions, SystemCallerGuarantee aGuarantee,
     ErrorResult& aRv) {
@@ -555,12 +544,15 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::DeleteForPrincipal(
                       /* aDeleting */ true, aGuarantee, aRv);
 }
 
-already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
+RefPtr<IDBOpenDBRequest> IDBFactory::OpenInternal(
     JSContext* aCx, nsIPrincipal* aPrincipal, const nsAString& aName,
     const Optional<uint64_t>& aVersion,
     const Optional<StorageType>& aStorageType, bool aDeleting,
     CallerType aCallerType, ErrorResult& aRv) {
-  MOZ_ASSERT(mGlobal);
+  if (NS_WARN_IF(!mGlobal)) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    return nullptr;
+  }
 
   CommonFactoryRequestParams commonParams;
 
@@ -666,11 +658,11 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
     BackgroundChildImpl::ThreadLocal* threadLocal =
         BackgroundChildImpl::GetThreadLocalForCurrentThread();
 
-    nsAutoPtr<ThreadLocal> newIDBThreadLocal;
+    UniquePtr<ThreadLocal> newIDBThreadLocal;
     ThreadLocal* idbThreadLocal;
 
     if (threadLocal && threadLocal->mIndexedDBThreadLocal) {
-      idbThreadLocal = threadLocal->mIndexedDBThreadLocal;
+      idbThreadLocal = threadLocal->mIndexedDBThreadLocal.get();
     } else {
       nsCOMPtr<nsIUUIDGenerator> uuidGen =
           do_GetService("@mozilla.org/uuid-generator;1");
@@ -679,7 +671,8 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
       nsID id;
       MOZ_ALWAYS_SUCCEEDS(uuidGen->GenerateUUIDInPlace(&id));
 
-      newIDBThreadLocal = idbThreadLocal = new ThreadLocal(id);
+      newIDBThreadLocal = WrapUnique(new ThreadLocal(id));
+      idbThreadLocal = newIDBThreadLocal.get();
     }
 
     PBackgroundChild* backgroundActor =
@@ -716,7 +709,7 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
       MOZ_ASSERT(threadLocal);
       MOZ_ASSERT(!threadLocal->mIndexedDBThreadLocal);
 
-      threadLocal->mIndexedDBThreadLocal = newIDBThreadLocal.forget();
+      threadLocal->mIndexedDBThreadLocal = std::move(newIDBThreadLocal);
     }
   }
 
@@ -748,7 +741,7 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
     return nullptr;
   }
 
-  return request.forget();
+  return request;
 }
 
 nsresult IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,

@@ -15,6 +15,8 @@
 #include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
 
+class JSRope;
+
 namespace js {
 
 class AutoAccessAtomsZone;
@@ -304,7 +306,7 @@ class GCMarker : public JSTracer {
   // must be empty when this is called.
   void setMainStackColor(gc::MarkColor newColor);
 
-  void enterWeakMarkingMode();
+  bool enterWeakMarkingMode();
   void leaveWeakMarkingMode();
 
   // Do not use linear-time weak marking for the rest of this collection.
@@ -380,7 +382,6 @@ class GCMarker : public JSTracer {
   void eagerlyMarkChildren(JSLinearString* str);
   void eagerlyMarkChildren(JSRope* rope);
   void eagerlyMarkChildren(JSString* str);
-  void eagerlyMarkChildren(LazyScript* thing);
   void eagerlyMarkChildren(Shape* shape);
   void eagerlyMarkChildren(Scope* scope);
   void lazilyMarkChildren(ObjectGroup* group);
@@ -488,11 +489,12 @@ class GCMarker : public JSTracer {
 
  public:
   /*
-   * The compartment of the object whose trace hook is currently being called,
-   * if any. Used to catch cross-compartment edges traced without use of
+   * The compartment and zone of the object whose trace hook is currently being
+   * called, if any. Used to catch cross-compartment edges traced without use of
    * TraceCrossCompartmentEdge.
    */
   MainThreadOrGCTaskData<Compartment*> tracingCompartment;
+  MainThreadOrGCTaskData<Zone*> tracingZone;
 
   /*
    * List of objects to mark at the beginning of a GC. May also contains string

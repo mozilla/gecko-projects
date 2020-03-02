@@ -74,6 +74,8 @@
 #ifndef mozilla_HashTable_h
 #define mozilla_HashTable_h
 
+#include <utility>
+
 #include "mozilla/AllocPolicy.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
@@ -83,7 +85,6 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryChecking.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/Move.h"
 #include "mozilla/Opaque.h"
 #include "mozilla/OperatorNewExtensions.h"
 #include "mozilla/PodOperations.h"
@@ -177,11 +178,8 @@ class HashMap {
   explicit HashMap(uint32_t aLen) : mImpl(AllocPolicy(), aLen) {}
 
   // HashMap is movable.
-  HashMap(HashMap&& aRhs) : mImpl(std::move(aRhs.mImpl)) {}
-  void operator=(HashMap&& aRhs) {
-    MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
-    mImpl = std::move(aRhs.mImpl);
-  }
+  HashMap(HashMap&& aRhs) = default;
+  HashMap& operator=(HashMap&& aRhs) = default;
 
   // -- Status and sizing ----------------------------------------------------
 
@@ -462,11 +460,8 @@ class HashSet {
   explicit HashSet(uint32_t aLen) : mImpl(AllocPolicy(), aLen) {}
 
   // HashSet is movable.
-  HashSet(HashSet&& aRhs) : mImpl(std::move(aRhs.mImpl)) {}
-  void operator=(HashSet&& aRhs) {
-    MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
-    mImpl = std::move(aRhs.mImpl);
-  }
+  HashSet(HashSet&& aRhs) = default;
+  HashSet& operator=(HashSet&& aRhs) = default;
 
   // -- Status and sizing ----------------------------------------------------
 
@@ -910,13 +905,8 @@ class HashMapEntry {
       : key_(std::forward<KeyInput>(aKey)),
         value_(std::forward<ValueInput>(aValue)) {}
 
-  HashMapEntry(HashMapEntry&& aRhs)
-      : key_(std::move(aRhs.key_)), value_(std::move(aRhs.value_)) {}
-
-  void operator=(HashMapEntry&& aRhs) {
-    key_ = std::move(aRhs.key_);
-    value_ = std::move(aRhs.value_);
-  }
+  HashMapEntry(HashMapEntry&& aRhs) = default;
+  HashMapEntry& operator=(HashMapEntry&& aRhs) = default;
 
   using KeyType = Key;
   using ValueType = Value;
@@ -1055,11 +1045,15 @@ class HashTableEntry {
   void destroy() { destroyStoredT(); }
 
   void swap(HashTableEntry* aOther, bool aIsLive) {
+    // This allows types to use Argument-Dependent-Lookup, and thus use a custom
+    // std::swap, which is needed by types like JS::Heap and such.
+    using std::swap;
+
     if (this == aOther) {
       return;
     }
     if (aIsLive) {
-      Swap(*valuePtr(), *aOther->valuePtr());
+      swap(*valuePtr(), *aOther->valuePtr());
     } else {
       *aOther->valuePtr() = std::move(*valuePtr());
       destroy();
@@ -1111,7 +1105,7 @@ class EntrySlot {
 
   void swap(EntrySlot& aOther) {
     mEntry->swap(aOther.mEntry, aOther.isLive());
-    Swap(*mKeyHash, *aOther.mKeyHash);
+    std::swap(*mKeyHash, *aOther.mKeyHash);
   }
 
   T& get() const { return mEntry->get(); }
@@ -1509,13 +1503,14 @@ class HashTable : private AllocPolicy {
 
   // HashTable is movable
   HashTable(HashTable&& aRhs) : AllocPolicy(std::move(aRhs)) { moveFrom(aRhs); }
-  void operator=(HashTable&& aRhs) {
+  HashTable& operator=(HashTable&& aRhs) {
     MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
     if (mTable) {
       destroyTable(*this, mTable, capacity());
     }
     AllocPolicy::operator=(std::move(aRhs));
     moveFrom(aRhs);
+    return *this;
   }
 
  private:

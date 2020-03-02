@@ -85,18 +85,19 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
         }
         break;
       }
-      case nsIAccessibleEvent::EVENT_SHOW:
-      case nsIAccessibleEvent::EVENT_HIDE: {
+      case nsIAccessibleEvent::EVENT_REORDER: {
         if (DocAccessibleWrap* topContentDoc =
                 doc->GetTopLevelContentDoc(accessible)) {
-          topContentDoc->CacheViewport();
+          topContentDoc->CacheViewport(true);
         }
         break;
       }
       case nsIAccessibleEvent::EVENT_TEXT_CARET_MOVED: {
         if (accessible != aEvent->Document() && !aEvent->IsFromUserInput()) {
           AccCaretMoveEvent* caretEvent = downcast_accEvent(aEvent);
-          if (IsHyperText()) {
+          HyperTextAccessible* ht = AsHyperText();
+          if ((State() & states::FOCUSABLE) != 0 ||
+              (ht && ht->SelectionCount())) {
             DOMPoint point =
                 AsHyperText()->OffsetToDOMPoint(caretEvent->GetCaretOffset());
             if (Accessible* newPos =
@@ -161,7 +162,7 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
       if (sessionAcc && newPosition) {
         if (vcEvent->Reason() == nsIAccessiblePivot::REASON_POINT) {
           sessionAcc->SendHoverEnterEvent(newPosition);
-        } else {
+        } else if (vcEvent->BoundaryType() == nsIAccessiblePivot::NO_BOUNDARY) {
           sessionAcc->SendAccessibilityFocusedEvent(newPosition);
         }
 
@@ -191,7 +192,19 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
       AccStateChangeEvent* event = downcast_accEvent(aEvent);
       auto state = event->GetState();
       if (state & states::CHECKED) {
-        sessionAcc->SendClickedEvent(accessible, event->IsStateEnabled());
+        sessionAcc->SendClickedEvent(
+            accessible, java::SessionAccessibility::FLAG_CHECKABLE |
+                            (event->IsStateEnabled()
+                                 ? java::SessionAccessibility::FLAG_CHECKED
+                                 : 0));
+      }
+
+      if (state & states::EXPANDED) {
+        sessionAcc->SendClickedEvent(
+            accessible, java::SessionAccessibility::FLAG_EXPANDABLE |
+                            (event->IsStateEnabled()
+                                 ? java::SessionAccessibility::FLAG_EXPANDED
+                                 : 0));
       }
 
       if (state & states::SELECTED) {
@@ -499,6 +512,14 @@ uint32_t AccessibleWrap::GetFlags(role aRole, uint64_t aState,
     flags |= java::SessionAccessibility::FLAG_SELECTED;
   }
 
+  if (aState & states::EXPANDABLE) {
+    flags |= java::SessionAccessibility::FLAG_EXPANDABLE;
+  }
+
+  if (aState & states::EXPANDED) {
+    flags |= java::SessionAccessibility::FLAG_EXPANDED;
+  }
+
   if ((aState & (states::INVISIBLE | states::OFFSCREEN)) == 0) {
     flags |= java::SessionAccessibility::FLAG_VISIBLE_TO_USER;
   }
@@ -701,7 +722,12 @@ mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle(
     GECKOBUNDLE_PUT(nodeInfo, "hint", jni::StringParam(hint));
     GECKOBUNDLE_PUT(nodeInfo, "text", jni::StringParam(aTextValue));
   } else {
-    GECKOBUNDLE_PUT(nodeInfo, "text", jni::StringParam(aName));
+    if (role == roles::LINK || role == roles::HEADING) {
+      GECKOBUNDLE_PUT(nodeInfo, "description", jni::StringParam(aName));
+    } else {
+      GECKOBUNDLE_PUT(nodeInfo, "text", jni::StringParam(aName));
+    }
+
     if (!aDescription.IsEmpty()) {
       GECKOBUNDLE_PUT(nodeInfo, "hint", jni::StringParam(aDescription));
     }
@@ -712,10 +738,6 @@ mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle(
   if (VirtualViewID() != kNoID) {
     GetRoleDescription(role, aAttributes, geckoRole, roleDescription);
   }
-
-  GECKOBUNDLE_PUT(nodeInfo, "roleDescription",
-                  jni::StringParam(roleDescription));
-  GECKOBUNDLE_PUT(nodeInfo, "geckoRole", jni::StringParam(geckoRole));
 
   GECKOBUNDLE_PUT(nodeInfo, "roleDescription",
                   jni::StringParam(roleDescription));

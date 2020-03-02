@@ -11,7 +11,6 @@ const protocol = require("devtools/shared/protocol");
 const { walkerSpec } = require("devtools/shared/specs/walker");
 const { LongStringActor } = require("devtools/server/actors/string");
 const InspectorUtils = require("InspectorUtils");
-const ReplayInspector = require("devtools/server/actors/replay/inspector");
 const {
   EXCLUDED_LISTENER,
 } = require("devtools/server/actors/inspector/constants");
@@ -271,18 +270,17 @@ exports.setValueSummaryLength = function(val) {
 var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   /**
    * Create the WalkerActor
-   * @param {DebuggerServerConnection} conn
+   * @param {DevToolsServerConnection} conn
    *        The server connection.
    * @param {TargetActor} targetActor
    *        The top-level Actor for this tab.
    * @param {Object} options
    *        - {Boolean} showAllAnonymousContent: Show all native anonymous content
-   *        - {Boolean} showUserAgentShadowRoots: Show shadow roots for user-agent widgets
    */
   initialize: function(conn, targetActor, options) {
     protocol.Actor.prototype.initialize.call(this, conn);
     this.targetActor = targetActor;
-    this.rootWin = isReplaying ? ReplayInspector.window : targetActor.window;
+    this.rootWin = targetActor.window;
     this.rootDoc = this.rootWin.document;
     this._refMap = new Map();
     this._pendingMutations = [];
@@ -293,7 +291,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     );
 
     this.showAllAnonymousContent = options.showAllAnonymousContent;
-    this.showUserAgentShadowRoots = options.showUserAgentShadowRoots;
 
     this.walkerSearch = new WalkerSearch(this);
 
@@ -942,9 +939,9 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     // developers.
     const isUAWidget =
       shadowHost && node.rawNode.openOrClosedShadowRoot.isUAWidget();
-    const hideShadowRoot = isUAWidget && !this.showUserAgentShadowRoots;
+    const hideShadowRoot = isUAWidget && !this.showAllAnonymousContent;
     const showNativeAnonymousChildren =
-      isUAWidget && this.showUserAgentShadowRoots;
+      isUAWidget && this.showAllAnonymousContent;
 
     const templateElement = isTemplateElement(node.rawNode);
     if (templateElement) {

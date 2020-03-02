@@ -9,8 +9,7 @@ const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
 const { executeSoon } = require("devtools/shared/DevToolsUtils");
 const { Toolbox } = require("devtools/client/framework/toolbox");
-const ReflowTracker = require("devtools/client/inspector/shared/reflow-tracker");
-const Store = require("devtools/client/inspector/store");
+const createStore = require("devtools/client/inspector/store");
 const InspectorStyleChangeTracker = require("devtools/client/inspector/shared/style-change-tracker");
 
 // Use privileged promise in panel documents to prevent having them to freeze
@@ -68,9 +67,8 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "ObjectFront",
-  "devtools/shared/fronts/object",
-  true
+  "PICKER_TYPES",
+  "devtools/shared/picker-constants"
 );
 
 // This import to chrome code is forbidden according to the inspector specific
@@ -154,29 +152,7 @@ function Inspector(toolbox) {
   this.panelWin = window;
   this.panelWin.inspector = this;
   this.telemetry = toolbox.telemetry;
-  this.store = Store({
-    createObjectFront: object => {
-      return new ObjectFront(
-        this.inspectorFront.conn,
-        this.inspectorFront.targetFront,
-        this.inspectorFront,
-        object
-      );
-    },
-    releaseActor: actor => {
-      if (!actor) {
-        return;
-      }
-      const objFront = toolbox.target.client.getFrontByID(actor);
-      if (objFront) {
-        objFront.release();
-        return;
-      }
-
-      // In case there's no object front, use the client's release method.
-      toolbox.target.client.release(actor).catch(() => {});
-    },
-  });
+  this.store = createStore();
 
   // Map [panel id => panel instance]
   // Stores all the instances of sidebar panels like rule view, computed view, ...
@@ -206,8 +182,7 @@ function Inspector(toolbox) {
   this.onSidebarSelect = this.onSidebarSelect.bind(this);
   this.onSidebarShown = this.onSidebarShown.bind(this);
   this.onSidebarToggle = this.onSidebarToggle.bind(this);
-  this.handleThreadPaused = this.handleThreadPaused.bind(this);
-  this.handleThreadResumed = this.handleThreadResumed.bind(this);
+  this.onReflowInSelection = this.onReflowInSelection.bind(this);
 }
 
 Inspector.prototype = {
@@ -220,18 +195,6 @@ Inspector.prototype = {
     // Localize all the nodes containing a data-localization attribute.
     localizeMarkup(this.panelDoc);
 
-    // When replaying, we need to listen to changes in the target's pause state.
-    if (this.currentTarget.isReplayEnabled()) {
-      let dbg = this._toolbox.getPanel("jsdebugger");
-      if (!dbg) {
-        dbg = await this._toolbox.loadTool("jsdebugger");
-      }
-      this._replayResumed = !dbg.isPaused();
-
-      this.currentTarget.threadFront.on("paused", this.handleThreadPaused);
-      this.currentTarget.threadFront.on("resumed", this.handleThreadResumed);
-    }
-
     await this.toolbox.targetList.watchTargets(
       [this.toolbox.targetList.TYPES.FRAME],
       this._onTargetAvailable,
@@ -241,7 +204,6 @@ Inspector.prototype = {
     // Store the URL of the target page prior to navigation in order to ensure
     // telemetry counts in the Grid Inspector are not double counted on reload.
     this.previousURL = this.currentTarget.url;
-    this.reflowTracker = new ReflowTracker(this.currentTarget);
     this.styleChangeTracker = new InspectorStyleChangeTracker(this);
 
     this._markupBox = this.panelDoc.getElementById("markup-box");
@@ -264,7 +226,6 @@ Inspector.prototype = {
       this._getDefaultSelection(),
       this._getAccessibilityFront(),
     ]);
-    this.reflowTracker = new ReflowTracker(this.currentTarget);
 
     // When we navigate to another process and switch to a new
     // target and the inspector is already ready, we want to
@@ -290,9 +251,6 @@ Inspector.prototype = {
 
     this._defaultNode = null;
     this.selection.setNodeFront(null);
-
-    this.reflowTracker.destroy();
-    this.reflowTracker = null;
   },
 
   async initInspectorFront(targetFront) {
@@ -422,7 +380,7 @@ Inspector.prototype = {
       "visible";
 
     // Setup the sidebar panels.
-    await this.setupSidebar();
+    this.setupSidebar();
 
     await onMarkupLoaded;
     this.isReady = true;
@@ -495,10 +453,8 @@ Inspector.prototype = {
 
     // A helper to tell if the target has or is about to navigate.
     // this._pendingSelection changes on "will-navigate" and "new-root" events.
-    // When replaying, if the target is unpaused then we consider it to be
-    // navigating so that its tree will not be constructed.
     const hasNavigated = () => {
-      return pendingSelection !== this._pendingSelection || this._replayResumed;
+      return pendingSelection !== this._pendingSelection;
     };
 
     // If available, set either the previously selected node or the body
@@ -857,7 +813,7 @@ Inspector.prototype = {
   async onSidebarToggle() {
     this.is3PaneModeEnabled = !this.is3PaneModeEnabled;
     await this.setupToolbar();
-    await this.addRuleView({ skipQueue: true });
+    this.addRuleView({ skipQueue: true });
   },
 
   /**
@@ -928,7 +884,7 @@ Inspector.prototype = {
    * @params {String} defaultTab
    *         Thie id of the default tab for the sidebar.
    */
-  async addRuleView({ defaultTab = "ruleview", skipQueue = false } = {}) {
+  addRuleView({ defaultTab = "ruleview", skipQueue = false } = {}) {
     const ruleViewSidebar = this.sidebarSplitBoxRef.current.startPanelContainer;
 
     if (this.is3PaneModeEnabled) {
@@ -942,7 +898,7 @@ Inspector.prototype = {
       // Force the rule view panel creation by calling getPanel
       this.getPanel("ruleview");
 
-      await this.sidebar.removeTab("ruleview");
+      this.sidebar.removeTab("ruleview");
 
       this.ruleViewSideBar.addExistingTab(
         "ruleview",
@@ -976,7 +932,7 @@ Inspector.prototype = {
       });
 
       this.ruleViewSideBar.hide();
-      await this.ruleViewSideBar.removeTab("ruleview");
+      this.ruleViewSideBar.removeTab("ruleview");
 
       if (skipQueue) {
         this.sidebar.addExistingTab(
@@ -1084,7 +1040,7 @@ Inspector.prototype = {
   /**
    * Build the sidebar.
    */
-  async setupSidebar() {
+  setupSidebar() {
     const sidebar = this.panelDoc.getElementById("inspector-sidebar");
     const options = {
       showAllTabsMenu: true,
@@ -1116,7 +1072,7 @@ Inspector.prototype = {
 
     // Append all side panels
 
-    await this.addRuleView({ defaultTab });
+    this.addRuleView({ defaultTab });
 
     // Inspector sidebar panels in order of appearance.
     const sidebarPanels = [
@@ -1396,22 +1352,6 @@ Inspector.prototype = {
   },
 
   /**
-   * When replaying, reset the inspector whenever the target pauses.
-   */
-  handleThreadPaused() {
-    this._replayResumed = false;
-    this.onNewRoot();
-  },
-
-  /**
-   * When replaying, reset the inspector whenever the target resumes.
-   */
-  handleThreadResumed() {
-    this._replayResumed = true;
-    this.onNewRoot();
-  },
-
-  /**
    * Handler for "markuploaded" event fired on a new root mutation and after the markup
    * view is initialized. Expands the current selected node and restores the saved
    * highlighter state.
@@ -1581,6 +1521,7 @@ Inspector.prototype = {
 
     this.updateAddElementButton();
     this.updateSelectionCssSelectors();
+    this.trackReflowsInSelection();
 
     const selfUpdate = this.updating("inspector-panel");
     executeSoon(() => {
@@ -1591,6 +1532,41 @@ Inspector.prototype = {
         console.error(ex);
       }
     });
+  },
+
+  /**
+   * Starts listening for reflows in the targetFront of the currently selected nodeFront.
+   */
+  async trackReflowsInSelection() {
+    this.untrackReflowsInSelection();
+    if (!this.selection.nodeFront) {
+      return;
+    }
+
+    const { targetFront } = this.selection.nodeFront;
+    this.reflowFront = await targetFront.getFront("reflow");
+    this.reflowFront.on("reflows", this.onReflowInSelection);
+    this.reflowFront.start();
+  },
+
+  /**
+   * Stops listening for reflows.
+   */
+  untrackReflowsInSelection() {
+    if (!this.reflowFront) {
+      return;
+    }
+
+    this.reflowFront.off("reflows", this.onReflowInSelection);
+    this.reflowFront.stop();
+    this.reflowFront = null;
+  },
+
+  onReflowInSelection() {
+    // This event will be fired whenever a reflow is detected in the target front of the
+    // selected node front (so when a reflow is detected inside any of the windows that
+    // belong to the BrowsingContext when the currently selected node lives).
+    this.emit("reflow-in-selected-target");
   },
 
   /**
@@ -1677,6 +1653,8 @@ Inspector.prototype = {
     }
 
     this.cancelUpdate();
+
+    this.untrackReflowsInSelection();
 
     this.sidebar.destroy();
 
@@ -1803,14 +1781,14 @@ Inspector.prototype = {
   },
 
   startEyeDropperListeners: function() {
-    this.toolbox.tellRDMAboutPickerState(true);
+    this.toolbox.tellRDMAboutPickerState(true, PICKER_TYPES.EYEDROPPER);
     this.inspectorFront.once("color-pick-canceled", this.onEyeDropperDone);
     this.inspectorFront.once("color-picked", this.onEyeDropperDone);
     this.walker.once("new-root", this.onEyeDropperDone);
   },
 
   stopEyeDropperListeners: function() {
-    this.toolbox.tellRDMAboutPickerState(false);
+    this.toolbox.tellRDMAboutPickerState(false, PICKER_TYPES.EYEDROPPER);
     this.inspectorFront.off("color-pick-canceled", this.onEyeDropperDone);
     this.inspectorFront.off("color-picked", this.onEyeDropperDone);
     this.walker.off("new-root", this.onEyeDropperDone);

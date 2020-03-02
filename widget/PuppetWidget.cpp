@@ -252,9 +252,9 @@ nsresult PuppetWidget::ConfigureChildren(
   return NS_OK;
 }
 
-void PuppetWidget::SetFocus(Raise aRaise) {
+void PuppetWidget::SetFocus(Raise aRaise, CallerType aCallerType) {
   if (aRaise == Raise::Yes && mBrowserChild) {
-    mBrowserChild->SendRequestFocus(true);
+    mBrowserChild->SendRequestFocus(true, aCallerType);
   }
 }
 
@@ -585,7 +585,7 @@ bool PuppetWidget::CreateRemoteLayerManager(
   // it if we successfully create its successor because a partially initialized
   // layer manager is worse than a fully initialized but shutdown layer manager.
   DestroyLayerManager();
-  mLayerManager = lm.forget();
+  mLayerManager = std::move(lm);
   return true;
 }
 
@@ -1140,6 +1140,14 @@ LayoutDeviceIntPoint PuppetWidget::GetChromeOffset() {
   return GetOwningBrowserChild()->GetChromeOffset();
 }
 
+LayoutDeviceIntPoint PuppetWidget::WidgetToScreenOffset() {
+  auto positionRalativeToWindow =
+      WidgetToTopLevelWidgetTransform().TransformPoint(LayoutDevicePoint());
+
+  return GetWindowPosition() +
+         LayoutDeviceIntPoint::Round(positionRalativeToWindow);
+}
+
 LayoutDeviceIntPoint PuppetWidget::GetWindowPosition() {
   if (!GetOwningBrowserChild()) {
     return LayoutDeviceIntPoint();
@@ -1445,9 +1453,6 @@ nsresult PuppetWidget::SetPrefersReducedMotionOverrideForTest(bool aValue) {
     return NS_ERROR_FAILURE;
   }
 
-  nsXPLookAndFeel::GetInstance()->SetPrefersReducedMotionOverrideForTest(
-      aValue);
-
   mBrowserChild->SendSetPrefersReducedMotionOverrideForTest(aValue);
   return NS_OK;
 }
@@ -1457,7 +1462,6 @@ nsresult PuppetWidget::ResetPrefersReducedMotionOverrideForTest() {
     return NS_ERROR_FAILURE;
   }
 
-  nsXPLookAndFeel::GetInstance()->ResetPrefersReducedMotionOverrideForTest();
   mBrowserChild->SendResetPrefersReducedMotionOverrideForTest();
   return NS_OK;
 }

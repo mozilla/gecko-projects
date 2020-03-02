@@ -32,9 +32,8 @@ use self::resampler::*;
 use self::utils::*;
 use atomic;
 use cubeb_backend::{
-    ffi, ChannelLayout, Context, ContextOps, DeviceCollectionRef, DeviceId, DeviceRef, DeviceType,
-    Error, Ops, Result, SampleFormat, State, Stream, StreamOps, StreamParams, StreamParamsRef,
-    StreamPrefs,
+    ffi, Context, ContextOps, DeviceCollectionRef, DeviceId, DeviceRef, DeviceType, Error, Ops,
+    Result, SampleFormat, State, Stream, StreamOps, StreamParams, StreamParamsRef, StreamPrefs,
 };
 use mach::mach_time::{mach_absolute_time, mach_timebase_info};
 use std::cmp;
@@ -137,64 +136,31 @@ impl device_property_listener {
 #[derive(Debug, PartialEq)]
 struct CAChannelLabel(AudioChannelLabel);
 
-impl CAChannelLabel {
-    fn get_raw_label(&self) -> AudioChannelLabel {
-        self.0
-    }
-}
-
-impl From<ChannelLayout> for CAChannelLabel {
-    fn from(layout: ChannelLayout) -> Self {
-        // Make sure the layout is a channel (only one bit set to 1)
-        assert_eq!(layout.bits() & (layout.bits() - 1), 0);
-        let channel = match layout {
-            ChannelLayout::FRONT_LEFT => kAudioChannelLabel_Left,
-            ChannelLayout::FRONT_RIGHT => kAudioChannelLabel_Right,
-            ChannelLayout::FRONT_CENTER => kAudioChannelLabel_Center,
-            ChannelLayout::LOW_FREQUENCY => kAudioChannelLabel_LFEScreen,
-            ChannelLayout::BACK_LEFT => kAudioChannelLabel_LeftSurround,
-            ChannelLayout::BACK_RIGHT => kAudioChannelLabel_RightSurround,
-            ChannelLayout::FRONT_LEFT_OF_CENTER => kAudioChannelLabel_LeftCenter,
-            ChannelLayout::FRONT_RIGHT_OF_CENTER => kAudioChannelLabel_RightCenter,
-            ChannelLayout::BACK_CENTER => kAudioChannelLabel_CenterSurround,
-            ChannelLayout::SIDE_LEFT => kAudioChannelLabel_LeftSurroundDirect,
-            ChannelLayout::SIDE_RIGHT => kAudioChannelLabel_RightSurroundDirect,
-            ChannelLayout::TOP_CENTER => kAudioChannelLabel_TopCenterSurround,
-            ChannelLayout::TOP_FRONT_LEFT => kAudioChannelLabel_VerticalHeightLeft,
-            ChannelLayout::TOP_FRONT_CENTER => kAudioChannelLabel_VerticalHeightCenter,
-            ChannelLayout::TOP_FRONT_RIGHT => kAudioChannelLabel_VerticalHeightRight,
-            ChannelLayout::TOP_BACK_LEFT => kAudioChannelLabel_TopBackLeft,
-            ChannelLayout::TOP_BACK_CENTER => kAudioChannelLabel_TopBackCenter,
-            ChannelLayout::TOP_BACK_RIGHT => kAudioChannelLabel_TopBackRight,
-            _ => kAudioChannelLabel_Unknown,
-        };
-        Self(channel)
-    }
-}
-
-impl Into<ChannelLayout> for CAChannelLabel {
-    fn into(self) -> ChannelLayout {
+impl Into<mixer::Channel> for CAChannelLabel {
+    fn into(self) -> mixer::Channel {
         use self::coreaudio_sys_utils::sys;
         match self.0 {
-            sys::kAudioChannelLabel_Left => ChannelLayout::FRONT_LEFT,
-            sys::kAudioChannelLabel_Right => ChannelLayout::FRONT_RIGHT,
-            sys::kAudioChannelLabel_Center => ChannelLayout::FRONT_CENTER,
-            sys::kAudioChannelLabel_LFEScreen => ChannelLayout::LOW_FREQUENCY,
-            sys::kAudioChannelLabel_LeftSurround => ChannelLayout::BACK_LEFT,
-            sys::kAudioChannelLabel_RightSurround => ChannelLayout::BACK_RIGHT,
-            sys::kAudioChannelLabel_LeftCenter => ChannelLayout::FRONT_LEFT_OF_CENTER,
-            sys::kAudioChannelLabel_RightCenter => ChannelLayout::FRONT_RIGHT_OF_CENTER,
-            sys::kAudioChannelLabel_CenterSurround => ChannelLayout::BACK_CENTER,
-            sys::kAudioChannelLabel_LeftSurroundDirect => ChannelLayout::SIDE_LEFT,
-            sys::kAudioChannelLabel_RightSurroundDirect => ChannelLayout::SIDE_RIGHT,
-            sys::kAudioChannelLabel_TopCenterSurround => ChannelLayout::TOP_CENTER,
-            sys::kAudioChannelLabel_VerticalHeightLeft => ChannelLayout::TOP_FRONT_LEFT,
-            sys::kAudioChannelLabel_VerticalHeightCenter => ChannelLayout::TOP_FRONT_CENTER,
-            sys::kAudioChannelLabel_VerticalHeightRight => ChannelLayout::TOP_FRONT_RIGHT,
-            sys::kAudioChannelLabel_TopBackLeft => ChannelLayout::TOP_BACK_LEFT,
-            sys::kAudioChannelLabel_TopBackCenter => ChannelLayout::TOP_BACK_CENTER,
-            sys::kAudioChannelLabel_TopBackRight => ChannelLayout::TOP_BACK_RIGHT,
-            _ => ChannelLayout::UNDEFINED,
+            sys::kAudioChannelLabel_Left => mixer::Channel::FrontLeft,
+            sys::kAudioChannelLabel_Right => mixer::Channel::FrontRight,
+            sys::kAudioChannelLabel_Center | sys::kAudioChannelLabel_Mono => {
+                mixer::Channel::FrontCenter
+            }
+            sys::kAudioChannelLabel_LFEScreen => mixer::Channel::LowFrequency,
+            sys::kAudioChannelLabel_LeftSurround => mixer::Channel::BackLeft,
+            sys::kAudioChannelLabel_RightSurround => mixer::Channel::BackRight,
+            sys::kAudioChannelLabel_LeftCenter => mixer::Channel::FrontLeftOfCenter,
+            sys::kAudioChannelLabel_RightCenter => mixer::Channel::FrontRightOfCenter,
+            sys::kAudioChannelLabel_CenterSurround => mixer::Channel::BackCenter,
+            sys::kAudioChannelLabel_LeftSurroundDirect => mixer::Channel::SideLeft,
+            sys::kAudioChannelLabel_RightSurroundDirect => mixer::Channel::SideRight,
+            sys::kAudioChannelLabel_TopCenterSurround => mixer::Channel::TopCenter,
+            sys::kAudioChannelLabel_VerticalHeightLeft => mixer::Channel::TopFrontLeft,
+            sys::kAudioChannelLabel_VerticalHeightCenter => mixer::Channel::TopFrontCenter,
+            sys::kAudioChannelLabel_VerticalHeightRight => mixer::Channel::TopFrontRight,
+            sys::kAudioChannelLabel_TopBackLeft => mixer::Channel::TopBackLeft,
+            sys::kAudioChannelLabel_TopBackCenter => mixer::Channel::TopBackCenter,
+            sys::kAudioChannelLabel_TopBackRight => mixer::Channel::TopBackRight,
+            _ => mixer::Channel::Silence,
         }
     }
 }
@@ -228,7 +194,7 @@ fn create_device_info(id: AudioDeviceID, devtype: DeviceType) -> Result<device_i
     assert_ne!(id, kAudioObjectSystemObject);
 
     let mut info = device_info {
-        id: id,
+        id,
         flags: match devtype {
             DeviceType::INPUT => device_flags::DEV_INPUT,
             DeviceType::OUTPUT => device_flags::DEV_OUTPUT,
@@ -362,9 +328,9 @@ fn get_volume(unit: AudioUnit) -> Result<f32> {
 }
 
 fn minimum_resampling_input_frames(input_rate: f64, output_rate: f64, output_frames: i64) -> i64 {
-    assert_ne!(input_rate, 0_f64);
-    assert_ne!(output_rate, 0_f64);
-    if input_rate == output_rate {
+    assert!(!approx_eq!(f64, input_rate, 0_f64));
+    assert!(!approx_eq!(f64, output_rate, 0_f64));
+    if approx_eq!(f64, input_rate, output_rate) {
         return output_frames;
     }
     (input_rate * output_frames as f64 / output_rate).ceil() as i64
@@ -417,6 +383,12 @@ extern "C" fn audiounit_input_callback(
             user_ptr as *const AudioUnitStream
         );
 
+        // `flags` and `tstamp` must be non-null so they can be casted into the references.
+        assert!(!flags.is_null());
+        let flags = unsafe { &mut (*flags) };
+        assert!(!tstamp.is_null());
+        let tstamp = unsafe { &(*tstamp) };
+
         // Create the AudioBufferList to store input.
         let mut input_buffer_list = AudioBufferList::default();
         input_buffer_list.mBuffers[0].mDataByteSize =
@@ -426,7 +398,7 @@ extern "C" fn audiounit_input_callback(
             stm.core_stream_data.input_desc.mChannelsPerFrame;
         input_buffer_list.mNumberBuffers = 1;
 
-        assert!(!stm.core_stream_data.input_unit.is_null());
+        debug_assert!(!stm.core_stream_data.input_unit.is_null());
         let status = audio_unit_render(
             stm.core_stream_data.input_unit,
             flags,
@@ -558,7 +530,8 @@ extern "C" fn audiounit_input_callback(
     // If the input (input-only stream) or the output is drained (duplex stream),
     // cancel this callback.
     if stm.draining.load(Ordering::SeqCst) {
-        assert!(stop_audiounit(stm.core_stream_data.input_unit).is_ok());
+        let r = stop_audiounit(stm.core_stream_data.input_unit);
+        assert!(r.is_ok());
         // Only fire state-changed callback for input-only stream.
         // The state-changed callback for the duplex stream is fired in the output callback.
         if stm.core_stream_data.output_unit.is_null() {
@@ -566,21 +539,20 @@ extern "C" fn audiounit_input_callback(
         }
     }
 
-    let status = match handle {
+    match handle {
         ErrorHandle::Reinit => {
             stm.reinit_async();
             NO_ERR
         }
         ErrorHandle::Return(s) => s,
-    };
-    status
+    }
 }
 
 fn host_time_to_ns(host_time: u64) -> u64 {
     let mut rv: f64 = host_time as f64;
     rv *= HOST_TIME_TO_NS_RATIO.0 as f64;
     rv /= HOST_TIME_TO_NS_RATIO.1 as f64;
-    return rv as u64;
+    rv as u64
 }
 
 fn compute_output_latency(stm: &AudioUnitStream, host_time: u64) -> u32 {
@@ -645,7 +617,8 @@ extern "C" fn audiounit_output_callback(
     if stm.draining.load(Ordering::SeqCst) {
         // Cancel the output callback only. For duplex stream,
         // the input callback will be cancelled in its own callback.
-        assert!(stop_audiounit(stm.core_stream_data.output_unit).is_ok());
+        let r = stop_audiounit(stm.core_stream_data.output_unit);
+        assert!(r.is_ok());
         stm.notify_state_changed(State::Drained);
         audiounit_make_silent(&mut buffers[0]);
         return NO_ERR;
@@ -752,13 +725,14 @@ extern "C" fn audiounit_output_callback(
         }
 
         if outframes < 0 || outframes > i64::from(output_frames) {
-            *stm.shutdown.get_mut() = true;
+            stm.shutdown.store(true, Ordering::SeqCst);
             stm.core_stream_data.stop_audiounits();
             audiounit_make_silent(&mut buffers[0]);
             return (NO_ERR, Some(State::Error));
         }
 
-        *stm.draining.get_mut() = outframes < i64::from(output_frames);
+        stm.draining
+            .store(outframes < i64::from(output_frames), Ordering::SeqCst);
         stm.frames_played
             .store(stm.frames_queued, atomic::Ordering::SeqCst);
         stm.frames_queued += outframes as u64;
@@ -779,8 +753,8 @@ extern "C" fn audiounit_output_callback(
                 )
             };
             let start = frames_to_bytes(outframes as usize);
-            for i in start..out_bytes.len() {
-                out_bytes[i] = 0;
+            for byte in out_bytes.iter_mut().skip(start) {
+                *byte = 0;
             }
         }
 
@@ -826,7 +800,7 @@ extern "C" fn audiounit_property_listener_callback(
         );
         return NO_ERR;
     }
-    *stm.switching_device.get_mut() = true;
+    stm.switching_device.store(true, Ordering::SeqCst);
 
     cubeb_log!(
         "({:p}) Audio device changed, {} events.",
@@ -864,7 +838,7 @@ extern "C" fn audiounit_property_listener_callback(
                     .contains(device_flags::DEV_SYSTEM_DEFAULT)
                 {
                     cubeb_log!("It's the default input device, ignore the event");
-                    *stm.switching_device.get_mut() = false;
+                    stm.switching_device.store(false, Ordering::SeqCst);
                     return NO_ERR;
                 }
             }
@@ -881,7 +855,7 @@ extern "C" fn audiounit_property_listener_callback(
                     i,
                     addr.mSelector
                 );
-                *stm.switching_device.get_mut() = false;
+                stm.switching_device.store(false, Ordering::SeqCst);
                 return NO_ERR;
             }
         }
@@ -922,23 +896,14 @@ fn audiounit_get_default_device_id(devtype: DeviceType) -> AudioObjectID {
     devid
 }
 
-fn audiounit_convert_channel_layout(layout: &AudioChannelLayout) -> ChannelLayout {
-    // When having one or two channel, force mono or stereo. Some devices (namely,
-    // Bose QC35, mark 1 and 2), expose a single channel mapped to the right for
-    // some reason.
-    if layout.mNumberChannelDescriptions == 1 {
-        return ChannelLayout::MONO;
-    } else if layout.mNumberChannelDescriptions == 2 {
-        return ChannelLayout::STEREO;
-    }
-
+fn audiounit_convert_channel_layout(layout: &AudioChannelLayout) -> Vec<mixer::Channel> {
     if layout.mChannelLayoutTag != kAudioChannelLayoutTag_UseChannelDescriptions {
         // kAudioChannelLayoutTag_UseChannelBitmap
         // kAudioChannelLayoutTag_Mono
         // kAudioChannelLayoutTag_Stereo
         // ....
         cubeb_log!("Only handle UseChannelDescriptions for now.\n");
-        return ChannelLayout::UNDEFINED;
+        return Vec::new();
     }
 
     let channel_descriptions = unsafe {
@@ -948,20 +913,16 @@ fn audiounit_convert_channel_layout(layout: &AudioChannelLayout) -> ChannelLayou
         )
     };
 
-    let mut cl = ChannelLayout::UNDEFINED;
+    let mut channels = Vec::with_capacity(layout.mNumberChannelDescriptions as usize);
     for description in channel_descriptions {
         let label = CAChannelLabel(description.mChannelLabel);
-        let channel: ChannelLayout = label.into();
-        if channel == ChannelLayout::UNDEFINED {
-            return ChannelLayout::UNDEFINED;
-        }
-        cl |= channel;
+        channels.push(label.into());
     }
 
-    cl
+    channels
 }
 
-fn audiounit_get_preferred_channel_layout(output_unit: AudioUnit) -> ChannelLayout {
+fn audiounit_get_preferred_channel_layout(output_unit: AudioUnit) -> Vec<mixer::Channel> {
     let mut rv = NO_ERR;
     let mut size: usize = 0;
     rv = audio_unit_get_property_info(
@@ -970,16 +931,16 @@ fn audiounit_get_preferred_channel_layout(output_unit: AudioUnit) -> ChannelLayo
         kAudioUnitScope_Output,
         AU_OUT_BUS,
         &mut size,
-        ptr::null_mut(),
+        None,
     );
     if rv != NO_ERR {
         cubeb_log!(
             "AudioUnitGetPropertyInfo/kAudioDevicePropertyPreferredChannelLayout rv={}",
             rv
         );
-        return ChannelLayout::UNDEFINED;
+        return Vec::new();
     }
-    assert!(size > 0);
+    debug_assert!(size > 0);
 
     let mut layout = make_sized_audio_channel_layout(size);
     rv = audio_unit_get_property(
@@ -995,13 +956,15 @@ fn audiounit_get_preferred_channel_layout(output_unit: AudioUnit) -> ChannelLayo
             "AudioUnitGetProperty/kAudioDevicePropertyPreferredChannelLayout rv={}",
             rv
         );
-        return ChannelLayout::UNDEFINED;
+        return Vec::new();
     }
 
     audiounit_convert_channel_layout(layout.as_ref())
 }
 
-fn audiounit_get_current_channel_layout(output_unit: AudioUnit) -> ChannelLayout {
+// This is for output AudioUnit only. Calling this by input-only AudioUnit is prone
+// to crash intermittently.
+fn audiounit_get_current_channel_layout(output_unit: AudioUnit) -> Vec<mixer::Channel> {
     let mut rv = NO_ERR;
     let mut size: usize = 0;
     rv = audio_unit_get_property_info(
@@ -1010,7 +973,7 @@ fn audiounit_get_current_channel_layout(output_unit: AudioUnit) -> ChannelLayout
         kAudioUnitScope_Output,
         AU_OUT_BUS,
         &mut size,
-        ptr::null_mut(),
+        None,
     );
     if rv != NO_ERR {
         cubeb_log!(
@@ -1020,7 +983,7 @@ fn audiounit_get_current_channel_layout(output_unit: AudioUnit) -> ChannelLayout
         // This property isn't known before macOS 10.12, attempt another method.
         return audiounit_get_preferred_channel_layout(output_unit);
     }
-    assert!(size > 0);
+    debug_assert!(size > 0);
 
     let mut layout = make_sized_audio_channel_layout(size);
     rv = audio_unit_get_property(
@@ -1036,69 +999,10 @@ fn audiounit_get_current_channel_layout(output_unit: AudioUnit) -> ChannelLayout
             "AudioUnitGetProperty/kAudioUnitProperty_AudioChannelLayout rv={}",
             rv
         );
-        return ChannelLayout::UNDEFINED;
+        return Vec::new();
     }
 
     audiounit_convert_channel_layout(layout.as_ref())
-}
-
-fn audiounit_set_channel_layout(
-    unit: AudioUnit,
-    layout: ChannelLayout,
-) -> std::result::Result<(), OSStatus> {
-    assert!(!unit.is_null());
-
-    if layout == ChannelLayout::UNDEFINED {
-        // We leave everything as-is...
-        return Ok(());
-    }
-
-    let nb_channels = unsafe { ffi::cubeb_channel_layout_nb_channels(layout.into()) };
-
-    // We do not use CoreAudio standard layout for lack of documentation on what
-    // the actual channel orders are. So we set a custom layout.
-    assert!(nb_channels >= 1);
-    let size = mem::size_of::<AudioChannelLayout>()
-        + (nb_channels as usize - 1) * mem::size_of::<AudioChannelDescription>();
-    let mut au_layout = make_sized_audio_channel_layout(size);
-    au_layout.as_mut().mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions;
-    au_layout.as_mut().mNumberChannelDescriptions = nb_channels;
-    let channel_descriptions = unsafe {
-        slice::from_raw_parts_mut(
-            au_layout.as_mut().mChannelDescriptions.as_mut_ptr(),
-            nb_channels as usize,
-        )
-    };
-
-    let mut channels: usize = 0;
-    let mut channel_map: ffi::cubeb_channel_layout = layout.into();
-    let i = 0;
-    while channel_map != 0 {
-        assert!(channels < nb_channels as usize);
-        let channel = (channel_map & 1) << i;
-        if channel != 0 {
-            let layout = ChannelLayout::from(channel);
-            let label = CAChannelLabel::from(layout);
-            channel_descriptions[channels].mChannelLabel = label.get_raw_label();
-            channel_descriptions[channels].mChannelFlags = kAudioChannelFlags_AllOff;
-            channels += 1;
-        }
-        channel_map >>= 1;
-    }
-
-    let err = audio_unit_set_property(
-        unit,
-        kAudioUnitProperty_AudioChannelLayout,
-        kAudioUnitScope_Input,
-        AU_OUT_BUS,
-        au_layout.as_ref(),
-        size,
-    );
-    if err == NO_ERR {
-        Ok(())
-    } else {
-        Err(err)
-    }
 }
 
 fn start_audiounit(unit: AudioUnit) -> Result<()> {
@@ -1327,6 +1231,7 @@ fn set_buffer_size(
     }
 }
 
+#[allow(clippy::mutex_atomic)] // The mutex needs to be fed into Condvar::wait_timeout.
 fn set_buffer_size_sync(unit: AudioUnit, devtype: DeviceType, frames: u32) -> Result<()> {
     let current_frames = get_buffer_size(unit, devtype).map_err(|e| {
         cubeb_log!(
@@ -1493,7 +1398,7 @@ fn get_range_of_sample_rates(
 ) -> std::result::Result<(f64, f64), String> {
     let result = get_ranges_of_device_sample_rate(devid, devtype);
     if let Err(e) = result {
-        return Err(format!("status {}", e).to_string());
+        return Err(format!("status {}", e));
     }
     let rates = result.unwrap();
     if rates.is_empty() {
@@ -1749,7 +1654,7 @@ fn audiounit_get_devices_of_type(devtype: DeviceType) -> Vec<AudioObjectID> {
     devices.retain(|&device| {
         if let Ok(uid) = get_device_global_uid(device) {
             let uid = uid.into_string();
-            uid != PRIVATE_AGGREGATE_DEVICE_NAME
+            !uid.contains(PRIVATE_AGGREGATE_DEVICE_NAME)
         } else {
             // Fail to get device uid.
             true
@@ -1867,9 +1772,7 @@ impl DevicesData {
     }
 
     fn is_empty(&self) -> bool {
-        self.changed_callback == None
-            && self.callback_user_ptr == ptr::null_mut()
-            && self.devices.is_empty()
+        self.changed_callback == None && self.callback_user_ptr.is_null() && self.devices.is_empty()
     }
 }
 
@@ -2239,7 +2142,7 @@ impl ContextOps for AudioUnitContext {
                     cubeb_log!("Fail to create device info for input.");
                     e
                 })?;
-            let stm_params = StreamParams::from(unsafe { (*params.as_ptr()) });
+            let stm_params = StreamParams::from(unsafe { *params.as_ptr() });
             Some((stm_params, in_device))
         } else {
             None
@@ -2251,7 +2154,7 @@ impl ContextOps for AudioUnitContext {
                     cubeb_log!("Fail to create device info for output.");
                     e
                 })?;
-            let stm_params = StreamParams::from(unsafe { (*params.as_ptr()) });
+            let stm_params = StreamParams::from(unsafe { *params.as_ptr() });
             Some((stm_params, out_device))
         } else {
             None
@@ -2348,7 +2251,7 @@ struct CoreStreamData<'ctx> {
     input_hw_rate: f64,
     output_hw_rate: f64,
     // Channel layout of the output AudioUnit.
-    device_layout: ChannelLayout,
+    device_layout: Vec<mixer::Channel>,
     // Hold the input samples in every input callback iteration.
     // Only accessed on input/output callback thread and during initial configure.
     input_linear_buffer: Option<Box<dyn AutoArrayWrapper>>,
@@ -2389,7 +2292,7 @@ impl<'ctx> Default for CoreStreamData<'ctx> {
             output_device: device_info::default(),
             input_hw_rate: 0_f64,
             output_hw_rate: 0_f64,
-            device_layout: ChannelLayout::UNDEFINED,
+            device_layout: Vec::new(),
             input_linear_buffer: None,
             default_input_listener: None,
             default_output_listener: None,
@@ -2434,7 +2337,7 @@ impl<'ctx> CoreStreamData<'ctx> {
             output_device: out_dev,
             input_hw_rate: 0_f64,
             output_hw_rate: 0_f64,
-            device_layout: ChannelLayout::UNDEFINED,
+            device_layout: Vec::new(),
             input_linear_buffer: None,
             default_input_listener: None,
             default_output_listener: None,
@@ -2447,7 +2350,7 @@ impl<'ctx> CoreStreamData<'ctx> {
     fn start_audiounits(&self) -> Result<()> {
         // Only allowed to be called after the stream is initialized
         // and before the stream is destroyed.
-        assert!(!self.input_unit.is_null() || !self.output_unit.is_null());
+        debug_assert!(!self.input_unit.is_null() || !self.output_unit.is_null());
 
         if !self.input_unit.is_null() {
             start_audiounit(self.input_unit)?;
@@ -2460,10 +2363,12 @@ impl<'ctx> CoreStreamData<'ctx> {
 
     fn stop_audiounits(&self) {
         if !self.input_unit.is_null() {
-            assert!(stop_audiounit(self.input_unit).is_ok());
+            let r = stop_audiounit(self.input_unit);
+            assert!(r.is_ok());
         }
         if !self.output_unit.is_null() {
-            assert!(stop_audiounit(self.output_unit).is_ok());
+            let r = stop_audiounit(self.output_unit);
+            assert!(r.is_ok());
         }
     }
 
@@ -2490,6 +2395,7 @@ impl<'ctx> CoreStreamData<'ctx> {
             && !is_device_a_type_of(self.output_device.id, DeviceType::INPUT)
     }
 
+    #[allow(clippy::cognitive_complexity)] // TODO: Refactoring.
     fn setup(&mut self) -> Result<()> {
         if self
             .input_stream_params
@@ -2537,6 +2443,12 @@ impl<'ctx> CoreStreamData<'ctx> {
 
         // Configure I/O stream
         if self.has_input() {
+            cubeb_log!(
+                "({:p}) Initialize input by device info: {:?}",
+                self.stm_ptr,
+                in_dev_info
+            );
+
             self.input_unit = create_audiounit(&in_dev_info).map_err(|e| {
                 cubeb_log!("({:p}) AudioUnit creation for input failed.", self.stm_ptr);
                 e
@@ -2676,6 +2588,12 @@ impl<'ctx> CoreStreamData<'ctx> {
         }
 
         if self.has_output() {
+            cubeb_log!(
+                "({:p}) Initialize output by device info: {:?}",
+                self.stm_ptr,
+                out_dev_info
+            );
+
             self.output_unit = create_audiounit(&out_dev_info).map_err(|e| {
                 cubeb_log!("({:p}) AudioUnit creation for output failed.", self.stm_ptr);
                 e
@@ -2726,22 +2644,19 @@ impl<'ctx> CoreStreamData<'ctx> {
             );
             self.output_hw_rate = output_hw_desc.mSampleRate;
             let hw_channels = output_hw_desc.mChannelsPerFrame;
+            if hw_channels == 0 {
+                cubeb_log!(
+                    "({:p}) Output hardware has no output channel! Bail out.",
+                    self.stm_ptr
+                );
+                return Err(Error::device_unavailable());
+            }
 
-            // Set the input layout to match the output device layout.
             self.device_layout = audiounit_get_current_channel_layout(self.output_unit);
-            let msg = match audiounit_set_channel_layout(self.output_unit, self.device_layout) {
-                Ok(_) => "successfully".to_string(),
-                Err(e) => format!("failed. Error: {}", e),
-            };
-            cubeb_log!(
-                "({:p}) Set output hardware layout to {:?} {}.",
-                self.stm_ptr,
-                self.device_layout,
-                msg
-            );
 
             self.mixer = if hw_channels != self.output_stream_params.channels()
-                || self.device_layout != self.output_stream_params.layout()
+                || self.device_layout
+                    != mixer::get_channel_order(self.output_stream_params.layout())
             {
                 cubeb_log!("Incompatible channel layouts detected, setting up remixer");
                 // We will be remixing the data before it reaches the output device.
@@ -2754,10 +2669,10 @@ impl<'ctx> CoreStreamData<'ctx> {
                     self.output_desc.mBytesPerFrame * self.output_desc.mFramesPerPacket;
                 Some(Mixer::new(
                     self.output_stream_params.format(),
-                    self.output_stream_params.channels(),
+                    self.output_stream_params.channels() as usize,
                     self.output_stream_params.layout(),
-                    hw_channels,
-                    self.device_layout,
+                    hw_channels as usize,
+                    self.device_layout.clone(),
                 ))
             } else {
                 None
@@ -2846,14 +2761,14 @@ impl<'ctx> CoreStreamData<'ctx> {
         };
 
         let resampler_input_params = if self.has_input() {
-            let mut params = unsafe { (*(self.input_stream_params.as_ptr())) };
+            let mut params = unsafe { *(self.input_stream_params.as_ptr()) };
             params.rate = self.input_hw_rate as u32;
             Some(params)
         } else {
             None
         };
         let resampler_output_params = if self.has_output() {
-            let params = unsafe { (*(self.output_stream_params.as_ptr())) };
+            let params = unsafe { *(self.output_stream_params.as_ptr()) };
             Some(params)
         } else {
             None
@@ -3151,6 +3066,8 @@ impl<'ctx> Drop for CoreStreamData<'ctx> {
 // #[repr(C)] is used to prevent any padding from being added in the beginning of the AudioUnitStream.
 #[repr(C)]
 #[derive(Debug)]
+// Allow exposing this private struct in public interfaces when running tests.
+#[cfg_attr(test, allow(private_in_public))]
 struct AudioUnitStream<'ctx> {
     context: &'ctx mut AudioUnitContext,
     user_ptr: *mut c_void,
@@ -3250,7 +3167,7 @@ impl<'ctx> AudioUnitStream<'ctx> {
             self.core_stream_data.stop_audiounits();
         }
 
-        assert!(
+        debug_assert!(
             !self.core_stream_data.input_unit.is_null()
                 || !self.core_stream_data.output_unit.is_null()
         );
@@ -3321,8 +3238,8 @@ impl<'ctx> AudioUnitStream<'ctx> {
             }
         }
 
-        if vol_rv.is_ok() {
-            set_volume(self.core_stream_data.output_unit, vol_rv.unwrap());
+        if let Ok(volume) = vol_rv {
+            set_volume(self.core_stream_data.output_unit, volume);
         }
 
         // If the stream was running, start it again.
@@ -3373,8 +3290,8 @@ impl<'ctx> AudioUnitStream<'ctx> {
                     stm_ptr
                 );
             }
-            *stm_guard.switching_device.get_mut() = false;
-            *stm_guard.reinit_pending.get_mut() = false;
+            stm_guard.switching_device.store(false, Ordering::SeqCst);
+            stm_guard.reinit_pending.store(false, Ordering::SeqCst);
         });
     }
 
@@ -3385,7 +3302,30 @@ impl<'ctx> AudioUnitStream<'ctx> {
     }
 
     fn destroy(&mut self) {
-        *self.destroy_pending.get_mut() = true;
+        if self
+            .core_stream_data
+            .uninstall_system_changed_callback()
+            .is_err()
+        {
+            cubeb_log!(
+                "({:p}) Could not uninstall the system changed callback",
+                self as *const AudioUnitStream
+            );
+        }
+
+        if self
+            .core_stream_data
+            .uninstall_device_changed_callback()
+            .is_err()
+        {
+            cubeb_log!(
+                "({:p}) Could not uninstall all device change listeners",
+                self as *const AudioUnitStream
+            );
+        }
+
+        // Execute the stream destroy work.
+        self.destroy_pending.store(true, Ordering::SeqCst);
 
         let queue = self.context.serial_queue;
 
@@ -3399,7 +3339,7 @@ impl<'ctx> AudioUnitStream<'ctx> {
             // CoreAudio framework that is used by the data callback.
             if !self.shutdown.load(Ordering::SeqCst) {
                 self.core_stream_data.stop_audiounits();
-                *self.shutdown.get_mut() = true;
+                self.shutdown.store(true, Ordering::SeqCst);
             }
 
             self.destroy_internal();
@@ -3417,8 +3357,8 @@ impl<'ctx> Drop for AudioUnitStream<'ctx> {
 
 impl<'ctx> StreamOps for AudioUnitStream<'ctx> {
     fn start(&mut self) -> Result<()> {
-        *self.shutdown.get_mut() = false;
-        *self.draining.get_mut() = false;
+        self.shutdown.store(false, Ordering::SeqCst);
+        self.draining.store(false, Ordering::SeqCst);
 
         // Execute start in serial queue to avoid racing with destroy or reinit.
         let queue = self.context.serial_queue;
@@ -3442,7 +3382,7 @@ impl<'ctx> StreamOps for AudioUnitStream<'ctx> {
         Ok(())
     }
     fn stop(&mut self) -> Result<()> {
-        *self.shutdown.get_mut() = true;
+        self.shutdown.store(true, Ordering::SeqCst);
 
         // Execute stop in serial queue to avoid racing with destroy or reinit.
         let queue = self.context.serial_queue;
@@ -3497,10 +3437,10 @@ impl<'ctx> StreamOps for AudioUnitStream<'ctx> {
 
         let mut device: Box<ffi::cubeb_device> = Box::new(ffi::cubeb_device::default());
 
-        let input_name = input_name.unwrap_or(CString::default());
+        let input_name = input_name.unwrap_or_default();
         device.input_name = input_name.into_raw();
 
-        let output_name = output_name.unwrap_or(CString::default());
+        let output_name = output_name.unwrap_or_default();
         device.output_name = output_name.into_raw();
 
         Ok(unsafe { DeviceRef::from_ptr(Box::into_raw(device)) })

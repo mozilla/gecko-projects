@@ -630,7 +630,6 @@ void MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType) {
   auto time = TimeUnit::FromSeconds(aTime);
 
   mLogicalPosition = aTime;
-
   mLogicallySeeking = true;
   SeekTarget target = SeekTarget(time, aSeekType);
   CallSeek(target);
@@ -638,6 +637,20 @@ void MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType) {
   if (mPlayState == PLAY_STATE_ENDED) {
     ChangeState(GetOwner()->GetPaused() ? PLAY_STATE_PAUSED
                                         : PLAY_STATE_PLAYING);
+  }
+}
+
+void MediaDecoder::SetDelaySeekMode(bool aShouldDelaySeek) {
+  MOZ_ASSERT(NS_IsMainThread());
+  LOG("SetDelaySeekMode, shouldDelaySeek=%d", aShouldDelaySeek);
+  if (mShouldDelaySeek == aShouldDelaySeek) {
+    return;
+  }
+  mShouldDelaySeek = aShouldDelaySeek;
+  if (!mShouldDelaySeek && mDelayedSeekTarget) {
+    Seek(mDelayedSeekTarget->GetTime().ToSeconds(),
+         mDelayedSeekTarget->GetType());
+    mDelayedSeekTarget.reset();
   }
 }
 
@@ -650,8 +663,13 @@ void MediaDecoder::DiscardOngoingSeekIfExists() {
 void MediaDecoder::CallSeek(const SeekTarget& aTarget) {
   MOZ_ASSERT(NS_IsMainThread());
   AbstractThread::AutoEnter context(AbstractMainThread());
+  if (mShouldDelaySeek) {
+    LOG("Delay seek to %f and store it to delayed seek target",
+        mDelayedSeekTarget->GetTime().ToSeconds());
+    mDelayedSeekTarget = Some(aTarget);
+    return;
+  }
   DiscardOngoingSeekIfExists();
-
   mDecoderStateMachine->InvokeSeek(aTarget)
       ->Then(mAbstractMainThread, __func__, this, &MediaDecoder::OnSeekResolved,
              &MediaDecoder::OnSeekRejected)
@@ -688,13 +706,13 @@ void MediaDecoder::MetadataLoaded(
   mMediaSeekable = aInfo->mMediaSeekable;
   mMediaSeekableOnlyInBufferedRanges =
       aInfo->mMediaSeekableOnlyInBufferedRanges;
-  mInfo = aInfo.release();
+  mInfo = std::move(aInfo);
 
   // Make sure the element and the frame (if any) are told about
   // our new size.
   if (aEventVisibility != MediaDecoderEventVisibility::Suppressed) {
     mFiredMetadataLoaded = true;
-    GetOwner()->MetadataLoaded(mInfo, std::move(aTags));
+    GetOwner()->MetadataLoaded(mInfo.get(), std::move(aTags));
   }
   // Invalidate() will end up calling GetOwner()->UpdateMediaSize with the last
   // dimensions retrieved from the video frame container. The video frame
@@ -745,7 +763,7 @@ const char* MediaDecoder::PlayStateStr() {
 }
 
 void MediaDecoder::FirstFrameLoaded(
-    nsAutoPtr<MediaInfo> aInfo, MediaDecoderEventVisibility aEventVisibility) {
+    UniquePtr<MediaInfo> aInfo, MediaDecoderEventVisibility aEventVisibility) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
   AbstractThread::AutoEnter context(AbstractMainThread());
@@ -755,7 +773,7 @@ void MediaDecoder::FirstFrameLoaded(
       aInfo->mAudio.mChannels, aInfo->mAudio.mRate, aInfo->HasAudio(),
       aInfo->HasVideo(), PlayStateStr(), IsTransportSeekable());
 
-  mInfo = aInfo.forget();
+  mInfo = std::move(aInfo);
 
   Invalidate();
 
@@ -1210,6 +1228,18 @@ void MediaDecoder::Invalidate() {
   if (mVideoFrameContainer) {
     mVideoFrameContainer->Invalidate();
   }
+}
+
+void MediaDecoder::Suspend() {
+  MOZ_ASSERT(NS_IsMainThread());
+  AbstractThread::AutoEnter context(AbstractMainThread());
+  GetStateMachine()->InvokeSuspendMediaSink();
+}
+
+void MediaDecoder::Resume() {
+  MOZ_ASSERT(NS_IsMainThread());
+  AbstractThread::AutoEnter context(AbstractMainThread());
+  GetStateMachine()->InvokeResumeMediaSink();
 }
 
 // Constructs the time ranges representing what segments of the media

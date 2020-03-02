@@ -660,12 +660,12 @@
       // if this panel has a "sliding" arrow, we may have previously set margins...
       arrowbox.style.removeProperty("transform");
       if (position.indexOf("start_") == 0 || position.indexOf("end_") == 0) {
-        container.orient = "horizontal";
-        arrowbox.orient = "vertical";
+        container.setAttribute("orient", "horizontal");
+        arrowbox.setAttribute("orient", "vertical");
         if (position.indexOf("_after") > 0) {
-          arrowbox.pack = "end";
+          arrowbox.setAttribute("pack", "end");
         } else {
-          arrowbox.pack = "start";
+          arrowbox.setAttribute("pack", "start");
         }
         arrowbox.style.transform = "translate(0, " + -offset + "px)";
 
@@ -683,12 +683,12 @@
         position.indexOf("before_") == 0 ||
         position.indexOf("after_") == 0
       ) {
-        container.orient = "";
-        arrowbox.orient = "";
+        container.removeAttribute("orient");
+        arrowbox.removeAttribute("orient");
         if (position.indexOf("_end") > 0) {
-          arrowbox.pack = "end";
+          arrowbox.setAttribute("pack", "end");
         } else {
-          arrowbox.pack = "start";
+          arrowbox.setAttribute("pack", "start");
         }
         arrowbox.style.transform = "translate(" + -offset + "px, 0)";
 

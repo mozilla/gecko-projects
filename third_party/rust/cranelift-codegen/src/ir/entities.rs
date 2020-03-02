@@ -1,7 +1,7 @@
 //! Cranelift IR entity references.
 //!
 //! Instructions in Cranelift IR need to reference other entities in the function. This can be other
-//! parts of the function like extended basic blocks or stack slots, or it can be external entities
+//! parts of the function like basic blocks or stack slots, or it can be external entities
 //! that are declared in the function preamble in the text format.
 //!
 //! These entity references in instruction operands are not implemented as Rust references both
@@ -25,18 +25,19 @@ use core::u32;
 #[cfg(feature = "enable-serde")]
 use serde::{Deserialize, Serialize};
 
-/// An opaque reference to an [extended basic
-/// block](https://en.wikipedia.org/wiki/Extended_basic_block) in a
+/// An opaque reference to a [basic block](https://en.wikipedia.org/wiki/Basic_block) in a
 /// [`Function`](super::function::Function).
 ///
-/// You can get an `Ebb` using
-/// [`FunctionBuilder::create_ebb`](https://docs.rs/cranelift-frontend/*/cranelift_frontend/struct.FunctionBuilder.html#method.create_ebb)
+/// You can get a `Block` using
+/// [`FunctionBuilder::create_block`](https://docs.rs/cranelift-frontend/*/cranelift_frontend/struct.FunctionBuilder.html#method.create_block)
+///
+/// While the order is stable, it is arbitrary and does not necessarily resemble the layout order.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Ebb(u32);
-entity_impl!(Ebb, "ebb");
+pub struct Block(u32);
+entity_impl!(Block, "block");
 
-impl Ebb {
-    /// Create a new EBB reference from its number. This corresponds to the `ebbNN` representation.
+impl Block {
+    /// Create a new block reference from its number. This corresponds to the `blockNN` representation.
     ///
     /// This method is for use by the parser.
     pub fn with_number(n: u32) -> Option<Self> {
@@ -61,6 +62,8 @@ impl Ebb {
 /// - [`null`](super::InstBuilder::null) for null reference constants
 ///
 /// Any `InstBuilder` instruction that has an output will also return a `Value`.
+///
+/// While the order is stable, it is arbitrary.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Value(u32);
 entity_impl!(Value, "v");
@@ -91,6 +94,8 @@ impl Value {
 /// on the type of instruction.
 ///
 /// [inst_comment]: https://github.com/bjorn3/rustc_codegen_cranelift/blob/0f8814fd6da3d436a90549d4bb19b94034f2b19c/src/pretty_clif.rs
+///
+/// While the order is stable, it is arbitrary and does not necessarily resemble the layout order.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Inst(u32);
 entity_impl!(Inst, "inst");
@@ -107,7 +112,9 @@ entity_impl!(Inst, "inst");
 /// [`stack_addr`](super::InstBuilder::stack_addr),
 /// [`stack_load`](super::InstBuilder::stack_load), and
 /// [`stack_store`](super::InstBuilder::stack_store).
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary and does not necessarily resemble the stack order.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
 pub struct StackSlot(u32);
 entity_impl!(StackSlot, "ss");
@@ -142,7 +149,9 @@ impl StackSlot {
 ///
 /// `GlobalValue`s can be retrieved with
 /// [`InstBuilder:global_value`](super::InstBuilder::global_value).
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalValue(u32);
 entity_impl!(GlobalValue, "gv");
 
@@ -164,6 +173,9 @@ impl GlobalValue {
 /// You can store [`ConstantData`](super::ConstantData) in a
 /// [`ConstantPool`](super::ConstantPool) for efficient storage and retrieval.
 /// See [`ConstantPool::insert`](super::ConstantPool::insert).
+///
+/// While the order is stable, it is arbitrary and does not necessarily resemble the order in which
+/// the constants are written in the constant pool.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct Constant(u32);
 entity_impl!(Constant, "const");
@@ -187,7 +199,9 @@ impl Constant {
 /// [`InstructionData`](super::instructions::InstructionData) struct and therefore must be
 /// tracked separately in [`DataFlowGraph::immediates`](super::dfg::DataFlowGraph). `Immediate`
 /// provides a way to reference values stored there.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Immediate(u32);
 entity_impl!(Immediate, "imm");
 
@@ -214,7 +228,9 @@ impl Immediate {
 ///
 /// `JumpTable`s can be created with
 /// [`create_jump_table`](https://docs.rs/cranelift-frontend/*/cranelift_frontend/struct.FunctionBuilder.html#method.create_jump_table).
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
 pub struct JumpTable(u32);
 entity_impl!(JumpTable, "jt");
@@ -248,7 +264,9 @@ impl JumpTable {
 /// - [`FuncEnvironment::make_direct_func`](https://docs.rs/cranelift-wasm/*/cranelift_wasm/trait.FuncEnvironment.html#tymethod.make_direct_func)
 /// for functions declared in the same WebAssembly
 /// [`FuncEnvironment`](https://docs.rs/cranelift-wasm/*/cranelift_wasm/trait.FuncEnvironment.html#tymethod.make_direct_func)
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FuncRef(u32);
 entity_impl!(FuncRef, "fn");
 
@@ -277,7 +295,9 @@ impl FuncRef {
 /// You can retrieve the [`Signature`](super::Signature) that was used to create a `SigRef` with
 /// [`FunctionBuilder::signature`](https://docs.rs/cranelift-frontend/*/cranelift_frontend/struct.FunctionBuilder.html#method.signature) or
 /// [`func.dfg.signatures`](super::dfg::DataFlowGraph::signatures).
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SigRef(u32);
 entity_impl!(SigRef, "sig");
 
@@ -300,7 +320,9 @@ impl SigRef {
 /// [`heap_addr`](super::InstBuilder::heap_addr).
 ///
 /// To create a heap, use [`FunctionBuilder::create_heap`](https://docs.rs/cranelift-frontend/*/cranelift_frontend/struct.FunctionBuilder.html#method.create_heap).
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Heap(u32);
 entity_impl!(Heap, "heap");
 
@@ -324,7 +346,9 @@ impl Heap {
 /// They can be created with [`FuncEnvironment::make_table`](https://docs.rs/cranelift-wasm/*/cranelift_wasm/trait.FuncEnvironment.html#tymethod.make_table).
 /// They can be used with
 /// [`FuncEnvironment::translate_call_indirect`](https://docs.rs/cranelift-wasm/*/cranelift_wasm/trait.FuncEnvironment.html#tymethod.translate_call_indirect).
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+///
+/// While the order is stable, it is arbitrary.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Table(u32);
 entity_impl!(Table, "table");
 
@@ -342,12 +366,12 @@ impl Table {
 }
 
 /// An opaque reference to any of the entities defined in this module that can appear in CLIF IR.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AnyEntity {
     /// The whole function.
     Function,
-    /// An extended basic block.
-    Ebb(Ebb),
+    /// a basic block.
+    Block(Block),
     /// An instruction.
     Inst(Inst),
     /// An SSA value.
@@ -372,7 +396,7 @@ impl fmt::Display for AnyEntity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Self::Function => write!(f, "function"),
-            Self::Ebb(r) => r.fmt(f),
+            Self::Block(r) => r.fmt(f),
             Self::Inst(r) => r.fmt(f),
             Self::Value(r) => r.fmt(f),
             Self::StackSlot(r) => r.fmt(f),
@@ -392,9 +416,9 @@ impl fmt::Debug for AnyEntity {
     }
 }
 
-impl From<Ebb> for AnyEntity {
-    fn from(r: Ebb) -> Self {
-        Self::Ebb(r)
+impl From<Block> for AnyEntity {
+    fn from(r: Block) -> Self {
+        Self::Block(r)
     }
 }
 

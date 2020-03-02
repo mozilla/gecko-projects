@@ -43,9 +43,8 @@ DebuggerPanel.prototype = {
       selectors,
       client,
     } = await this.panelWin.Debugger.bootstrap({
-      threadFront: this.toolbox.threadFront,
-      tabTarget: this.toolbox.target,
-      debuggerClient: this.toolbox.target.client,
+      targetList: this.toolbox.targetList,
+      devToolsClient: this.toolbox.target.client,
       workers: {
         sourceMaps: this.toolbox.sourceMapService,
         evaluationsParser: this.toolbox.parserService,

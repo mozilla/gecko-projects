@@ -28,7 +28,6 @@ var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { assert } = DevToolsUtils;
 var { TabSources } = require("devtools/server/actors/utils/TabSources");
 var makeDebugger = require("devtools/server/actors/utils/make-debugger");
-const ReplayDebugger = require("devtools/server/actors/replay/debugger");
 const InspectorUtils = require("InspectorUtils");
 
 const EXTENSION_CONTENT_JSM = "resource://gre/modules/ExtensionContent.jsm";
@@ -232,7 +231,7 @@ const browsingContextTargetPrototype = {
    * This class is subclassed by FrameTargetActor and others.
    * Subclasses are expected to implement a getter for the docShell property.
    *
-   * @param connection DebuggerServerConnection
+   * @param connection DevToolsServerConnection
    *        The conection to the client.
    */
   initialize: function(connection) {
@@ -259,13 +258,7 @@ const browsingContextTargetPrototype = {
 
     // Flag eventually overloaded by sub classes in order to watch new docshells
     // Used by the ParentProcessTargetActor to list all frames in the Browser Toolbox
-    this.listenForNewDocShells = false;
-
-    let canRewind = false;
-    if (isReplaying) {
-      const replayDebugger = new ReplayDebugger();
-      canRewind = replayDebugger.canRewind();
-    }
+    this.watchNewDocShells = false;
 
     this.traits = {
       reconfigure: true,
@@ -274,8 +267,6 @@ const browsingContextTargetPrototype = {
       frames: true,
       // Supports the logInPage request.
       logInPage: true,
-      // Supports requests related to rewinding.
-      canRewind,
       // Supports watchpoints in the server for Fx71+
       watchpoints: true,
     };
@@ -524,6 +515,16 @@ const browsingContextTargetPrototype = {
     );
 
     Object.assign(response, actors);
+
+    // The thread actor is the only actor manually created by the target actor.
+    // It is not registered in targetScopedActorFactoriesand therefore needs
+    // to be added here manually.
+    if (this.threadActor) {
+      Object.assign(response, {
+        threadActor: this.threadActor.actorID,
+      });
+    }
+
     return response;
   },
 
@@ -626,9 +627,7 @@ const browsingContextTargetPrototype = {
 
   _watchDocshells() {
     // In child processes, we watch all docshells living in the process.
-    if (this.listenForNewDocShells) {
-      Services.obs.addObserver(this, "webnavigation-create");
-    }
+    Services.obs.addObserver(this, "webnavigation-create");
     Services.obs.addObserver(this, "webnavigation-destroy");
 
     // We watch for all child docshells under the current document,
@@ -775,7 +774,11 @@ const browsingContextTargetPrototype = {
       // In child processes, we have new root docshells,
       // let's watch them and all their child docshells.
       if (this._isRootDocShell(docShell)) {
-        this._progressListener.watch(docShell);
+        if (this.watchNewDocShells) {
+          this._progressListener.watch(docShell);
+        }
+      } else if (this._progressListener.isParentWatched(docShell)) {
+        docShell.watchedByDevtools = true;
       }
       this._notifyDocShellsUpdate([docShell]);
     });
@@ -945,9 +948,7 @@ const browsingContextTargetPrototype = {
       this._originalWindow = null;
 
       // Removes the observers being set in _watchDocShells
-      if (this.listenForNewDocShells) {
-        Services.obs.removeObserver(this, "webnavigation-create");
-      }
+      Services.obs.removeObserver(this, "webnavigation-create");
       Services.obs.removeObserver(this, "webnavigation-destroy");
     }
 
@@ -1168,7 +1169,8 @@ const browsingContextTargetPrototype = {
     this._setCacheDisabled(false);
     this._setServiceWorkersTestingEnabled(false);
     this._setPaintFlashingEnabled(false);
-    if (this._restoreFocus) {
+
+    if (this._restoreFocus && this.window.docShell.isActive) {
       this.window.focus();
     }
   },
@@ -1178,8 +1180,7 @@ const browsingContextTargetPrototype = {
    */
   _setCacheDisabled(disabled) {
     const enable = Ci.nsIRequest.LOAD_NORMAL;
-    const disable =
-      Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
+    const disable = Ci.nsIRequest.LOAD_BYPASS_CACHE;
 
     this.docShell.defaultLoadFlags = disabled ? disable : enable;
   },
@@ -1242,8 +1243,7 @@ const browsingContextTargetPrototype = {
       return null;
     }
 
-    const disable =
-      Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
+    const disable = Ci.nsIRequest.LOAD_BYPASS_CACHE;
     return this.docShell.defaultLoadFlags === disable;
   },
 
@@ -1556,7 +1556,12 @@ DebuggerProgressListener.prototype = {
       this._knownWindowIDs.set(getWindowID(win), win);
     }
 
+    // The watchedByDevtools flag is set on each docshell this target is
+    // associated with. This enables Gecko behavior tied to this flag, such as
+    // reporting the contents of HTML loaded in the docshells, or capturing
+    // stacks for the network monitor.
     docShell.watchedByDevtools = true;
+    getChildDocShells(docShell).forEach(d => (d.watchedByDevtools = true));
   },
 
   unwatch(docShell) {
@@ -1564,6 +1569,7 @@ DebuggerProgressListener.prototype = {
     if (!this._watchedDocShells.has(docShellWindow)) {
       return;
     }
+    this._watchedDocShells.delete(docShellWindow);
 
     const webProgress = docShell
       .QueryInterface(Ci.nsIInterfaceRequestor)
@@ -1589,6 +1595,18 @@ DebuggerProgressListener.prototype = {
     }
 
     docShell.watchedByDevtools = false;
+    getChildDocShells(docShell).forEach(d => (d.watchedByDevtools = false));
+  },
+
+  isParentWatched(docShell) {
+    let parent = docShell.parent;
+    while (parent) {
+      if (this._watchedDocShells.has(parent.domWindow)) {
+        return true;
+      }
+      parent = parent.parent;
+    }
+    return false;
   },
 
   _getWindowsInDocShell(docShell) {

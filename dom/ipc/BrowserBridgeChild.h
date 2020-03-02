@@ -77,7 +77,8 @@ class BrowserBridgeChild : public PBrowserBridgeChild {
   mozilla::ipc::IPCResult RecvSetLayersId(
       const mozilla::layers::LayersId& aLayersId);
 
-  mozilla::ipc::IPCResult RecvRequestFocus(const bool& aCanRaise);
+  mozilla::ipc::IPCResult RecvRequestFocus(const bool& aCanRaise,
+                                           const CallerType aCallerType);
 
   mozilla::ipc::IPCResult RecvMoveFocus(const bool& aForward,
                                         const bool& aForDocumentNavigation);
@@ -94,7 +95,8 @@ class BrowserBridgeChild : public PBrowserBridgeChild {
       const ScrollAxis& aHorizontal, const ScrollFlags& aScrollFlags,
       const int32_t& aAppUnitsPerDevPixel);
 
-  mozilla::ipc::IPCResult RecvSubFrameCrashed(BrowsingContext* aContext);
+  mozilla::ipc::IPCResult RecvSubFrameCrashed(
+      const MaybeDiscarded<BrowsingContext>& aContext);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 

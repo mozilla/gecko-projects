@@ -22,7 +22,7 @@ File::File(nsIGlobalObject* aGlobal, BlobImpl* aImpl) : Blob(aGlobal, aImpl) {
   MOZ_ASSERT(aImpl->IsFile());
 }
 
-File::~File() {}
+File::~File() = default;
 
 /* static */
 File* File::Create(nsIGlobalObject* aGlobal, BlobImpl* aImpl) {
@@ -149,7 +149,7 @@ already_AddRefed<File> File::Constructor(const GlobalObject& aGlobal,
 
   nsAutoString type(aBag.mType);
   MakeValidBlobType(type);
-  impl->InitializeBlob(aData, type, aBag.mEndings == EndingTypes::Native, aRv);
+  impl->InitializeBlob(aData, type, aBag.mEndings == EndingType::Native, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }

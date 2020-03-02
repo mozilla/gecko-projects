@@ -293,22 +293,10 @@ private:
     }
   }
 
-  inline void set_callbacks_slots_ref(bool external_loads_exist)
+  inline std::shared_ptr<FunctionTable> get_callback_ref_data(
+    LucetFunctionTable& functionPointerTable)
   {
-    LucetFunctionTable functionPointerTable =
-      lucet_get_function_pointer_table(sandbox);
-    void* key = functionPointerTable.data;
-
-    std::lock_guard<std::mutex> lock(callback_table_mutex);
-    std::weak_ptr<FunctionTable> slots = shared_callback_slots[key];
-
-    if (auto shared_slots = slots.lock()) {
-      // pointer exists
-      callback_slots = shared_slots;
-      return;
-    }
-
-    callback_slots = std::make_shared<FunctionTable>();
+    auto callback_slots = std::make_shared<FunctionTable>();
 
     for (size_t i = 0; i < MAX_CALLBACKS; i++) {
       uintptr_t reservedVal =
@@ -328,6 +316,56 @@ private:
       detail::dynamic_check(found, "Unable to intialize callback tables");
     }
 
+    return callback_slots;
+  }
+
+  inline void reinit_callback_ref_data(
+    LucetFunctionTable& functionPointerTable,
+    std::shared_ptr<FunctionTable>& callback_slots)
+  {
+    for (size_t i = 0; i < MAX_CALLBACKS; i++) {
+      uintptr_t reservedVal =
+        lucet_get_reserved_callback_slot_val(sandbox, i + 1);
+
+      for (size_t j = 0; j < functionPointerTable.length; j++) {
+        if (functionPointerTable.data[j].rf == reservedVal) {
+          functionPointerTable.data[j].rf = 0;
+
+          detail::dynamic_check(
+            callback_slots->elements[i] == &(functionPointerTable.data[j]) &&
+              callback_slots->slot_number[i] == static_cast<uint32_t>(j),
+            "Sandbox creation error: Error when checking the values of "
+            "callback slot data");
+
+          break;
+        }
+      }
+    }
+  }
+
+  inline void set_callbacks_slots_ref(bool external_loads_exist)
+  {
+    LucetFunctionTable functionPointerTable =
+      lucet_get_function_pointer_table(sandbox);
+    void* key = functionPointerTable.data;
+
+    std::lock_guard<std::mutex> lock(callback_table_mutex);
+    std::weak_ptr<FunctionTable> slots = shared_callback_slots[key];
+
+    if (auto shared_slots = slots.lock()) {
+      // pointer exists
+      callback_slots = shared_slots;
+      // Sometimes, dlopen and process forking seem to act a little weird.
+      // Writes to the writable page of the dynamic lib section seem to not
+      // always be propagated (possibly when the dynamic library is opened
+      // externally - "external_loads_exist")). This occurred in when RLBox was
+      // used in ASAN builds of Firefox. In general, we take the precaution of
+      // rechecking this on each sandbox creation.
+      reinit_callback_ref_data(functionPointerTable, callback_slots);
+      return;
+    }
+
+    callback_slots = get_callback_ref_data(functionPointerTable);
     shared_callback_slots[key] = callback_slots;
     if (external_loads_exist) {
       saved_callback_slot_info.push_back(callback_slots);
@@ -437,10 +475,11 @@ protected:
   // library lucet_module_path outside of rlbox_lucet_sandbox such as via dlopen
   // or the Windows equivalent
   inline void impl_create_sandbox(const char* lucet_module_path,
-                                  bool external_loads_exist)
+                                  bool external_loads_exist,
+                                  bool allow_stdio)
   {
     detail::dynamic_check(sandbox == nullptr, "Sandbox already initialized");
-    sandbox = lucet_load_module(lucet_module_path);
+    sandbox = lucet_load_module(lucet_module_path, allow_stdio);
     detail::dynamic_check(sandbox != nullptr, "Sandbox could not be created");
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
@@ -467,7 +506,8 @@ protected:
     // Default is to assume that no external code will load the wasm library as
     // this is usually the case
     const bool external_loads_exist = false;
-    impl_create_sandbox(lucet_module_path, external_loads_exist);
+    const bool allow_stdio = true;
+    impl_create_sandbox(lucet_module_path, external_loads_exist, allow_stdio);
   }
 
   inline void impl_destroy_sandbox() { lucet_drop_module(sandbox); }

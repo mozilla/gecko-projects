@@ -103,11 +103,13 @@ nsXULElement::nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
   XUL_PROTOTYPE_ATTRIBUTE_METER(gNumElements);
 }
 
-nsXULElement::~nsXULElement() {}
+nsXULElement::~nsXULElement() = default;
 
 void nsXULElement::MaybeUpdatePrivateLifetime() {
   if (AttrValueIs(kNameSpaceID_None, nsGkAtoms::windowtype,
-                  NS_LITERAL_STRING("navigator:browser"), eCaseMatters)) {
+                  NS_LITERAL_STRING("navigator:browser"), eCaseMatters) ||
+      AttrValueIs(kNameSpaceID_None, nsGkAtoms::windowtype,
+                  NS_LITERAL_STRING("navigator:geckoview"), eCaseMatters)) {
     return;
   }
 
@@ -1416,7 +1418,7 @@ nsresult nsXULPrototypeElement::Deserialize(
             if (NS_WARN_IF(NS_FAILED(rv))) return rv;
           }
 
-          child = script.forget();
+          child = std::move(script);
           break;
         }
         default:
@@ -1774,7 +1776,8 @@ NotifyOffThreadScriptCompletedRunnable::Run() {
 
   auto index = sReceivers->IndexOf(mReceiver);
   MOZ_RELEASE_ASSERT(index != sReceivers->NoIndex);
-  nsCOMPtr<nsIOffThreadScriptReceiver> receiver = (*sReceivers)[index].forget();
+  nsCOMPtr<nsIOffThreadScriptReceiver> receiver =
+      std::move((*sReceivers)[index]);
   sReceivers->RemoveElementAt(index);
 
   return receiver->OnScriptCompileComplete(script,

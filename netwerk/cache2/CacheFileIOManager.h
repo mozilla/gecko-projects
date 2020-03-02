@@ -122,7 +122,10 @@ class CacheFileHandle final : public nsISupports {
   PinningStatus mPinning;
 
   nsCOMPtr<nsIFile> mFile;
-  int64_t mFileSize;
+
+  // file size is atomic because it is used on main thread by
+  // nsHttpChannel::ReportNetVSCacheTelemetry()
+  Atomic<int64_t, Relaxed> mFileSize;
   PRFileDesc* mFD;  // if null then the file doesn't exists on the disk
   nsCString mKey;
 };
@@ -163,7 +166,7 @@ class CacheFileHandles {
     HandleHashKey(const HandleHashKey& aOther) {
       MOZ_ASSERT_UNREACHABLE("HandleHashKey copy constructor is forbidden!");
     }
-    ~HandleHashKey() { MOZ_COUNT_DTOR(HandleHashKey); }
+    MOZ_COUNTED_DTOR(HandleHashKey)
 
     bool KeyEquals(KeyTypePointer aKey) const {
       return memcmp(mHash.get(), aKey, sizeof(SHA1Sum::Hash)) == 0;
@@ -323,9 +326,7 @@ class CacheFileIOManager final : public nsITimerCallback, public nsINamed {
                                    const bool* aHasAltData,
                                    const uint16_t* aOnStartTime,
                                    const uint16_t* aOnStopTime,
-                                   const uint8_t* aContentType,
-                                   const uint16_t* aBaseDomainAccessCount,
-                                   const uint32_t aTelemetryReportID);
+                                   const uint8_t* aContentType);
 
   static nsresult UpdateIndexEntry();
 

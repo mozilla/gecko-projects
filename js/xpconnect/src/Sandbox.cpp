@@ -37,19 +37,25 @@
 #include "mozilla/dom/CSSBinding.h"
 #include "mozilla/dom/CSSRuleBinding.h"
 #include "mozilla/dom/DirectoryBinding.h"
+#include "mozilla/dom/DocumentBinding.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMParserBinding.h"
+#include "mozilla/dom/DOMTokenListBinding.h"
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/EventBinding.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FileBinding.h"
+#include "mozilla/dom/HeadersBinding.h"
 #include "mozilla/dom/InspectorUtilsBinding.h"
 #include "mozilla/dom/MessageChannelBinding.h"
 #include "mozilla/dom/MessagePortBinding.h"
 #include "mozilla/dom/NodeBinding.h"
 #include "mozilla/dom/NodeFilterBinding.h"
+#include "mozilla/dom/PerformanceBinding.h"
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/PromiseDebuggingBinding.h"
+#include "mozilla/dom/RangeBinding.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/ResponseBinding.h"
 #ifdef MOZ_WEBRTC
@@ -57,6 +63,7 @@
 #endif
 #include "mozilla/dom/FileReaderBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/SelectionBinding.h"
 #include "mozilla/dom/TextDecoderBinding.h"
 #include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/UnionConversions.h"
@@ -84,6 +91,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(SandboxPrivate)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SandboxPrivate)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
   tmp->UnlinkHostObjectURIs();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -446,21 +454,21 @@ static size_t sandbox_moved(JSObject* obj, JSObject* old) {
   (XPCONNECT_GLOBAL_EXTRA_SLOT_OFFSET)
 
 static const JSClassOps SandboxClassOps = {
-    nullptr,
-    nullptr,
-    nullptr,
-    JS_NewEnumerateStandardClasses,
-    JS_ResolveStandardClass,
-    JS_MayResolveStandardClass,
-    sandbox_finalize,
-    nullptr,
-    nullptr,
-    nullptr,
-    JS_GlobalObjectTraceHook,
+    nullptr,                         // addProperty
+    nullptr,                         // delProperty
+    nullptr,                         // enumerate
+    JS_NewEnumerateStandardClasses,  // newEnumerate
+    JS_ResolveStandardClass,         // resolve
+    JS_MayResolveStandardClass,      // mayResolve
+    sandbox_finalize,                // finalize
+    nullptr,                         // call
+    nullptr,                         // hasInstance
+    nullptr,                         // construct
+    JS_GlobalObjectTraceHook,        // trace
 };
 
 static const js::ClassExtension SandboxClassExtension = {
-    sandbox_moved /* objectMovedOp */
+    sandbox_moved,  // objectMovedOp
 };
 
 static const JSClass SandboxClass = {
@@ -833,10 +841,16 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
       CSS = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "CSSRule")) {
       CSSRule = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "Document")) {
+      Document = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "Directory")) {
       Directory = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "DOMException")) {
+      DOMException = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "DOMParser")) {
       DOMParser = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "DOMTokenList")) {
+      DOMTokenList = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "Element")) {
       Element = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "Event")) {
@@ -847,6 +861,8 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
       FileReader = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "FormData")) {
       FormData = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "Headers")) {
+      Headers = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "InspectorUtils")) {
       InspectorUtils = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "MessageChannel")) {
@@ -855,8 +871,14 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
       Node = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "NodeFilter")) {
       NodeFilter = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "Performance")) {
+      Performance = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "PromiseDebugging")) {
       PromiseDebugging = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "Range")) {
+      Range = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "Selection")) {
+      Selection = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "TextDecoder")) {
       TextDecoder = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "TextEncoder")) {
@@ -881,6 +903,8 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
       fetch = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "indexedDB")) {
       indexedDB = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "isSecureContext")) {
+      isSecureContext = true;
 #ifdef MOZ_WEBRTC
     } else if (JS_LinearStringEqualsLiteral(nameStr, "rtcIdentityProvider")) {
       rtcIdentityProvider = true;
@@ -923,8 +947,21 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
   if (Directory && !dom::Directory_Binding::GetConstructorObject(cx))
     return false;
 
-  if (DOMParser && !dom::DOMParser_Binding::GetConstructorObject(cx))
+  if (Document && !dom::Document_Binding::GetConstructorObject(cx)) {
     return false;
+  }
+
+  if (DOMException && !dom::DOMException_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
+
+  if (DOMParser && !dom::DOMParser_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
+
+  if (DOMTokenList && !dom::DOMTokenList_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
 
   if (Element && !dom::Element_Binding::GetConstructorObject(cx)) return false;
 
@@ -938,6 +975,10 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
 
   if (FormData && !dom::FormData_Binding::GetConstructorObject(cx))
     return false;
+
+  if (Headers && !dom::Headers_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
 
   if (InspectorUtils && !dom::InspectorUtils_Binding::GetConstructorObject(cx))
     return false;
@@ -955,8 +996,20 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
     return false;
   }
 
+  if (Performance && !dom::Performance_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
+
   if (PromiseDebugging &&
       !dom::PromiseDebugging_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
+
+  if (Range && !dom::Range_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
+
+  if (Selection && !dom::Selection_Binding::GetConstructorObject(cx)) {
     return false;
   }
 
@@ -992,6 +1045,15 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
 
   if (fetch && !SandboxCreateFetch(cx, obj)) {
     return false;
+  }
+
+  // Note that isSecureContext here doesn't mean the context is actually secure
+  // - just that the caller wants the property defined
+  if (isSecureContext) {
+    bool hasSecureContext = IsSecureContextOrObjectIsFromSecureContext(cx, obj);
+    JS::Rooted<JS::Value> secureJsValue(cx, JS::BooleanValue(hasSecureContext));
+    return JS_DefineProperty(cx, obj, "isSecureContext", secureJsValue,
+                             JSPROP_ENUMERATE);
   }
 
 #ifdef MOZ_WEBRTC
@@ -1097,6 +1159,15 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
                                   SandboxOptions& options) {
   // Create the sandbox global object
   nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(prinOrSop);
+  nsCOMPtr<nsIGlobalObject> obj = do_QueryInterface(prinOrSop);
+  if (obj) {
+    nsGlobalWindowInner* window =
+        WindowOrNull(js::UncheckedUnwrap(obj->GetGlobalJSObject(), false));
+    // If we have a secure context window inherit from it's parent
+    if (window && window->IsSecureContext()) {
+      options.forceSecureContext = true;
+    }
+  }
   if (!principal) {
     nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(prinOrSop);
     if (sop) {
@@ -1113,11 +1184,16 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
 
   auto& creationOptions = realmOptions.creationOptions();
 
-  // XXXjwatt: Consider whether/when sandboxes should be able to see
-  // [SecureContext] API (bug 1273687).  In that case we'd call
-  // creationOptions.setSecureContext(true).
-
   bool isSystemPrincipal = principal->IsSystemPrincipal();
+
+  if (isSystemPrincipal) {
+    options.forceSecureContext = true;
+  }
+
+  // If we are able to see [SecureContext] API code
+  if (options.forceSecureContext) {
+    creationOptions.setSecureContext(true);
+  }
 
   xpc::SetPrefableRealmOptions(realmOptions);
   if (options.sameZoneAs) {
@@ -1728,6 +1804,7 @@ bool SandboxOptions::Parse() {
             ParseBoolean("wantExportHelpers", &wantExportHelpers) &&
             ParseBoolean("isWebExtensionContentScript",
                          &isWebExtensionContentScript) &&
+            ParseBoolean("forceSecureContext", &forceSecureContext) &&
             ParseString("sandboxName", sandboxName) &&
             ParseObject("sameZoneAs", &sameZoneAs) &&
             ParseBoolean("freshCompartment", &freshCompartment) &&

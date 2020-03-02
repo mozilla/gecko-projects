@@ -3,13 +3,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gtest/gtest.h"
+#include "MediaController.h"
 #include "MediaControlKeysEvent.h"
 
 using namespace mozilla::dom;
 
 class MediaControlKeysEventSourceTestImpl : public MediaControlKeysEventSource {
+ public:
+  NS_INLINE_DECL_REFCOUNTING(MediaControlKeysEventSourceTestImpl, override)
   bool Open() override { return true; }
   bool IsOpened() const override { return true; }
+
+ private:
+  ~MediaControlKeysEventSourceTestImpl() = default;
 };
 
 TEST(MediaControlKeysEvent, TestAddOrRemoveListener)
@@ -26,4 +32,20 @@ TEST(MediaControlKeysEvent, TestAddOrRemoveListener)
 
   source->RemoveListener(listener);
   ASSERT_TRUE(source->GetListenersNum() == 0);
+}
+
+TEST(MediaControlKeysEvent, SetSourcePlaybackState)
+{
+  RefPtr<MediaControlKeysEventSource> source =
+      new MediaControlKeysEventSourceTestImpl();
+  ASSERT_TRUE(source->GetPlaybackState() == PlaybackState::eStopped);
+
+  source->SetPlaybackState(PlaybackState::ePlaying);
+  ASSERT_TRUE(source->GetPlaybackState() == PlaybackState::ePlaying);
+
+  source->SetPlaybackState(PlaybackState::ePaused);
+  ASSERT_TRUE(source->GetPlaybackState() == PlaybackState::ePaused);
+
+  source->SetPlaybackState(PlaybackState::eStopped);
+  ASSERT_TRUE(source->GetPlaybackState() == PlaybackState::eStopped);
 }

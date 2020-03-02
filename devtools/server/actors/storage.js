@@ -7,7 +7,7 @@
 const { Cc, Ci, Cu, CC } = require("chrome");
 const protocol = require("devtools/shared/protocol");
 const { LongStringActor } = require("devtools/server/actors/string");
-const { DebuggerServer } = require("devtools/server/debugger-server");
+const { DevToolsServer } = require("devtools/server/devtools-server");
 const Services = require("Services");
 const defer = require("devtools/shared/defer");
 const { isWindowIncluded } = require("devtools/shared/layout/utils");
@@ -39,12 +39,12 @@ loader.lazyRequireGetter(
   true
 );
 
-// "Lax", "Strict" and "Unset" are special values of the sameSite property
+// "Lax", "Strict" and "None" are special values of the sameSite property
 // that should not be translated.
 const COOKIE_SAMESITE = {
   LAX: "Lax",
   STRICT: "Strict",
-  UNSET: "Unset",
+  NONE: "None",
 };
 
 // GUID to be used as a separator in compound keys. This must match the same
@@ -505,7 +505,7 @@ StorageActors.createActor(
       // We need to remove the cookie listeners early in E10S mode so we need to
       // use a conditional here to ensure that we only attempt to remove them in
       // single process mode.
-      if (!DebuggerServer.isInChildProcess) {
+      if (!DevToolsServer.isInChildProcess) {
         this.removeCookieObservers();
       }
 
@@ -578,6 +578,8 @@ StorageActors.createActor(
         // because creationTime is in micro seconds
         creationTime: cookie.creationTime / 1000,
 
+        size: cookie.name.length + (cookie.value || "").length,
+
         // - do -
         lastAccessed: cookie.lastAccessed / 1000,
         value: new LongStringActor(this.conn, cookie.value || ""),
@@ -596,7 +598,7 @@ StorageActors.createActor(
           return COOKIE_SAMESITE.STRICT;
       }
       // cookie.SAMESITE_NONE
-      return COOKIE_SAMESITE.UNSET;
+      return COOKIE_SAMESITE.NONE;
     },
 
     populateStoresForHost(host) {
@@ -708,16 +710,17 @@ StorageActors.createActor(
       return [
         { name: "uniqueKey", editable: false, private: true },
         { name: "name", editable: true, hidden: false },
+        { name: "value", editable: true, hidden: false },
         { name: "host", editable: true, hidden: false },
         { name: "path", editable: true, hidden: false },
         { name: "expires", editable: true, hidden: false },
+        { name: "size", editable: false, hidden: false },
+        { name: "isHttpOnly", editable: true, hidden: false },
+        { name: "isSecure", editable: true, hidden: false },
+        { name: "sameSite", editable: false, hidden: false },
         { name: "lastAccessed", editable: false, hidden: false },
         { name: "creationTime", editable: false, hidden: true },
-        { name: "value", editable: true, hidden: false },
         { name: "hostOnly", editable: false, hidden: true },
-        { name: "isSecure", editable: true, hidden: true },
-        { name: "isHttpOnly", editable: true, hidden: false },
-        { name: "sameSite", editable: false, hidden: false },
       ];
     },
 
@@ -771,7 +774,7 @@ StorageActors.createActor(
     maybeSetupChildProcess() {
       cookieHelpers.onCookieChanged = this.onCookieChanged.bind(this);
 
-      if (!DebuggerServer.isInChildProcess) {
+      if (!DevToolsServer.isInChildProcess) {
         this.getCookiesFromHost = cookieHelpers.getCookiesFromHost.bind(
           cookieHelpers
         );
@@ -1961,10 +1964,10 @@ if (Services.prefs.getBoolPref(EXTENSION_STORAGE_ENABLED_PREF, false)) {
         }
 
         // FIXME: Bug 1318029 - Due to a bug that is thrown whenever a
-        // LongStringActor string reaches DebuggerServer.LONG_STRING_LENGTH we need
+        // LongStringActor string reaches DevToolsServer.LONG_STRING_LENGTH we need
         // to trim the value. When the bug is fixed we should stop trimming the
         // string here.
-        const maxLength = DebuggerServer.LONG_STRING_LENGTH - 1;
+        const maxLength = DevToolsServer.LONG_STRING_LENGTH - 1;
         if (value.length > maxLength) {
           value = value.substr(0, maxLength);
           isValueEditable = false;
@@ -2063,13 +2066,12 @@ StorageActors.createActor(
   },
   {
     async getCachesForHost(host) {
-      const uri = Services.io.newURI(host);
-      const attrs = this.storageActor.document.effectiveStoragePrincipal
-        .originAttributes;
-      const principal = Services.scriptSecurityManager.createContentPrincipal(
-        uri,
-        attrs
-      );
+      const win = this.storageActor.getWindowFromHost(host);
+      if (!win) {
+        return null;
+      }
+
+      const principal = win.document.effectiveStoragePrincipal;
 
       // The first argument tells if you want to get |content| cache or |chrome|
       // cache.
@@ -2077,10 +2079,10 @@ StorageActors.createActor(
       // (service worker or web page).
       // The |chrome| cache is the cache implicitely cached by the platform,
       // hosting the source file of the service worker.
-      const { CacheStorage } = this.storageActor.window;
+      const { CacheStorage } = win;
 
       if (!CacheStorage) {
-        return [];
+        return null;
       }
 
       const cache = new CacheStorage("content", principal);
@@ -2569,10 +2571,10 @@ StorageActors.createActor(
       let value = JSON.stringify(item.value);
 
       // FIXME: Bug 1318029 - Due to a bug that is thrown whenever a
-      // LongStringActor string reaches DebuggerServer.LONG_STRING_LENGTH we need
+      // LongStringActor string reaches DevToolsServer.LONG_STRING_LENGTH we need
       // to trim the value. When the bug is fixed we should stop trimming the
       // string here.
-      const maxLength = DebuggerServer.LONG_STRING_LENGTH - 1;
+      const maxLength = DevToolsServer.LONG_STRING_LENGTH - 1;
       if (value.length > maxLength) {
         value = value.substr(0, maxLength);
       }
@@ -2610,7 +2612,7 @@ StorageActors.createActor(
     },
 
     maybeSetupChildProcess() {
-      if (!DebuggerServer.isInChildProcess) {
+      if (!DevToolsServer.isInChildProcess) {
         this.backToChild = (func, rv) => rv;
         this.clearDBStore = indexedDBHelpers.clearDBStore;
         this.findIDBPathsForHost = indexedDBHelpers.findIDBPathsForHost;

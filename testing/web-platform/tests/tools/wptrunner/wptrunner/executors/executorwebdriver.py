@@ -1,13 +1,15 @@
+from __future__ import absolute_import
 import json
 import os
 import socket
 import threading
 import time
 import traceback
-import urlparse
 import uuid
+from six.moves.urllib.parse import urljoin
 
 from .base import (CallbackHandler,
+                   CrashtestExecutor,
                    RefTestExecutor,
                    RefTestImplementation,
                    TestharnessExecutor,
@@ -58,14 +60,24 @@ class WebDriverBaseProtocolPart(BaseProtocolPart):
     def set_window(self, handle):
         self.webdriver.window_handle = handle
 
+    def load(self, url):
+        self.webdriver.url = url
+
     def wait(self):
         while True:
             try:
                 self.webdriver.execute_async_script("")
-            except (client.TimeoutException, client.ScriptTimeoutException):
+            except (client.TimeoutException,
+                    client.ScriptTimeoutException,
+                    client.JavascriptErrorException):
+                # A JavascriptErrorException will happen when we navigate;
+                # by ignoring it it's possible to reload the test whilst the
+                # harness remains paused
                 pass
-            except (socket.timeout, client.NoSuchWindowException,
-                    client.UnknownErrorException, IOError):
+            except (socket.timeout,
+                    client.NoSuchWindowException,
+                    client.UnknownErrorException,
+                    IOError):
                 break
             except Exception as e:
                 self.logger.error(traceback.format_exc(e))
@@ -82,8 +94,8 @@ class WebDriverTestharnessProtocolPart(TestharnessProtocolPart):
     def load_runner(self, url_protocol):
         if self.runner_handle:
             self.webdriver.window_handle = self.runner_handle
-        url = urlparse.urljoin(self.parent.executor.server_url(url_protocol),
-                               "/testharness_runner.html")
+        url = urljoin(self.parent.executor.server_url(url_protocol),
+                      "/testharness_runner.html")
         self.logger.debug("Loading %s" % url)
 
         self.webdriver.url = url
@@ -289,11 +301,19 @@ class WebDriverProtocol(Protocol):
         self.webdriver = None
 
     def is_alive(self):
+        socket_previous_timeout = socket.getdefaulttimeout()
         try:
-            # Get a simple property over the connection
+            # Get a simple property over the connection, with 2 seconds of timeout
+            # that should be more than enough to check if the WebDriver its
+            # still alive, and allows to complete the check within the testrunner
+            # 5 seconds of extra_timeout we have as maximum to end the test before
+            # the external timeout from testrunner triggers.
+            socket.setdefaulttimeout(2)
             self.webdriver.window_handle
-        except (socket.timeout, client.UnknownErrorException):
+        except (socket.timeout, client.UnknownErrorException, client.InvalidSessionIdException):
             return False
+        finally:
+            socket.setdefaulttimeout(socket_previous_timeout)
         return True
 
     def after_connect(self):
@@ -449,8 +469,8 @@ class WebDriverRefTestExecutor(RefTestExecutor):
         self.close_after_done = close_after_done
         self.has_window = False
 
-        with open(os.path.join(here, "reftest-wait_webdriver.js")) as f:
-            self.wait_script = f.read()
+        with open(os.path.join(here, "test-wait.js")) as f:
+            self.wait_script = f.read() % {"classname": "reftest-wait"}
 
     def reset(self):
         self.implementation.reset()
@@ -487,15 +507,55 @@ class WebDriverRefTestExecutor(RefTestExecutor):
                             self.extra_timeout).run()
 
     def _screenshot(self, protocol, url, timeout):
-        webdriver = protocol.webdriver
-        webdriver.url = url
+        self.protocol.base.load(url)
 
-        webdriver.execute_async_script(self.wait_script)
+        self.protocol.base.execute_script(self.wait_script, True)
 
-        screenshot = webdriver.screenshot()
+        screenshot = self.protocol.webdriver.screenshot()
 
         # strip off the data:img/png, part of the url
         if screenshot.startswith("data:image/png;base64,"):
             screenshot = screenshot.split(",", 1)[1]
 
         return screenshot
+
+
+class WebDriverCrashtestExecutor(CrashtestExecutor):
+    def __init__(self, browser, server_config, timeout_multiplier=1,
+                 screenshot_cache=None, close_after_done=True,
+                 debug_info=None, capabilities=None, **kwargs):
+        """WebDriver-based executor for reftests"""
+        CrashtestExecutor.__init__(self,
+                                   browser,
+                                   server_config,
+                                   screenshot_cache=screenshot_cache,
+                                   timeout_multiplier=timeout_multiplier,
+                                   debug_info=debug_info)
+        self.protocol = WebDriverProtocol(self, browser,
+                                          capabilities=capabilities)
+
+        with open(os.path.join(here, "test-wait.js")) as f:
+            self.wait_script = f.read() % {"classname": "test-wait"}
+
+    def do_test(self, test):
+        timeout = (test.timeout * self.timeout_multiplier if self.debug_info is None
+                   else None)
+
+        success, data = WebDriverRun(self.logger,
+                                     self.do_crashtest,
+                                     self.protocol,
+                                     self.test_url(test),
+                                     timeout,
+                                     self.extra_timeout).run()
+
+        if success:
+            return self.convert_result(test, data)
+
+        return (test.result_cls(*data), [])
+
+    def do_crashtest(self, protocol, url, timeout):
+        protocol.base.load(url)
+        protocol.base.execute_script(self.wait_script, asynchronous=True)
+
+        return {"status": "PASS",
+                "message": None}

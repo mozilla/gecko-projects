@@ -16,6 +16,8 @@
 #  include "mozilla/SandboxBrokerPolicyFactory.h"
 #endif
 
+#include "mozilla/Telemetry.h"
+
 #if defined(XP_WIN)
 #  include "mozilla/WinDllServices.h"
 #endif
@@ -36,7 +38,7 @@ RDDChild::RDDChild(RDDProcessHost* aHost) : mHost(aHost) {
 
 RDDChild::~RDDChild() { MOZ_COUNT_DTOR(RDDChild); }
 
-bool RDDChild::Init(bool aStartMacSandbox) {
+bool RDDChild::Init() {
   Maybe<FileDescriptor> brokerFd;
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
@@ -56,7 +58,7 @@ bool RDDChild::Init(bool aStartMacSandbox) {
 
   nsTArray<GfxVarUpdate> updates = gfxVars::FetchNonDefaultVars();
 
-  SendInit(updates, brokerFd, aStartMacSandbox);
+  SendInit(updates, brokerFd, Telemetry::CanRecordReleaseData());
 
 #ifdef MOZ_GECKO_PROFILER
   Unused << SendInitProfiler(ProfilerParent::CreateForProcess(OtherPid()));

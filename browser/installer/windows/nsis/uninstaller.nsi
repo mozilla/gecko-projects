@@ -99,6 +99,7 @@ VIAddVersionKey "OriginalFilename" "helper.exe"
 !insertmacro GetInstallerRegistryPref
 
 !insertmacro un.ChangeMUIHeaderImage
+!insertmacro un.ChangeMUISidebarImage
 !insertmacro un.CheckForFilesInUse
 !insertmacro un.CleanUpdateDirectories
 !insertmacro un.CleanVirtualStore
@@ -401,6 +402,18 @@ Section "Uninstall"
     ${EndIf}
   ${EndIf}
 
+  ; Remove our HKCR/Applications key, if it's for this installation.
+  ReadRegStr $0 HKLM "Software\Classes\Applications\${FileMainEXE}\DefaultIcon" ""
+  StrCpy $0 $0 -2
+  ${If} $0 == "$INSTDIR\${FileMainEXE}"
+    DeleteRegKey HKLM "Software\Classes\Applications\${FileMainEXE}"
+  ${EndIf}
+  ReadRegStr $0 HKCU "Software\Classes\Applications\${FileMainEXE}\DefaultIcon" ""
+  StrCpy $0 $0 -2
+  ${If} $0 == "$INSTDIR\${FileMainEXE}"
+    DeleteRegKey HKCU "Software\Classes\Applications\${FileMainEXE}"
+  ${EndIf}
+
   ; Remove directories and files we always control before parsing the uninstall
   ; log so empty directories can be removed.
   ${If} ${FileExists} "$INSTDIR\updates"
@@ -568,6 +581,10 @@ Function un.ShowWelcome
 
   ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 3" "HWND"
   SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
+  ; We need to overwrite the sidebar image so that we get it drawn with proper
+  ; scaling if the display is scaled at anything above 100%.
+  ${un.ChangeMUISidebarImage} "$PLUGINSDIR\modern-wizard.bmp"
 FunctionEnd
 
 Function un.leaveWelcome
@@ -613,11 +630,10 @@ Function un.preConfirm
   SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
 
   ${If} ${FileExists} "$INSTDIR\distribution\modern-header.bmp"
-  ${AndIf} $hHeaderBitmap == ""
     Delete "$PLUGINSDIR\modern-header.bmp"
     CopyFiles /SILENT "$INSTDIR\distribution\modern-header.bmp" "$PLUGINSDIR\modern-header.bmp"
-    ${un.ChangeMUIHeaderImage} "$PLUGINSDIR\modern-header.bmp"
   ${EndIf}
+  ${un.ChangeMUIHeaderImage} "$PLUGINSDIR\modern-header.bmp"
 
   ; Setup the unconfirm.ini file for the Custom Uninstall Confirm Page
   WriteINIStr "$PLUGINSDIR\unconfirm.ini" "Settings" NumFields "3"
@@ -692,6 +708,10 @@ Function un.ShowFinish
 
   ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 3" "HWND"
   SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
+  ; We need to overwrite the sidebar image so that we get it drawn with proper
+  ; scaling if the display is scaled at anything above 100%.
+  ${un.ChangeMUISidebarImage} "$PLUGINSDIR\modern-wizard.bmp"
 
   ; Either Fields 4 and 5 are the reboot option radio buttons, or Field 4 is
   ; the survey checkbox and Field 5 doesn't exist. Either way, we need to

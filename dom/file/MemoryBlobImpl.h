@@ -121,7 +121,7 @@ class MemoryBlobImpl final : public BaseBlobImpl {
     NS_FORWARD_NSIIPCSERIALIZABLEINPUTSTREAM(mSerializableInputStream->)
 
    private:
-    ~DataOwnerAdapter() {}
+    ~DataOwnerAdapter() = default;
 
     DataOwnerAdapter(DataOwner* aDataOwner, nsIInputStream* aStream)
         : mDataOwner(aDataOwner),
@@ -147,10 +147,9 @@ class MemoryBlobImpl final : public BaseBlobImpl {
                      aOther->mStart + aStart, aLength),
         mDataOwner(aOther->mDataOwner) {
     MOZ_ASSERT(mDataOwner && mDataOwner->mData, "must have data");
-    mImmutable = aOther->mImmutable;
   }
 
-  ~MemoryBlobImpl() {}
+  ~MemoryBlobImpl() = default;
 
   // Used when backed by a memory store
   RefPtr<DataOwner> mDataOwner;

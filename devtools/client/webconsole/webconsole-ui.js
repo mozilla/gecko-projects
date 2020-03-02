@@ -4,7 +4,6 @@
 
 "use strict";
 
-const { Utils: WebConsoleUtils } = require("devtools/client/webconsole/utils");
 const EventEmitter = require("devtools/shared/event-emitter");
 const Services = require("Services");
 const {
@@ -29,10 +28,10 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "PREFS",
-  "devtools/client/webconsole/constants",
-  true
+  "constants",
+  "devtools/client/webconsole/constants"
 );
+
 loader.lazyRequireGetter(
   this,
   "START_IGNORE_ACTION",
@@ -121,7 +120,9 @@ class WebConsoleUI {
     // Ignore Fronts that are already destroyed
     if (filterDisconnectedProxies) {
       proxies = proxies.filter(proxy => {
-        return proxy.webConsoleFront && !!proxy.webConsoleFront.actorID;
+        return (
+          proxy && proxy.webConsoleFront && !!proxy.webConsoleFront.actorID
+        );
       });
     }
 
@@ -143,18 +144,14 @@ class WebConsoleUI {
       await this._attachTargets();
 
       this._commands = new ConsoleCommands({
-        debuggerClient: this.hud.currentTarget.client,
+        devToolsClient: this.hud.currentTarget.client,
         proxy: this.getProxy(),
+        hud: this.hud,
         threadFront: this.hud.toolbox && this.hud.toolbox.threadFront,
         currentTarget: this.hud.currentTarget,
       });
 
       await this.wrapper.init();
-
-      const id = WebConsoleUtils.supportsString(this.hudId);
-      if (Services.obs) {
-        Services.obs.notifyObservers(id, "web-console-created");
-      }
     })();
 
     return this._initializer;
@@ -229,7 +226,7 @@ class WebConsoleUI {
     if (clearStorage) {
       this.clearMessagesCache();
     }
-    this.emit("messages-cleared");
+    this.emitForTests("messages-cleared");
   }
 
   clearNetworkRequests() {
@@ -252,7 +249,7 @@ class WebConsoleUI {
   clearPrivateMessages() {
     if (this.wrapper) {
       this.wrapper.dispatchPrivateMessagesClear();
-      this.emit("private-messages-cleared");
+      this.emitForTests("private-messages-cleared");
     }
   }
 
@@ -347,11 +344,21 @@ class WebConsoleUI {
    *        A new top level target is created.
    */
   async _onTargetAvailable({ type, targetFront, isTopLevel }) {
+    const dispatchTargetAvailable = () => {
+      const store = this.wrapper && this.wrapper.getStore();
+      if (store) {
+        this.wrapper.getStore().dispatch({
+          type: constants.TARGET_AVAILABLE,
+          targetType: type,
+        });
+      }
+    };
+
     // This is a top level target. It may update on process switches
     // when navigating to another domain.
     if (isTopLevel) {
       const fissionSupport = Services.prefs.getBoolPref(
-        PREFS.FEATURES.BROWSER_TOOLBOX_FISSION
+        constants.PREFS.FEATURES.BROWSER_TOOLBOX_FISSION
       );
       const needContentProcessMessagesListener =
         targetFront.isParentProcess && !targetFront.isAddon && !fissionSupport;
@@ -361,16 +368,28 @@ class WebConsoleUI {
         needContentProcessMessagesListener
       );
       await this.proxy.connect();
+      dispatchTargetAvailable();
       return;
     }
-    // Ignore frame targets, except the top level one, which is handled in the previous
-    // block.
-    if (type == this.hud.targetList.TYPES.FRAME) {
+
+    // Allow frame, but only in content toolbox, when the fission/content toolbox pref is
+    // set. i.e. still ignore them in the content of the browser toolbox as we inspect
+    // messages via the process targets
+    // Also ignore workers as they are not supported yet. (see bug 1592584)
+    const isContentToolbox = this.hud.targetList.targetFront.isLocalTab;
+    const listenForFrames =
+      isContentToolbox &&
+      Services.prefs.getBoolPref("devtools.contenttoolbox.fission");
+    if (
+      type != this.hud.targetList.TYPES.PROCESS &&
+      (type != this.hud.targetList.TYPES.FRAME || !listenForFrames)
+    ) {
       return;
     }
     const proxy = new WebConsoleConnectionProxy(this, targetFront);
     this.additionalProxies.set(targetFront, proxy);
     await proxy.connect();
+    dispatchTargetAvailable();
   }
 
   /**
@@ -403,7 +422,7 @@ class WebConsoleUI {
     const WebConsoleWrapper = BrowserLoader({
       baseURI: "resource://devtools/client/webconsole/",
       window: this.window,
-    }).require("./webconsole-wrapper");
+    }).require("devtools/client/webconsole/webconsole-wrapper");
 
     this.wrapper = new WebConsoleWrapper(
       this.outputNode,
@@ -495,7 +514,7 @@ class WebConsoleUI {
   }
 
   getLongString(grip) {
-    this.getProxy().webConsoleFront.getString(grip);
+    return this.getProxy().webConsoleFront.getString(grip);
   }
 
   /**
@@ -550,33 +569,38 @@ class WebConsoleUI {
     this[id] = node;
   }
 
-  /**
-   * Retrieve the FrameActor ID given a frame depth, or the selected one if no
-   * frame depth given.
-   *
-   * @return { frameActor: String|null, webConsoleFront: WebConsoleFront }:
-   *         frameActor is the FrameActor ID for the given frame depth
-   *         (or the selected frame if it exists), null if no frame was found.
-   *         webConsoleFront is the front for the thread the frame is associated with.
-   */
+  // Retrieves the debugger's currently selected frame front
   async getFrameActor() {
     const state = this.hud.getDebuggerFrames();
     if (!state) {
-      return { frameActor: null, webConsoleFront: this.webConsoleFront };
+      return null;
     }
 
-    const grip = state.frames[state.selected];
+    const frame = state.frames[state.selected];
 
-    if (!grip) {
-      return { frameActor: null, webConsoleFront: this.webConsoleFront };
+    if (!frame) {
+      return null;
     }
 
-    const webConsoleFront = await state.target.getFront("console");
+    return frame.actor;
+  }
 
-    return {
-      frameActor: grip.actor,
-      webConsoleFront,
-    };
+  getWebconsoleFront({ frameActorId } = {}) {
+    if (frameActorId) {
+      const frameFront = this.hud.getFrontByID(frameActorId);
+      return frameFront.getWebConsoleFront();
+    }
+
+    if (!this.hud.toolbox) {
+      return this.webConsoleFront;
+    }
+
+    const threadFront = this.hud.toolbox.getSelectedThreadFront();
+    if (!threadFront) {
+      return this.webConsoleFront;
+    }
+
+    return threadFront.getWebconsoleFront();
   }
 
   getSelectedNodeActor() {

@@ -31,41 +31,6 @@ add_task(async function setup() {
   });
 });
 
-add_task(async function test_button_display() {
-  let tab = await BrowserTestUtils.openNewForegroundTab({
-    url: "about:protections",
-    gBrowser,
-  });
-  let tabPromise = BrowserTestUtils.waitForNewTab(
-    gBrowser,
-    "about:preferences#privacy-trackingprotection"
-  );
-
-  await SpecialPowers.spawn(tab.linkedBrowser, [], async function() {
-    await ContentTaskUtils.waitForCondition(() => {
-      return content.document.querySelectorAll(".graph-bar").length;
-    }, "The graph has been built");
-
-    let protectionsButton = content.document.getElementById(
-      "manage-protections"
-    );
-    Assert.ok(
-      ContentTaskUtils.is_visible(protectionsButton),
-      "Button to manage protections is displayed"
-    );
-    await ContentTaskUtils.getEventUtils(content).synthesizeMouseAtCenter(
-      protectionsButton,
-      {},
-      content
-    );
-  });
-
-  let preferencesTab = await tabPromise;
-  ok(preferencesTab, "The preferences tab opened");
-  BrowserTestUtils.removeTab(tab);
-  BrowserTestUtils.removeTab(preferencesTab);
-});
-
 add_task(async function test_graph_display() {
   // This creates the schema.
   await TrackingDBService.saveEvents(JSON.stringify({}));
@@ -760,5 +725,48 @@ add_task(async function test_etp_custom_protections_off() {
     );
   });
   Services.prefs.setStringPref("browser.contentblocking.category", "standard");
+  BrowserTestUtils.removeTab(tab);
+});
+
+// Ensure that the ETP mobile promotion card is shown when the pref is on, and hidden when the pref is off
+add_task(async function test_etp_mobile_promotion() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.contentblocking.report.show_mobile_app", true]],
+  });
+  let tab = await BrowserTestUtils.openNewForegroundTab({
+    url: "about:protections",
+    gBrowser,
+  });
+  await SpecialPowers.spawn(tab.linkedBrowser, [], async function() {
+    let mobilePromotion = content.document.getElementById("mobile-hanger");
+    Assert.ok(
+      ContentTaskUtils.is_visible(mobilePromotion),
+      "Mobile promotions card is displayed"
+    );
+
+    // Card should hide after the X is clicked.
+    mobilePromotion.querySelector(".exit-icon").click();
+    Assert.ok(
+      ContentTaskUtils.is_hidden(mobilePromotion),
+      "Mobile promotions card is no longer displayed"
+    );
+  });
+  BrowserTestUtils.removeTab(tab);
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.contentblocking.report.show_mobile_app", false]],
+  });
+  tab = await BrowserTestUtils.openNewForegroundTab({
+    url: "about:protections",
+    gBrowser,
+  });
+  await SpecialPowers.spawn(tab.linkedBrowser, [], async function() {
+    let mobilePromotion = content.document.getElementById("mobile-hanger");
+    Assert.ok(
+      ContentTaskUtils.is_hidden(mobilePromotion),
+      "Mobile promotions card is hidden"
+    );
+  });
+
   BrowserTestUtils.removeTab(tab);
 });

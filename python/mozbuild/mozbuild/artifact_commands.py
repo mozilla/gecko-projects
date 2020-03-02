@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import six
 
 from collections import OrderedDict
 
@@ -177,7 +178,7 @@ class PackageFrontend(MachCommandBase):
     def artifact_toolchain(self, verbose=False, cache_dir=None,
                            skip_cache=False, from_build=(),
                            tooltool_manifest=None, authentication_file=None,
-                           no_unpack=False, retry=None,
+                           no_unpack=False, retry=0,
                            artifact_manifest=None, files=()):
         '''Download, cache and install pre-built toolchains.
         '''
@@ -248,7 +249,7 @@ class PackageFrontend(MachCommandBase):
                     cot.raise_for_status()
 
                 digest = algorithm = None
-                data = json.loads(cot.content)
+                data = json.loads(cot.text)
                 for algorithm, digest in (data.get('artifacts', {})
                                               .get(artifact_name, {}).items()):
                     pass
@@ -283,7 +284,7 @@ class PackageFrontend(MachCommandBase):
             from taskgraph.parameters import Parameters
             from taskgraph.generator import load_tasks_for_kind
             params = Parameters(
-                level=os.environ.get('MOZ_SCM_LEVEL', '3'),
+                level=six.ensure_text(os.environ.get('MOZ_SCM_LEVEL', '3')),
                 strict=False,
             )
 
@@ -335,7 +336,7 @@ class PackageFrontend(MachCommandBase):
             record = ArtifactRecord(task_id, name)
             records[record.filename] = record
 
-        for record in records.itervalues():
+        for record in six.itervalues(records):
             self.log(logging.INFO, 'artifact', {'name': record.basename},
                      'Setting up artifact {name}')
             valid = False

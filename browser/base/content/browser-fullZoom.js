@@ -48,7 +48,8 @@ var FullZoom = {
   // Initialization & Destruction
 
   init: function FullZoom_init() {
-    gBrowser.addEventListener("ZoomChangeUsingMouseWheel", this);
+    gBrowser.addEventListener("DoZoomEnlargeBy10", this);
+    gBrowser.addEventListener("DoZoomReduceBy10", this);
 
     // Register ourselves with the service so we know when our pref changes.
     this._cps2 = Cc["@mozilla.org/content-pref/service;1"].getService(
@@ -83,7 +84,8 @@ var FullZoom = {
   destroy: function FullZoom_destroy() {
     Services.prefs.removeObserver("browser.zoom.", this);
     this._cps2.removeObserverForName(this.name, this);
-    gBrowser.removeEventListener("ZoomChangeUsingMouseWheel", this);
+    gBrowser.removeEventListener("DoZoomEnlargeBy10", this);
+    gBrowser.removeEventListener("DoZoomReduceBy10", this);
   },
 
   // Event Handlers
@@ -92,10 +94,11 @@ var FullZoom = {
 
   handleEvent: function FullZoom_handleEvent(event) {
     switch (event.type) {
-      case "ZoomChangeUsingMouseWheel":
-        let browser = this._getTargetedBrowser(event);
-        this._ignorePendingZoomAccesses(browser);
-        this._applyZoomToPref(browser);
+      case "DoZoomEnlargeBy10":
+        this.changeZoomBy(this._getTargetedBrowser(event), 0.1);
+        break;
+      case "DoZoomReduceBy10":
+        this.changeZoomBy(this._getTargetedBrowser(event), -0.1);
         break;
     }
   },
@@ -179,9 +182,6 @@ var FullZoom = {
       }
       return;
     }
-
-    this._globalValue =
-      aValue === undefined ? aValue : this._ensureValid(aValue);
 
     // If the current page doesn't have a site-specific preference, then its
     // zoom should be set to the new global preference now that the global
@@ -361,6 +361,35 @@ var FullZoom = {
   },
 
   /**
+   * If browser in reader mode sends message to reader in order to increase font size,
+   * Otherwise enlarges the zoom level of the page in the current browser.
+   * This function is not async like reduce/enlarge, because it is invoked by our
+   * event handler. This means that the call to _applyZoomToPref is not awaited and
+   * will happen asynchronously.
+   */
+  changeZoomBy(aBrowser, aValue) {
+    if (aBrowser.currentURI.spec.startsWith("about:reader")) {
+      const message = aValue > 0 ? "Reader::ZoomIn" : "Reader:ZoomOut";
+      aBrowser.messageManager.sendAsyncMessage(message);
+      return;
+    } else if (this._isPDFViewer(aBrowser)) {
+      const message = aValue > 0 ? "PDFJS::ZoomIn" : "PDFJS:ZoomOut";
+      aBrowser.messageManager.sendAsyncMessage(message);
+      return;
+    }
+    let zoom = ZoomManager.getZoomForBrowser(aBrowser);
+    zoom += aValue;
+    if (zoom < ZoomManager.MIN) {
+      zoom = ZoomManager.MIN;
+    } else if (zoom > ZoomManager.MAX) {
+      zoom = ZoomManager.MAX;
+    }
+    ZoomManager.setZoomForBrowser(aBrowser, zoom);
+    this._ignorePendingZoomAccesses(aBrowser);
+    this._applyZoomToPref(aBrowser);
+  },
+
+  /**
    * Sets the zoom level for the given browser to the given floating
    * point value, where 1 is the default zoom level.
    */
@@ -386,9 +415,9 @@ var FullZoom = {
       browser.messageManager.sendAsyncMessage("PDFJS:ZoomReset");
     }
     let token = this._getBrowserToken(browser);
-    let result = this._getGlobalValue(browser).then(value => {
+    let result = ZoomUI.getGlobalValue().then(value => {
       if (token.isCurrent) {
-        ZoomManager.setZoomForBrowser(browser, value === undefined ? 1 : value);
+        ZoomManager.setZoomForBrowser(browser, value);
         this._ignorePendingZoomAccesses(browser);
       }
     });
@@ -424,7 +453,7 @@ var FullZoom = {
     aBrowser,
     aCallback
   ) {
-    if (!this.siteSpecific || gInPrintPreviewMode) {
+    if (gInPrintPreviewMode) {
       this._executeSoon(aCallback);
       return;
     }
@@ -437,20 +466,20 @@ var FullZoom = {
       return;
     }
 
-    if (aValue !== undefined) {
+    if (aValue !== undefined && this.siteSpecific) {
       ZoomManager.setZoomForBrowser(aBrowser, this._ensureValid(aValue));
       this._ignorePendingZoomAccesses(aBrowser);
       this._executeSoon(aCallback);
       return;
     }
 
+    // Above, we check if site-specific zoom is enabled before setting
+    // the tab browser zoom, however global zoom should work independent
+    // of the site-specific pref, so we do no checks here.
     let token = this._getBrowserToken(aBrowser);
-    this._getGlobalValue(aBrowser).then(value => {
+    ZoomUI.getGlobalValue().then(value => {
       if (token.isCurrent) {
-        ZoomManager.setZoomForBrowser(
-          aBrowser,
-          value === undefined ? 1 : value
-        );
+        ZoomManager.setZoomForBrowser(aBrowser, value);
         this._ignorePendingZoomAccesses(aBrowser);
       }
       this._executeSoon(aCallback);
@@ -539,7 +568,7 @@ var FullZoom = {
 
   /**
    * Returns the browser that the supplied zoom event is associated with.
-   * @param event  The ZoomChangeUsingMouseWheel event.
+   * @param event  The zoom event.
    * @return  The associated browser element, if one exists, otherwise null.
    */
   _getTargetedBrowser: function FullZoom__getTargetedBrowser(event) {
@@ -563,7 +592,7 @@ var FullZoom = {
       return target.ownerGlobal.docShell.chromeEventHandler;
     }
 
-    throw new Error("Unexpected ZoomChangeUsingMouseWheel event source");
+    throw new Error("Unexpected zoom event source");
   },
 
   /**
@@ -596,35 +625,6 @@ var FullZoom = {
     }
 
     return aValue;
-  },
-
-  /**
-   * Gets the global browser.content.full-zoom content preference.
-   *
-   * @param browser   The browser pertaining to the zoom.
-   * @returns Promise<prefValue>
-   *                  Resolves to the preference value when done.
-   */
-  _getGlobalValue: function FullZoom__getGlobalValue(browser) {
-    // * !("_globalValue" in this) => global value not yet cached.
-    // * this._globalValue === undefined => global value known not to exist.
-    // * Otherwise, this._globalValue is a number, the global value.
-    return new Promise(resolve => {
-      if ("_globalValue" in this) {
-        resolve(this._globalValue);
-        return;
-      }
-      let value = undefined;
-      this._cps2.getGlobal(this.name, this._loadContextFromBrowser(browser), {
-        handleResult(pref) {
-          value = pref.value;
-        },
-        handleCompletion: reason => {
-          this._globalValue = this._ensureValid(value);
-          resolve(this._globalValue);
-        },
-      });
-    });
   },
 
   /**

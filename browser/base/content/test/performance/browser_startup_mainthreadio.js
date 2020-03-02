@@ -256,7 +256,7 @@ const startupPhases = {
       // bug 975996
       path: "ProfD:permissions.sqlite",
       condition: WIN || MAC,
-      fsync: 7,
+      fsync: 8,
       read: 2,
       stat: 1,
       write: 10,
@@ -265,9 +265,9 @@ const startupPhases = {
       // bug 975996
       path: "ProfD:permissions.sqlite-journal",
       condition: WIN || MAC,
-      fsync: 7,
-      stat: 26,
-      write: 38,
+      fsync: 8,
+      stat: 28,
+      write: 40,
     },
     {
       // bug 975996
@@ -288,13 +288,6 @@ const startupPhases = {
       ignoreIfUnused: true,
       read: 22,
       close: 11,
-    },
-    {
-      // bug 1545167
-      path: "/etc/mime.types",
-      condition: LINUX,
-      read: 3,
-      close: 3,
     },
     {
       // bug 1541246
@@ -356,20 +349,6 @@ const startupPhases = {
       path: "XREAppDist:distribution.ini",
       condition: WIN,
       stat: 1,
-    },
-    // Bug 1547693
-    {
-      path: "*WindowsApps/microsoft.windowscommunicationsapps*",
-      condition: WIN,
-      ignoreIfUnused: true,
-      stat: 3,
-    },
-    // Bug 1545167
-    {
-      path: "*Microsoft.MicrosoftEdge*",
-      condition: WIN,
-      ignoreIfUnused: true,
-      stat: 3,
     },
     {
       // bug 1545139

@@ -5,12 +5,14 @@
 #ifndef DOM_MEDIA_MEDIACONTROL_PLAYBACKCONTROLLER_H_
 #define DOM_MEDIA_MEDIACONTROL_PLAYBACKCONTROLLER_H_
 
-#include "MediaController.h"
+#include "MediaControlKeysEvent.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/dom/BrowsingContext.h"
 
 namespace mozilla {
 namespace dom {
+
+class MediaSession;
 
 /**
  * This interface is used to handle different playback control actions. The
@@ -47,13 +49,14 @@ class MOZ_STACK_CLASS PlaybackController {
   void SeekTo();
 
  private:
-  RefPtr<nsPIDOMWindowOuter> mWindow;
+  MediaSession* GetMediaSession();
+  RefPtr<BrowsingContext> mBC;
 };
 
 class MediaActionHandler {
  public:
-  static void UpdateMediaAction(BrowsingContext* aContext,
-                                MediaControlActions aAction);
+  static void HandleMediaControlKeysEvent(BrowsingContext* aContext,
+                                          MediaControlKeysEvent aEvent);
 };
 
 }  // namespace dom

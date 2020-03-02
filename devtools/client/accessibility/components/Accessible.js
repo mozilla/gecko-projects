@@ -23,14 +23,19 @@ const {
   ORDERED_PROPS,
   ACCESSIBLE_EVENTS,
   VALUE_FLASHING_DURATION,
-} = require("../constants");
-const { L10N } = require("../utils/l10n");
+} = require("devtools/client/accessibility/constants");
+const { L10N } = require("devtools/client/accessibility/utils/l10n");
 const {
   flashElementOn,
   flashElementOff,
 } = require("devtools/client/inspector/markup/utils");
-const { updateDetails } = require("../actions/details");
-const { select, unhighlight } = require("../actions/accessibles");
+const {
+  updateDetails,
+} = require("devtools/client/accessibility/actions/details");
+const {
+  select,
+  unhighlight,
+} = require("devtools/client/accessibility/actions/accessibles");
 
 const Tree = createFactory(
   require("devtools/client/shared/components/VirtualizedTree")
@@ -180,16 +185,13 @@ class Accessible extends Component {
     }
   }
 
-  async update() {
+  update() {
     const { dispatch, accessibleFront } = this.props;
     if (!accessibleFront.actorID) {
       return;
     }
 
-    const domWalker = (await accessibleFront.targetFront.getFront("inspector"))
-      .walker;
-
-    dispatch(updateDetails(domWalker, accessibleFront));
+    dispatch(updateDetails(accessibleFront));
   }
 
   setExpanded(item, isExpanded) {
@@ -228,20 +230,18 @@ class Accessible extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
+    const accessibleWalkerFront = accessibleFront.parent();
+    if (!accessibleWalkerFront) {
       return;
     }
 
-    accessibilityWalkerFront
-      .highlightAccessible(accessibleFront)
-      .catch(error => {
-        // Only report an error where there's still a toolbox. Ignore cases
-        // where toolbox is already destroyed.
-        if (this.props.toolbox) {
-          console.error(error);
-        }
-      });
+    accessibleWalkerFront.highlightAccessible(accessibleFront).catch(error => {
+      // Only report an error where there's still a toolbox. Ignore cases
+      // where toolbox is already destroyed.
+      if (this.props.toolbox) {
+        console.error(error);
+      }
+    });
   }
 
   hideAccessibleHighlighter(accessibleFront) {
@@ -250,12 +250,12 @@ class Accessible extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
+    const accessibleWalkerFront = accessibleFront.parent();
+    if (!accessibleWalkerFront) {
       return;
     }
 
-    accessibilityWalkerFront.unhighlight().catch(error => {
+    accessibleWalkerFront.unhighlight().catch(error => {
       // Only report an error where there's still a toolbox. Ignore cases where
       // toolbox is already destroyed.
       if (this.props.toolbox) {
@@ -282,14 +282,7 @@ class Accessible extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
-      return;
-    }
-
-    await this.props.dispatch(
-      select(accessibilityWalkerFront, accessibleFront)
-    );
+    await this.props.dispatch(select(accessibleFront));
 
     const { props } = this.refs;
     if (props) {

@@ -28,17 +28,20 @@ class nsDOMOfflineResourceList;
 class nsGlobalWindowInner;
 class nsGlobalWindowOuter;
 class nsIArray;
+class nsIBaseWindow;
 class nsIChannel;
 class nsIContent;
 class nsIContentSecurityPolicy;
 class nsICSSDeclaration;
 class nsIDocShell;
+class nsIDocShellTreeOwner;
 class nsDocShellLoadState;
 class nsIPrincipal;
 class nsIRunnable;
 class nsIScriptTimeoutHandler;
 class nsISerialEventTarget;
 class nsIURI;
+class nsIWebBrowserChrome;
 class nsPIDOMWindowInner;
 class nsPIDOMWindowOuter;
 class nsPIWindowRoot;
@@ -49,6 +52,7 @@ namespace mozilla {
 namespace dom {
 class AudioContext;
 class BrowsingContext;
+class BrowsingContextGroup;
 class ClientInfo;
 class ClientState;
 class ContentFrameMessageManager;
@@ -309,9 +313,8 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // indexedDB counters.
   void TryToCacheTopInnerWindow();
 
-  // Increase/Decrease the number of active IndexedDB transactions/databases for
-  // the decision making of TabGroup scheduling and timeout-throttling.
-  void UpdateActiveIndexedDBTransactionCount(int32_t aDelta);
+  // Increase/Decrease the number of active IndexedDB databases for the
+  // decision making of TabGroup scheduling and timeout-throttling.
   void UpdateActiveIndexedDBDatabaseCount(int32_t aDelta);
 
   // Return true if there is any active IndexedDB databases which could block
@@ -338,6 +341,10 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   void NoteDOMContentLoaded();
 
   mozilla::dom::TabGroup* TabGroup();
+
+  // Like MaybeTabGroup, but it is more tolerant of being called at peculiar
+  // times, and it can return null.
+  mozilla::dom::TabGroup* MaybeTabGroup();
 
   virtual mozilla::dom::CustomElementRegistry* CustomElements() = 0;
 
@@ -394,6 +401,11 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
    * Get the browsing context in this window.
    */
   inline mozilla::dom::BrowsingContext* GetBrowsingContext() const;
+
+  /**
+   * Get the browsing context group this window belongs to.
+   */
+  mozilla::dom::BrowsingContextGroup* GetBrowsingContextGroup() const;
 
   /**
    * Call this to indicate that some node (this window, its document,
@@ -541,13 +553,11 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
       mozilla::dom::Element& aElt, const nsAString& aPseudoElt,
       mozilla::ErrorResult& aError) = 0;
 
-  virtual mozilla::dom::Element* GetFrameElement() = 0;
-
   virtual nsDOMOfflineResourceList* GetApplicationCache() = 0;
 
   virtual bool GetFullScreen() = 0;
 
-  virtual nsresult Focus() = 0;
+  virtual nsresult Focus(mozilla::dom::CallerType aCallerType) = 0;
   virtual nsresult Close() = 0;
 
   mozilla::dom::DocGroup* GetDocGroup() const;
@@ -566,6 +576,8 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   void SaveStorageAccessGranted(const nsACString& aPermissionKey);
 
   bool HasStorageAccessGranted(const nsACString& aPermissionKey);
+
+  nsIPrincipal* GetDocumentContentBlockingAllowListPrincipal() const;
 
  protected:
   void CreatePerformanceObjectIfNeeded();
@@ -591,6 +603,7 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // Cache the URI when mDoc is cleared.
   nsCOMPtr<nsIURI> mDocumentURI;  // strong
   nsCOMPtr<nsIURI> mDocBaseURI;   // strong
+  nsCOMPtr<nsIPrincipal> mDocContentBlockingAllowListPrincipal;
 
   nsCOMPtr<mozilla::dom::EventTarget> mParentTarget;  // strong
 
@@ -757,6 +770,10 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   bool HadOriginalOpener() const;
 
   mozilla::dom::TabGroup* TabGroup();
+
+  // Like MaybeTabGroup, but it is more tolerant of being called at peculiar
+  // times, and it can return null.
+  mozilla::dom::TabGroup* MaybeTabGroup();
 
   virtual nsPIDOMWindowOuter* GetPrivateRoot() = 0;
 
@@ -990,13 +1007,6 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
                                      const nsAString& aPopupWindowName,
                                      const nsAString& aPopupWindowFeatures) = 0;
 
-  virtual void NotifyContentBlockingEvent(
-      unsigned aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aURIHint,
-      nsIChannel* aTrackingChannel,
-      const mozilla::Maybe<
-          mozilla::AntiTrackingCommon::StorageAccessGrantedReason>& aReason =
-          mozilla::Nothing()) = 0;
-
   // WebIDL-ish APIs
   void MarkUncollectableForCCGeneration(uint32_t aGeneration) {
     mMarkedCCGeneration = aGeneration;
@@ -1036,7 +1046,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   virtual bool GetFullScreen() = 0;
   virtual nsresult SetFullScreen(bool aFullscreen) = 0;
 
-  virtual nsresult Focus() = 0;
+  virtual nsresult Focus(mozilla::dom::CallerType aCallerType) = 0;
   virtual nsresult Close() = 0;
 
   virtual nsresult MoveBy(int32_t aXDif, int32_t aYDif) = 0;
@@ -1063,6 +1073,10 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
       mozilla::dom::BrowsingContext* aOpener);
   already_AddRefed<mozilla::dom::BrowsingContext>
   TakeOpenerForInitialContentBrowser();
+
+  already_AddRefed<nsIDocShellTreeOwner> GetTreeOwner();
+  already_AddRefed<nsIBaseWindow> GetTreeOwnerWindow();
+  already_AddRefed<nsIWebBrowserChrome> GetWebBrowserChrome();
 
  protected:
   // Lazily instantiate an about:blank document if necessary, and if

@@ -36,7 +36,6 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/intl/LocaleService.h"
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsDependentSubstring.h"
@@ -1597,7 +1596,7 @@ nsresult PendingLookup::SendRemoteQueryInternal(Reason& aReason) {
   mRequest.set_user_initiated(true);
 
   nsCString locale;
-  rv = LocaleService::GetInstance()->GetAppLocaleAsLangTag(locale);
+  rv = LocaleService::GetInstance()->GetAppLocaleAsBCP47(locale);
   NS_ENSURE_SUCCESS(rv, rv);
   mRequest.set_locale(locale.get());
   nsCString sha256Hash;
@@ -1978,4 +1977,10 @@ nsresult ApplicationReputationService::QueryReputationInternal(
 
   observerService->AddObserver(lookup, "quit-application", true);
   return lookup->StartLookup();
+}
+
+nsresult ApplicationReputationService::IsBinary(const nsACString& aFileName,
+                                                bool* aBinary) {
+  *aBinary = ::IsBinary(aFileName);
+  return NS_OK;
 }

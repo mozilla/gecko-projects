@@ -202,6 +202,10 @@ NS_IMETHODIMP RemoteWebProgressRequest::Cancel(nsresult aStatus) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+NS_IMETHODIMP RemoteWebProgressRequest::GetCanceled(bool* aCanceled) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 NS_IMETHODIMP RemoteWebProgressRequest::Suspend(void) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -223,12 +227,17 @@ NS_IMETHODIMP RemoteWebProgressRequest::GetLoadFlags(nsLoadFlags* aLoadFlags) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP RemoteWebProgressRequest::SetLoadFlags(nsLoadFlags aLoadFlags) {
+NS_IMETHODIMP RemoteWebProgressRequest::GetTRRMode(
+    nsIRequest::TRRMode* aTRRMode) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP
-RemoteWebProgressRequest::IsTrackingResource(bool* aIsTrackingResource) {
+NS_IMETHODIMP RemoteWebProgressRequest::SetTRRMode(
+    nsIRequest::TRRMode aTRRMode) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP RemoteWebProgressRequest::SetLoadFlags(nsLoadFlags aLoadFlags) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -239,8 +248,8 @@ RemoteWebProgressRequest::IsThirdPartyTrackingResource(
 }
 
 NS_IMETHODIMP
-RemoteWebProgressRequest::IsSocialTrackingResource(
-    bool* aIsSocialTrackingResource) {
+RemoteWebProgressRequest::IsThirdPartySocialTrackingResource(
+    bool* aIsThirdPartySocialTrackingResource) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

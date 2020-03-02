@@ -7,30 +7,29 @@ const {
   STUBS_UPDATE_ENV,
   getCleanedPacket,
   getSerializedPacket,
-  getStubFilePath,
+  getStubFile,
   writeStubsToFile,
-} = require("devtools/client/webconsole/test/browser/stub-generator-helpers");
+} = require("chrome://mochitests/content/browser/devtools/client/webconsole/test/browser/stub-generator-helpers");
 
 const TEST_URI =
   "http://example.com/browser/devtools/client/webconsole/test/browser/test-console-api.html";
 const STUB_FILE = "pageError.js";
 
 add_task(async function() {
+  await pushPref("javascript.options.asyncstack", true);
+
   const isStubsUpdate = env.get(STUBS_UPDATE_ENV) == "true";
   info(`${isStubsUpdate ? "Update" : "Check"} ${STUB_FILE}`);
 
   const generatedStubs = await generatePageErrorStubs();
 
   if (isStubsUpdate) {
-    await writeStubsToFile(
-      getStubFilePath(STUB_FILE, env, true),
-      generatedStubs
-    );
+    await writeStubsToFile(env, STUB_FILE, generatedStubs);
     ok(true, `${STUB_FILE} was updated`);
     return;
   }
 
-  const existingStubs = require(getStubFilePath(STUB_FILE));
+  const existingStubs = getStubFile(STUB_FILE);
   const FAILURE_MSG =
     "The pageError stubs file needs to be updated by running " +
     "`mach test devtools/client/webconsole/test/browser/" +

@@ -8,7 +8,7 @@ const protocol = require("devtools/shared/protocol");
 
 const { Cc, Ci, Cu, Cr } = require("chrome");
 
-const { DebuggerServer } = require("devtools/server/debugger-server");
+const { DevToolsServer } = require("devtools/server/devtools-server");
 const Services = require("Services");
 const ChromeUtils = require("ChromeUtils");
 
@@ -140,6 +140,10 @@ CustomizedReload.prototype = {
       .getInterface(Ci.nsIWebNavigation);
   },
 
+  get browsingContext() {
+    return this.docShell.browsingContext;
+  },
+
   start() {
     if (!this.waitForReloadCompleted) {
       this.waitForReloadCompleted = new Promise((resolve, reject) => {
@@ -147,7 +151,7 @@ CustomizedReload.prototype = {
         this.rejectReloadCompleted = reject;
 
         if (this.userAgent) {
-          this.docShell.customUserAgent = this.userAgent;
+          this.browsingContext.customUserAgent = this.userAgent;
         }
 
         let reloadFlags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
@@ -265,8 +269,11 @@ CustomizedReload.prototype = {
     }
 
     // Reset the customized user agent.
-    if (this.userAgent && this.docShell.customUserAgent == this.userAgent) {
-      this.docShell.customUserAgent = null;
+    if (
+      this.userAgent &&
+      this.browsingContext.customUserAgent == this.userAgent
+    ) {
+      this.browsingContext.customUserAgent = null;
     }
 
     if (error) {
@@ -329,7 +336,7 @@ var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
       let selectedDOMNode;
 
       if (options.toolboxSelectedNodeActorID) {
-        const actor = DebuggerServer.searchAllConnectionsForActor(
+        const actor = DevToolsServer.searchAllConnectionsForActor(
           options.toolboxSelectedNodeActorID
         );
         if (actor && actor instanceof NodeActor) {
@@ -356,12 +363,11 @@ var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
         enumerable: true,
         configurable: true,
         value: dbgWindow.makeDebuggeeValue(object => {
-          const dbgObj = dbgWindow.makeDebuggeeValue(object);
-
-          const consoleActor = DebuggerServer.searchAllConnectionsForActor(
+          const consoleActor = DevToolsServer.searchAllConnectionsForActor(
             options.toolboxConsoleActorID
           );
           if (consoleActor) {
+            const dbgObj = consoleActor.makeDebuggeeValue(object);
             consoleActor.inspectObject(
               dbgObj,
               "webextension-devtools-inspectedWindow-eval"
@@ -665,7 +671,7 @@ var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
               });
             }
 
-            const consoleActor = DebuggerServer.searchAllConnectionsForActor(
+            const consoleActor = DevToolsServer.searchAllConnectionsForActor(
               options.toolboxConsoleActorID
             );
 

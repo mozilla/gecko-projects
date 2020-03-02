@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMPtr.h"
+#include "nsDocShell.h"
 #include "nsMemory.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/ModuleUtils.h"
@@ -63,10 +64,10 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsTypeAheadFind)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsTypeAheadFind)
 
-NS_IMPL_CYCLE_COLLECTION(nsTypeAheadFind, mFoundLink, mFoundEditable,
-                         mCurrentWindow, mStartFindRange, mSearchRange,
-                         mStartPointRange, mEndPointRange, mSoundInterface,
-                         mFind, mFoundRange)
+NS_IMPL_CYCLE_COLLECTION_WEAK(nsTypeAheadFind, mFoundLink, mFoundEditable,
+                              mCurrentWindow, mStartFindRange, mSearchRange,
+                              mStartPointRange, mEndPointRange, mSoundInterface,
+                              mFind, mFoundRange)
 
 static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
@@ -434,7 +435,7 @@ nsresult nsTypeAheadFind::FindItNow(uint32_t aMode, bool aIsLinksOnly,
   }
 
   if (!mStartPointRange) {
-    mStartPointRange = new nsRange(presShell->GetDocument());
+    mStartPointRange = nsRange::Create(presShell->GetDocument());
   }
 
   // XXXbz Should this really be ignoring errors?
@@ -705,7 +706,7 @@ nsresult nsTypeAheadFind::FindItNow(uint32_t aMode, bool aIsLinksOnly,
         // at end of document and go to beginning
         RefPtr<nsRange> tempRange = mStartPointRange->CloneRange();
         if (!mEndPointRange) {
-          mEndPointRange = new nsRange(presShell->GetDocument());
+          mEndPointRange = nsRange::Create(presShell->GetDocument());
         }
 
         mStartPointRange = mEndPointRange;
@@ -789,24 +790,22 @@ nsresult nsTypeAheadFind::GetSearchContainers(
   }
 
   if (!mSearchRange) {
-    mSearchRange = new nsRange(doc);
+    mSearchRange = nsRange::Create(doc);
   }
   nsCOMPtr<nsINode> searchRootNode(rootContent);
 
   mSearchRange->SelectNodeContents(*searchRootNode, IgnoreErrors());
 
   if (!mStartPointRange) {
-    mStartPointRange = new nsRange(doc);
+    mStartPointRange = nsRange::Create(doc);
   }
-  mStartPointRange->SetStart(*searchRootNode, 0, IgnoreErrors());
-  mStartPointRange->Collapse(true);  // collapse to start
+  mStartPointRange->SetStartAndEnd(searchRootNode, 0, searchRootNode, 0);
 
   if (!mEndPointRange) {
-    mEndPointRange = new nsRange(doc);
+    mEndPointRange = nsRange::Create(doc);
   }
-  mEndPointRange->SetEnd(*searchRootNode, searchRootNode->Length(),
-                         IgnoreErrors());
-  mEndPointRange->Collapse(false);  // collapse to end
+  mEndPointRange->SetStartAndEnd(searchRootNode, searchRootNode->Length(),
+                                 searchRootNode, searchRootNode->Length());
 
   // Consider current selection as null if
   // it's not in the currently focused document
@@ -827,6 +826,10 @@ nsresult nsTypeAheadFind::GetSearchContainers(
     // IsRangeVisible. It returns the first visible range after searchRange
     IsRangeVisible(mSearchRange, aIsFirstVisiblePreferred, true,
                    getter_AddRefs(mStartPointRange), nullptr);
+    // We want to search in the visible selection range. That means that the
+    // start point needs to be the end if we're looking backwards, or vice
+    // versa.
+    mStartPointRange->Collapse(!aFindPrev);
   } else {
     uint32_t startOffset;
     nsCOMPtr<nsINode> startNode;
@@ -845,9 +848,8 @@ nsresult nsTypeAheadFind::GetSearchContainers(
     // We need to set the start point this way, other methods haven't worked
     mStartPointRange->SelectNode(*startNode, IgnoreErrors());
     mStartPointRange->SetStart(*startNode, startOffset, IgnoreErrors());
+    mStartPointRange->Collapse(true);  // collapse to start
   }
-
-  mStartPointRange->Collapse(true);  // collapse to start
 
   presShell.forget(aPresShell);
   presContext.forget(aPresContext);
@@ -1419,7 +1421,8 @@ nsTypeAheadFind::IsRangeRendered(nsRange* aRange, bool* aResult) {
 
 bool nsTypeAheadFind::IsRangeRendered(nsRange* aRange) {
   using FrameForPointOption = nsLayoutUtils::FrameForPointOption;
-  nsCOMPtr<nsIContent> content = do_QueryInterface(aRange->GetCommonAncestor());
+  nsCOMPtr<nsIContent> content =
+      do_QueryInterface(aRange->GetClosestCommonInclusiveAncestor());
   if (!content) {
     return false;
   }

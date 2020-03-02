@@ -1,10 +1,15 @@
 //! x86 ABI implementation.
 
 use super::super::settings as shared_settings;
+#[cfg(feature = "unwind")]
+use super::fde::emit_fde;
 use super::registers::{FPR, GPR, RU};
 use super::settings as isa_settings;
+#[cfg(feature = "unwind")]
 use super::unwind::UnwindInfo;
 use crate::abi::{legalize_args, ArgAction, ArgAssigner, ValueConversion};
+#[cfg(feature = "unwind")]
+use crate::binemit::{FrameUnwindKind, FrameUnwindSink};
 use crate::cursor::{Cursor, CursorPosition, EncCursor};
 use crate::ir;
 use crate::ir::immediates::Imm64;
@@ -18,7 +23,6 @@ use crate::regalloc::RegisterSet;
 use crate::result::CodegenResult;
 use crate::stack_layout::layout_stack;
 use alloc::borrow::Cow;
-use alloc::vec::Vec;
 use core::i32;
 use std::boxed::Box;
 use target_lexicon::{PointerWidth, Triple};
@@ -329,7 +333,7 @@ pub fn legalize_signature(
 
 /// Get register class for a type appearing in a legalized signature.
 pub fn regclass_for_abi_type(ty: ir::Type) -> RegClass {
-    if ty.is_int() || ty.is_bool() {
+    if ty.is_int() || ty.is_bool() || ty.is_ref() {
         GPR
     } else {
         FPR
@@ -415,8 +419,8 @@ fn callee_saved_gprs_used(isa: &dyn TargetIsa, func: &ir::Function) -> RegisterS
     //
     // TODO: Consider re-evaluating how regmove/regfill/regspill work and whether it's possible
     // to avoid this step.
-    for ebb in &func.layout {
-        for inst in func.layout.ebb_insts(ebb) {
+    for block in &func.layout {
+        for inst in func.layout.block_insts(block) {
             match func.dfg[inst] {
                 ir::instructions::InstructionData::RegMove { dst, .. }
                 | ir::instructions::InstructionData::RegFill { dst, .. } => {
@@ -449,7 +453,7 @@ pub fn prologue_epilogue(func: &mut ir::Function, isa: &dyn TargetIsa) -> Codege
 
 fn baldrdash_prologue_epilogue(func: &mut ir::Function, isa: &dyn TargetIsa) -> CodegenResult<()> {
     debug_assert!(
-        !isa.flags().probestack_enabled(),
+        !isa.flags().enable_probestack(),
         "baldrdash does not expect cranelift to emit stack probes"
     );
 
@@ -547,8 +551,8 @@ fn fastcall_prologue_epilogue(func: &mut ir::Function, isa: &dyn TargetIsa) -> C
     }
 
     // Set up the cursor and insert the prologue
-    let entry_ebb = func.layout.entry_block().expect("missing entry block");
-    let mut pos = EncCursor::new(func, isa).at_first_insertion_point(entry_ebb);
+    let entry_block = func.layout.entry_block().expect("missing entry block");
+    let mut pos = EncCursor::new(func, isa).at_first_insertion_point(entry_block);
     let prologue_cfa_state =
         insert_common_prologue(&mut pos, local_stack_size, reg_type, &csrs, isa);
 
@@ -608,8 +612,8 @@ fn system_v_prologue_epilogue(func: &mut ir::Function, isa: &dyn TargetIsa) -> C
     }
 
     // Set up the cursor and insert the prologue
-    let entry_ebb = func.layout.entry_block().expect("missing entry block");
-    let mut pos = EncCursor::new(func, isa).at_first_insertion_point(entry_ebb);
+    let entry_block = func.layout.entry_block().expect("missing entry block");
+    let mut pos = EncCursor::new(func, isa).at_first_insertion_point(entry_block);
     let prologue_cfa_state =
         insert_common_prologue(&mut pos, local_stack_size, reg_type, &csrs, isa);
 
@@ -674,9 +678,9 @@ fn insert_common_prologue(
         None
     };
 
-    // Append param to entry EBB
-    let ebb = pos.current_ebb().expect("missing ebb under cursor");
-    let fp = pos.func.dfg.append_ebb_param(ebb, reg_type);
+    // Append param to entry block
+    let block = pos.current_block().expect("missing block under cursor");
+    let fp = pos.func.dfg.append_block_param(block, reg_type);
     pos.func.locations[fp] = ir::ValueLoc::Reg(RU::rbp as RegUnit);
 
     let push_fp_inst = pos.ins().x86_push(fp);
@@ -723,8 +727,8 @@ fn insert_common_prologue(
     }
 
     for reg in csrs.iter(GPR) {
-        // Append param to entry EBB
-        let csr_arg = pos.func.dfg.append_ebb_param(ebb, reg_type);
+        // Append param to entry block
+        let csr_arg = pos.func.dfg.append_block_param(block, reg_type);
 
         // Assign it a location
         pos.func.locations[csr_arg] = ir::ValueLoc::Reg(reg);
@@ -750,8 +754,7 @@ fn insert_common_prologue(
 
     // Allocate stack frame storage.
     if stack_size > 0 {
-        if isa.flags().probestack_enabled()
-            && stack_size > (1 << isa.flags().probestack_size_log2())
+        if isa.flags().enable_probestack() && stack_size > (1 << isa.flags().probestack_size_log2())
         {
             // Emit a stack probe.
             let rax = RU::rax as RegUnit;
@@ -828,29 +831,11 @@ fn insert_common_epilogues(
     isa: &dyn TargetIsa,
     cfa_state: Option<CFAState>,
 ) {
-    while let Some(ebb) = pos.next_ebb() {
-        pos.goto_last_inst(ebb);
+    while let Some(block) = pos.next_block() {
+        pos.goto_last_inst(block);
         if let Some(inst) = pos.current_inst() {
             if pos.func.dfg[inst].opcode().is_return() {
-                if let (Some(ref mut frame_layout), ref func_layout) =
-                    (pos.func.frame_layout.as_mut(), &pos.func.layout)
-                {
-                    // Figure out if we need to insert end-of-function-aware frame layout information.
-                    let following_inst = func_layout
-                        .next_ebb(ebb)
-                        .and_then(|next_ebb| func_layout.first_inst(next_ebb));
-
-                    if let Some(following_inst) = following_inst {
-                        frame_layout
-                            .instructions
-                            .insert(inst, vec![FrameLayoutChange::Preserve].into_boxed_slice());
-                        frame_layout.instructions.insert(
-                            following_inst,
-                            vec![FrameLayoutChange::Restore].into_boxed_slice(),
-                        );
-                    }
-                }
-
+                let is_last = pos.func.layout.last_block() == Some(block);
                 insert_common_epilogue(
                     inst,
                     stack_size,
@@ -858,6 +843,7 @@ fn insert_common_epilogues(
                     reg_type,
                     csrs,
                     isa,
+                    is_last,
                     cfa_state.clone(),
                 );
             }
@@ -874,6 +860,7 @@ fn insert_common_epilogue(
     reg_type: ir::types::Type,
     csrs: &RegisterSet,
     isa: &dyn TargetIsa,
+    is_last: bool,
     mut cfa_state: Option<CFAState>,
 ) {
     let word_size = isa.pointer_bytes() as isize;
@@ -928,9 +915,15 @@ fn insert_common_epilogue(
         assert_eq!(cfa_state.current_depth, -word_size);
         assert_eq!(cfa_state.cf_ptr_offset, word_size);
 
+        // Inserting preserve CFA state operation after FP pop instructions.
         let new_cfa = FrameLayoutChange::CallFrameAddressAt {
             reg: cfa_state.cf_ptr_reg,
             offset: cfa_state.cf_ptr_offset,
+        };
+        let new_cfa = if is_last {
+            vec![new_cfa]
+        } else {
+            vec![FrameLayoutChange::Preserve, new_cfa]
         };
 
         frame_layout
@@ -940,17 +933,39 @@ fn insert_common_epilogue(
                 *insts = insts
                     .iter()
                     .cloned()
-                    .chain(std::iter::once(new_cfa))
+                    .chain(new_cfa.clone().into_iter())
                     .collect::<Box<[_]>>();
             })
-            .or_insert_with(|| Box::new([new_cfa]));
+            .or_insert_with(|| new_cfa.into_boxed_slice());
+
+        if !is_last {
+            // Inserting restore CFA state operation after each return.
+            frame_layout
+                .instructions
+                .insert(inst, vec![FrameLayoutChange::Restore].into_boxed_slice());
+        }
     }
 }
 
-pub fn emit_unwind_info(func: &ir::Function, isa: &dyn TargetIsa, mem: &mut Vec<u8>) {
-    // Assumption: RBP is being used as the frame pointer
-    // In the future, Windows fastcall codegen should usually omit the frame pointer
-    if let Some(info) = UnwindInfo::try_from_func(func, isa, Some(RU::rbp.into())) {
-        info.emit(mem);
+#[cfg(feature = "unwind")]
+pub fn emit_unwind_info(
+    func: &ir::Function,
+    isa: &dyn TargetIsa,
+    kind: FrameUnwindKind,
+    sink: &mut dyn FrameUnwindSink,
+) {
+    match kind {
+        FrameUnwindKind::Fastcall => {
+            // Assumption: RBP is being used as the frame pointer
+            // In the future, Windows fastcall codegen should usually omit the frame pointer
+            if let Some(info) = UnwindInfo::try_from_func(func, isa, Some(RU::rbp.into())) {
+                info.emit(sink);
+            }
+        }
+        FrameUnwindKind::Libunwind => {
+            if func.frame_layout.is_some() {
+                emit_fde(func, isa, sink);
+            }
+        }
     }
 }

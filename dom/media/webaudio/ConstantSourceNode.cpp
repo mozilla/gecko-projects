@@ -203,13 +203,12 @@ void ConstantSourceNode::DestroyMediaTrack() {
 
 void ConstantSourceNode::Start(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(
-        NS_LITERAL_STRING("start time"));
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"start time");
     return;
   }
 
   if (mStartCalled) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    aRv.ThrowInvalidStateError("Can't call start() more than once");
     return;
   }
   mStartCalled = true;
@@ -227,12 +226,12 @@ void ConstantSourceNode::Start(double aWhen, ErrorResult& aRv) {
 
 void ConstantSourceNode::Stop(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(NS_LITERAL_STRING("stop time"));
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"stop time");
     return;
   }
 
   if (!mStartCalled) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    aRv.ThrowInvalidStateError("Can't call stop() without calling start()");
     return;
   }
 

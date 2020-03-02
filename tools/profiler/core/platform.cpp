@@ -254,9 +254,7 @@ static uint32_t StartupExtraDefaultFeatures() {
 // locked state.
 class PSMutex : private ::mozilla::detail::MutexImpl {
  public:
-  PSMutex()
-      : ::mozilla::detail::MutexImpl(
-            ::mozilla::recordreplay::Behavior::DontPreserve) {}
+  PSMutex() : ::mozilla::detail::MutexImpl() {}
 
   void Lock() {
     const int tid = profiler_current_thread_id();
@@ -315,9 +313,7 @@ class PSMutex : private ::mozilla::detail::MutexImpl {
   // This should only be used to compare with the current thread id; any other
   // number (0 or other id) could change at any time because the current thread
   // wouldn't own the lock.
-  Atomic<int, MemoryOrdering::SequentiallyConsistent,
-         recordreplay::Behavior::DontPreserve>
-      mOwningThreadId{0};
+  Atomic<int, MemoryOrdering::SequentiallyConsistent> mOwningThreadId{0};
 };
 
 // RAII class to lock the profiler mutex.
@@ -708,6 +704,11 @@ class ActivePS {
 
     for (uint32_t i = 0; i < mFilters.length(); ++i) {
       std::string filter = mFilters[i];
+
+      if (filter == "*") {
+        return true;
+      }
+
       std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
 
       // Crude, non UTF-8 compatible, case insensitive substring search
@@ -775,7 +776,7 @@ class ActivePS {
 
     size_t n = aMallocSizeOf(sInstance);
 
-    n += sInstance->mProfileBuffer.SizeOfIncludingThis(aMallocSizeOf);
+    n += sInstance->mProfileBuffer.SizeOfExcludingThis(aMallocSizeOf);
 
     // Measurement of the following members may be added later if DMD finds it
     // is worthwhile:
@@ -1217,7 +1218,7 @@ class ActivePS {
 #ifdef MOZ_BASE_PROFILER
   // Optional startup profile thread array from BaseProfiler.
   UniquePtr<char[]> mBaseProfileThreads;
-  BlocksRingBuffer::BlockIndex mGeckoIndexWhenBaseProfileAdded;
+  ProfileBufferBlockIndex mGeckoIndexWhenBaseProfileAdded;
 #endif
 
   struct ExitProfile {
@@ -1237,8 +1238,7 @@ uint32_t ActivePS::sNextGeneration = 0;
 // The mutex that guards accesses to CorePS and ActivePS.
 static PSMutex gPSMutex;
 
-Atomic<uint32_t, MemoryOrdering::Relaxed, recordreplay::Behavior::DontPreserve>
-    RacyFeatures::sActiveAndFeatures(0);
+Atomic<uint32_t, MemoryOrdering::Relaxed> RacyFeatures::sActiveAndFeatures(0);
 
 // Each live thread has a RegisteredThread, and we store a reference to it in
 // TLS. This class encapsulates that TLS.
@@ -3200,19 +3200,22 @@ void SamplerThread::Run() {
             if (NS_WARN_IF(state.mClearedBlockCount !=
                            previousState.mClearedBlockCount)) {
               LOG("Stack sample too big for local storage, needed %u bytes",
-                  unsigned(state.mRangeEnd.ConvertToU64() -
-                           previousState.mRangeEnd.ConvertToU64()));
+                  unsigned(
+                      state.mRangeEnd.ConvertToProfileBufferIndex() -
+                      previousState.mRangeEnd.ConvertToProfileBufferIndex()));
               // There *must* be a CompactStack after a TimeBeforeCompactStack,
               // even an empty one.
               CorePS::CoreBlocksRingBuffer().PutObjects(
                   ProfileBufferEntry::Kind::CompactStack,
                   UniquePtr<BlocksRingBuffer>(nullptr));
-            } else if (state.mRangeEnd.ConvertToU64() -
-                           previousState.mRangeEnd.ConvertToU64() >=
+            } else if (state.mRangeEnd.ConvertToProfileBufferIndex() -
+                           previousState.mRangeEnd
+                               .ConvertToProfileBufferIndex() >=
                        CorePS::CoreBlocksRingBuffer().BufferLength()->Value()) {
               LOG("Stack sample too big for profiler storage, needed %u bytes",
-                  unsigned(state.mRangeEnd.ConvertToU64() -
-                           previousState.mRangeEnd.ConvertToU64()));
+                  unsigned(
+                      state.mRangeEnd.ConvertToProfileBufferIndex() -
+                      previousState.mRangeEnd.ConvertToProfileBufferIndex()));
               // There *must* be a CompactStack after a TimeBeforeCompactStack,
               // even an empty one.
               CorePS::CoreBlocksRingBuffer().PutObjects(
@@ -3707,7 +3710,7 @@ static void locked_profiler_save_profile_to_file(PSLockRef aLock,
 
 static SamplerThread* locked_profiler_stop(PSLockRef aLock);
 
-void profiler_shutdown() {
+void profiler_shutdown(IsFastShutdown aIsFastShutdown) {
   LOG("profiler_shutdown");
 
   VTUNE_SHUTDOWN();
@@ -3728,8 +3731,13 @@ void profiler_shutdown() {
         locked_profiler_save_profile_to_file(lock, filename,
                                              /* aIsShuttingDown */ true);
       }
+      if (aIsFastShutdown == IsFastShutdown::Yes) {
+        return;
+      }
 
       samplerThread = locked_profiler_stop(lock);
+    } else if (aIsFastShutdown == IsFastShutdown::Yes) {
+      return;
     }
 
     CorePS::Destroy(lock);
@@ -4835,7 +4843,7 @@ bool profiler_add_native_allocation_marker(int aMainThreadId, int64_t aSize,
 void profiler_add_network_marker(
     nsIURI* aURI, int32_t aPriority, uint64_t aChannelId, NetworkLoadType aType,
     mozilla::TimeStamp aStart, mozilla::TimeStamp aEnd, int64_t aCount,
-    mozilla::net::CacheDisposition aCacheDisposition,
+    mozilla::net::CacheDisposition aCacheDisposition, uint64_t aInnerWindowID,
     const mozilla::net::TimingStruct* aTimings, nsIURI* aRedirectURI,
     UniqueProfilerBacktrace aSource) {
   if (!profiler_can_accept_markers()) {
@@ -4857,10 +4865,11 @@ void profiler_add_network_marker(
   AUTO_PROFILER_STATS(add_marker_with_NetworkMarkerPayload);
   profiler_add_marker(
       name, JS::ProfilingCategoryPair::NETWORK,
-      NetworkMarkerPayload(
-          static_cast<int64_t>(aChannelId), PromiseFlatCString(spec).get(),
-          aType, aStart, aEnd, aPriority, aCount, aCacheDisposition, aTimings,
-          PromiseFlatCString(redirect_spec).get(), std::move(aSource)));
+      NetworkMarkerPayload(static_cast<int64_t>(aChannelId),
+                           PromiseFlatCString(spec).get(), aType, aStart, aEnd,
+                           aPriority, aCount, aCacheDisposition, aInnerWindowID,
+                           aTimings, PromiseFlatCString(redirect_spec).get(),
+                           std::move(aSource)));
 }
 
 void profiler_add_marker_for_thread(int aThreadId,
@@ -4905,10 +4914,11 @@ void profiler_add_marker_for_thread(int aThreadId,
       static_cast<uint32_t>(aCategoryPair), aPayload, delta.ToMilliseconds());
 }
 
-void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
-                      JS::ProfilingCategoryPair aCategoryPair,
-                      TracingKind aKind,
-                      const Maybe<uint64_t>& aInnerWindowID) {
+void profiler_tracing_marker(const char* aCategoryString,
+                             const char* aMarkerName,
+                             JS::ProfilingCategoryPair aCategoryPair,
+                             TracingKind aKind,
+                             const Maybe<uint64_t>& aInnerWindowID) {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
   VTUNE_TRACING(aMarkerName, aKind);
@@ -4924,10 +4934,11 @@ void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
       TracingMarkerPayload(aCategoryString, aKind, aInnerWindowID));
 }
 
-void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
-                      JS::ProfilingCategoryPair aCategoryPair,
-                      TracingKind aKind, UniqueProfilerBacktrace aCause,
-                      const Maybe<uint64_t>& aInnerWindowID) {
+void profiler_tracing_marker(const char* aCategoryString,
+                             const char* aMarkerName,
+                             JS::ProfilingCategoryPair aCategoryPair,
+                             TracingKind aKind, UniqueProfilerBacktrace aCause,
+                             const Maybe<uint64_t>& aInnerWindowID) {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
   VTUNE_TRACING(aMarkerName, aKind);

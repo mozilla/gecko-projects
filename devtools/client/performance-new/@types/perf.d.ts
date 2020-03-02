@@ -89,10 +89,8 @@ export type RecordingState =
   // An async request has been sent to stop the profiler.
   | "request-to-stop-profiler"
   // The profiler notified us that our request to start it actually started
-  // it.
+  // it, or it was already started.
   | "recording"
-  // Some other code with access to the profiler started it.
-  | "other-is-recording"
   // Profiling is not available when in private browsing mode.
   | "locked-by-private-browsing";
 
@@ -110,6 +108,7 @@ export interface State {
   features: string[];
   threads: string[];
   objdirs: string[];
+  presetName: string;
   initializedValues: InitializedValues | null;
   promptEnvRestart: null | string
 }
@@ -189,6 +188,7 @@ interface GeckoProfilerFrameScriptInterface {
 }
 
 export interface RecordingStateFromPreferences {
+  presetName: string;
   entries: number;
   interval: number;
   features: string[];
@@ -268,6 +268,11 @@ export type Action =
       recordingSettingsFromPreferences: RecordingStateFromPreferences;
       getSymbolTableGetter: (profile: object) => GetSymbolTableCallback;
       supportedFeatures: string[] | null;
+    }
+  | {
+      type: "CHANGE_PRESET";
+      presetName: string;
+      preset: PresetDefinition | undefined;
     };
 
 export interface InitializeStoreValues {
@@ -306,6 +311,11 @@ export interface ContentFrameMessageManager {
  * one of the properties of this interface.
  */
 export interface PerformancePref {
+  /**
+   * The recording preferences by default are controlled by different presets.
+   * This pref stores that preset.
+   */
+  Preset: "devtools.performance.recording.preset";
   /**
    * Stores the total number of entries to be used in the profile buffer.
    */
@@ -362,6 +372,7 @@ export interface PerformancePref {
  */
 export interface PopupWindow extends Window {
   gResizePopup?: (height: number) => void;
+  gIsDarkMode?: boolean;
 }
 
 /**
@@ -376,4 +387,55 @@ export interface ScaleFunctions {
   fromFractionToValue: NumberScaler,
   fromValueToFraction: NumberScaler,
   fromFractionToSingleDigitValue: NumberScaler,
+}
+
+export interface PresetDefinition {
+  label: string;
+  description: string;
+  entries: number;
+  interval: number;
+  features: string[];
+  threads: string[];
+  duration: number;
+}
+
+export interface PresetDefinitions {
+  [presetName: string]: PresetDefinition;
+}
+
+export type MessageFromFrontend =
+  | {
+      type: "STATUS_QUERY";
+      requestId: number;
+    }
+  | {
+      type: "ENABLE_MENU_BUTTON";
+      requestId: number;
+    };
+
+export type MessageToFrontend =
+  | {
+      type: "STATUS_RESPONSE";
+      menuButtonIsEnabled: boolean;
+      requestId: number;
+    }
+  | {
+      type: "ENABLE_MENU_BUTTON_DONE";
+      requestId: number;
+    }
+
+/**
+ * This represents an event channel that can talk to a content page on the web.
+ * This interface is a manually typed version of toolkit/modules/WebChannel.jsm
+ * and is opinionated about the types of messages we can send with it.
+ *
+ * The definition is here rather than gecko.d.ts because it was simpler than getting
+ * generics working with the ChromeUtils.import machinery.
+ */
+export class ProfilerWebChannel {
+  constructor(id: string, url: MockedExports.nsIURI);
+  send: (message: MessageToFrontend, target: MockedExports.WebChannelTarget) => void;
+  listen: (
+    handler: (idle: string, message: MessageFromFrontend, target: MockedExports.WebChannelTarget) => void
+  ) => void;
 }

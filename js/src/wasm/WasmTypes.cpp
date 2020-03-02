@@ -24,6 +24,7 @@
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmSerialize.h"
+#include "wasm/WasmStubs.h"
 
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -238,7 +239,7 @@ size_t FuncType::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const {
   return args_.sizeOfExcludingThis(mallocSizeOf);
 }
 
-typedef uint32_t ImmediateType;  // for 32/64 consistency
+using ImmediateType = uint32_t;  // for 32/64 consistency
 static const unsigned sTotalBits = sizeof(ImmediateType) * 8;
 static const unsigned sTagBits = 1;
 static const unsigned sReturnBit = 1;
@@ -382,6 +383,11 @@ const uint8_t* FuncTypeWithId::deserialize(const uint8_t* cursor) {
 size_t FuncTypeWithId::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const {
   return FuncType::sizeOfExcludingThis(mallocSizeOf);
 }
+
+ArgTypeVector::ArgTypeVector(const FuncType& funcType)
+    : args_(funcType.args()),
+      hasStackResults_(ABIResultIter::HasStackResults(
+          ResultType::Vector(funcType.results()))) {}
 
 // A simple notion of prefix: types and mutability must match exactly.
 
@@ -664,12 +670,20 @@ JSObject* DebugFrame::environmentChain() const {
 bool DebugFrame::getLocal(uint32_t localIndex, MutableHandleValue vp) {
   ValTypeVector locals;
   size_t argsLength;
-  if (!instance()->debug().debugGetLocalTypes(funcIndex(), &locals,
-                                              &argsLength)) {
+  StackResults stackResults;
+  if (!instance()->debug().debugGetLocalTypes(funcIndex(), &locals, &argsLength,
+                                              &stackResults)) {
     return false;
   }
 
-  BaseLocalIter iter(locals, argsLength, /* debugEnabled = */ true);
+  ValTypeVector args;
+  MOZ_ASSERT(argsLength <= locals.length());
+  if (!args.append(locals.begin(), argsLength)) {
+    return false;
+  }
+  ArgTypeVector abiArgs(args, stackResults);
+
+  BaseLocalIter iter(locals, abiArgs, /* debugEnabled = */ true);
   while (!iter.done() && iter.index() < localIndex) {
     iter++;
   }
@@ -794,9 +808,9 @@ void TrapSiteVectorArray::swap(TrapSiteVectorArray& rhs) {
   }
 }
 
-void TrapSiteVectorArray::podResizeToFit() {
+void TrapSiteVectorArray::shrinkStorageToFit() {
   for (Trap trap : MakeEnumeratedRange(Trap::Limit)) {
-    (*this)[trap].podResizeToFit();
+    (*this)[trap].shrinkStorageToFit();
   }
 }
 

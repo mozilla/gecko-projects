@@ -14,6 +14,10 @@
 #include "nsCSSAnonBoxes.h"
 #include "nsFrameManager.h"
 
+bool nsIFrame::IsSVGGeometryFrameOrSubclass() const {
+  return IsSVGGeometryFrame() || IsSVGImageFrame();
+}
+
 bool nsIFrame::IsFlexItem() const {
   return GetParent() && GetParent()->IsFlexContainerFrame() &&
          !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
@@ -226,6 +230,29 @@ nsIFrame* nsIFrame::GetClosestFlattenedTreeAncestorPrimaryFrame() const {
     parent = parent->GetFlattenedTreeParentElementForStyle();
   }
   return nullptr;
+}
+
+nsPoint nsIFrame::GetNormalPosition(bool* aHasProperty) const {
+  nsPoint* normalPosition = GetProperty(NormalPositionProperty());
+  if (normalPosition) {
+    if (aHasProperty) {
+      *aHasProperty = true;
+    }
+    return *normalPosition;
+  }
+  if (aHasProperty) {
+    *aHasProperty = false;
+  }
+  return GetPosition();
+}
+
+mozilla::LogicalPoint nsIFrame::GetLogicalNormalPosition(
+    mozilla::WritingMode aWritingMode, const nsSize& aContainerSize) const {
+  // Subtract the size of this frame from the container size to get
+  // the correct position in rtl frames where the origin is on the
+  // right instead of the left
+  return mozilla::LogicalPoint(aWritingMode, GetNormalPosition(),
+                               aContainerSize - mRect.Size());
 }
 
 #endif

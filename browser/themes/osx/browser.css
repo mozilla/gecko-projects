@@ -74,6 +74,11 @@
   text-shadow: inherit;
 }
 
+:root {
+  -moz-appearance: none;
+  background-color: #eeeeee;
+}
+
 /** Begin titlebar **/
 
 #titlebar {
@@ -126,7 +131,7 @@
 
 /* Draw the bottom border of the tabs toolbar when it's not using
    -moz-appearance: toolbar. */
-:root:-moz-any([sizemode="fullscreen"],[customize-entered]) #nav-bar:not([tabs-hidden="true"]),
+:root:-moz-any([sizemode="fullscreen"],[customizing]) #nav-bar:not([tabs-hidden="true"]),
 :root:not([tabsintitlebar]) #nav-bar:not([tabs-hidden="true"]),
 #nav-bar:not([tabs-hidden="true"]):-moz-lwtheme {
   box-shadow: 0 calc(-1 * var(--tabs-navbar-shadow-size)) 0 var(--tabs-border-color);
@@ -239,8 +244,16 @@
 
 %include ../shared/urlbar-searchbar.inc.css
 
-:root {
-  --toolbar-field-focus-border-color: -moz-mac-focusring;
+@supports not -moz-bool-pref("browser.urlbar.update1") {
+  :root {
+    --toolbar-field-focus-border-color: -moz-mac-focusring;
+  }
+
+  #searchbar:focus-within,
+  #urlbar:not(.megabar)[focused="true"] {
+    box-shadow: 0 0 0 1px var(--toolbar-field-focus-border-color) inset,
+                0 0 0 1px var(--toolbar-field-focus-border-color);
+  }
 }
 
 #urlbar,
@@ -252,20 +265,6 @@
  * even in non-Latin scripts. */
 #urlbar-input {
   line-height: 1.745em;
-}
-
-/* Focus ring. */
-#urlbar:not(.megabar)[focused="true"],
-#urlbar.megabar[focused="true"] > #urlbar-background,
-#searchbar:focus-within {
-  box-shadow: 0 0 0 1px var(--toolbar-field-focus-border-color) inset,
-              0 0 0 1px var(--toolbar-field-focus-border-color);
-}
-
-#urlbar.megabar[breakout][breakout-extend][focused="true"] > #urlbar-background {
-  box-shadow: 0 0 0 1px var(--toolbar-field-focus-border-color) inset,
-              0 0 0 1px var(--toolbar-field-focus-border-color),
-              0 5px 18px rgba(0, 0, 0, .2);
 }
 
 %include ../shared/identity-block/identity-block.inc.css
@@ -300,7 +299,7 @@
   font-size: 14px;
 }
 
-@supports -moz-bool-pref("browser.urlbar.update1.expandTextOnFocus") {
+@supports -moz-bool-pref("browser.urlbar.update2.expandTextOnFocus") {
   .urlbarView {
     font-size: inherit;
   }
@@ -498,16 +497,9 @@
 #sidebar-box {
   /* Default font size is 11px on mac, so this is 12px */
   font-size: 1.0909rem;
-  --sidebar-background-color: -moz-mac-source-list;
 }
 
-/* Give the sidebar a vibrant -moz-appearance. Only do this when no lwtheme is
- * in use, because vibrant -moz-appearance values only work if there is no
- * background-color rendered behind the element, and we have :root:-moz-lwtheme
- * rules which set -moz-appearance: none and an opaque background color on the
- * root element. That background color would interfere with the vibrancy.
- * See bug 1594132 for fixing this. */
-#sidebar-box:not(:-moz-lwtheme) {
+#sidebar-box:not([lwt-sidebar]) {
   -moz-appearance: -moz-mac-source-list;
   -moz-font-smoothing-background-color: -moz-mac-source-list;
 }
@@ -749,6 +741,14 @@ menulist.translate-infobar-element > .menulist-dropmarker {
   border-top-style: solid;
   color: #444;
   text-shadow: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  #statuspanel-label {
+    background-color: hsl(240, 1%, 20%);
+    border-color: hsl(240, 1%, 40%);
+    color: rgb(249, 249, 250);
+  }
 }
 
 #statuspanel:not([mirror]) > #statuspanel-inner > #statuspanel-label:-moz-locale-dir(ltr),

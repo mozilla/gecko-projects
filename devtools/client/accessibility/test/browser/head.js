@@ -8,7 +8,7 @@
 /* exported addTestTab, checkTreeState, checkSidebarState, checkAuditState, selectRow,
             toggleRow, toggleMenuItem, addA11yPanelTestsTask, reload, navigate,
             openSimulationMenu, toggleSimulationOption, TREE_FILTERS_MENU_ID,
-            PREFS_MENU_ID */
+            PREFS_MENU_ID, checkHighlighted */
 
 "use strict";
 
@@ -664,12 +664,12 @@ async function toggleSimulationOption(doc, optionIndex) {
 }
 
 async function findAccessibleFor(
-  { toolbox: { target }, panel: { walker: accessibilityWalker } },
+  { toolbox: { target }, panel: { walker: accessibleWalkerFront } },
   selector
 ) {
   const domWalker = (await target.getFront("inspector")).walker;
   const node = await domWalker.querySelector(domWalker.rootNode, selector);
-  return accessibilityWalker.getAccessibleFor(node);
+  return accessibleWalkerFront.getAccessibleFor(node);
 }
 
 async function selectAccessibleForNode(env, selector) {
@@ -803,12 +803,16 @@ function reload(target, waitForTargetEvent = "navigate") {
 }
 
 /**
- * Navigate to a new URL within the panel target.
- * @param  {Object} target             Panel target.
- * @param  {Srting} url                URL to navigate to.
- * @param  {String} waitForTargetEvent Event to wait for after reload.
+ * Wait and check that the state of the accessibility tab in the toolbox is
+ * correct.
+ * @param {Object}   toolbox
+ *                   DevTools toolbox to be checked.
+ * @param {Boolean}  expected
+ *                   Expected highlighted state of the accessibility tab.
  */
-function navigate(target, url, waitForTargetEvent = "navigate") {
-  executeSoon(() => target.navigateTo({ url }));
-  return once(target, waitForTargetEvent);
+async function checkHighlighted(toolbox, expected) {
+  await BrowserTestUtils.waitForCondition(async function() {
+    const isHighlighted = await toolbox.isToolHighlighted("accessibility");
+    return isHighlighted === expected;
+  });
 }

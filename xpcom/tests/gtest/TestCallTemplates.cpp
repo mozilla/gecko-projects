@@ -17,7 +17,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
-#include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 
 #define NS_ITESTSERVICE_IID                          \
@@ -50,7 +49,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsITestService2, NS_ITESTSERVICE2_IID)
 
 class nsTestService final : public nsITestService,
                             public nsSupportsWeakReference {
-  ~nsTestService() {}
+  ~nsTestService() = default;
 
  public:
   NS_DECL_ISUPPORTS

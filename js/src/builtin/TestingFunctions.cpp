@@ -10,7 +10,6 @@
 #include "mozilla/Casting.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
 #include "mozilla/Span.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TextUtils.h"
@@ -22,6 +21,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <utility>
 
 #if defined(XP_UNIX) && !defined(XP_DARWIN)
 #  include <time.h>
@@ -44,6 +44,7 @@
 #include "gc/Zone.h"
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
+#include "jit/Ion.h"
 #include "jit/JitRealm.h"
 #include "js/Array.h"        // JS::NewArrayObject
 #include "js/ArrayBuffer.h"  // JS::{DetachArrayBuffer,GetArrayBufferLengthAndData,NewArrayBufferWithContents}
@@ -76,6 +77,7 @@
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/PromiseObject.h"  // js::PromiseObject, js::PromiseSlot_*
 #include "vm/ProxyObject.h"
 #include "vm/SavedStacks.h"
 #include "vm/Stack.h"
@@ -438,6 +440,18 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   args.rval().setObject(*info);
+  return true;
+}
+
+static bool IsLCovEnabled(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  args.rval().setBoolean(coverage::IsLCovEnabled());
+  return true;
+}
+
+static bool IsTypeInferenceEnabled(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  args.rval().setBoolean(js::IsTypeInferenceEnabled());
   return true;
 }
 
@@ -2497,7 +2511,8 @@ static bool GetWaitForAllPromise(JSContext* cx, unsigned argc, Value* vp) {
   if (!args.requireAtLeast(cx, "getWaitForAllPromise", 1)) {
     return false;
   }
-  if (!args[0].isObject() || !IsPackedArray(&args[0].toObject())) {
+  if (!args[0].isObject() || !args[0].toObject().is<ArrayObject>() ||
+      args[0].toObject().as<NativeObject>().isIndexed()) {
     JS_ReportErrorASCII(
         cx, "first argument must be a dense Array of Promise objects");
     return false;
@@ -2614,13 +2629,19 @@ static void finalize_counter_finalize(JSFreeOp* fop, JSObject* obj) {
   ++finalizeCount;
 }
 
-static const JSClassOps FinalizeCounterClassOps = {nullptr, /* addProperty */
-                                                   nullptr, /* delProperty */
-                                                   nullptr, /* enumerate */
-                                                   nullptr, /* newEnumerate */
-                                                   nullptr, /* resolve */
-                                                   nullptr, /* mayResolve */
-                                                   finalize_counter_finalize};
+static const JSClassOps FinalizeCounterClassOps = {
+    nullptr,                    // addProperty
+    nullptr,                    // delProperty
+    nullptr,                    // enumerate
+    nullptr,                    // newEnumerate
+    nullptr,                    // resolve
+    nullptr,                    // mayResolve
+    finalize_counter_finalize,  // finalize
+    nullptr,                    // call
+    nullptr,                    // hasInstance
+    nullptr,                    // construct
+    nullptr,                    // trace
+};
 
 static const JSClass FinalizeCounterClass = {
     "FinalizeCounter", JSCLASS_FOREGROUND_FINALIZE, &FinalizeCounterClassOps};
@@ -2978,7 +2999,7 @@ static_assert(JitWarmupResetLimit <=
 static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (!jit::IsBaselineJitEnabled()) {
+  if (!jit::IsBaselineJitEnabled(cx)) {
     return ReturnStringCopy(cx, args, "Baseline is disabled.");
   }
 
@@ -3012,7 +3033,7 @@ static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
 static bool testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (!jit::IsIonEnabled()) {
+  if (!jit::IsIonEnabled(cx)) {
     return ReturnStringCopy(cx, args, "Ion is disabled.");
   }
 
@@ -3335,13 +3356,18 @@ class CloneBufferObject : public NativeObject {
 };
 
 static const JSClassOps CloneBufferObjectClassOps = {
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* enumerate */
-    nullptr, /* newEnumerate */
-    nullptr, /* resolve */
-    nullptr, /* mayResolve */
-    CloneBufferObject::Finalize};
+    nullptr,                      // addProperty
+    nullptr,                      // delProperty
+    nullptr,                      // enumerate
+    nullptr,                      // newEnumerate
+    nullptr,                      // resolve
+    nullptr,                      // mayResolve
+    CloneBufferObject::Finalize,  // finalize
+    nullptr,                      // call
+    nullptr,                      // hasInstance
+    nullptr,                      // construct
+    nullptr,                      // trace
+};
 
 const JSClass CloneBufferObject::class_ = {
     "CloneBuffer",
@@ -3363,10 +3389,8 @@ static mozilla::Maybe<JS::StructuredCloneScope> ParseCloneScope(
     return scope;
   }
 
-  if (StringEqualsLiteral(scopeStr, "SameProcessSameThread")) {
-    scope.emplace(JS::StructuredCloneScope::SameProcessSameThread);
-  } else if (StringEqualsLiteral(scopeStr, "SameProcessDifferentThread")) {
-    scope.emplace(JS::StructuredCloneScope::SameProcessDifferentThread);
+  if (StringEqualsLiteral(scopeStr, "SameProcess")) {
+    scope.emplace(JS::StructuredCloneScope::SameProcess);
   } else if (StringEqualsLiteral(scopeStr, "DifferentProcess")) {
     scope.emplace(JS::StructuredCloneScope::DifferentProcess);
   } else if (StringEqualsLiteral(scopeStr, "DifferentProcessForIndexedDB")) {
@@ -3404,7 +3428,8 @@ bool js::testingFunc_serialize(JSContext* cx, unsigned argc, Value* vp) {
       }
 
       if (StringEqualsLiteral(poli, "allow")) {
-        policy.allowSharedMemory();
+        policy.allowSharedMemoryObjects();
+        policy.allowIntraClusterClonableSharedObjects();
       } else if (StringEqualsLiteral(poli, "deny")) {
         // default
       } else {
@@ -3432,8 +3457,7 @@ bool js::testingFunc_serialize(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   if (!clonebuf) {
-    clonebuf.emplace(JS::StructuredCloneScope::SameProcessSameThread, nullptr,
-                     nullptr);
+    clonebuf.emplace(JS::StructuredCloneScope::SameProcess, nullptr, nullptr);
   }
 
   if (!clonebuf->write(cx, args.get(0), args.get(1), policy)) {
@@ -3462,7 +3486,7 @@ static bool Deserialize(JSContext* cx, unsigned argc, Value* vp) {
   JS::CloneDataPolicy policy;
   JS::StructuredCloneScope scope =
       obj->isSynthetic() ? JS::StructuredCloneScope::DifferentProcess
-                         : JS::StructuredCloneScope::SameProcessSameThread;
+                         : JS::StructuredCloneScope::SameProcess;
   if (args.get(1).isObject()) {
     RootedObject opts(cx, &args[1].toObject());
     if (!opts) {
@@ -3485,7 +3509,8 @@ static bool Deserialize(JSContext* cx, unsigned argc, Value* vp) {
       }
 
       if (StringEqualsLiteral(poli, "allow")) {
-        policy.allowSharedMemory();
+        policy.allowSharedMemoryObjects();
+        policy.allowIntraClusterClonableSharedObjects();
       } else if (StringEqualsLiteral(poli, "deny")) {
         // default
       } else {
@@ -3815,7 +3840,7 @@ static bool ReportLargeAllocationFailure(JSContext* cx, unsigned argc,
 
 namespace heaptools {
 
-typedef UniqueTwoByteChars EdgeName;
+using EdgeName = UniqueTwoByteChars;
 
 // An edge to a node from its predecessor in a path through the graph.
 class BackEdge {
@@ -3850,8 +3875,8 @@ class BackEdge {
 
 // A path-finding handler class for use with JS::ubi::BreadthFirst.
 struct FindPathHandler {
-  typedef BackEdge NodeData;
-  typedef JS::ubi::BreadthFirst<FindPathHandler> Traversal;
+  using NodeData = BackEdge;
+  using Traversal = JS::ubi::BreadthFirst<FindPathHandler>;
 
   FindPathHandler(JSContext* cx, JS::ubi::Node start, JS::ubi::Node target,
                   MutableHandle<GCVector<Value>> nodes, Vector<EdgeName>& edges)
@@ -4503,16 +4528,6 @@ static bool SetLazyParsingDisabled(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-static bool SetDeferredParserAlloc(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-
-  bool enable = !args.hasDefined(0) || ToBoolean(args[0]);
-  cx->realm()->behaviors().setDeferredParserAlloc(enable);
-
-  args.rval().setUndefined();
-  return true;
-}
-
 static bool SetDiscardSource(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -4789,6 +4804,11 @@ static bool GetLcovInfo(JSContext* cx, unsigned argc, Value* vp) {
 
   if (args.length() > 1) {
     JS_ReportErrorASCII(cx, "Wrong number of arguments");
+    return false;
+  }
+
+  if (!coverage::IsLCovEnabled()) {
+    JS_ReportErrorASCII(cx, "Coverage not enabled for process.");
     return false;
   }
 
@@ -5881,9 +5901,9 @@ static bool MonitorType(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  // Avoid assertion failures if Baseline is disabled or we can't Baseline
-  // Interpret this script.
-  if (!jit::IsBaselineInterpreterEnabled() ||
+  // Avoid assertion failures if TI or Baseline Interpreter is disabled or if we
+  // can't Baseline Interpret this script.
+  if (!IsTypeInferenceEnabled() || !jit::IsBaselineInterpreterEnabled() ||
       !jit::CanBaselineInterpretScript(script)) {
     args.rval().setUndefined();
     return true;
@@ -6104,7 +6124,7 @@ static bool BaselineCompile(JSContext* cx, unsigned argc, Value* vp) {
       return true;
     }
 
-    if (!jit::IsBaselineJitEnabled()) {
+    if (!jit::IsBaselineJitEnabled(cx)) {
       returnedStr = "baseline disabled";
       break;
     }
@@ -6135,6 +6155,13 @@ static bool BaselineCompile(JSContext* cx, unsigned argc, Value* vp) {
     return ReturnStringCopy(cx, args, returnedStr);
   }
 
+  return true;
+}
+
+static bool ClearKeptObjects(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  JS::ClearKeptObjects(cx);
+  args.rval().setUndefined();
   return true;
 }
 
@@ -6246,6 +6273,14 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "getBuildConfiguration()",
 "  Return an object describing some of the configuration options SpiderMonkey\n"
 "  was built with."),
+
+    JS_FN_HELP("isLcovEnabled", ::IsLCovEnabled, 0, 0,
+"isLcovEnabled()",
+"  Return true if JS LCov support is enabled."),
+
+    JS_FN_HELP("isTypeInferenceEnabled", ::IsTypeInferenceEnabled, 0, 0,
+"isTypeInferenceEnabled()",
+"  Return true if Type Inference is enabled."),
 
     JS_FN_HELP("hasChild", HasChild, 0, 0,
 "hasChild(parent, child)",
@@ -6718,10 +6753,10 @@ gc::ZealModeHelpText),
 "  clone buffer object. 'policy' may be an options hash. Valid keys:\n"
 "    'SharedArrayBuffer' - either 'allow' or 'deny' (the default)\n"
 "      to specify whether SharedArrayBuffers may be serialized.\n"
-"    'scope' - SameProcessSameThread, SameProcessDifferentThread,\n"
-"      DifferentProcess, or DifferentProcessForIndexedDB. Determines how some\n"
-"      values will be serialized. Clone buffers may only be deserialized with a\n"
-"      compatible scope. NOTE - For DifferentProcess/DifferentProcessForIndexedDB,\n"
+"    'scope' - SameProcess, DifferentProcess, or\n"
+"      DifferentProcessForIndexedDB. Determines how some values will be\n"
+"      serialized. Clone buffers may only be deserialized with a compatible\n"
+"      scope. NOTE - For DifferentProcess/DifferentProcessForIndexedDB,\n"
 "      must also set SharedArrayBuffer:'deny' if data contains any shared memory\n"
 "      object."),
 
@@ -6732,10 +6767,10 @@ gc::ZealModeHelpText),
 "    'SharedArrayBuffer' - either 'allow' or 'deny' (the default)\n"
 "      to specify whether SharedArrayBuffers may be serialized.\n"
 "    'scope', which limits the clone buffers that are considered\n"
-"  valid. Allowed values: 'SameProcessSameThread', 'SameProcessDifferentThread',\n"
-"  'DifferentProcess', and 'DifferentProcessForIndexedDB'. So for example, a\n"
+"  valid. Allowed values: ''SameProcess', 'DifferentProcess',\n"
+"  and 'DifferentProcessForIndexedDB'. So for example, a\n"
 "  DifferentProcessForIndexedDB clone buffer may be deserialized in any scope, but\n"
-"  a SameProcessSameThread clone buffer cannot be deserialized in a\n"
+"  a SameProcess clone buffer cannot be deserialized in a\n"
 "  DifferentProcess scope."),
 
     JS_FN_HELP("detachArrayBuffer", DetachArrayBuffer, 1, 0,
@@ -6873,10 +6908,6 @@ gc::ZealModeHelpText),
 "setLazyParsingDisabled(bool)",
 "  Explicitly disable lazy parsing in the current compartment.  The default is that lazy "
 "  parsing is not explicitly disabled."),
-
-    JS_FN_HELP("setDeferredParserAlloc", SetDeferredParserAlloc, 1, 0,
-"setDeferredParserAlloc(bool)",
-"  Enable or disable the parser's deferred alloc support"),
 
     JS_FN_HELP("setDiscardSource", SetDiscardSource, 1, 0,
 "setDiscardSource(bool)",
@@ -7047,6 +7078,13 @@ gc::ZealModeHelpText),
 "  REPLACEMENT CHARACTER.  Return an array [r, w] where |r| is the\n"
 "  number of 16-bit units read and |w| is the number of bytes of UTF-8\n"
 "  written."),
+
+   JS_FN_HELP("clearKeptObjects", ClearKeptObjects, 0, 0,
+"clearKeptObjects()",
+"Perform the ECMAScript ClearKeptObjects operation, clearing the list of\n"
+"observed WeakRef targets that are kept alive until the next synchronous\n"
+"sequence of ECMAScript execution completes. This is used for testing\n"
+"WeakRefs.\n"),
 
     JS_FS_HELP_END
 };

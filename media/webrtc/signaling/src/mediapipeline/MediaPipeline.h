@@ -88,7 +88,7 @@ class MediaPipeline : public sigslot::has_slots<> {
                 RefPtr<MediaSessionConduit> aConduit);
 
   virtual void Start() = 0;
-  virtual void Stop() = 0;
+  virtual RefPtr<GenericPromise> Stop() = 0;
   virtual void DetachMedia() {}
 
   void SetLevel(size_t aLevel) { mLevel = aLevel; }
@@ -207,14 +207,15 @@ class MediaPipeline : public sigslot::has_slots<> {
   void RtpStateChange(const std::string& aTransportId, TransportLayer::State);
   void RtcpStateChange(const std::string& aTransportId, TransportLayer::State);
   virtual void CheckTransportStates();
-  void PacketReceived(const std::string& aTransportId, MediaPacket& packet);
+  void PacketReceived(const std::string& aTransportId,
+                      const MediaPacket& packet);
   void AlpnNegotiated(const std::string& aAlpn, bool aPrivacyRequested);
 
-  void RtpPacketReceived(MediaPacket& packet);
-  void RtcpPacketReceived(MediaPacket& packet);
+  void RtpPacketReceived(const MediaPacket& packet);
+  void RtcpPacketReceived(const MediaPacket& packet);
 
   void EncryptedPacketSending(const std::string& aTransportId,
-                              MediaPacket& aPacket);
+                              const MediaPacket& aPacket);
 
   void SetDescription_s(const std::string& description);
 
@@ -282,7 +283,7 @@ class MediaPipelineTransmit : public MediaPipeline {
   bool Transmitting() const;
 
   void Start() override;
-  void Stop() override;
+  RefPtr<GenericPromise> Stop() override;
 
   // written and used from MainThread
   bool IsVideo() const override;
@@ -303,7 +304,7 @@ class MediaPipelineTransmit : public MediaPipeline {
   // Replace a track with a different one.
   nsresult SetTrack(RefPtr<dom::MediaStreamTrack> aDomTrack);
 
-  // Set the track whose data we will transmit. For internal and test use. */
+  // Set the track whose data we will transmit. For internal and test use.
   void SetSendTrack(RefPtr<ProcessedMediaTrack> aSendTrack);
 
   // Separate classes to allow ref counting
@@ -317,6 +318,8 @@ class MediaPipelineTransmit : public MediaPipeline {
   void SetDescription();
 
  private:
+  void AsyncStart(const RefPtr<GenericPromise>& aPromise);
+
   const bool mIsVideo;
   const RefPtr<PipelineListener> mListener;
   // Listens for changes in enabled state on the attached MediaStreamTrack, and
@@ -332,6 +335,11 @@ class MediaPipelineTransmit : public MediaPipeline {
   RefPtr<ProcessedMediaTrack> mSendTrack;
   // True if we're actively transmitting data to the network. Main thread only.
   bool mTransmitting;
+  // When AsyncStart() is used this flag helps to avoid unexpected starts. One
+  // case is that a start has already been scheduled. A second case is that a
+  // start has already taken place (from JS for example). A third case is that
+  // a stop has taken place so we want to cancel the start. Main thread only.
+  bool mAsyncStartRequested;
 };
 
 // A specialization of pipeline for reading from the network and
@@ -368,7 +376,7 @@ class MediaPipelineReceiveAudio : public MediaPipelineReceive {
   void MakePrincipalPrivate_s() override;
 
   void Start() override;
-  void Stop() override;
+  RefPtr<GenericPromise> Stop() override;
 
   void OnRtpPacketReceived() override;
 
@@ -399,7 +407,7 @@ class MediaPipelineReceiveVideo : public MediaPipelineReceive {
   void MakePrincipalPrivate_s() override;
 
   void Start() override;
-  void Stop() override;
+  RefPtr<GenericPromise> Stop() override;
 
   void OnRtpPacketReceived() override;
 

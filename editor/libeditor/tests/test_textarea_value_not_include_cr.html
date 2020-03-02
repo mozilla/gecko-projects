@@ -34,12 +34,7 @@ SimpleTest.waitForFocus(async () => {
   textarea.value = "";
   await new Promise((resolve, reject) => {
     SimpleTest.waitForClipboard(
-      (aData) => {
-        // It depends on platform whether the copied value's line breaks are
-        // replaced to \n at setting or getting the value.  Therefore, we
-        // need to compare with replaced value here.
-        return aData.replace(/\r\n?/g, "\n") === "ab\ncd\nef";
-      },
+      "ab\ncd\nef",
       () => { SpecialPowers.clipboardCopyString("ab\r\ncd\ref"); },
       resolve,
       () => {
@@ -52,8 +47,8 @@ SimpleTest.waitForFocus(async () => {
   is(textarea.value, "ab\ncd\nef", "Pasting \\r from clipboard should be converted to \\n");
 
   textarea.value = "";
-  SpecialPowers.wrap(textarea).editor.QueryInterface(SpecialPowers.Ci.nsIPlaintextEditor).insertText("ab\r\ncd\ref");
-  is(textarea.value, "ab\ncd\nef", "Inserting \\r with nsIPlaintextEditor.insertText() should be converted to \\n");
+  SpecialPowers.wrap(textarea).editor.insertText("ab\r\ncd\ref");
+  is(textarea.value, "ab\ncd\nef", "Inserting \\r with nsIEditor.insertText() should be converted to \\n");
 
   textarea.value = "";
   synthesizeCompositionChange(

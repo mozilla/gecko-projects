@@ -20,11 +20,13 @@
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
+#  include "mozilla/widget/AndroidCompositorWidget.h"
 #  include "GeneratedJNIWrappers.h"
+#  include <android/native_window.h>
+#  include <android/native_window_jni.h>
 #endif
 
-namespace mozilla {
-namespace wr {
+namespace mozilla::wr {
 
 /* static */
 UniquePtr<RenderCompositor> RenderCompositorEGL::Create(
@@ -88,7 +90,7 @@ bool RenderCompositorEGL::BeginFrame() {
 }
 
 RenderedFrameId RenderCompositorEGL::EndFrame(
-    const FfiVec<DeviceIntRect>& aDirtyRects) {
+    const nsTArray<DeviceIntRect>& aDirtyRects) {
   RenderedFrameId frameId = GetNextRenderFrameId();
   if (mEGLSurface != EGL_NO_SURFACE) {
     gl()->SwapBuffers();
@@ -110,6 +112,18 @@ bool RenderCompositorEGL::Resume() {
   DestroyEGLSurface();
   mEGLSurface = CreateEGLSurface();
   gl::GLContextEGL::Cast(gl())->SetEGLSurfaceOverride(mEGLSurface);
+
+  // Query the new surface size as this may have changed. We cannot use
+  // mWidget->GetClientSize() due to a race condition between nsWindow::Resize()
+  // being called and the frame being rendered after the surface is resized.
+  EGLNativeWindowType window = mWidget->AsAndroid()->GetEGLNativeWindow();
+  JNIEnv* const env = jni::GetEnvForThread();
+  ANativeWindow* const nativeWindow =
+      ANativeWindow_fromSurface(env, reinterpret_cast<jobject>(window));
+  const int32_t width = ANativeWindow_getWidth(nativeWindow);
+  const int32_t height = ANativeWindow_getHeight(nativeWindow);
+  mEGLSurfaceSize = LayoutDeviceIntSize(width, height);
+  ANativeWindow_release(nativeWindow);
 #elif defined(MOZ_WAYLAND)
   // Destroy EGLSurface if it exists and create a new one. We will set the
   // swap interval after MakeCurrent() has been called.
@@ -154,8 +168,11 @@ void RenderCompositorEGL::DestroyEGLSurface() {
 }
 
 LayoutDeviceIntSize RenderCompositorEGL::GetBufferSize() {
+#ifdef MOZ_WIDGET_ANDROID
+  return mEGLSurfaceSize;
+#else
   return mWidget->GetClientSize();
+#endif
 }
 
-}  // namespace wr
-}  // namespace mozilla
+}  // namespace mozilla::wr

@@ -399,7 +399,7 @@ However, if any of the frames on the page are running in their own process, they
       let actor = global.getActor("PageInfo");
       actor.sendAsyncMessage("PageInfo:getInfoForFrame", { someArgument: 123 });
 
-      contextsToVisit.push(...currentContext.getChildren());
+      contextsToVisit.push(...currentContext.children);
     }
 
 The original ``"PageInfo:info"`` message listener will need to be updated, too. Any responses from the ``PageInfoChild`` actor will end up being passed to the ``receiveMessage`` method of the ``PageInfoParent`` actor. It will be necessary to pass that information along to the interested party (in this case, the dialog code which is showing the table of interesting Page Info).
@@ -449,9 +449,6 @@ Minimal Example Actors
   // resource://testing-common/TestParent.jsm
   var EXPORTED_SYMBOLS = ["TestParent"];
   class TestParent extends JSWindowActorParent {
-    constructor() {
-      super();
-    }
     ...
   }
 
@@ -460,9 +457,6 @@ Minimal Example Actors
   // resource://testing-common/TestChild.jsm
   var EXPORTED_SYMBOLS = ["TestChild"];
   class TestChild extends JSWindowActorChild {
-    constructor() {
-      super();
-    }
     ...
   }
 
@@ -475,7 +469,7 @@ Minimal Example Actors
   let parentActor = this.browser.browsingContext.currentWindowGlobal.getActor("Test");
 
   // get child side actor
-  let childActor = content.window.getWindowGlobalChild().getActor("Test");
+  let childActor = content.windowGlobalChild.getActor("Test");
 
 .. _Electrolysis Project: https://wiki.mozilla.org/Electrolysis
 .. _IPC Actors: https://developer.mozilla.org/en-US/docs/Mozilla/IPDL/Tutorial

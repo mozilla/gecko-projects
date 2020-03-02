@@ -78,16 +78,6 @@ loader.lazyGetter(
   "WhatsNewPanel",
   () => require("devtools/client/whats-new/panel").WhatsNewPanel
 );
-loader.lazyGetter(
-  this,
-  "reloadAndRecordTab",
-  () => require("devtools/client/webreplay/menu.js").reloadAndRecordTab
-);
-loader.lazyGetter(
-  this,
-  "reloadAndStopRecordingTab",
-  () => require("devtools/client/webreplay/menu.js").reloadAndStopRecordingTab
-);
 
 // Other dependencies
 loader.lazyRequireGetter(
@@ -127,7 +117,7 @@ exports.Tools = Tools;
 Tools.options = {
   id: "options",
   ordinal: 0,
-  url: "chrome://devtools/content/framework/toolbox-options.xhtml",
+  url: "chrome://devtools/content/framework/toolbox-options.html",
   icon: "chrome://devtools/skin/images/settings.svg",
   bgTheme: "theme-body",
   label: l10n("options.label"),
@@ -465,8 +455,8 @@ Tools.application = {
   label: l10n("application.label"),
   panelLabel: l10n("application.panellabel"),
   tooltip: l10n("application.tooltip"),
-  inMenu: false,
-  hiddenInOptions: true,
+  inMenu: AppConstants.NIGHTLY_BUILD,
+  hiddenInOptions: !AppConstants.NIGHTLY_BUILD,
 
   isTargetSupported: function(target) {
     return target.hasActor("manifest");
@@ -565,28 +555,6 @@ exports.ToolboxButtons = [
     isChecked(toolbox) {
       return toolbox.isPaintFlashing;
     },
-  },
-  {
-    id: "command-button-replay",
-    description: l10n("toolbox.buttons.replay"),
-    isTargetSupported: target =>
-      Services.prefs.getBoolPref("devtools.recordreplay.enabled") &&
-      !target.canRewind &&
-      target.isLocalTab,
-    onClick: () => reloadAndRecordTab(),
-    isChecked: () => false,
-    experimentalURL:
-      "https://developer.mozilla.org/en-US/docs/Mozilla/Projects/WebReplay",
-  },
-  {
-    id: "command-button-stop-replay",
-    description: l10n("toolbox.buttons.stopReplay"),
-    isTargetSupported: target =>
-      Services.prefs.getBoolPref("devtools.recordreplay.enabled") &&
-      target.canRewind &&
-      target.isLocalTab,
-    onClick: () => reloadAndStopRecordingTab(),
-    isChecked: () => true,
   },
   {
     id: "command-button-fission-prefs",

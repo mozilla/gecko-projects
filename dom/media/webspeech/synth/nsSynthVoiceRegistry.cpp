@@ -486,7 +486,7 @@ nsresult nsSynthVoiceRegistry::AddVoiceImpl(
                                           aLocalService, aQueuesUtterances);
 
   mVoices.AppendElement(voice);
-  mUriVoiceMap.Put(aUri, voice);
+  mUriVoiceMap.Put(aUri, std::move(voice));
   mUseGlobalQueue |= aQueuesUtterances;
 
   nsTArray<SpeechSynthesisParent*> ssplist;
@@ -571,7 +571,7 @@ VoiceData* nsSynthVoiceRegistry::FindBestMatch(const nsAString& aUri,
 
   // Try UI language.
   nsAutoCString uiLang;
-  LocaleService::GetInstance()->GetAppLocaleAsLangTag(uiLang);
+  LocaleService::GetInstance()->GetAppLocaleAsBCP47(uiLang);
 
   if (FindVoiceByLang(NS_ConvertASCIItoUTF16(uiLang), &retval)) {
     LOG(LogLevel::Debug,

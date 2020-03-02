@@ -103,7 +103,7 @@ class HitTestingTreeNode {
 
   void SetHitTestData(const EventRegions& aRegions,
                       const LayerIntRegion& aVisibleRegion,
-                      const LayerIntRect& aRemoteDocumentRect,
+                      const LayerIntSize& aRemoteDocumentSize,
                       const CSSTransformMatrix& aTransform,
                       const Maybe<ParentLayerIntRegion>& aClipRegion,
                       const EventRegionsOverride& aOverride,
@@ -131,6 +131,14 @@ class HitTestingTreeNode {
   ScrollableLayerGuid::ViewID GetFixedPosTarget() const;
   SideBits GetFixedPosSides() const;
   Maybe<uint64_t> GetFixedPositionAnimationId() const;
+
+  /* Sticky pos info */
+  void SetStickyPosData(ScrollableLayerGuid::ViewID aStickyPosTarget,
+                        const LayerRectAbsolute& aScrollRangeOuter,
+                        const LayerRectAbsolute& aScrollRangeInner);
+  ScrollableLayerGuid::ViewID GetStickyPosTarget() const;
+  const LayerRectAbsolute& GetStickyScrollRangeOuter() const;
+  const LayerRectAbsolute& GetStickyScrollRangeInner() const;
 
   /* Convert |aPoint| into the LayerPixel space for the layer corresponding to
    * this node. |aTransform| is the complete (content + async) transform for
@@ -193,6 +201,10 @@ class HitTestingTreeNode {
   ScrollableLayerGuid::ViewID mFixedPosTarget;
   SideBits mFixedPosSides;
 
+  ScrollableLayerGuid::ViewID mStickyPosTarget;
+  LayerRectAbsolute mStickyScrollRangeOuter;
+  LayerRectAbsolute mStickyScrollRangeInner;
+
   /* Let {L,M} be the {layer, scrollable metrics} pair that this node
    * corresponds to in the layer tree. mEventRegions contains the event regions
    * from L, in the case where event-regions are enabled. If event-regions are
@@ -204,9 +216,9 @@ class HitTestingTreeNode {
 
   LayerIntRegion mVisibleRegion;
 
-  /* The rectangle of remote iframe on the corresponding layer coordinate.
+  /* The size of remote iframe on the corresponding layer coordinate.
    * It's empty if this node is not for remote iframe. */
-  LayerIntRect mRemoteDocumentRect;
+  LayerIntSize mRemoteDocumentSize;
 
   /* This is the transform from layer L. This does NOT include any async
    * transforms. */

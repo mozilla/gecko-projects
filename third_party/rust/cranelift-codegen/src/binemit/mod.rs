@@ -127,8 +127,8 @@ pub trait CodeSink {
     /// Add 8 bytes to the code section.
     fn put8(&mut self, _: u64);
 
-    /// Add a relocation referencing an EBB at the current offset.
-    fn reloc_ebb(&mut self, _: Reloc, _: CodeOffset);
+    /// Add a relocation referencing an block at the current offset.
+    fn reloc_block(&mut self, _: Reloc, _: CodeOffset);
 
     /// Add a relocation referencing an external symbol plus the addend at the current offset.
     fn reloc_external(&mut self, _: Reloc, _: &ExternalName, _: Addend);
@@ -155,6 +155,36 @@ pub trait CodeSink {
     fn add_stackmap(&mut self, _: &[Value], _: &Function, _: &dyn TargetIsa);
 }
 
+/// Type of the frame unwind information.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FrameUnwindKind {
+    /// Windows fastcall unwinding (as in .pdata).
+    Fastcall,
+    /// FDE entry for libunwind (similar to .eh_frame format).
+    Libunwind,
+}
+
+/// Offset in frame unwind information buffer.
+pub type FrameUnwindOffset = usize;
+
+/// Sink for frame unwind information.
+pub trait FrameUnwindSink {
+    /// Get the current position.
+    fn len(&self) -> FrameUnwindOffset;
+
+    /// Add bytes to the code section.
+    fn bytes(&mut self, _: &[u8]);
+
+    /// Reserves bytes in the buffer.
+    fn reserve(&mut self, _len: usize) {}
+
+    /// Add a relocation entry.
+    fn reloc(&mut self, _: Reloc, _: FrameUnwindOffset);
+
+    /// Specified offset to main structure.
+    fn set_entry_offset(&mut self, _: FrameUnwindOffset);
+}
+
 /// Report a bad encoding error.
 #[cold]
 pub fn bad_encoding(func: &Function, inst: Inst) -> ! {
@@ -175,10 +205,10 @@ where
     EI: Fn(&Function, Inst, &mut RegDiversions, &mut CS, &dyn TargetIsa),
 {
     let mut divert = RegDiversions::new();
-    for ebb in func.layout.ebbs() {
-        divert.at_ebb(&func.entry_diversions, ebb);
-        debug_assert_eq!(func.offsets[ebb], sink.offset());
-        for inst in func.layout.ebb_insts(ebb) {
+    for block in func.layout.blocks() {
+        divert.at_block(&func.entry_diversions, block);
+        debug_assert_eq!(func.offsets[block], sink.offset());
+        for inst in func.layout.block_insts(block) {
             emit_inst(func, inst, &mut divert, sink, isa);
         }
     }
@@ -188,8 +218,8 @@ where
     // Output jump tables.
     for (jt, jt_data) in func.jump_tables.iter() {
         let jt_offset = func.jt_offsets[jt];
-        for ebb in jt_data.iter() {
-            let rel_offset: i32 = func.offsets[*ebb] as i32 - jt_offset as i32;
+        for block in jt_data.iter() {
+            let rel_offset: i32 = func.offsets[*block] as i32 - jt_offset as i32;
             sink.put4(rel_offset as u32)
         }
     }

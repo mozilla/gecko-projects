@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-if (Services.prefs.getBoolPref("fission.autostart")) {
+if (SpecialPowers.useRemoteSubframes) {
   requestLongerTimeout(2);
 }
 
@@ -126,9 +126,6 @@ add_task(async function startup() {
     "chrome.override_package.global": {
       min: 0,
       max: 50,
-    },
-    "csp.skip_about_page_has_csp_assert": {
-      // This is accessed in debug only.
     },
   };
 

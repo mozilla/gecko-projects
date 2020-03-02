@@ -24,6 +24,7 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ExpandedPrincipal.h"
 #include "mozilla/MozPromise.h"
+#include "mozilla/Pair.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Variant.h"
 #include "mozilla/Vector.h"
@@ -78,11 +79,12 @@ class nsPermissionManager final : public nsIPermissionManager,
   class PermissionKey {
    public:
     static PermissionKey* CreateFromPrincipal(nsIPrincipal* aPrincipal,
+                                              bool aForceStripOA,
                                               nsresult& aResult);
     static PermissionKey* CreateFromURI(nsIURI* aURI, nsresult& aResult);
     static PermissionKey* CreateFromURIAndOriginAttributes(
         nsIURI* aURI, const mozilla::OriginAttributes* aOriginAttributes,
-        nsresult& aResult);
+        bool aForceStripOA, nsresult& aResult);
 
     explicit PermissionKey(const nsACString& aOrigin)
         : mOrigin(aOrigin), mHashCode(mozilla::HashString(aOrigin)) {}
@@ -182,7 +184,8 @@ class nsPermissionManager final : public nsIPermissionManager,
                        int64_t aExpireTime, int64_t aModificationTime,
                        NotifyOperationType aNotifyOperation,
                        DBOperationType aDBOperation,
-                       const bool aIgnoreSessionPermissions = false);
+                       const bool aIgnoreSessionPermissions = false,
+                       const nsACString* aOriginString = nullptr);
 
   // Similar to TestPermissionFromPrincipal, except that it is used only for
   // permissions which can never have default values.
@@ -222,11 +225,13 @@ class nsPermissionManager final : public nsIPermissionManager,
    * https://, or ftp:// schemes are given the default "" Permission Key.
    *
    * @param aPrincipal  The Principal which the key is to be extracted from.
-   * @param aPermissionKey  A string which will be filled with the permission
+   * @param aForceStripOA Whether to force stripping the principals origin
+   *        attributes prior to generating the key.
+   * @param aKey  A string which will be filled with the permission
    * key.
    */
-  static void GetKeyForPrincipal(nsIPrincipal* aPrincipal,
-                                 nsACString& aPermissionKey);
+  static void GetKeyForPrincipal(nsIPrincipal* aPrincipal, bool aForceStripOA,
+                                 nsACString& aKey);
 
   /**
    * See `nsIPermissionManager::GetPermissionsWithKey` for more info on
@@ -240,11 +245,13 @@ class nsPermissionManager final : public nsIPermissionManager,
    * nonsensical permission key result.
    *
    * @param aOrigin  The origin which the key is to be extracted from.
-   * @param aPermissionKey  A string which will be filled with the permission
+   * @param aForceStripOA Whether to force stripping the origins attributes
+   *        prior to generating the key.
+   * @param aKey  A string which will be filled with the permission
    * key.
    */
-  static void GetKeyForOrigin(const nsACString& aOrigin,
-                              nsACString& aPermissionKey);
+  static void GetKeyForOrigin(const nsACString& aOrigin, bool aForceStripOA,
+                              nsACString& aKey);
 
   /**
    * See `nsIPermissionManager::GetPermissionsWithKey` for more info on
@@ -273,7 +280,7 @@ class nsPermissionManager final : public nsIPermissionManager,
    *
    * Get all permissions keys which could correspond to the given principal.
    * This method, like GetKeyForPrincipal, is infallible and should always
-   * produce at least one key.
+   * produce at least one (key, origin) pair.
    *
    * Unlike GetKeyForPrincipal, this method also gets the keys for base domains
    * of the given principal. All keys returned by this method must be available
@@ -281,8 +288,10 @@ class nsPermissionManager final : public nsIPermissionManager,
    * checked in the `aExactHostMatch = false` situation.
    *
    * @param aPrincipal  The Principal which the key is to be extracted from.
+   * @return returns an array of (key, origin) pairs.
    */
-  static nsTArray<nsCString> GetAllKeysForPrincipal(nsIPrincipal* aPrincipal);
+  static nsTArray<mozilla::Pair<nsCString, nsCString>> GetAllKeysForPrincipal(
+      nsIPrincipal* aPrincipal);
 
   // From ContentChild.
   nsresult RemoveAllFromIPC();
@@ -308,15 +317,17 @@ class nsPermissionManager final : public nsIPermissionManager,
    * determining the permission key for a given principal.
    *
    * This method may only be called in the parent process. It fills the nsTArray
-   * argument with the IPC::Permission objects which have a matching permission
-   * key.
+   * argument with the IPC::Permission objects which have a matching origin.
    *
-   * @param permissionKey  The key to use to find the permissions of interest.
+   * @param origin The origin to use to find the permissions of interest.
+   * @param key The key to use to find the permissions of interest. Only used
+   *            when the origin argument is empty.
    * @param perms  An array which will be filled with the permissions which
-   *               match the given permission key.
+   *               match the given origin.
    */
-  bool GetPermissionsWithKey(const nsACString& aPermissionKey,
-                             nsTArray<IPC::Permission>& aPerms);
+  bool GetPermissionsFromOriginOrKey(const nsACString& aOrigin,
+                                     const nsACString& aKey,
+                                     nsTArray<IPC::Permission>& aPerms);
 
   /**
    * See `nsPermissionManager::GetPermissionsWithKey` for more info on
@@ -352,14 +363,18 @@ class nsPermissionManager final : public nsIPermissionManager,
   void WhenPermissionsAvailable(nsIPrincipal* aPrincipal,
                                 nsIRunnable* aRunnable);
 
-  /**
-   * True if any "preload" permissions are present. This is used to avoid making
-   * potentially expensive permissions checks in nsContentBlocker.
-   */
-  bool HasPreloadPermissions();
-
  private:
   virtual ~nsPermissionManager();
+
+  /**
+   * Get all permissions for a given principal, which should not be isolated
+   * by user context or private browsing. The principal has its origin
+   * attributes stripped before perm db lookup. This is currently only affects
+   * the "cookie" permission.
+   * @param aPrincipal Used for creating the permission key.
+   */
+  nsresult GetStripPermsForPrincipal(nsIPrincipal* aPrincipal,
+                                     nsTArray<PermissionEntry>& aResult);
 
   // NOTE: nullptr can be passed as aType - if it is this function will return
   // "false" unconditionally.
@@ -560,6 +575,10 @@ class nsPermissionManager final : public nsIPermissionManager,
 
   nsresult OpenDatabase(nsIFile* permissionsFile);
   nsresult InitDB(bool aRemoveFile);
+  void AddIdleDailyMaintenanceJob();
+  void RemoveIdleDailyMaintenanceJob();
+  void PerformIdleDailyMaintenance();
+
   nsresult CreateTable();
   nsresult ImportDefaults();
   nsresult _DoImport(nsIInputStream* inputStream, mozIStorageConnection* aConn);

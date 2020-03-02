@@ -381,16 +381,21 @@ void ScrollAnchorContainer::ApplyAdjustments() {
   if (!mAnchorNode || mAnchorNodeIsDirty || mDisabled ||
       mScrollFrame->HasPendingScrollRestoration() ||
       mScrollFrame->IsProcessingScrollEvent() ||
-      mScrollFrame->IsProcessingAsyncScroll()) {
+      mScrollFrame->IsProcessingAsyncScroll() ||
+      mScrollFrame->mApzSmoothScrollDestination.isSome() ||
+      mScrollFrame->GetScrollPosition() == nsPoint()) {
     ANCHOR_LOG(
         "Ignoring post-reflow (anchor=%p, dirty=%d, disabled=%d, "
         "pendingRestoration=%d, scrollevent=%d, asyncScroll=%d, "
-        "pendingSuppression=%d, container=%p).\n",
+        "apzSmoothDestination=%d, zeroScrollPos=%d pendingSuppression=%d, "
+        "container=%p).\n",
         mAnchorNode, mAnchorNodeIsDirty, mDisabled,
         mScrollFrame->HasPendingScrollRestoration(),
         mScrollFrame->IsProcessingScrollEvent(),
-        mScrollFrame->IsProcessingAsyncScroll(), mSuppressAnchorAdjustment,
-        this);
+        mScrollFrame->IsProcessingAsyncScroll(),
+        mScrollFrame->mApzSmoothScrollDestination.isSome(),
+        mScrollFrame->GetScrollPosition() == nsPoint(),
+        mSuppressAnchorAdjustment, this);
     if (mSuppressAnchorAdjustment) {
       mSuppressAnchorAdjustment = false;
       InvalidateAnchor();
@@ -419,7 +424,7 @@ void ScrollAnchorContainer::ApplyAdjustments() {
   }
 
   ANCHOR_LOG("Applying anchor adjustment of %d in %s with anchor %p.\n",
-             logicalAdjustment, writingMode.DebugString(), mAnchorNode);
+             logicalAdjustment, ToString(writingMode).c_str(), mAnchorNode);
 
   AdjustmentMade(logicalAdjustment);
 

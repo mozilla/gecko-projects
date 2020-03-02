@@ -48,6 +48,7 @@ jobs:
                 - builds/releng_base_linux_32_builds.py
             mozconfig-variant: profile-generate
             tooltool-downloads: public
+        run-on-projects: ['try', 'release']
         fetches:
             toolchain:
                 - linux64-binutils
@@ -82,13 +83,15 @@ jobs:
                 - linux64-cbindgen
                 - linux64-nasm
                 - linux64-node
+                - linux64-lucetc
+                - wasi-sysroot
 
-    macosx64/pgo:
+    macosx64-shippable/opt:
         description: "MacOS X x64 Cross-compile Instrumented"
         shipping-phase: build
         shipping-product: firefox
         treeherder:
-            platform: osx-cross/pgo
+            platform: osx-shippable/opt
         worker-type: b-linux
         worker:
             max-run-time: 7200
@@ -117,6 +120,8 @@ jobs:
                 - linux64-cbindgen
                 - linux64-nasm
                 - linux64-node
+                - linux64-lucetc
+                - wasi-sysroot
 
     android-api-16/pgo:
         description: "Android 4.0 api-16+ PGO instrumented"

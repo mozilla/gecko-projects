@@ -22,12 +22,16 @@ namespace dom {
 class MediaControlKeysManager final : public MediaControlKeysEventSource,
                                       public MediaControlKeysEventListener {
  public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING(MediaControlKeysManager, override)
+
   MediaControlKeysManager() = default;
 
   // MediaControlKeysEventSource methods
   bool Open() override;
   bool IsOpened() const override;
+
+  void SetPlaybackState(PlaybackState aState) override;
+  PlaybackState GetPlaybackState() const override;
 
   // MediaControlKeysEventListener methods
   void OnKeyPressed(MediaControlKeysEvent aKeyEvent) override;

@@ -34,10 +34,7 @@ registerCleanupFunction(
     await recipeParent.then(recipeParentResult => recipeParentResult.reset());
 
     await cleanupDoorhanger();
-    let notif;
-    while ((notif = PopupNotifications.getNotification("password"))) {
-      notif.remove();
-    }
+    await cleanupPasswordNotifications();
     await closePopup(document.getElementById("contentAreaContextMenu"));
     await closePopup(document.getElementById("PopupAutoComplete"));
   }
@@ -271,7 +268,7 @@ const DONT_CHANGE_BUTTON = "secondaryButton";
  * Checks if we have a password capture popup notification
  * of the right type and with the right label.
  *
- * @param {String} aKind The desired `passwordNotificationType`
+ * @param {String} aKind The desired `passwordNotificationType` ("any" for any type)
  * @param {Object} [popupNotifications = PopupNotifications]
  * @param {Object} [browser = null] Optional browser whose notifications should be searched.
  * @return the found password popup notification.
@@ -283,7 +280,12 @@ function getCaptureDoorhanger(
 ) {
   ok(true, "Looking for " + aKind + " popup notification");
   let notification = popupNotifications.getNotification("password", browser);
-  if (notification) {
+  if (!aKind) {
+    throw new Error(
+      "getCaptureDoorhanger needs aKind to be a non-empty string"
+    );
+  }
+  if (aKind !== "any" && notification) {
     is(
       notification.options.passwordNotificationType,
       aKind,
@@ -324,10 +326,15 @@ async function getCaptureDoorhangerThatMayOpen(
 }
 
 async function waitForDoorhanger(browser, type) {
+  let notif;
   await TestUtils.waitForCondition(() => {
-    let notif = PopupNotifications.getNotification("password", browser);
-    return notif && notif.options.passwordNotificationType == type;
+    notif = PopupNotifications.getNotification("password", browser);
+    if (notif && type !== "any") {
+      return notif.options.passwordNotificationType == type;
+    }
+    return notif;
   }, `Waiting for a ${type} notification`);
+  return notif;
 }
 
 async function hideDoorhangerPopup() {
@@ -389,6 +396,15 @@ async function cleanupDoorhanger(notif) {
   await promiseHidden;
 }
 
+async function cleanupPasswordNotifications(
+  popupNotifications = PopupNotifications
+) {
+  let notif;
+  while ((notif = popupNotifications.getNotification("password"))) {
+    notif.remove();
+  }
+}
+
 /**
  * Checks the doorhanger's username and password.
  *
@@ -399,19 +415,11 @@ async function checkDoorhangerUsernamePassword(username, password) {
   await BrowserTestUtils.waitForCondition(() => {
     return (
       document.getElementById("password-notification-username").value ==
-      username
+        username &&
+      document.getElementById("password-notification-password").value ==
+        password
     );
-  }, "Wait for nsLoginManagerPrompter writeDataToUI()");
-  is(
-    document.getElementById("password-notification-username").value,
-    username,
-    "Check doorhanger username"
-  );
-  is(
-    document.getElementById("password-notification-password").value,
-    password,
-    "Check doorhanger password"
-  );
+  }, "Wait for nsLoginManagerPrompter writeDataToUI() to update to the correct username/password values");
 }
 
 /**
@@ -582,13 +590,14 @@ async function fillGeneratedPasswordFromOpenACPopup(
   );
 
   let passwordGeneratedPromise = listenForTestNotification(
-    "PasswordFilledOrEdited"
+    "PasswordEditedOrGenerated"
   );
 
   info("Clicking the generated password AC item");
   EventUtils.synthesizeMouseAtCenter(item, {});
   info("Waiting for the content input value to change");
   await inputEventPromise;
+  info("Waiting for the passwordGeneratedPromise");
   await passwordGeneratedPromise;
 }
 
@@ -648,7 +657,8 @@ async function openPasswordContextMenu(
 
   // Synthesize a mouse click over the fill login menu header.
   let popupShownPromise = BrowserTestUtils.waitForCondition(
-    () => POPUP_HEADER.open && BrowserTestUtils.is_visible(LOGIN_POPUP)
+    () => POPUP_HEADER.open && BrowserTestUtils.is_visible(LOGIN_POPUP),
+    "Waiting for header to be open and submenu to be visible"
   );
   EventUtils.synthesizeMouseAtCenter(POPUP_HEADER, {}, browser.ownerGlobal);
   await popupShownPromise;
@@ -659,7 +669,7 @@ async function openPasswordContextMenu(
  * expectedMessage. Possible messages:
  *   FormProcessed - a form was processed after page load.
  *   FormSubmit - a form was just submitted.
- *   PasswordFilledOrEdited - a password was filled in or modified.
+ *   PasswordEditedOrGenerated - a password was filled in or modified.
  *
  * The count is the number of that messages to wait for. This should
  * typically be used when waiting for the FormProcessed message for a page
@@ -685,16 +695,13 @@ async function doFillGeneratedPasswordContextMenuItem(browser, passwordInput) {
   await SimpleTest.promiseFocus(browser);
   await openPasswordContextMenu(browser, passwordInput);
 
-  let loginPopup = document.getElementById("fill-login-popup");
   let generatedPasswordItem = document.getElementById(
     "fill-login-generated-password"
   );
   let generatedPasswordSeparator = document.getElementById(
-    "generated-password-separator"
+    "fill-login-and-generated-password-separator"
   );
 
-  // Check the content of the password manager popup
-  ok(BrowserTestUtils.is_visible(loginPopup), "Popup is visible");
   ok(
     BrowserTestUtils.is_visible(generatedPasswordItem),
     "generated password item is visible"
@@ -716,4 +723,42 @@ async function doFillGeneratedPasswordContextMenuItem(browser, passwordInput) {
 
   await promiseShown;
   await fillGeneratedPasswordFromOpenACPopup(browser, passwordInput);
+}
+
+// Content form helpers
+async function changeContentFormValues(browser, selectorValues) {
+  for (let [sel, value] of Object.entries(selectorValues)) {
+    info("changeContentFormValues, update: " + sel + ", to: " + value);
+    await changeContentInputValue(browser, sel, value);
+    await TestUtils.waitForTick();
+  }
+}
+
+async function changeContentInputValue(browser, selector, str) {
+  let oldValue = await ContentTask.spawn(browser, [selector], function(sel) {
+    return content.document.querySelector(sel).value;
+  });
+
+  if (str === oldValue) {
+    info("no change needed to value of " + selector + ": " + oldValue);
+    return;
+  }
+  let changedPromise = ContentTask.spawn(browser, [selector], async function(
+    sel
+  ) {
+    let input = content.document.querySelector(sel);
+    input.focus();
+    input.select();
+    await ContentTaskUtils.waitForEvent(input, "change");
+    info("change event on " + sel + ": " + input.value);
+  });
+
+  await SimpleTest.promiseFocus(browser);
+  await EventUtils.synthesizeKey("KEY_Backspace");
+  if (str) {
+    await EventUtils.sendString(str);
+  }
+  info("waiting for changedPromise");
+  await EventUtils.synthesizeKey("KEY_Tab");
+  await changedPromise;
 }

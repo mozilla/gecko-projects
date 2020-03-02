@@ -6,20 +6,24 @@
 
 #include "APZEventState.h"
 
-#include "ActiveElementManager.h"
-#include "APZCCallbackHelper.h"
+#include <utility>
 
+#include "APZCCallbackHelper.h"
+#include "ActiveElementManager.h"
 #include "LayersLogging.h"
+#include "TouchManager.h"
 #include "mozilla/BasicEvents.h"
-#include "mozilla/dom/MouseEventBinding.h"
-#include "mozilla/dom/BrowserChild.h"
-#include "mozilla/dom/TabGroup.h"
 #include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/dom/BrowserChild.h"
+#include "mozilla/dom/MouseEventBinding.h"
+#include "mozilla/dom/TabGroup.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
+#include "mozilla/widget/nsAutoRollup.h"
 #include "nsCOMPtr.h"
 #include "nsDocShell.h"
 #include "nsIDOMWindowUtils.h"
@@ -31,17 +35,9 @@
 #include "nsIWidget.h"
 #include "nsLayoutUtils.h"
 #include "nsQueryFrame.h"
-#include "TouchManager.h"
-#include "nsLayoutUtils.h"
-#include "nsIScrollableFrame.h"
-#include "nsIScrollbarMediator.h"
-#include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/StaticPrefs_ui.h"
-#include "mozilla/TouchEvents.h"
-#include "mozilla/widget/nsAutoRollup.h"
 
-#define APZES_LOG(...)
-// #define APZES_LOG(...) printf_stderr("APZES: " __VA_ARGS__)
+static mozilla::LazyLogModule sApzEvtLog("apz.eventstate");
+#define APZES_LOG(...) MOZ_LOG(sApzEvtLog, LogLevel::Debug, (__VA_ARGS__))
 
 // Static helper functions
 namespace {
@@ -365,10 +361,10 @@ void APZEventState::ProcessTouchEvent(const WidgetTouchEvent& aEvent,
         mTouchEndCancelled = true;
         mEndTouchIsClick = false;
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eTouchCancel:
       mActiveElementManager->HandleTouchEndEvent(mEndTouchIsClick);
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eTouchMove: {
       if (mPendingTouchPreventedResponse) {
         MOZ_ASSERT(aGuid == mPendingTouchPreventedGuid);

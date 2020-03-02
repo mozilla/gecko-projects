@@ -25,7 +25,6 @@
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
-#include "nsAutoPtr.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
@@ -119,7 +118,12 @@ CacheStorageService::CacheStorageService()
       mForcedValidEntriesLock("CacheStorageService.mForcedValidEntriesLock"),
       mShutdown(false),
       mDiskPool(MemoryPool::DISK),
-      mMemoryPool(MemoryPool::MEMORY) {
+      mMemoryPool(MemoryPool::MEMORY)
+#ifdef MOZ_TSAN
+      ,
+      mPurgeTimerActive(false)
+#endif
+{
   CacheFileIOManager::Init();
 
   MOZ_ASSERT(XRE_IsParentProcess());
@@ -442,7 +446,7 @@ class WalkDiskCacheRunnable : public WalkCacheRunnable {
           }
 
           mPass = ITERATE_METADATA;
-          MOZ_FALLTHROUGH;
+          [[fallthrough]];
 
         case ITERATE_METADATA:
           // Now grab the context iterator.
@@ -1088,7 +1092,7 @@ static bool AddExactEntry(CacheEntryTable* aEntries, nsACString const& aKey,
   }
 
   LOG(("AddExactEntry [entry=%p put]", aEntry));
-  aEntries->Put(aKey, aEntry);
+  aEntries->Put(aKey, RefPtr{aEntry});
   return true;
 }
 
@@ -1274,9 +1278,15 @@ void CacheStorageService::OnMemoryConsumptionChange(
 
   if (!overLimit) return;
 
-  // It's likely the timer has already been set when we get here,
-  // check outside the lock to save resources.
-  if (mPurgeTimer) return;
+    // It's likely the timer has already been set when we get here,
+    // check outside the lock to save resources.
+#ifdef MOZ_TSAN
+  if (mPurgeTimerActive) {
+#else
+  if (mPurgeTimer) {
+#endif
+    return;
+  }
 
   // We don't know if this is called under the service lock or not,
   // hence rather dispatch.
@@ -1322,6 +1332,9 @@ void CacheStorageService::SchedulePurgeOverMemoryLimit() {
 
   mPurgeTimer = NS_NewTimer();
   if (mPurgeTimer) {
+#ifdef MOZ_TSAN
+    mPurgeTimerActive = true;
+#endif
     nsresult rv;
     rv = mPurgeTimer->InitWithCallback(this, 1000, nsITimer::TYPE_ONE_SHOT);
     LOG(("  timer init rv=0x%08" PRIx32, static_cast<uint32_t>(rv)));
@@ -1335,6 +1348,9 @@ CacheStorageService::Notify(nsITimer* aTimer) {
   mozilla::MutexAutoLock lock(mLock);
 
   if (aTimer == mPurgeTimer) {
+#ifdef MOZ_TSAN
+    mPurgeTimerActive = false;
+#endif
     mPurgeTimer = nullptr;
 
     nsCOMPtr<nsIRunnable> event =
@@ -1571,7 +1587,7 @@ nsresult CacheStorageService::AddStorageEntry(
       // Entry is not in the hashtable or has just been truncated...
       entry = new CacheEntry(aContextKey, aURI, aIdExtension, aWriteToDisk,
                              aSkipSizeCheck, aPin);
-      entries->Put(entryKey, entry);
+      entries->Put(entryKey, RefPtr{entry});
       LOG(("  new entry %p for %s", entry.get(), entryKey.get()));
     }
 
@@ -1903,7 +1919,7 @@ nsresult CacheStorageService::DoomStorageEntries(
     // Since we store memory entries also in the disk entries table
     // we need to remove the memory entries from the disk table one
     // by one manually.
-    nsAutoPtr<CacheEntryTable> memoryEntries;
+    mozilla::UniquePtr<CacheEntryTable> memoryEntries;
     sGlobalEntryTables->Remove(memoryStorageID, &memoryEntries);
 
     CacheEntryTable* diskEntries;

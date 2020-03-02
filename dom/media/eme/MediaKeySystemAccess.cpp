@@ -302,22 +302,8 @@ static nsTArray<KeySystemConfig> GetSupportedKeySystems() {
           NS_LITERAL_STRING("SW_SECURE_DECODE"));
       widevine.mEncryptionSchemes.AppendElement(NS_LITERAL_STRING("cenc"));
       widevine.mEncryptionSchemes.AppendElement(NS_LITERAL_STRING("cbcs"));
-#if defined(XP_WIN)
-      // Widevine CDM doesn't include an AAC decoder. So if WMF can't
-      // decode AAC, and a codec wasn't specified, be conservative
-      // and reject the MediaKeys request, since we assume Widevine
-      // will be used with AAC.
-      if (WMFDecoderModule::HasAAC()) {
-        widevine.mMP4.SetCanDecrypt(EME_CODEC_AAC);
-      }
-#elif !defined(MOZ_WIDGET_ANDROID)
-      widevine.mMP4.SetCanDecrypt(EME_CODEC_AAC);
-      widevine.mMP4.SetCanDecrypt(EME_CODEC_FLAC);
-      widevine.mMP4.SetCanDecrypt(EME_CODEC_OPUS);
-#endif
 
 #if defined(MOZ_WIDGET_ANDROID)
-      using namespace mozilla::java;
       // MediaDrm.isCryptoSchemeSupported only allows passing
       // "video/mp4" or "video/webm" for mimetype string.
       // See
@@ -331,29 +317,29 @@ static nsTArray<KeySystemConfig> GetSupportedKeySystems() {
       } DataForValidation;
 
       DataForValidation validationList[] = {
-          {nsCString(VIDEO_MP4), EME_CODEC_H264, MediaDrmProxy::AVC,
+          {nsCString(VIDEO_MP4), EME_CODEC_H264, java::MediaDrmProxy::AVC,
            &widevine.mMP4},
-          {nsCString(VIDEO_MP4), EME_CODEC_VP9, MediaDrmProxy::AVC,
+          {nsCString(VIDEO_MP4), EME_CODEC_VP9, java::MediaDrmProxy::AVC,
            &widevine.mMP4},
-          {nsCString(AUDIO_MP4), EME_CODEC_AAC, MediaDrmProxy::AAC,
+          {nsCString(AUDIO_MP4), EME_CODEC_AAC, java::MediaDrmProxy::AAC,
            &widevine.mMP4},
-          {nsCString(AUDIO_MP4), EME_CODEC_FLAC, MediaDrmProxy::FLAC,
+          {nsCString(AUDIO_MP4), EME_CODEC_FLAC, java::MediaDrmProxy::FLAC,
            &widevine.mMP4},
-          {nsCString(AUDIO_MP4), EME_CODEC_OPUS, MediaDrmProxy::OPUS,
+          {nsCString(AUDIO_MP4), EME_CODEC_OPUS, java::MediaDrmProxy::OPUS,
            &widevine.mMP4},
-          {nsCString(VIDEO_WEBM), EME_CODEC_VP8, MediaDrmProxy::VP8,
+          {nsCString(VIDEO_WEBM), EME_CODEC_VP8, java::MediaDrmProxy::VP8,
            &widevine.mWebM},
-          {nsCString(VIDEO_WEBM), EME_CODEC_VP9, MediaDrmProxy::VP9,
+          {nsCString(VIDEO_WEBM), EME_CODEC_VP9, java::MediaDrmProxy::VP9,
            &widevine.mWebM},
-          {nsCString(AUDIO_WEBM), EME_CODEC_VORBIS, MediaDrmProxy::VORBIS,
+          {nsCString(AUDIO_WEBM), EME_CODEC_VORBIS, java::MediaDrmProxy::VORBIS,
            &widevine.mWebM},
-          {nsCString(AUDIO_WEBM), EME_CODEC_OPUS, MediaDrmProxy::OPUS,
+          {nsCString(AUDIO_WEBM), EME_CODEC_OPUS, java::MediaDrmProxy::OPUS,
            &widevine.mWebM},
       };
 
       for (const auto& data : validationList) {
-        if (MediaDrmProxy::IsCryptoSchemeSupported(EME_KEY_SYSTEM_WIDEVINE,
-                                                   data.mMimeType)) {
+        if (java::MediaDrmProxy::IsCryptoSchemeSupported(
+                EME_KEY_SYSTEM_WIDEVINE, data.mMimeType)) {
           if (AndroidDecoderModule::SupportsMimeType(data.mMimeType)) {
             data.mSupportType->SetCanDecryptAndDecode(data.mEMECodecType);
           } else {
@@ -362,6 +348,19 @@ static nsTArray<KeySystemConfig> GetSupportedKeySystems() {
         }
       }
 #else
+#  if defined(XP_WIN)
+      // Widevine CDM doesn't include an AAC decoder. So if WMF can't
+      // decode AAC, and a codec wasn't specified, be conservative
+      // and reject the MediaKeys request, since we assume Widevine
+      // will be used with AAC.
+      if (WMFDecoderModule::HasAAC()) {
+        widevine.mMP4.SetCanDecrypt(EME_CODEC_AAC);
+      }
+#  else
+      widevine.mMP4.SetCanDecrypt(EME_CODEC_AAC);
+#  endif
+      widevine.mMP4.SetCanDecrypt(EME_CODEC_FLAC);
+      widevine.mMP4.SetCanDecrypt(EME_CODEC_OPUS);
       widevine.mMP4.SetCanDecryptAndDecode(EME_CODEC_H264);
       widevine.mMP4.SetCanDecryptAndDecode(EME_CODEC_VP9);
       widevine.mWebM.SetCanDecrypt(EME_CODEC_VORBIS);
@@ -412,12 +411,14 @@ static bool CanDecryptAndDecode(
       continue;
     }
 
-    if (aContainerSupport.Decrypts(codec) &&
-        NS_SUCCEEDED(
-            MediaSource::IsTypeSupported(aContentType, aDiagnostics))) {
-      // GMP can decrypt and is allowed to return compressed samples to
-      // Gecko to decode, and Gecko has a decoder.
-      continue;
+    if (aContainerSupport.Decrypts(codec)) {
+      IgnoredErrorResult rv;
+      MediaSource::IsTypeSupported(aContentType, aDiagnostics, rv);
+      if (!rv.Failed()) {
+        // GMP can decrypt and is allowed to return compressed samples to
+        // Gecko to decode, and Gecko has a decoder.
+        continue;
+      }
     }
 
     // Neither the GMP nor Gecko can both decrypt and decode. We don't

@@ -13,7 +13,7 @@ exclude: true
 {:toc}
 
 # Debugging Native Code in Android Studio.
-If you want to work on the C++ code that powers GeckoView, you will need to be able to perform native debugging inside Android Studio. This article will guide you through how to do that. 
+If you want to work on the C++ code that powers GeckoView, you will need to be able to perform native debugging inside Android Studio. This article will guide you through how to do that.
 
 If you need to get set up with GeckoView for the first time, follow the [Quick Start Guide](geckoview-quick-start).
 
@@ -40,9 +40,9 @@ ac_add_options --with-android-ndk="<path>/.mozbuild/android-ndk-r17b"
 ./mach build
 ```
 ## Set up lldb to find your symbols
-Edit your `~/.lldbinit` file (or create one if one does not already exist) and add the following lines. 
+Edit your `~/.lldbinit` file (or create one if one does not already exist) and add the following lines.
 
-The first line tells LLDB to enable inline breakpoints - Android Studio will need this if you want to use visual breakpoints. 
+The first line tells LLDB to enable inline breakpoints - Android Studio will need this if you want to use visual breakpoints.
 
 The remaining lines tell LLDB where to go to find the symbols for debugging.
 
@@ -62,7 +62,7 @@ settings append target.exec-search-paths <PATH>/objdir-android-opt/mozglue/build
 # Debug Native code in Android Studio
 
 1. The first time you are running a debug session for your app, it's best to start from a completely clean build. Click `Build -> Rebuild Project` to clean and rebuild. You can also choose to remove any existing builds from your emulator to be completely sure, but this may not be necessary.
-2. If using Android Studio visual breakpoints, set your breakpoints in your native code. 
+2. If using Android Studio visual breakpoints, set your breakpoints in your native code.
 3. Run the app in debug mode as usual.
 4. When debugging Fennec or geckoview_example, you will almost immediately hit a breakpoint in `ElfLoader.cpp`. This is expected. If you are not using Android Studio visual breakpoints, you can set your breakpoints here using the lldb console that is available now this breakpoint has been hit. To set a breakpoint, select the app tab (if running Dual, there will also be an `<app> java` tab) from the debug window, and then select the `lldb` console tab. Type the following into the console:
 
@@ -101,6 +101,12 @@ Set `MOZ_DEBUG_CHILD_WAIT_FOR_JAVA_DEBUGGER=suffix` in the environment to make c
 MOZ_DEBUG_CHILD_WAIT_FOR_JAVA_DEBUGGER=:tab
 ```
 
+An easy way to set this is with `./mach run`:
+
+```shell
+./mach run --setenv MOZ_DEBUG_CHILD_WAIT_FOR_JAVA_DEBUGGER=:tab
+```
+
 ### Attaching a Java debugger to a waiting child process
 
 This is standard: follow the [Android Studio instructions](https://developer.android.com/studio/debug/index.html#attach-debugger).  You must attach a Java debugger, so you almost certainly want to attach a `Dual` debugger and you definitely can't attach only a `Native` debugger.
@@ -112,3 +118,22 @@ If you attach `Dual` debuggers to both the main process and a content child proc
 Android Studio also doesn't appear to support targeting breakpoints from the UI (say, from clicking in a gutter) to specific debug tabs, so you may also need to set breakpoints in the appropriate `lldb` console by hand.
 
 Managing more debug tabs may require different approaches.
+
+### Using Android Studio on Windows
+
+You can now use [artifact builds](https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Artifact_builds) mode on [MozillaBuild environment](https://wiki.mozilla.org/MozillaBuild) even if you are not using WSL. If you want to debug GeckoView using Android Studio on Windows, you have to set an additional environment variable via the Control Panel to run the gradle script. The `mach` command sets these variables automatically, but Android Studio cannot.
+
+If you install MozillaBuild tools to `C:\mozilla-build` (default installation path), you have to set the `MOZILLABUILD` environment variable to recognize MozillaBuild installation path.
+
+To set environment variable on Windows 10, open the `Control Panel` from `Windows System`, then select `System and Security` - `System` - `Advanced system settings` - `Environment Variables ...`.
+
+To set the `MOZILLABUILD` variable, click `New...` in `User variables for`, then `Variable name:` is `MOZILLABUILD` and `Variable value:` is `C:\mozilla-build`.
+
+You also have to append some tool paths to the `Path` environment variable.
+
+To append the variables to PATH, double click `Path` in `User Variables for`, then click `New`. And append the following variables to `Path`.
+
+* `%MOZILLABUILD%\msys\bin`
+* `%MOZILLABUILD%\bin`
+
+

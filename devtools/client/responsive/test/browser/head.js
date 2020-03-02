@@ -129,32 +129,48 @@ var closeRDM = async function(tab, options) {
 };
 
 /**
- * Adds a new test task that adds a tab with the given URL, opens responsive
- * design mode, runs the given generator, closes responsive design mode, and
- * removes the tab. If includeBrowserEmbeddedUI is truthy, the task will be
- * run a second time with the devtools.responsive.browserUI.enabled pref set.
+ * Adds a new test task that adds a tab with the given URL, awaits the
+ * rdmPreTask (if provided), opens responsive design mode, awaits the rdmTask,
+ * closes responsive design mode, awaits the rdmPostTask (if provided), and
+ * removes the tab. If includeBrowserEmbeddedUI is truthy, the sequence will
+ * be repeated with the devtools.responsive.browserUI.enabled pref set.
  *
  * Example usage:
  *
- *   addRDMTask(
+ *   addRDMTaskWithPreAndPost(
  *     TEST_URL,
- *     async function ({ ui, manager, browser, usingBrowserUI }) {
- *       // Your tests go here...
+ *     async function preTask({ browser, usingBrowserUI }) {
+ *       // Your pre-task goes here...
+ *     },
+ *     async function task({ ui, manager, browser, usingBrowserUI }) {
+ *       // Your task goes here...
+ *     },
+ *     async function postTask({ browser, usingBrowserUI }) {
+ *       // Your post-task goes here...
  *     },
  *     true
  *   );
  */
-function addRDMTask(rdmUrl, rdmTask, includeBrowserEmbeddedUI) {
+function addRDMTaskWithPreAndPost(
+  rdmURL,
+  rdmPreTask,
+  rdmTask,
+  rdmPostTask,
+  includeBrowserEmbeddedUI
+) {
   // Define a task setup function that can work with our without the
   // browser embedded UI.
-  function taskSetup(url, task) {
+  function taskSetup(url, preTask, task, postTask, usingBrowserUI) {
     add_task(async function() {
+      await SpecialPowers.pushPrefEnv({
+        set: [["devtools.responsive.browserUI.enabled", usingBrowserUI]],
+      });
       const tab = await addTab(url);
-      const { ui, manager } = await openRDM(tab);
-      const usingBrowserUI = Services.prefs.getBoolPref(
-        "devtools.responsive.browserUI.enabled"
-      );
       const browser = tab.linkedBrowser;
+      if (preTask) {
+        await preTask({ browser, usingBrowserUI });
+      }
+      const { ui, manager } = await openRDM(tab);
       try {
         await task({ ui, manager, browser, usingBrowserUI });
       } catch (err) {
@@ -168,28 +184,50 @@ function addRDMTask(rdmUrl, rdmTask, includeBrowserEmbeddedUI) {
       }
 
       await closeRDM(tab);
+      if (postTask) {
+        await postTask({ browser, usingBrowserUI });
+      }
       await removeTab(tab);
+
+      // Flush prefs to not only undo our earlier change, but also undo
+      // any changes made by the tasks.
+      await SpecialPowers.flushPrefEnv();
     });
   }
 
   // Call the task setup function without using the browser UI pref.
-  const oldPrefValue = Services.prefs.getBoolPref(
-    "devtools.responsive.browserUI.enabled"
-  );
-  Services.prefs.setBoolPref("devtools.responsive.browserUI.enabled", false);
-
-  taskSetup(rdmUrl, rdmTask);
+  taskSetup(rdmURL, rdmPreTask, rdmTask, rdmPostTask, false);
 
   if (includeBrowserEmbeddedUI) {
-    // Set the pref and then call the task setup function again.
-    Services.prefs.setBoolPref("devtools.responsive.browserUI.enabled", true);
-
-    taskSetup(rdmUrl, rdmTask);
+    // Call it again with the browser UI pref on.
+    taskSetup(rdmURL, rdmPreTask, rdmTask, rdmPostTask, true);
   }
+}
 
-  Services.prefs.setBoolPref(
-    "devtools.responsive.browserUI.enabled",
-    oldPrefValue
+/**
+ * This is a simplified version of addRDMTaskWithPreAndPost. Adds a new test
+ * task that adds a tab with the given URL, opens responsive design mode,
+ * closes responsive design mode, and removes the tab. If
+ * includeBrowserEmbeddedUI is truthy, the sequence will be repeated with the
+ * devtools.responsive.browserUI.enabled pref set.
+ *
+ * Example usage:
+ *
+ *   addRDMTask(
+ *     TEST_URL,
+ *     async function task({ ui, manager, browser, usingBrowserUI }) {
+ *       // Your task goes here...
+ *     },
+ *     true
+ *   );
+ */
+function addRDMTask(rdmURL, rdmTask, includeBrowserEmbeddedUI) {
+  addRDMTaskWithPreAndPost(
+    rdmURL,
+    undefined,
+    rdmTask,
+    undefined,
+    includeBrowserEmbeddedUI
   );
 }
 
@@ -329,7 +367,8 @@ async function testViewportResize(
   expectedViewportSize,
   expectedHandleMove
 ) {
-  const win = ui.toolWindow;
+  const win = ui.getBrowserWindow();
+
   const resized = waitForViewportResizeTo(ui, ...expectedViewportSize);
   const startRect = dragElementBy(selector, ...moveBy, win);
   await resized;
@@ -379,9 +418,7 @@ async function selectMenuItem({ toolWindow }, selector, value) {
   info(`Selecting ${value} in ${selector}.`);
 
   await testMenuItems(toolWindow, button, items => {
-    const menuItem = items.find(item =>
-      item.getAttribute("label").includes(value)
-    );
+    const menuItem = findMenuItem(items, value);
     isnot(
       menuItem,
       undefined,
@@ -402,12 +439,31 @@ async function selectMenuItem({ toolWindow }, selector, value) {
  *         A test function that will be ran with the found menu item in the context menu
  *         as an argument.
  */
-function testMenuItems(toolWindow, button, testFn) {
+async function testMenuItems(toolWindow, button, testFn) {
+  if (button.id === "device-selector") {
+    // device-selector uses a DevTools MenuButton instead of a XUL menu
+    button.click();
+    // Wait for appearance the menu items..
+    await waitUntil(() =>
+      toolWindow.document.querySelector("#device-selector-menu .menuitem")
+    );
+    const tooltip = toolWindow.document.querySelector("#device-selector-menu");
+    const items = tooltip.querySelectorAll(".menuitem > .command");
+    testFn([...items]);
+
+    if (tooltip.classList.contains("tooltip-visible")) {
+      // Close the tooltip explicitly.
+      button.click();
+      await waitUntil(() => !tooltip.classList.contains("tooltip-visible"));
+    }
+    return;
+  }
+
   // The context menu appears only in the top level window, which is different from
   // the inner toolWindow.
   const win = getTopLevelWindow(toolWindow);
 
-  return new Promise(resolve => {
+  await new Promise(resolve => {
     win.document.addEventListener(
       "popupshown",
       () => {
@@ -529,9 +585,9 @@ function addDeviceForTest(device) {
 }
 
 async function waitForClientClose(ui) {
-  info("Waiting for RDM debugger client to close");
+  info("Waiting for RDM devtools client to close");
   await ui.client.once("closed");
-  info("RDM's debugger client is now closed");
+  info("RDM's devtools client is now closed");
 }
 
 async function testDevicePixelRatio(ui, expected) {
@@ -543,7 +599,7 @@ async function testTouchEventsOverride(ui, expected) {
   const { document } = ui.toolWindow;
   const touchButton = document.getElementById("touch-simulation-button");
 
-  const flag = await ui.emulationFront.getTouchEventsOverride();
+  const flag = await ui.responsiveFront.getTouchEventsOverride();
   is(
     flag === Ci.nsIDocShell.TOUCHEVENTS_OVERRIDE_ENABLED,
     expected,
@@ -559,25 +615,15 @@ async function testTouchEventsOverride(ui, expected) {
 function testViewportDeviceMenuLabel(ui, expectedDeviceName) {
   info("Test viewport's device select label");
 
-  const label = ui.toolWindow.document.querySelector("#device-selector .title");
-  const deviceEl = label.querySelector(".device-name");
-  if (deviceEl) {
-    is(
-      deviceEl.textContent,
-      expectedDeviceName,
-      `Device Select value should be: ${expectedDeviceName}`
-    );
-  } else {
-    is(
-      label.textContent,
-      expectedDeviceName,
-      `Device Select value should be: ${expectedDeviceName}`
-    );
-  }
+  const button = ui.toolWindow.document.querySelector("#device-selector");
+  ok(
+    button.textContent.includes(expectedDeviceName),
+    `Device Select value ${button.textContent} should be: ${expectedDeviceName}`
+  );
 }
 
 async function toggleTouchSimulation(ui) {
-  const { document } = ui.toolWindow;
+  const { document } = ui.getBrowserWindow();
   const touchButton = document.getElementById("touch-simulation-button");
   const changed = once(ui, "touch-simulation-changed");
   const loaded = waitForViewportLoad(ui);
@@ -742,6 +788,10 @@ async function editDeviceInModal(ui, device, newDevice) {
   return saved;
 }
 
+function findMenuItem(menuItems, name) {
+  return menuItems.find(menuItem => menuItem.textContent.includes(name));
+}
+
 function reloadOnUAChange(enabled) {
   const pref = RELOAD_CONDITION_PREF_PREFIX + "userAgent";
   Services.prefs.setBoolPref(pref, enabled);
@@ -832,7 +882,7 @@ function promiseRDMZoom(ui, browser, zoom) {
 
     const zoomComplete = BrowserTestUtils.waitForEvent(
       browser,
-      "PostFullZoomChange"
+      "FullZoomResolutionStable"
     );
     ZoomManager.setZoomForBrowser(browser, zoom);
 

@@ -7,7 +7,7 @@
 #include "IDBIndex.h"
 
 #include "FileInfo.h"
-#include "IDBCursor.h"
+#include "IDBCursorType.h"
 #include "IDBEvents.h"
 #include "IDBKeyRange.h"
 #include "IDBObjectStore.h"
@@ -130,7 +130,7 @@ RefPtr<IDBRequest> IDBIndex::GetAllKeys(JSContext* aCx,
 
 void IDBIndex::RefreshMetadata(bool aMayDelete) {
   AssertIsOnOwningThread();
-  MOZ_ASSERT_IF(mDeletedMetadata, mMetadata == mDeletedMetadata);
+  MOZ_ASSERT_IF(mDeletedMetadata, mMetadata == mDeletedMetadata.get());
 
   const auto& indexes = mObjectStore->Spec().indexes();
   const auto foundIt = std::find_if(
@@ -142,7 +142,7 @@ void IDBIndex::RefreshMetadata(bool aMayDelete) {
 
   if (found) {
     mMetadata = &*foundIt;
-    MOZ_ASSERT(mMetadata != mDeletedMetadata);
+    MOZ_ASSERT(mMetadata != mDeletedMetadata.get());
     mDeletedMetadata = nullptr;
   } else {
     NoteDeletion();
@@ -155,13 +155,13 @@ void IDBIndex::NoteDeletion() {
   MOZ_ASSERT(Id() == mMetadata->id());
 
   if (mDeletedMetadata) {
-    MOZ_ASSERT(mMetadata == mDeletedMetadata);
+    MOZ_ASSERT(mMetadata == mDeletedMetadata.get());
     return;
   }
 
-  mDeletedMetadata = new IndexMetadata(*mMetadata);
+  mDeletedMetadata = MakeUnique<IndexMetadata>(*mMetadata);
 
-  mMetadata = mDeletedMetadata;
+  mMetadata = mDeletedMetadata.get();
 }
 
 const nsString& IDBIndex::Name() const {
@@ -182,7 +182,7 @@ void IDBIndex::SetName(const nsAString& aName, ErrorResult& aRv) {
     return;
   }
 
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return;
   }
@@ -314,7 +314,7 @@ RefPtr<IDBRequest> IDBIndex::GetInternal(bool aKeyOnly, JSContext* aCx,
   }
 
   IDBTransaction* transaction = mObjectStore->Transaction();
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -390,7 +390,7 @@ RefPtr<IDBRequest> IDBIndex::GetAllInternal(bool aKeysOnly, JSContext* aCx,
   }
 
   IDBTransaction* transaction = mObjectStore->Transaction();
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -466,7 +466,7 @@ RefPtr<IDBRequest> IDBIndex::OpenCursorInternal(bool aKeysOnly, JSContext* aCx,
   }
 
   IDBTransaction* transaction = mObjectStore->Transaction();
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -489,11 +489,8 @@ RefPtr<IDBRequest> IDBIndex::OpenCursorInternal(bool aKeysOnly, JSContext* aCx,
     optionalKeyRange.emplace(std::move(serializedKeyRange));
   }
 
-  const IDBCursor::Direction direction =
-      IDBCursor::ConvertDirection(aDirection);
-
   const CommonIndexOpenCursorParams commonIndexParams = {
-      {objectStoreId, std::move(optionalKeyRange), direction}, indexId};
+      {objectStoreId, std::move(optionalKeyRange), aDirection}, indexId};
 
   const auto params =
       aKeysOnly ? OpenCursorParams{IndexOpenKeyCursorParams{commonIndexParams}}
@@ -511,7 +508,7 @@ RefPtr<IDBRequest> IDBIndex::OpenCursorInternal(bool aKeysOnly, JSContext* aCx,
         IDB_LOG_STRINGIFY(transaction->Database()),
         IDB_LOG_STRINGIFY(transaction), IDB_LOG_STRINGIFY(mObjectStore),
         IDB_LOG_STRINGIFY(this), IDB_LOG_STRINGIFY(keyRange),
-        IDB_LOG_STRINGIFY(direction));
+        IDB_LOG_STRINGIFY(aDirection));
   } else {
     IDB_LOG_MARK_CHILD_TRANSACTION_REQUEST(
         "database(%s).transaction(%s).objectStore(%s).index(%s)."
@@ -521,11 +518,15 @@ RefPtr<IDBRequest> IDBIndex::OpenCursorInternal(bool aKeysOnly, JSContext* aCx,
         IDB_LOG_STRINGIFY(transaction->Database()),
         IDB_LOG_STRINGIFY(transaction), IDB_LOG_STRINGIFY(mObjectStore),
         IDB_LOG_STRINGIFY(this), IDB_LOG_STRINGIFY(keyRange),
-        IDB_LOG_STRINGIFY(direction));
+        IDB_LOG_STRINGIFY(aDirection));
   }
 
-  BackgroundCursorChild* const actor =
-      new BackgroundCursorChild(request, this, direction);
+  BackgroundCursorChildBase* const actor =
+      aKeysOnly ? static_cast<BackgroundCursorChildBase*>(
+                      new BackgroundCursorChild<IDBCursorType::IndexKey>(
+                          request, this, aDirection))
+                : new BackgroundCursorChild<IDBCursorType::Index>(request, this,
+                                                                  aDirection);
 
   // TODO: This is necessary to preserve request ordering only. Proper
   // sequencing of requests should be done in a more sophisticated manner that
@@ -547,7 +548,7 @@ RefPtr<IDBRequest> IDBIndex::Count(JSContext* aCx, JS::Handle<JS::Value> aKey,
   }
 
   IDBTransaction* const transaction = mObjectStore->Transaction();
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }

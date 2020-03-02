@@ -89,15 +89,13 @@ EventQueuePriority PrioritizedEventQueue::SelectQueue(
   // are meant to avoid starvation and to ensure that we don't process an event
   // at the wrong time.
   //
-  // HIGH: if mProcessHighPriorityQueue
+  // HIGH:
   // INPUT: if inputCount > 0 && TimeStamp::Now() > mInputHandlingStartTime
   // MEDIUMHIGH: if medium high pending
   // NORMAL: if normal pending
   //
   // If we still don't have an event, then we take events from the queues
   // in the following order:
-  //
-  // HIGH
   // INPUT
   // DEFERREDTIMERS: if GetLocalIdleDeadline()
   // IDLE: if GetLocalIdleDeadline()
@@ -107,9 +105,7 @@ EventQueuePriority PrioritizedEventQueue::SelectQueue(
 
   // This variable determines which queue we will take an event from.
   EventQueuePriority queue;
-  bool highPending = !mHighQueue->IsEmpty(aProofOfLock);
-
-  if (mProcessHighPriorityQueue) {
+  if (!mHighQueue->IsEmpty(aProofOfLock)) {
     queue = EventQueuePriority::High;
   } else if (inputCount > 0 && (mInputQueueState == STATE_FLUSHING ||
                                 (mInputQueueState == STATE_ENABLED &&
@@ -125,8 +121,6 @@ EventQueuePriority PrioritizedEventQueue::SelectQueue(
     MOZ_ASSERT(mInputQueueState != STATE_FLUSHING,
                "Shouldn't consume normal event when flushing input events");
     queue = EventQueuePriority::Normal;
-  } else if (highPending) {
-    queue = EventQueuePriority::High;
   } else if (inputCount > 0 && mInputQueueState != STATE_SUSPEND) {
     MOZ_ASSERT(
         mInputQueueState != STATE_DISABLED,
@@ -143,10 +137,6 @@ EventQueuePriority PrioritizedEventQueue::SelectQueue(
   MOZ_ASSERT_IF(
       queue == EventQueuePriority::Input,
       mInputQueueState != STATE_DISABLED && mInputQueueState != STATE_SUSPEND);
-
-  if (aUpdateState) {
-    mProcessHighPriorityQueue = highPending;
-  }
 
   return queue;
 }
@@ -193,7 +183,6 @@ already_AddRefed<nsIRunnable> PrioritizedEventQueue::GetEvent(
                                    aHypotheticalInputEventDelay);
       MOZ_ASSERT(event);
       mInputHandlingStartTime = TimeStamp();
-      mProcessHighPriorityQueue = false;
       break;
 
     case EventQueuePriority::Input:
@@ -299,11 +288,12 @@ bool PrioritizedEventQueue::HasReadyEvent(const MutexAutoLock& aProofOfLock) {
   }
 
   // Temporarily unlock so we can peek our idle deadline.
-  TimeStamp idleDeadline;
   {
     MutexAutoUnlock unlock(*mMutex);
-    idleDeadline = mIdlePeriodState.PeekIdleDeadline(unlock);
+    mIdlePeriodState.CachePeekedIdleDeadline(unlock);
   }
+  TimeStamp idleDeadline = mIdlePeriodState.GetCachedIdleDeadline();
+  mIdlePeriodState.ClearCachedIdleDeadline();
 
   // Re-check the emptiness of the queues, since we had the lock released for a
   // bit.

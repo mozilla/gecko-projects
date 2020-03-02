@@ -60,6 +60,7 @@
 #include "nsNetCID.h"
 #include "runnable_utils.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/UniquePtr.h"
 
 extern "C" {
 #include "nr_api.h"
@@ -176,7 +177,7 @@ static int nr_async_timer_set_zero(NR_async_cb cb, void* arg, char* func, int l,
       new nrappkitScheduledCallback(cb, arg, func, l));
 
   nsresult rv = GetSTSThread()->Dispatch(
-      WrapRunnable(nsAutoPtr<nrappkitScheduledCallback>(callback),
+      WrapRunnable(UniquePtr<nrappkitScheduledCallback>(callback),
                    &nrappkitScheduledCallback::Run),
       NS_DISPATCH_NORMAL);
   if (NS_FAILED(rv)) return R_FAILED;

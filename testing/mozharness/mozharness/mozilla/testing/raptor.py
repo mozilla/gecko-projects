@@ -20,7 +20,9 @@ import mozharness
 
 from mozharness.base.errors import PythonErrorList
 from mozharness.base.log import OutputParser, DEBUG, ERROR, CRITICAL, INFO
-from mozharness.mozilla.automation import TBPL_SUCCESS, TBPL_RETRY, TBPL_WORST_LEVEL_TUPLE
+from mozharness.mozilla.automation import (
+    EXIT_STATUS_DICT, TBPL_SUCCESS, TBPL_RETRY, TBPL_WORST_LEVEL_TUPLE
+)
 from mozharness.mozilla.testing.android import AndroidMixin
 from mozharness.mozilla.testing.errors import HarnessErrorList, TinderBoxPrintRe
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
@@ -139,6 +141,11 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "default": False,
             "help": "Run without the conditioned profile.",
         }],
+        [["--device-name"], {
+            "dest": "device_name",
+            "default": None,
+            "help": "Device name of mobile device.",
+        }],
         [["--geckoProfile"], {
             "dest": "gecko_profile",
             "action": "store_true",
@@ -203,8 +210,9 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "dest": "power_test",
             "action": "store_true",
             "default": False,
-            "help": "Use Raptor to measure power usage; the host IP address must be specified via "
-            "the --host command-line argument.",
+            "help": "Use Raptor to measure power usage on Android browsers (Geckoview Example, "
+                    "Fenix, Refbrow, and Fennec) as well as on Intel-based MacOS machines that "
+                    "have Intel Power Gadget installed.",
         }],
         [["--memory-test"], {
             "dest": "memory_test",
@@ -484,12 +492,18 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         # Options overwritten from **kw
         if 'test' in self.config:
             kw_options['test'] = self.config['test']
+        if 'binary' in self.config:
+            kw_options['binary'] = self.config['binary']
         if self.symbols_path:
             kw_options['symbolsPath'] = self.symbols_path
         if self.config.get('obj_path', None) is not None:
             kw_options['obj-path'] = self.config['obj_path']
         if self.test_url_params:
             kw_options['test-url-params'] = self.test_url_params
+        if self.config.get('device_name') is not None:
+            kw_options['device-name'] = self.config['device_name']
+        if self.config.get('activity') is not None:
+            kw_options['activity'] = self.config['activity']
 
         kw_options.update(kw)
         if self.host:
@@ -779,6 +793,15 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
                 dest = os.path.join(env['MOZ_UPLOAD_DIR'], 'screenshots.html')
                 self.info(str(dest))
                 self._artifact_perf_data(src, dest)
+
+        # Allow log failures to over-ride successful runs of the test harness and
+        # give log failures priority, so that, for instance, log failures resulting
+        # in TBPL_RETRY cause a retry rather than simply reporting an error.
+        if parser.tbpl_status != TBPL_SUCCESS:
+            parser_status = EXIT_STATUS_DICT[parser.tbpl_status]
+            self.info('return code %s changed to %s due to log output' %
+                      (str(self.return_code), str(parser_status)))
+            self.return_code = parser_status
 
 
 class RaptorOutputParser(OutputParser):

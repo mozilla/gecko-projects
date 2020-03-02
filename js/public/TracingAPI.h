@@ -96,16 +96,16 @@ class JS_PUBLIC_API JSTracer {
   JSTracer(JSRuntime* rt, TracerKindTag tag,
            WeakMapTraceKind weakTraceKind = TraceWeakMapValues)
       : runtime_(rt),
-        weakMapAction_(weakTraceKind)
-#ifdef DEBUG
-        ,
-        checkEdges_(true)
-#endif
-        ,
+        weakMapAction_(weakTraceKind),
         tag_(tag),
         traceWeakEdges_(true),
+#ifdef DEBUG
+        checkEdges_(true),
+#endif
         canSkipJsids_(false) {
   }
+
+  void setTraceWeakEdges(bool value) { traceWeakEdges_ = value; }
 
 #ifdef DEBUG
   // Set whether to check edges are valid in debug builds.
@@ -113,15 +113,18 @@ class JS_PUBLIC_API JSTracer {
 #endif
 
  private:
-  JSRuntime* runtime_;
-  WeakMapTraceKind weakMapAction_;
+  JSRuntime* const runtime_;
+  const WeakMapTraceKind weakMapAction_;
+  const TracerKindTag tag_;
+
+  // Whether the tracer should trace weak edges. GCMarker sets this to false.
+  bool traceWeakEdges_;
+
 #ifdef DEBUG
   bool checkEdges_;
 #endif
 
  protected:
-  const TracerKindTag tag_;
-  bool traceWeakEdges_;
   bool canSkipJsids_;
 };
 
@@ -159,7 +162,7 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
   virtual bool onBigIntEdge(JS::BigInt** bip) {
     return onChild(JS::GCCellPtr(*bip));
   }
-  virtual bool onScriptEdge(JSScript** scriptp) {
+  virtual bool onScriptEdge(js::BaseScript** scriptp) {
     return onChild(JS::GCCellPtr(*scriptp));
   }
   virtual bool onShapeEdge(js::Shape** shapep) {
@@ -173,9 +176,6 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
   }
   virtual bool onJitCodeEdge(js::jit::JitCode** codep) {
     return onChild(JS::GCCellPtr(*codep, JS::TraceKind::JitCode));
-  }
-  virtual bool onLazyScriptEdge(js::LazyScript** lazyp) {
-    return onChild(JS::GCCellPtr(*lazyp, JS::TraceKind::LazyScript));
   }
   virtual bool onScopeEdge(js::Scope** scopep) {
     return onChild(JS::GCCellPtr(*scopep, JS::TraceKind::Scope));
@@ -260,7 +260,9 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
   bool dispatchToOnEdge(JSString** strp) { return onStringEdge(strp); }
   bool dispatchToOnEdge(JS::Symbol** symp) { return onSymbolEdge(symp); }
   bool dispatchToOnEdge(JS::BigInt** bip) { return onBigIntEdge(bip); }
-  bool dispatchToOnEdge(JSScript** scriptp) { return onScriptEdge(scriptp); }
+  bool dispatchToOnEdge(js::BaseScript** scriptp) {
+    return onScriptEdge(scriptp);
+  }
   bool dispatchToOnEdge(js::Shape** shapep) { return onShapeEdge(shapep); }
   bool dispatchToOnEdge(js::ObjectGroup** groupp) {
     return onObjectGroupEdge(groupp);
@@ -271,17 +273,12 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
   bool dispatchToOnEdge(js::jit::JitCode** codep) {
     return onJitCodeEdge(codep);
   }
-  bool dispatchToOnEdge(js::LazyScript** lazyp) {
-    return onLazyScriptEdge(lazyp);
-  }
   bool dispatchToOnEdge(js::Scope** scopep) { return onScopeEdge(scopep); }
   bool dispatchToOnEdge(js::RegExpShared** sharedp) {
     return onRegExpSharedEdge(sharedp);
   }
 
  protected:
-  void setTraceWeakEdges(bool value) { traceWeakEdges_ = value; }
-
   // If this is set to false, then the tracer will skip some jsids
   // to improve performance. This is needed for the cycle collector.
   void setCanSkipJsids(bool value) { canSkipJsids_ = value; }

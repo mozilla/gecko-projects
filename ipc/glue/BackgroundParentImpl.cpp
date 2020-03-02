@@ -26,7 +26,6 @@
 #include "mozilla/dom/PGamepadTestChannelParent.h"
 #include "mozilla/dom/MediaTransportParent.h"
 #include "mozilla/dom/MessagePortParent.h"
-#include "mozilla/dom/PendingIPCBlobParent.h"
 #include "mozilla/dom/ServiceWorkerActors.h"
 #include "mozilla/dom/ServiceWorkerManagerParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
@@ -102,7 +101,7 @@ namespace {
 class TestParent final : public mozilla::ipc::PBackgroundTestParent {
   friend class mozilla::ipc::BackgroundParentImpl;
 
-  TestParent() { MOZ_COUNT_CTOR(TestParent); }
+  MOZ_COUNTED_DEFAULT_CTOR(TestParent)
 
  protected:
   ~TestParent() override { MOZ_COUNT_DTOR(TestParent); }
@@ -113,8 +112,7 @@ class TestParent final : public mozilla::ipc::PBackgroundTestParent {
 
 }  // namespace
 
-namespace mozilla {
-namespace ipc {
+namespace mozilla::ipc {
 
 using mozilla::dom::BroadcastChannelParent;
 using mozilla::dom::ContentParent;
@@ -235,23 +233,26 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvFlushPendingFileDeletions() {
 
 BackgroundParentImpl::PBackgroundSDBConnectionParent*
 BackgroundParentImpl::AllocPBackgroundSDBConnectionParent(
+    const PersistenceType& aPersistenceType,
     const PrincipalInfo& aPrincipalInfo) {
   AssertIsInMainOrSocketProcess();
   AssertIsOnBackgroundThread();
 
-  return mozilla::dom::AllocPBackgroundSDBConnectionParent(aPrincipalInfo);
+  return mozilla::dom::AllocPBackgroundSDBConnectionParent(aPersistenceType,
+                                                           aPrincipalInfo);
 }
 
 mozilla::ipc::IPCResult
 BackgroundParentImpl::RecvPBackgroundSDBConnectionConstructor(
     PBackgroundSDBConnectionParent* aActor,
+    const PersistenceType& aPersistenceType,
     const PrincipalInfo& aPrincipalInfo) {
   AssertIsInMainOrSocketProcess();
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aActor);
 
-  if (!mozilla::dom::RecvPBackgroundSDBConnectionConstructor(aActor,
-                                                             aPrincipalInfo)) {
+  if (!mozilla::dom::RecvPBackgroundSDBConnectionConstructor(
+          aActor, aPersistenceType, aPrincipalInfo)) {
     return IPC_FAIL_NO_REASON(this);
   }
   return IPC_OK();
@@ -475,21 +476,6 @@ BackgroundParentImpl::AllocPIdleSchedulerParent() {
   AssertIsOnBackgroundThread();
   RefPtr<IdleSchedulerParent> actor = new IdleSchedulerParent();
   return actor.forget();
-}
-
-mozilla::dom::PPendingIPCBlobParent*
-BackgroundParentImpl::AllocPPendingIPCBlobParent(const IPCBlob& aBlob) {
-  MOZ_CRASH("PPendingIPCBlobParent actors should be manually constructed!");
-}
-
-bool BackgroundParentImpl::DeallocPPendingIPCBlobParent(
-    mozilla::dom::PPendingIPCBlobParent* aActor) {
-  AssertIsInMainOrSocketProcess();
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aActor);
-
-  delete aActor;
-  return true;
 }
 
 mozilla::dom::PRemoteWorkerParent*
@@ -778,8 +764,7 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvPUDPSocketConstructor(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  IPC::Principal principal;
-  if (!static_cast<UDPSocketParent*>(aActor)->Init(principal, aFilter)) {
+  if (!static_cast<UDPSocketParent*>(aActor)->Init(nullptr, aFilter)) {
     MOZ_CRASH("UDPSocketCallback - failed init");
   }
 
@@ -1321,8 +1306,7 @@ BackgroundParentImpl::SendPFileDescriptorSetConstructor(
   return PBackgroundParent::SendPFileDescriptorSetConstructor(aFD);
 }
 
-}  // namespace ipc
-}  // namespace mozilla
+}  // namespace mozilla::ipc
 
 void TestParent::ActorDestroy(ActorDestroyReason aWhy) {
   mozilla::ipc::AssertIsInMainOrSocketProcess();

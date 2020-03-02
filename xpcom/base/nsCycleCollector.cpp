@@ -160,39 +160,40 @@
 #include "mozilla/HashTable.h"
 #include "mozilla/HoldDropJSObjects.h"
 /* This must occur *after* base/process_util.h to avoid typedefs conflicts. */
-#include "mozilla/LinkedList.h"
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/Move.h"
-#include "mozilla/MruCache.h"
-#include "mozilla/SegmentedVector.h"
-
-#include "nsCycleCollectionParticipant.h"
-#include "nsCycleCollectionNoteRootCallback.h"
-#include "nsDeque.h"
-#include "nsExceptionHandler.h"
-#include "nsCycleCollector.h"
-#include "nsThreadUtils.h"
-#include "nsXULAppAPI.h"
-#include "prenv.h"
-#include "nsPrintfCString.h"
-#include "nsTArray.h"
-#include "nsIConsoleService.h"
-#include "mozilla/Attributes.h"
-#include "nsICycleCollectorListener.h"
-#include "nsISerialEventTarget.h"
-#include "nsIMemoryReporter.h"
-#include "nsIFile.h"
-#include "nsDumpUtils.h"
-#include "xpcpublic.h"
-#include "GeckoProfiler.h"
 #include <stdint.h>
 #include <stdio.h>
 
+#include <utility>
+
+#include "GeckoProfiler.h"
+#include "mozilla/Attributes.h"
 #include "mozilla/AutoGlobalTimelineMarker.h"
 #include "mozilla/Likely.h"
+#include "mozilla/LinkedList.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/MruCache.h"
 #include "mozilla/PoisonIOInterposer.h"
+#include "mozilla/SegmentedVector.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/ThreadLocal.h"
+#include "mozilla/UniquePtr.h"
+#include "nsCycleCollectionNoteRootCallback.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsCycleCollector.h"
+#include "nsDeque.h"
+#include "nsDumpUtils.h"
+#include "nsExceptionHandler.h"
+#include "nsIConsoleService.h"
+#include "nsICycleCollectorListener.h"
+#include "nsIFile.h"
+#include "nsIMemoryReporter.h"
+#include "nsISerialEventTarget.h"
+#include "nsPrintfCString.h"
+#include "nsTArray.h"
+#include "nsThreadUtils.h"
+#include "nsXULAppAPI.h"
+#include "prenv.h"
+#include "xpcpublic.h"
 
 using namespace mozilla;
 
@@ -348,7 +349,7 @@ class TimeLog {
 #else
 class TimeLog {
  public:
-  TimeLog() {}
+  TimeLog() = default;
   void Checkpoint(const char* aEvent) {}
 };
 #endif
@@ -428,7 +429,7 @@ class EdgePool {
    public:
     Iterator() : mPointer(nullptr) {}
     explicit Iterator(PtrInfoOrBlock* aPointer) : mPointer(aPointer) {}
-    Iterator(const Iterator& aOther) : mPointer(aOther.mPointer) {}
+    Iterator(const Iterator& aOther) = default;
 
     Iterator& operator++() {
       if (!mPointer->ptrInfo) {
@@ -787,7 +788,7 @@ struct CCGraph {
   CCGraph()
       : mRootCount(0), mPtrInfoMap(kInitialMapLength), mOutOfMemory(false) {}
 
-  ~CCGraph() {}
+  ~CCGraph() = default;
 
   void Init() { MOZ_ASSERT(IsEmpty(), "Failed to call CCGraph::Clear"); }
 
@@ -912,7 +913,7 @@ struct nsPurpleBuffer {
         "ill-sized nsPurpleBuffer::mEntries");
   }
 
-  ~nsPurpleBuffer() {}
+  ~nsPurpleBuffer() = default;
 
   // This method compacts mEntries.
   template <class PurpleVisitor>
@@ -1109,7 +1110,7 @@ class nsCycleCollector : public nsIMemoryReporter {
 
   ccPhase mIncrementalPhase;
   CCGraph mGraph;
-  nsAutoPtr<CCGraphBuilder> mBuilder;
+  UniquePtr<CCGraphBuilder> mBuilder;
   RefPtr<nsCycleCollectorLogger> mLogger;
 
 #ifdef DEBUG
@@ -1828,7 +1829,7 @@ class CCGraphBuilder final : public nsCycleCollectionTraversalCallback,
   nsCString mNextEdgeName;
   RefPtr<nsCycleCollectorLogger> mLogger;
   bool mMergeZones;
-  nsAutoPtr<NodePool::Enumerator> mCurrNode;
+  UniquePtr<NodePool::Enumerator> mCurrNode;
   uint32_t mNoteChildCount;
 
   struct PtrInfoCache : public MruCache<void*, PtrInfo*, PtrInfoCache, 491> {
@@ -1973,7 +1974,7 @@ CCGraphBuilder::CCGraphBuilder(CCGraph& aGraph, CycleCollectorResults& aResults,
              nsCycleCollectionTraversalCallback::WantAllTraces());
 }
 
-CCGraphBuilder::~CCGraphBuilder() {}
+CCGraphBuilder::~CCGraphBuilder() = default;
 
 PtrInfo* CCGraphBuilder::AddNode(void* aPtr,
                                  nsCycleCollectionParticipant* aParticipant) {
@@ -2034,7 +2035,7 @@ void CCGraphBuilder::DoneAddingRoots() {
   // We've finished adding roots, and everything in the graph is a root.
   mGraph.mRootCount = mGraph.MapCount();
 
-  mCurrNode = new NodePool::Enumerator(mGraph.mNodes);
+  mCurrNode = MakeUnique<NodePool::Enumerator>(mGraph.mNodes);
 }
 
 MOZ_NEVER_INLINE bool CCGraphBuilder::BuildGraph(SliceBudget& aBudget) {
@@ -2432,11 +2433,6 @@ class SnowWhiteKiller : public TraceCallbacks {
 
  public:
   bool Visit(nsPurpleBuffer& aBuffer, nsPurpleBufferEntry* aEntry) {
-    // The cycle collector does not collect anything when recording/replaying.
-    if (recordreplay::IsRecordingOrReplaying()) {
-      return true;
-    }
-
     if (mBudget) {
       if (mBudget->isOverBudget()) {
         return false;
@@ -2644,11 +2640,6 @@ void nsCycleCollector::ForgetSkippable(js::SliceBudget& aBudget,
   // If we remove things from the purple buffer during graph building, we may
   // lose track of an object that was mutated during graph building.
   MOZ_ASSERT(IsIdle());
-
-  // The cycle collector does not collect anything when recording/replaying.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return;
-  }
 
   if (mCCJSRuntime) {
     mCCJSRuntime->PrepareForForgetSkippable();
@@ -3374,9 +3365,7 @@ bool nsCycleCollector::Collect(ccType aCCType, SliceBudget& aBudget,
   CheckThreadSafety();
 
   // This can legitimately happen in a few cases. See bug 383651.
-  // When recording/replaying we do not collect cycles.
-  if (mActivelyCollecting || mFreeingSnowWhite ||
-      recordreplay::IsRecordingOrReplaying()) {
+  if (mActivelyCollecting || mFreeingSnowWhite) {
     return false;
   }
   mActivelyCollecting = true;
@@ -3603,8 +3592,8 @@ void nsCycleCollector::BeginCollection(
   mResults.mMergedZones = mergeZones;
 
   MOZ_ASSERT(!mBuilder, "Forgot to clear mBuilder");
-  mBuilder =
-      new CCGraphBuilder(mGraph, mResults, mCCJSRuntime, mLogger, mergeZones);
+  mBuilder = MakeUnique<CCGraphBuilder>(mGraph, mResults, mCCJSRuntime, mLogger,
+                                        mergeZones);
   timeLog.Checkpoint("BeginCollection prepare graph builder");
 
   if (mCCJSRuntime) {
@@ -3794,9 +3783,7 @@ uint32_t nsCycleCollector_suspectedCount() {
   // We should have started the cycle collector by now.
   MOZ_ASSERT(data);
 
-  // When recording/replaying we do not collect cycles. Return zero here so
-  // that callers behave consistently between recording and replaying.
-  if (!data->mCollector || recordreplay::IsRecordingOrReplaying()) {
+  if (!data->mCollector) {
     return 0;
   }
 

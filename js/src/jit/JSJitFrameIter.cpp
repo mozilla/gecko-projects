@@ -317,7 +317,7 @@ void JSJitFrameIter::dumpBaseline() const {
 
   fprintf(stderr, "  script = %p, pc = %p (offset %u)\n", (void*)script, pc,
           uint32_t(script->pcToOffset(pc)));
-  fprintf(stderr, "  current op: %s\n", CodeName[*pc]);
+  fprintf(stderr, "  current op: %s\n", CodeName(JSOp(*pc)));
 
   fprintf(stderr, "  actual args: %d\n", numActualArgs());
 
@@ -580,7 +580,7 @@ bool JSJitProfilingFrameIterator::tryInitWithTable(JitcodeGlobalTable* table,
 
   JSScript* callee = frameScript();
 
-  MOZ_ASSERT(entry->isIon() || entry->isBaseline() || entry->isIonCache() ||
+  MOZ_ASSERT(entry->isIon() || entry->isBaseline() ||
              entry->isBaselineInterpreter() || entry->isDummy());
 
   // Treat dummy lookups as an empty frame sequence.
@@ -617,20 +617,6 @@ bool JSJitProfilingFrameIterator::tryInitWithTable(JitcodeGlobalTable* table,
 
   if (entry->isBaselineInterpreter()) {
     type_ = FrameType::BaselineJS;
-    resumePCinCurrentFrame_ = pc;
-    return true;
-  }
-
-  if (entry->isIonCache()) {
-    void* ptr = entry->ionCacheEntry().rejoinAddr();
-    const JitcodeGlobalEntry& ionEntry = table->lookupInfallible(ptr);
-    MOZ_ASSERT(ionEntry.isIon());
-
-    if (ionEntry.ionEntry().getScript(0) != callee) {
-      return false;
-    }
-
-    type_ = FrameType::IonJS;
     resumePCinCurrentFrame_ = pc;
     return true;
   }

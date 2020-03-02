@@ -7,7 +7,6 @@
 #include "mozilla/ArrayUtils.h"
 
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsDirectoryService.h"
 #include "nsLocalFile.h"
 #include "nsDebug.h"
@@ -103,7 +102,7 @@ void nsDirectoryService::RealInit() {
   gService->mProviders.AppendElement(defaultProvider);
 }
 
-nsDirectoryService::~nsDirectoryService() {}
+nsDirectoryService::~nsDirectoryService() = default;
 
 NS_IMPL_ISUPPORTS(nsDirectoryService, nsIProperties, nsIDirectoryService,
                   nsIDirectoryServiceProvider, nsIDirectoryServiceProvider2)

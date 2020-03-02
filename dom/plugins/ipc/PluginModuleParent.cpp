@@ -29,6 +29,7 @@
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
 #include "nsIFile.h"
+#include "nsICrashService.h"
 #include "nsIObserverService.h"
 #include "nsNPAPIPlugin.h"
 #include "nsPrintfCString.h"
@@ -485,7 +486,7 @@ void PluginModuleChromeParent::OnProcessLaunched(const bool aSucceeded) {
     return;
   }
 
-  Open(mSubprocess->GetChannel(),
+  Open(mSubprocess->TakeChannel(),
        base::GetProcId(mSubprocess->GetChildProcessHandle()));
 
   // Request Windows message deferral behavior on our channel. This
@@ -1279,8 +1280,7 @@ void PluginModuleChromeParent::ProcessFirstMinidump() {
   mozilla::MutexAutoLock lock(mCrashReporterMutex);
 
   if (!mCrashReporter) {
-    CrashReporter::FinalizeOrphanedMinidump(OtherPid(),
-                                            GeckoProcessType_Plugin);
+    HandleOrphanedMinidump();
     return;
   }
 
@@ -1349,6 +1349,20 @@ void PluginModuleChromeParent::ProcessFirstMinidump() {
                                   flashProcessType);
   }
   mCrashReporter->FinalizeCrashReport();
+}
+
+void PluginModuleChromeParent::HandleOrphanedMinidump() {
+  if (CrashReporter::FinalizeOrphanedMinidump(
+          OtherPid(), GeckoProcessType_Plugin, &mOrphanedDumpId)) {
+    CrashReporterHost::RecordCrash(GeckoProcessType_Plugin,
+                                   nsICrashService::CRASH_TYPE_CRASH,
+                                   mOrphanedDumpId);
+  } else {
+    NS_WARNING(nsPrintfCString("plugin process pid = %d crashed without "
+                               "leaving a minidump behind",
+                               OtherPid())
+                   .get());
+  }
 }
 
 void PluginModuleParent::ActorDestroy(ActorDestroyReason why) {
@@ -1426,6 +1440,8 @@ void PluginModuleParent::NotifyPluginCrashed() {
   if (mCrashReporter && mCrashReporter->HasMinidump()) {
     dumpID = mCrashReporter->MinidumpID();
     additionalMinidumps = mCrashReporter->AdditionalMinidumps();
+  } else {
+    dumpID = mOrphanedDumpId;
   }
 
   mPlugin->PluginCrashed(dumpID, additionalMinidumps);

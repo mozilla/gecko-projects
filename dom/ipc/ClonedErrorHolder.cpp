@@ -80,12 +80,11 @@ void ClonedErrorHolder::Init(JSContext* aCx, JS::Handle<JSObject*> aError,
     if (NS_SUCCEEDED(UNWRAP_OBJECT(DOMException, aError, domExn))) {
       mType = Type::DOMException;
       mCode = domExn->Code();
-      exn = domExn.forget();
+      exn = std::move(domExn);
     } else if (NS_SUCCEEDED(UNWRAP_OBJECT(Exception, aError, exn))) {
       mType = Type::Exception;
     } else {
-      aRv.ThrowDOMException(
-          NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+      aRv.ThrowNotSupportedError(
           "We can only clone DOM Exceptions and native JS Error objects");
       return;
     }
@@ -279,6 +278,15 @@ bool ClonedErrorHolder::ToErrorValue(JSContext* aCx,
   if (mType == Type::JSError) {
     JS::Rooted<JSString*> filename(aCx);
     JS::Rooted<JSString*> message(aCx);
+
+    // For some unknown reason, we can end up with a void string in mFilename,
+    // which will cause filename to be null, which causes JS::CreateError() to
+    // crash. Make this code against robust against this by treating void
+    // strings as the empty string.
+    if (mFilename.IsVoid()) {
+      mFilename.Assign(EmptyCString());
+    }
+
     if (!ToJSString(aCx, mFilename, &filename) ||
         !ToJSString(aCx, mMessage, &message)) {
       return false;

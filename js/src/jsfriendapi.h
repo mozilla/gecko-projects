@@ -11,7 +11,6 @@
 #include "mozilla/Casting.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 
 #include "jspubtd.h"
@@ -179,8 +178,7 @@ enum {
   JS_TELEMETRY_END
 };
 
-typedef void (*JSAccumulateTelemetryDataCallback)(int id, uint32_t sample,
-                                                  const char* key);
+using JSAccumulateTelemetryDataCallback = void (*)(int, uint32_t, const char*);
 
 extern JS_FRIEND_API void JS_SetAccumulateTelemetryCallback(
     JSContext* cx, JSAccumulateTelemetryDataCallback callback);
@@ -194,14 +192,10 @@ extern JS_FRIEND_API void JS_SetAccumulateTelemetryCallback(
 
 enum class JSUseCounter { ASMJS, WASM };
 
-typedef void (*JSSetUseCounterCallback)(JSObject* obj, JSUseCounter counter);
+using JSSetUseCounterCallback = void (*)(JSObject*, JSUseCounter);
 
 extern JS_FRIEND_API void JS_SetSetUseCounterCallback(
     JSContext* cx, JSSetUseCounterCallback callback);
-
-extern JS_FRIEND_API void JS_ReportFirstCompileTime(
-    JS::HandleScript script, mozilla::TimeDuration& parse,
-    mozilla::TimeDuration& emit);
 
 extern JS_FRIEND_API JSPrincipals* JS_GetScriptPrincipals(JSScript* script);
 
@@ -429,7 +423,7 @@ extern JS_FRIEND_API void RunJobs(JSContext* cx);
 
 extern JS_FRIEND_API JS::Zone* GetRealmZone(JS::Realm* realm);
 
-typedef bool (*PreserveWrapperCallback)(JSContext* cx, JS::HandleObject obj);
+using PreserveWrapperCallback = bool (*)(JSContext*, JS::HandleObject);
 
 typedef enum {
   CollectNurseryBeforeDump,
@@ -476,7 +470,7 @@ extern JS_FRIEND_API bool ZoneGlobalsAreAllGray(JS::Zone* zone);
 extern JS_FRIEND_API bool IsCompartmentZoneSweepingOrCompacting(
     JS::Compartment* comp);
 
-typedef void (*GCThingCallback)(void* closure, JS::GCCellPtr thing);
+using GCThingCallback = void (*)(void*, JS::GCCellPtr);
 
 extern JS_FRIEND_API void VisitGrayWrapperTargets(JS::Zone* zone,
                                                   GCThingCallback callback,
@@ -1102,13 +1096,12 @@ JS_FRIEND_API JS::UniqueChars GetCodeCoverageSummary(JSContext* cx,
 JS_FRIEND_API JS::UniqueChars GetCodeCoverageSummaryAll(JSContext* cx,
                                                         size_t* length);
 
-typedef bool (*DOMInstanceClassHasProtoAtDepth)(const JSClass* instanceClass,
-                                                uint32_t protoID,
-                                                uint32_t depth);
+using DOMInstanceClassHasProtoAtDepth = bool (*)(const JSClass*, uint32_t,
+                                                 uint32_t);
 struct JSDOMCallbacks {
   DOMInstanceClassHasProtoAtDepth instanceClassMatchesProto;
 };
-typedef struct JSDOMCallbacks DOMCallbacks;
+using DOMCallbacks = struct JSDOMCallbacks;
 
 extern JS_FRIEND_API void SetDOMCallbacks(JSContext* cx,
                                           const DOMCallbacks* callbacks);
@@ -1230,9 +1223,9 @@ typedef enum DOMProxyShadowsResult {
   ShadowsViaDirectExpando,
   ShadowsViaIndirectExpando
 } DOMProxyShadowsResult;
-typedef DOMProxyShadowsResult (*DOMProxyShadowsCheck)(JSContext* cx,
-                                                      JS::HandleObject object,
-                                                      JS::HandleId id);
+using DOMProxyShadowsCheck = DOMProxyShadowsResult (*)(JSContext*,
+                                                       JS::HandleObject,
+                                                       JS::HandleId);
 JS_FRIEND_API void SetDOMProxyInformation(
     const void* domProxyHandlerFamily,
     DOMProxyShadowsCheck domProxyShadowsCheck,
@@ -1746,9 +1739,6 @@ extern JS_FRIEND_API JSObject* JS_GetObjectAsArrayBufferView(
  */
 extern JS_FRIEND_API js::Scalar::Type JS_GetArrayBufferViewType(JSObject* obj);
 
-extern JS_FRIEND_API js::Scalar::Type JS_GetSharedArrayBufferViewType(
-    JSObject* obj);
-
 /**
  * Return the number of elements in a typed array.
  *
@@ -1903,7 +1893,7 @@ struct JSJitMethodCallArgsTraits;
 class JSJitMethodCallArgs
     : protected JS::detail::CallArgsBase<JS::detail::NoUsedRval> {
  private:
-  typedef JS::detail::CallArgsBase<JS::detail::NoUsedRval> Base;
+  using Base = JS::detail::CallArgsBase<JS::detail::NoUsedRval>;
   friend struct JSJitMethodCallArgsTraits;
 
  public:
@@ -1943,13 +1933,12 @@ struct JSJitMethodCallArgsTraits {
   static const size_t offsetOfArgc = offsetof(JSJitMethodCallArgs, argc_);
 };
 
-typedef bool (*JSJitGetterOp)(JSContext* cx, JS::HandleObject thisObj,
-                              void* specializedThis, JSJitGetterCallArgs args);
-typedef bool (*JSJitSetterOp)(JSContext* cx, JS::HandleObject thisObj,
-                              void* specializedThis, JSJitSetterCallArgs args);
-typedef bool (*JSJitMethodOp)(JSContext* cx, JS::HandleObject thisObj,
-                              void* specializedThis,
-                              const JSJitMethodCallArgs& args);
+using JSJitGetterOp = bool (*)(JSContext*, JS::HandleObject, void*,
+                               JSJitGetterCallArgs);
+using JSJitSetterOp = bool (*)(JSContext*, JS::HandleObject, void*,
+                               JSJitSetterCallArgs);
+using JSJitMethodOp = bool (*)(JSContext*, JS::HandleObject, void*,
+                               const JSJitMethodCallArgs&);
 
 /**
  * This struct contains metadata passed from the DOM to the JS Engine for JIT
@@ -2175,7 +2164,7 @@ static MOZ_ALWAYS_INLINE shadow::Function* FunctionObjectToShadowFunction(
 }
 
 /* Statically asserted in JSFunction.h. */
-static const unsigned JS_FUNCTION_INTERPRETED_BITS = 0x0201;
+static const unsigned JS_FUNCTION_INTERPRETED_BITS = 0x0060;
 
 // Return whether the given function object is native.
 static MOZ_ALWAYS_INLINE bool FunctionObjectIsNative(JSObject* fun) {
@@ -2270,7 +2259,7 @@ static MOZ_ALWAYS_INLINE JSAtom* JSID_TO_ATOM(jsid id) {
   return (JSAtom*)JSID_TO_STRING(id);
 }
 
-JS_STATIC_ASSERT(sizeof(jsid) == sizeof(void*));
+static_assert(sizeof(jsid) == sizeof(void*));
 
 namespace js {
 
@@ -2322,7 +2311,7 @@ enum CTypesActivityType {
   CTYPES_CALLBACK_END
 };
 
-typedef void (*CTypesActivityCallback)(JSContext* cx, CTypesActivityType type);
+using CTypesActivityCallback = void (*)(JSContext*, CTypesActivityType);
 
 /**
  * Sets a callback that is run whenever js-ctypes is about to be used when
@@ -2605,11 +2594,6 @@ extern JS_FRIEND_API JSObject* ToWindowIfWindowProxy(JSObject* obj);
 extern bool AddMozDateTimeFormatConstructor(JSContext* cx,
                                             JS::Handle<JSObject*> intl);
 
-// Create and add the Intl.Locale constructor function to the provided object.
-// If JS was built without JS_HAS_INTL_API, this function will throw an
-// exception.
-extern bool AddLocaleConstructor(JSContext* cx, JS::Handle<JSObject*> intl);
-
 // Create and add the Intl.ListFormat constructor function to the provided
 // object.
 // If JS was built without JS_HAS_INTL_API, this function will throw an
@@ -2644,7 +2628,7 @@ extern JS_FRIEND_API void SetRealmValidAccessPtr(JSContext* cx,
 // contexts are using it now).
 extern JS_FRIEND_API bool SystemZoneAvailable(JSContext* cx);
 
-typedef void (*LogCtorDtor)(void* self, const char* type, uint32_t sz);
+using LogCtorDtor = void (*)(void*, const char*, uint32_t);
 
 /**
  * Set global function used to monitor a few internal classes to highlight
@@ -2688,6 +2672,20 @@ class JS_FRIEND_API CompartmentTransplantCallback {
 extern JS_FRIEND_API void RemapRemoteWindowProxies(
     JSContext* cx, CompartmentTransplantCallback* callback,
     JS::MutableHandleObject newTarget);
+
+namespace gc {
+
+// API to let the DOM tell us whether we're currently in pageload, so we can
+// change the GC triggers to discourage collection of the atoms zone.
+//
+// This is a temporary measure; bug 1544117 will make this unnecessary.
+
+enum class PerformanceHint { Normal, InPageLoad };
+
+extern JS_FRIEND_API void SetPerformanceHint(JSContext* cx,
+                                             PerformanceHint hint);
+
+} /* namespace gc */
 
 } /* namespace js */
 

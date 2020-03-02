@@ -7,7 +7,6 @@
 #include "CrashReporterHost.h"
 #include "CrashReporterMetadataShmem.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/Telemetry.h"
@@ -101,11 +100,6 @@ bool CrashReporterHost::AdoptMinidump(nsIFile* aFile,
 }
 
 int32_t CrashReporterHost::GetCrashType() {
-  if (mExtraAnnotations[CrashReporter::Annotation::RecordReplayHang]
-          .EqualsLiteral("1")) {
-    return nsICrashService::CRASH_TYPE_HANG;
-  }
-
   if (mExtraAnnotations[CrashReporter::Annotation::PluginHang].EqualsLiteral(
           "1")) {
     return nsICrashService::CRASH_TYPE_HANG;
@@ -136,28 +130,61 @@ bool CrashReporterHost::FinalizeCrashReport() {
   MergeCrashAnnotations(mExtraAnnotations, annotations);
   CrashReporter::WriteExtraFile(mDumpID, mExtraAnnotations);
 
-  int32_t crashType = GetCrashType();
-  NotifyCrashService(mProcessType, crashType, mDumpID);
+  RecordCrash(mProcessType, GetCrashType(), mDumpID);
 
   mFinalized = true;
   return true;
 }
 
 /* static */
-void CrashReporterHost::NotifyCrashService(GeckoProcessType aProcessType,
-                                           int32_t aCrashType,
-                                           const nsString& aChildDumpID) {
+void CrashReporterHost::RecordCrash(GeckoProcessType aProcessType,
+                                    int32_t aCrashType,
+                                    const nsString& aChildDumpID) {
   if (!NS_IsMainThread()) {
     RefPtr<Runnable> runnable = NS_NewRunnableFunction(
-        "ipc::CrashReporterHost::NotifyCrashService", [&]() -> void {
-          CrashReporterHost::NotifyCrashService(aProcessType, aCrashType,
-                                                aChildDumpID);
+        "ipc::CrashReporterHost::RecordCrash", [&]() -> void {
+          CrashReporterHost::RecordCrash(aProcessType, aCrashType,
+                                         aChildDumpID);
         });
     RefPtr<nsIThread> mainThread = do_GetMainThread();
     SyncRunnable::DispatchToThread(mainThread, runnable);
     return;
   }
 
+  RecordCrashWithTelemetry(aProcessType, aCrashType);
+  NotifyCrashService(aProcessType, aCrashType, aChildDumpID);
+}
+
+/* static */
+void CrashReporterHost::RecordCrashWithTelemetry(GeckoProcessType aProcessType,
+                                                 int32_t aCrashType) {
+  nsCString key;
+
+  if (aProcessType == GeckoProcessType_Plugin &&
+      aCrashType == nsICrashService::CRASH_TYPE_HANG) {
+    key.AssignLiteral("pluginhang");
+  } else {
+    switch (aProcessType) {
+#define GECKO_PROCESS_TYPE(enum_name, string_name, xre_name, bin_type) \
+  case GeckoProcessType_##enum_name:                                   \
+    key.AssignLiteral(string_name);                                    \
+    break;
+#include "mozilla/GeckoProcessTypes.h"
+#undef GECKO_PROCESS_TYPE
+      // We can't really hit this, thanks to the above switch, but having it
+      // here will placate the compiler.
+      default:
+        MOZ_ASSERT_UNREACHABLE("unknown process type");
+    }
+  }
+
+  Telemetry::Accumulate(Telemetry::SUBPROCESS_CRASHES_WITH_DUMP, key, 1);
+}
+
+/* static */
+void CrashReporterHost::NotifyCrashService(GeckoProcessType aProcessType,
+                                           int32_t aCrashType,
+                                           const nsString& aChildDumpID) {
   MOZ_ASSERT(!aChildDumpID.IsEmpty());
 
   nsCOMPtr<nsICrashService> crashService =
@@ -167,7 +194,6 @@ void CrashReporterHost::NotifyCrashService(GeckoProcessType aProcessType,
   }
 
   int32_t processType;
-  nsCString telemetryKey;
 
   switch (aProcessType) {
     case GeckoProcessType_IPDLUnitTest:
@@ -179,30 +205,9 @@ void CrashReporterHost::NotifyCrashService(GeckoProcessType aProcessType,
       break;
   }
 
-  if (aProcessType == GeckoProcessType_Plugin &&
-      aCrashType == nsICrashService::CRASH_TYPE_HANG) {
-    telemetryKey.AssignLiteral("pluginhang");
-  } else {
-    switch (aProcessType) {
-#define GECKO_PROCESS_TYPE(enum_name, string_name, xre_name, bin_type) \
-  case GeckoProcessType_##enum_name:                                   \
-    telemetryKey.AssignLiteral(string_name);                           \
-    break;
-#include "mozilla/GeckoProcessTypes.h"
-#undef GECKO_PROCESS_TYPE
-      // We can't really hit this, thanks to the above switch, but having it
-      // here will placate the compiler.
-      default:
-        NS_ERROR("unknown process type");
-        return;
-    }
-  }
-
   RefPtr<Promise> promise;
   crashService->AddCrash(processType, aCrashType, aChildDumpID,
                          getter_AddRefs(promise));
-  Telemetry::Accumulate(Telemetry::SUBPROCESS_CRASHES_WITH_DUMP, telemetryKey,
-                        1);
 }
 
 void CrashReporterHost::AddAnnotation(CrashReporter::Annotation aKey,

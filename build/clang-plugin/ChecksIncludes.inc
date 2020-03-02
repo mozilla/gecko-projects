@@ -11,8 +11,9 @@
 #include "DanglingOnTemporaryChecker.h"
 #include "ExplicitImplicitChecker.h"
 #include "ExplicitOperatorBoolChecker.h"
-#ifdef _WIN32
+#ifdef TARGET_IS_WINDOWS
 #include "LoadLibraryUsageChecker.h"
+#include "FopenUsageChecker.h"
 #endif
 #include "KungFuDeathGripChecker.h"
 #include "MustOverrideChecker.h"
@@ -24,9 +25,12 @@
 #include "NoAutoTypeChecker.h"
 #include "NoDuplicateRefCntMemberChecker.h"
 #include "NoExplicitMoveConstructorChecker.h"
+#include "NoNewThreadsChecker.h"
 #include "NonMemMovableMemberChecker.h"
 #include "NonMemMovableTemplateArgChecker.h"
 #include "NonParamInsideFunctionDeclChecker.h"
+#include "NonTrivialTypeInFfiChecker.h"
+#include "NoUsingNamespaceMozillaJavaChecker.h"
 #include "OverrideBaseCallChecker.h"
 #include "OverrideBaseCallUsageChecker.h"
 #include "ParamTraitsEnumChecker.h"
@@ -34,6 +38,6 @@
 #include "RefCountedInsideLambdaChecker.h"
 #include "ScopeChecker.h"
 #include "SprintfLiteralChecker.h"
+#include "TempRefPtrChecker.h"
 #include "TrivialCtorDtorChecker.h"
 #include "TrivialDtorChecker.h"
-

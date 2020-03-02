@@ -22,13 +22,25 @@ namespace binding_detail {
 // point to a literal (static-lifetime) string that's compiled into the binary,
 // or point at the buffer of an nsAString whose lifetime is longer than that of
 // the FakeString.
+template <typename CharT>
 struct FakeString {
+  using char_type = CharT;
+  using string_type = nsTString<CharT>;
+  using size_type = typename string_type::size_type;
+  using DataFlags = typename string_type::DataFlags;
+  using ClassFlags = typename string_type::ClassFlags;
+  using AString = nsTSubstring<CharT>;
+
+  static const size_t kInlineCapacity = 64;
+  using AutoString = nsTAutoStringN<CharT, kInlineCapacity>;
+
   FakeString()
-      : mDataFlags(nsString::DataFlags::TERMINATED),
-        mClassFlags(nsString::ClassFlags(0)) {}
+      : mDataFlags(DataFlags::TERMINATED),
+        mClassFlags(ClassFlags::INLINE),
+        mInlineCapacity(kInlineCapacity - 1) {}
 
   ~FakeString() {
-    if (mDataFlags & nsString::DataFlags::REFCOUNTED) {
+    if (mDataFlags & DataFlags::REFCOUNTED) {
       MOZ_ASSERT(mDataInitialized);
       nsStringBuffer::FromData(mData)->Release();
     }
@@ -37,52 +49,63 @@ struct FakeString {
   // Share aString's string buffer, if it has one; otherwise, make this string
   // depend upon aString's data.  aString should outlive this instance of
   // FakeString.
-  void ShareOrDependUpon(const nsAString& aString) {
+  void ShareOrDependUpon(const AString& aString) {
     RefPtr<nsStringBuffer> sharedBuffer = nsStringBuffer::FromString(aString);
     if (!sharedBuffer) {
       InitData(aString.BeginReading(), aString.Length());
       if (!aString.IsTerminated()) {
-        mDataFlags &= ~nsString::DataFlags::TERMINATED;
+        mDataFlags &= ~DataFlags::TERMINATED;
       }
     } else {
       AssignFromStringBuffer(sharedBuffer.forget(), aString.Length());
     }
   }
 
-  void Truncate() { InitData(nsString::char_traits::sEmptyBuffer, 0); }
+  void Truncate() { InitData(string_type::char_traits::sEmptyBuffer, 0); }
 
   void SetIsVoid(bool aValue) {
     MOZ_ASSERT(aValue, "We don't support SetIsVoid(false) on FakeString!");
     Truncate();
-    mDataFlags |= nsString::DataFlags::VOIDED;
+    mDataFlags |= DataFlags::VOIDED;
   }
 
-  nsString::char_type* BeginWriting() {
+  char_type* BeginWriting() {
     MOZ_ASSERT(IsMutable());
     MOZ_ASSERT(mDataInitialized);
     return mData;
   }
 
-  nsString::size_type Length() const { return mLength; }
+  size_type Length() const { return mLength; }
 
-  operator mozilla::Span<const nsString::char_type>() const {
+  operator mozilla::Span<const char_type>() const {
     MOZ_ASSERT(mDataInitialized);
     return mozilla::MakeSpan(mData, Length());
   }
 
-  operator mozilla::Span<nsString::char_type>() {
+  operator mozilla::Span<char_type>() {
     return mozilla::MakeSpan(BeginWriting(), Length());
   }
 
+  mozilla::BulkWriteHandle<CharT> BulkWrite(size_type aCapacity,
+                                            size_type aPrefixToPreserve,
+                                            bool aAllowShrinking,
+                                            nsresult& aRv) {
+    MOZ_ASSERT(!mDataInitialized);
+    InitData(mStorage, 0);
+    mDataFlags |= DataFlags::INLINE;
+    return ToAStringPtr()->BulkWrite(aCapacity, aPrefixToPreserve,
+                                     aAllowShrinking, aRv);
+  }
+
   // Reserve space to write aLength chars, not including null-terminator.
-  bool SetLength(nsString::size_type aLength, mozilla::fallible_t const&) {
-    // Use mInlineStorage for small strings.
-    if (aLength < sInlineCapacity) {
-      InitData(mInlineStorage, aLength);
-      mDataFlags |= nsString::DataFlags::INLINE;
+  bool SetLength(size_type aLength, mozilla::fallible_t const&) {
+    // Use mStorage for small strings.
+    if (aLength < kInlineCapacity) {
+      InitData(mStorage, aLength);
+      mDataFlags |= DataFlags::INLINE;
     } else {
       RefPtr<nsStringBuffer> buf =
-          nsStringBuffer::Alloc((aLength + 1) * sizeof(nsString::char_type));
+          nsStringBuffer::Alloc((aLength + 1) * sizeof(char_type));
       if (MOZ_UNLIKELY(!buf)) {
         return false;
       }
@@ -91,7 +114,7 @@ struct FakeString {
     }
 
     MOZ_ASSERT(mDataInitialized);
-    mData[mLength] = char16_t(0);
+    mData[mLength] = char_type(0);
     return true;
   }
 
@@ -104,14 +127,14 @@ struct FakeString {
     }
 
     RefPtr<nsStringBuffer> buffer;
-    if (mDataFlags & nsString::DataFlags::REFCOUNTED) {
+    if (mDataFlags & DataFlags::REFCOUNTED) {
       // Make sure we'll drop it when we're done.
       buffer = dont_AddRef(nsStringBuffer::FromData(mData));
       // And make sure we don't release it twice by accident.
     }
-    const nsString::char_type* oldChars = mData;
+    const char_type* oldChars = mData;
 
-    mDataFlags = nsString::DataFlags::TERMINATED;
+    mDataFlags = DataFlags::TERMINATED;
 #ifdef DEBUG
     // Reset mDataInitialized because we're explicitly reinitializing
     // it via the SetLength call.
@@ -126,55 +149,52 @@ struct FakeString {
     }
     MOZ_ASSERT(oldChars != mData, "Should have new chars now!");
     MOZ_ASSERT(IsMutable(), "Why are we still not mutable?");
-    memcpy(mData, oldChars, Length() * sizeof(nsString::char_type));
+    memcpy(mData, oldChars, Length() * sizeof(char_type));
     return true;
   }
 
   void AssignFromStringBuffer(already_AddRefed<nsStringBuffer> aBuffer,
                               size_t aLength) {
-    InitData(static_cast<nsString::char_type*>(aBuffer.take()->Data()),
-             aLength);
-    mDataFlags |= nsString::DataFlags::REFCOUNTED;
+    InitData(static_cast<char_type*>(aBuffer.take()->Data()), aLength);
+    mDataFlags |= DataFlags::REFCOUNTED;
   }
 
   // The preferred way to assign literals to a FakeString.  This should only be
   // called with actual C++ literal strings (i.e. u"stuff") or character arrays
   // that originally come from passing such literal strings.
   template <int N>
-  void AssignLiteral(const nsString::char_type (&aData)[N]) {
+  void AssignLiteral(const char_type (&aData)[N]) {
     AssignLiteral(aData, N - 1);
   }
 
   // Assign a literal to a FakeString when it's not an actual literal
   // in the code, but is known to be a literal somehow (e.g. it came
   // from an nsAString that tested true for IsLiteral()).
-  void AssignLiteral(const nsString::char_type* aData, size_t aLength) {
+  void AssignLiteral(const char_type* aData, size_t aLength) {
     InitData(aData, aLength);
-    mDataFlags |= nsString::DataFlags::LITERAL;
+    mDataFlags |= DataFlags::LITERAL;
   }
 
   // If this ever changes, change the corresponding code in the
-  // Optional<nsAString> specialization as well.
-  const nsAString* ToAStringPtr() const {
-    return reinterpret_cast<const nsString*>(this);
+  // Optional<nsA[C]String> specialization as well.
+  const AString* ToAStringPtr() const {
+    return reinterpret_cast<const string_type*>(this);
   }
 
-  operator const nsAString&() const {
-    return *reinterpret_cast<const nsString*>(this);
-  }
+  operator const AString&() const { return *ToAStringPtr(); }
 
  private:
-  nsAString* ToAStringPtr() { return reinterpret_cast<nsString*>(this); }
+  AString* ToAStringPtr() { return reinterpret_cast<string_type*>(this); }
 
   // mData is left uninitialized for optimization purposes.
-  MOZ_INIT_OUTSIDE_CTOR nsString::char_type* mData;
+  MOZ_INIT_OUTSIDE_CTOR char_type* mData;
   // mLength is left uninitialized for optimization purposes.
-  MOZ_INIT_OUTSIDE_CTOR nsString::size_type mLength;
-  nsString::DataFlags mDataFlags;
-  nsString::ClassFlags mClassFlags;
+  MOZ_INIT_OUTSIDE_CTOR size_type mLength;
+  DataFlags mDataFlags;
+  const ClassFlags mClassFlags;
 
-  static const size_t sInlineCapacity = 64;
-  nsString::char_type mInlineStorage[sInlineCapacity];
+  const size_type mInlineCapacity;
+  char_type mStorage[kInlineCapacity];
 #ifdef DEBUG
   bool mDataInitialized = false;
 #endif  // DEBUG
@@ -182,10 +202,10 @@ struct FakeString {
   FakeString(const FakeString& other) = delete;
   void operator=(const FakeString& other) = delete;
 
-  void InitData(const nsString::char_type* aData, nsString::size_type aLength) {
-    MOZ_ASSERT(mDataFlags == nsString::DataFlags::TERMINATED);
+  void InitData(const char_type* aData, size_type aLength) {
+    MOZ_ASSERT(mDataFlags == DataFlags::TERMINATED);
     MOZ_ASSERT(!mDataInitialized);
-    mData = const_cast<nsString::char_type*>(aData);
+    mData = const_cast<char_type*>(aData);
     mLength = aLength;
 #ifdef DEBUG
     mDataInitialized = true;
@@ -193,23 +213,26 @@ struct FakeString {
   }
 
   bool IsMutable() {
-    return (mDataFlags & nsString::DataFlags::INLINE) ||
-           ((mDataFlags & nsString::DataFlags::REFCOUNTED) &&
+    return (mDataFlags & DataFlags::INLINE) ||
+           ((mDataFlags & DataFlags::REFCOUNTED) &&
             !nsStringBuffer::FromData(mData)->IsReadonly());
   }
 
-  friend class NonNull<nsAString>;
+  friend class NonNull<AString>;
 
   // A class to use for our static asserts to ensure our object layout
   // matches that of nsString.
   class StringAsserter;
   friend class StringAsserter;
 
-  class StringAsserter : public nsString {
+  class StringAsserter : public AutoString {
    public:
     static void StaticAsserts() {
-      static_assert(offsetof(FakeString, mInlineStorage) == sizeof(nsString),
-                    "FakeString should include all nsString members");
+      static_assert(sizeof(AutoString) == sizeof(FakeString),
+                    "Should be binary compatible with nsTAutoString");
+      static_assert(
+          offsetof(FakeString, mInlineCapacity) == sizeof(string_type),
+          "FakeString should include all nsString members");
       static_assert(
           offsetof(FakeString, mData) == offsetof(StringAsserter, mData),
           "Offset of mData should match");
@@ -222,6 +245,12 @@ struct FakeString {
       static_assert(offsetof(FakeString, mClassFlags) ==
                         offsetof(StringAsserter, mClassFlags),
                     "Offset of mClassFlags should match");
+      static_assert(offsetof(FakeString, mInlineCapacity) ==
+                        offsetof(StringAsserter, mInlineCapacity),
+                    "Offset of mInlineCapacity should match");
+      static_assert(
+          offsetof(FakeString, mStorage) == offsetof(StringAsserter, mStorage),
+          "Offset of mStorage should match");
     }
   };
 };
@@ -229,9 +258,10 @@ struct FakeString {
 }  // namespace dom
 }  // namespace mozilla
 
+template <typename CharT>
 inline void AssignFromStringBuffer(
     nsStringBuffer* aBuffer, size_t aLength,
-    mozilla::dom::binding_detail::FakeString& aDest) {
+    mozilla::dom::binding_detail::FakeString<CharT>& aDest) {
   aDest.AssignFromStringBuffer(do_AddRef(aBuffer), aLength);
 }
 

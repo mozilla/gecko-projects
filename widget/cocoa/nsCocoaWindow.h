@@ -15,6 +15,7 @@
 #include "nsPIWidgetCocoa.h"
 #include "nsCocoaUtils.h"
 #include "nsTouchBar.h"
+#include <dlfcn.h>
 
 class nsCocoaWindow;
 class nsChildView;
@@ -232,7 +233,7 @@ class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa {
   virtual void SetFakeModal(bool aState) override;
   virtual bool IsRunningAppModal() override;
   virtual bool IsVisible() const override;
-  virtual void SetFocus(Raise) override;
+  virtual void SetFocus(Raise, mozilla::dom::CallerType aCallerType) override;
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
   virtual LayoutDeviceIntPoint GetClientOffset() override;
   virtual LayoutDeviceIntSize ClientToWindowSize(const LayoutDeviceIntSize& aClientSize) override;
@@ -243,6 +244,8 @@ class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa {
   virtual void SetSizeConstraints(const SizeConstraints& aConstraints) override;
   virtual void Move(double aX, double aY) override;
   virtual void SetSizeMode(nsSizeMode aMode) override;
+  virtual int32_t GetWorkspaceID() override;
+  virtual void MoveToWorkspace(int32_t workspaceID) override;
   virtual void SuppressAnimation(bool aSuppress) override;
   virtual void HideWindowChrome(bool aShouldHide) override;
 

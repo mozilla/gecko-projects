@@ -307,7 +307,7 @@ class nsChildView final : public nsBaseWidget {
 
   virtual void Enable(bool aState) override;
   virtual bool IsEnabled() const override;
-  virtual void SetFocus(Raise) override;
+  virtual void SetFocus(Raise, mozilla::dom::CallerType aCallerType) override;
   virtual LayoutDeviceIntRect GetBounds() override;
   virtual LayoutDeviceIntRect GetClientBounds() override;
   virtual LayoutDeviceIntRect GetScreenBounds() override;
@@ -429,8 +429,6 @@ class nsChildView final : public nsBaseWidget {
 
   virtual void CreateCompositor() override;
 
-  virtual bool WidgetPaintsBackground() override { return true; }
-
   virtual bool PreRender(mozilla::widget::WidgetRenderingContext* aContext) override;
   virtual void PostRender(mozilla::widget::WidgetRenderingContext* aContext) override;
   virtual RefPtr<mozilla::layers::NativeLayerRoot> GetNativeLayerRoot() override;
@@ -491,6 +489,8 @@ class nsChildView final : public nsBaseWidget {
 
   virtual LayoutDeviceIntPoint GetClientOffset() override;
 
+  virtual LayoutDeviceIntRegion GetOpaqueWidgetRegion() override;
+
   void DispatchAPZWheelInputEvent(mozilla::InputData& aEvent, bool aCanTriggerSwipe);
   nsEventStatus DispatchAPZInputEvent(mozilla::InputData& aEvent);
 
@@ -533,6 +533,8 @@ class nsChildView final : public nsBaseWidget {
 
   void UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries);
   mozilla::VibrancyManager& EnsureVibrancyManager();
+
+  void UpdateInternalOpaqueRegion();
 
   nsIWidget* GetWidgetForListenerEvents();
 
@@ -584,6 +586,7 @@ class nsChildView final : public nsBaseWidget {
   // wrapper layer.
   // Lazily created by EnsureContentLayerForMainThreadPainting().
   RefPtr<mozilla::layers::NativeLayerCA> mContentLayer;
+  RefPtr<mozilla::layers::SurfacePoolHandle> mPoolHandle;
 
   // In BasicLayers mode, this is the invalid region of mContentLayer.
   LayoutDeviceIntRegion mContentLayerInvalidRegion;
@@ -592,23 +595,10 @@ class nsChildView final : public nsBaseWidget {
   RefPtr<mozilla::SwipeTracker> mSwipeTracker;
   mozilla::UniquePtr<mozilla::SwipeEventQueue> mSwipeEventQueue;
 
-  // Coordinates the triggering of CoreAnimation transactions between the main
-  // thread and the compositor thread in order to avoid glitches during window
-  // resizing and window focus changes.
-  struct WidgetCompositingState {
-    // While mAsyncCATransactionsSuspended is true, no CoreAnimation transaction
-    // should be triggered on a non-main thread, because they might race with
-    // main-thread driven updates such as window shape changes, and cause glitches.
-    bool mAsyncCATransactionsSuspended = false;
-
-    // Set to true if mNativeLayerRoot->ApplyChanges() needs to be called at the
-    // next available opportunity. Set to false whenever ApplyChanges does get
-    // called.
-    bool mNativeLayerChangesPending = false;
-  };
-  mozilla::DataMutex<WidgetCompositingState> mCompositingState;
-
   RefPtr<mozilla::CancelableRunnable> mUnsuspendAsyncCATransactionsRunnable;
+
+  // The widget's opaque region. Written on the main thread, read on any thread.
+  mozilla::DataMutex<mozilla::LayoutDeviceIntRegion> mOpaqueRegion;
 
   // This flag is only used when APZ is off. It indicates that the current pan
   // gesture was processed as a swipe. Sometimes the swipe animation can finish

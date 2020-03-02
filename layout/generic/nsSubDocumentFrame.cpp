@@ -187,15 +187,9 @@ void nsSubDocumentFrame::ShowViewer() {
   } else {
     RefPtr<nsFrameLoader> frameloader = FrameLoader();
     if (frameloader) {
-      CSSIntSize margin = GetMarginAttributes();
       AutoWeakFrame weakThis(this);
       mCallingShow = true;
-      const nsAttrValue* attrValue =
-          GetContent()->AsElement()->GetParsedAttr(nsGkAtoms::scrolling);
-      ScrollbarPreference scrolling =
-          nsGenericHTMLFrameElement::MapScrollingAttribute(attrValue);
-      bool didCreateDoc =
-          frameloader->Show(margin.width, margin.height, scrolling, this);
+      bool didCreateDoc = frameloader->Show(this);
       if (!weakThis.IsAlive()) {
         return;
       }
@@ -367,10 +361,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // We're the subdoc for <browser remote="true"> and it has
     // painted content.  Display its shadow layer tree.
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
-
-    nsPoint offset = aBuilder->ToReferenceFrame(this);
-    nsRect bounds = this->EnsureInnerView()->GetBounds() + offset;
-    clipState.ClipContentDescendants(bounds);
+    clipState.ClipContainingBlockDescendantsToContentBox(aBuilder, this);
 
     aLists.Content()->AppendNewToTop<nsDisplayRemote>(aBuilder, this);
     return;
@@ -849,12 +840,10 @@ nsresult nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
     }
   } else if (aAttribute == nsGkAtoms::marginwidth ||
              aAttribute == nsGkAtoms::marginheight) {
-    // Retrieve the attributes
-    CSSIntSize margins = GetMarginAttributes();
-
     // Notify the frameloader
-    RefPtr<nsFrameLoader> frameloader = FrameLoader();
-    if (frameloader) frameloader->MarginsChanged(margins.width, margins.height);
+    if (RefPtr<nsFrameLoader> frameloader = FrameLoader()) {
+      frameloader->MarginsChanged();
+    }
   }
 
   return NS_OK;
@@ -972,20 +961,6 @@ void nsSubDocumentFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsAtomicContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-CSSIntSize nsSubDocumentFrame::GetMarginAttributes() {
-  CSSIntSize result(-1, -1);
-  nsGenericHTMLElement* content = nsGenericHTMLElement::FromNode(mContent);
-  if (content) {
-    const nsAttrValue* attr = content->GetParsedAttr(nsGkAtoms::marginwidth);
-    if (attr && attr->Type() == nsAttrValue::eInteger)
-      result.width = attr->GetIntegerValue();
-    attr = content->GetParsedAttr(nsGkAtoms::marginheight);
-    if (attr && attr->Type() == nsAttrValue::eInteger)
-      result.height = attr->GetIntegerValue();
-  }
-  return result;
-}
-
 nsFrameLoader* nsSubDocumentFrame::FrameLoader() const {
   nsIContent* content = GetContent();
   if (!content) return nullptr;
@@ -1026,7 +1001,7 @@ static void DestroyDisplayItemDataForFrames(nsIFrame* aFrame) {
   }
 }
 
-static bool BeginSwapDocShellsForDocument(Document& aDocument, void*) {
+static CallState BeginSwapDocShellsForDocument(Document& aDocument, void*) {
   if (PresShell* presShell = aDocument.GetPresShell()) {
     // Disable painting while the views are detached, see bug 946929.
     presShell->SetNeverPainting(true);
@@ -1038,7 +1013,7 @@ static bool BeginSwapDocShellsForDocument(Document& aDocument, void*) {
   aDocument.EnumerateActivityObservers(nsPluginFrame::BeginSwapDocShells,
                                        nullptr);
   aDocument.EnumerateSubDocuments(BeginSwapDocShellsForDocument, nullptr);
-  return true;
+  return CallState::Continue;
 }
 
 static nsView* BeginSwapDocShellsForViews(nsView* aSibling) {
@@ -1099,7 +1074,7 @@ nsresult nsSubDocumentFrame::BeginSwapDocShells(nsIFrame* aOther) {
   return NS_OK;
 }
 
-static bool EndSwapDocShellsForDocument(Document& aDocument, void*) {
+static CallState EndSwapDocShellsForDocument(Document& aDocument, void*) {
   // Our docshell and view trees have been updated for the new hierarchy.
   // Now also update all nsDeviceContext::mWidget to that of the
   // container view in the new hierarchy.
@@ -1123,7 +1098,7 @@ static bool EndSwapDocShellsForDocument(Document& aDocument, void*) {
   aDocument.EnumerateActivityObservers(nsPluginFrame::EndSwapDocShells,
                                        nullptr);
   aDocument.EnumerateSubDocuments(EndSwapDocShellsForDocument, nullptr);
-  return true;
+  return CallState::Continue;
 }
 
 static void EndSwapDocShellsForViews(nsView* aSibling) {
@@ -1333,12 +1308,14 @@ mozilla::LayerState nsDisplayRemote::GetLayerState(
   return mozilla::LayerState::LAYER_ACTIVE_FORCE;
 }
 
-LayerIntRect GetFrameRect(const nsIFrame* aFrame) {
-  LayoutDeviceRect rect = LayoutDeviceRect::FromAppUnits(
-      aFrame->GetContentRectRelativeToSelf(),
+LayerIntSize GetFrameSize(const nsIFrame* aFrame) {
+  LayoutDeviceSize size = LayoutDeviceRect::FromAppUnits(
+      aFrame->GetContentRectRelativeToSelf().Size(),
       aFrame->PresContext()->AppUnitsPerDevPixel());
-  return RoundedOut(rect * LayoutDeviceToLayerScale(
-                               aFrame->PresShell()->GetCumulativeResolution()));
+
+  float cumulativeResolution = aFrame->PresShell()->GetCumulativeResolution();
+  return LayerIntSize::Round(size.width * cumulativeResolution,
+                             size.height * cumulativeResolution);
 }
 
 already_AddRefed<mozilla::layers::Layer> nsDisplayRemote::BuildLayer(
@@ -1372,6 +1349,9 @@ already_AddRefed<mozilla::layers::Layer> nsDisplayRemote::BuildLayer(
       visibleRect = GetBuildingRect();
     }
     visibleRect -= ToReferenceFrame();
+    nsRect contentRect = Frame()->GetContentRectRelativeToSelf();
+    visibleRect.IntersectRect(visibleRect, contentRect);
+    visibleRect -= contentRect.TopLeft();
 
     // Generate an effects update notifying the browser it is visible
     aBuilder->AddEffectUpdate(remoteBrowser,
@@ -1407,7 +1387,7 @@ already_AddRefed<mozilla::layers::Layer> nsDisplayRemote::BuildLayer(
   refLayer->SetBaseTransform(m);
   refLayer->SetEventRegionsOverride(mEventRegionsOverride);
   refLayer->SetReferentId(mLayersId);
-  refLayer->SetRemoteDocumentRect(GetFrameRect(mFrame));
+  refLayer->SetRemoteDocumentSize(GetFrameSize(mFrame));
 
   return layer.forget();
 }
@@ -1440,6 +1420,9 @@ bool nsDisplayRemote::CreateWebRenderCommands(
     // Adjust mItemVisibleRect, which is relative to the reference frame, to be
     // relative to this frame
     nsRect visibleRect = GetBuildingRect() - ToReferenceFrame();
+    nsRect contentRect = Frame()->GetContentRectRelativeToSelf();
+    visibleRect.IntersectRect(visibleRect, contentRect);
+    visibleRect -= contentRect.TopLeft();
 
     // Generate an effects update notifying the browser it is visible
     // TODO - Gather scaling factors
@@ -1457,9 +1440,10 @@ bool nsDisplayRemote::CreateWebRenderCommands(
 
   mOffset = GetContentRectLayerOffset(mFrame, aDisplayListBuilder);
 
+  nsRect contentRect = mFrame->GetContentRectRelativeToSelf();
+  contentRect.MoveTo(0, 0);
   LayoutDeviceRect rect = LayoutDeviceRect::FromAppUnits(
-      mFrame->GetContentRectRelativeToSelf(),
-      mFrame->PresContext()->AppUnitsPerDevPixel());
+      contentRect, mFrame->PresContext()->AppUnitsPerDevPixel());
   rect += mOffset;
 
   aBuilder.PushIFrame(mozilla::wr::ToLayoutRect(rect), !BackfaceIsHidden(),
@@ -1481,7 +1465,7 @@ bool nsDisplayRemote::UpdateScrollData(
     aLayerData->SetTransform(
         mozilla::gfx::Matrix4x4::Translation(mOffset.x, mOffset.y, 0.0));
     aLayerData->SetEventRegionsOverride(mEventRegionsOverride);
-    aLayerData->SetRemoteDocumentRect(GetFrameRect(mFrame));
+    aLayerData->SetRemoteDocumentSize(GetFrameSize(mFrame));
   }
   return true;
 }

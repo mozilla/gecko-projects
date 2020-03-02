@@ -7,7 +7,6 @@ module.exports = {
   "globals": {
     "exports": true,
     "isWorker": true,
-    "isReplaying": true,
     "loader": true,
     "module": true,
     "reportError": true,
@@ -50,7 +49,7 @@ module.exports = {
       "client/shared/*.jsm",
       "client/shared/widgets/*.jsm",
       "client/storage/VariablesView.jsm",
-      "shared/webconsole/test/*.html",
+      "shared/webconsole/test/chrome/*.html",
     ],
     "rules": {
       "mozilla/no-aArgs": "off",
@@ -133,7 +132,23 @@ module.exports = {
     "rules": {
       "mozilla/no-define-cc-etc": "off",
     }
-  }, ],
+  }, {
+    // All DevTools files should avoid relative paths.
+    "files": [
+      "**"
+    ],
+    "excludedFiles": [
+      // Debugger modules have a custom bundling logic which relies on relative
+      // paths.
+      "client/debugger/**",
+      // `client/shared/build` contains node helpers to build the debugger and
+      // not devtools modules.
+      "client/shared/build/**",
+    ],
+    "rules": {
+      "mozilla/reject-relative-requires": "error",
+    }
+  }],
   "rules": {
     // These are the rules that have been configured so far to match the
     // devtools coding style.

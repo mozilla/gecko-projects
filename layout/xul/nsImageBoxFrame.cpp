@@ -65,6 +65,10 @@ using namespace mozilla::gfx;
 using namespace mozilla::image;
 using namespace mozilla::layers;
 
+using mozilla::dom::Document;
+using mozilla::dom::Element;
+using mozilla::dom::ReferrerInfo;
+
 class nsImageBoxFrameEvent : public Runnable {
  public:
   nsImageBoxFrameEvent(nsIContent* content, EventMessage message)
@@ -189,7 +193,7 @@ void nsImageBoxFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                            nsIFrame* aPrevInFlow) {
   if (!mListener) {
     RefPtr<nsImageBoxListener> listener = new nsImageBoxListener(this);
-    mListener = listener.forget();
+    mListener = std::move(listener);
   }
 
   mSuppressStyleCheck = true;

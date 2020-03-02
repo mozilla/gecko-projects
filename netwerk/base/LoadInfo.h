@@ -29,6 +29,7 @@ namespace mozilla {
 namespace dom {
 class PerformanceStorage;
 class XMLHttpRequestMainThread;
+class CanonicalBrowsingContext;
 }  // namespace dom
 
 namespace net {
@@ -40,8 +41,7 @@ namespace ipc {
 // we have to forward declare that function so we can use it as a friend.
 nsresult LoadInfoArgsToLoadInfo(
     const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
-    nsINode* aLoadingContext, nsINode* aCspToInheritLoadingContext,
-    net::LoadInfo** outLoadInfo);
+    nsINode* aCspToInheritLoadingContext, net::LoadInfo** outLoadInfo);
 }  // namespace ipc
 
 namespace net {
@@ -63,14 +63,19 @@ class LoadInfo final : public nsILoadInfo {
            const Maybe<mozilla::dom::ClientInfo>& aLoadingClientInfo =
                Maybe<mozilla::dom::ClientInfo>(),
            const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController =
-               Maybe<mozilla::dom::ServiceWorkerDescriptor>());
+               Maybe<mozilla::dom::ServiceWorkerDescriptor>(),
+           uint32_t aSandboxFlags = 0);
 
   // Constructor used for TYPE_DOCUMENT loads which have a different
   // loadingContext than other loads. This ContextForTopLevelLoad is
   // only used for content policy checks.
   LoadInfo(nsPIDOMWindowOuter* aOuterWindow, nsIPrincipal* aTriggeringPrincipal,
-           nsISupports* aContextForTopLevelLoad,
-           nsSecurityFlags aSecurityFlags);
+           nsISupports* aContextForTopLevelLoad, nsSecurityFlags aSecurityFlags,
+           uint32_t aSandboxFlags);
+  LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
+           nsIPrincipal* aTriggeringPrincipal,
+           const OriginAttributes& aOriginAttributes, uint64_t aOuterWindowID,
+           nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
   // create an exact copy of the loadinfo
   already_AddRefed<nsILoadInfo> Clone() const;
@@ -133,7 +138,7 @@ class LoadInfo final : public nsILoadInfo {
            const Maybe<mozilla::dom::ClientInfo>& aReservedClientInfo,
            const Maybe<mozilla::dom::ClientInfo>& aInitialClientInfo,
            const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
-           nsSecurityFlags aSecurityFlags,
+           nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags,
            nsContentPolicyType aContentPolicyType, LoadTainting aTainting,
            bool aBlockAllMixedContent, bool aUpgradeInsecureRequests,
            bool aBrowserUpgradeInsecureRequests,
@@ -145,8 +150,7 @@ class LoadInfo final : public nsILoadInfo {
            uint64_t aTopOuterWindowID, uint64_t aFrameOuterWindowID,
            uint64_t aBrowsingContextID, uint64_t aFrameBrowsingContextID,
            bool aInitialSecurityCheckDone, bool aIsThirdPartyRequest,
-           bool aIsDocshellReload, bool aIsFormSubmission,
-           bool aSendCSPViolationEvents,
+           bool aIsFormSubmission, bool aSendCSPViolationEvents,
            const OriginAttributes& aOriginAttributes,
            RedirectHistoryArray& aRedirectChainIncludingInternalRedirects,
            RedirectHistoryArray& aRedirectChain,
@@ -156,6 +160,7 @@ class LoadInfo final : public nsILoadInfo {
            bool aIsPreflight, bool aLoadTriggeredFromExternal,
            bool aServiceWorkerTaintingSynthesized,
            bool aDocumentHasUserInteracted, bool aDocumentHasLoaded,
+           bool aAllowListFutureDocumentsCreatedFromThisRedirectChain,
            const nsAString& aCspNonce, bool aSkipContentSniffing,
            uint32_t aRequestBlockingReason, nsINode* aLoadingContext);
   LoadInfo(const LoadInfo& rhs);
@@ -166,8 +171,7 @@ class LoadInfo final : public nsILoadInfo {
 
   friend nsresult mozilla::ipc::LoadInfoArgsToLoadInfo(
       const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
-      nsINode* aLoadingContext, nsINode* aCspToInheritLoadingContext,
-      net::LoadInfo** outLoadInfo);
+      nsINode* aCspToInheritLoadingContext, net::LoadInfo** outLoadInfo);
 
   ~LoadInfo() = default;
 
@@ -213,6 +217,7 @@ class LoadInfo final : public nsILoadInfo {
   nsWeakPtr mLoadingContext;
   nsWeakPtr mContextForTopLevelLoad;
   nsSecurityFlags mSecurityFlags;
+  uint32_t mSandboxFlags;
   nsContentPolicyType mInternalContentPolicyType;
   LoadTainting mTainting;
   bool mBlockAllMixedContent;
@@ -234,7 +239,6 @@ class LoadInfo final : public nsILoadInfo {
   uint64_t mFrameBrowsingContextID;
   bool mInitialSecurityCheckDone;
   bool mIsThirdPartyContext;
-  bool mIsDocshellReload;
   bool mIsFormSubmission;
   bool mSendCSPViolationEvents;
   OriginAttributes mOriginAttributes;
@@ -250,6 +254,7 @@ class LoadInfo final : public nsILoadInfo {
   bool mServiceWorkerTaintingSynthesized;
   bool mDocumentHasUserInteracted;
   bool mDocumentHasLoaded;
+  bool mAllowListFutureDocumentsCreatedFromThisRedirectChain;
   nsString mCspNonce;
   bool mSkipContentSniffing;
 

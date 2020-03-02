@@ -25,12 +25,13 @@ nsCommandManager::nsCommandManager(mozIDOMWindowProxy* aWindow)
   MOZ_DIAGNOSTIC_ASSERT(mWindow);
 }
 
-nsCommandManager::~nsCommandManager() {}
+nsCommandManager::~nsCommandManager() = default;
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsCommandManager)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCommandManager)
   tmp->mObserversTable.Clear();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCommandManager)
   for (auto iter = tmp->mObserversTable.Iter(); !iter.Done(); iter.Next()) {
@@ -79,7 +80,7 @@ nsCommandManager::AddCommandObserver(nsIObserver* aCommandObserver,
   // XXX todo: handle special cases of aCommandToObserve being null, or empty
 
   // for each command in the table, we make a list of observers for that command
-  ObserverList* commandObservers =
+  const auto& commandObservers =
       mObserversTable.LookupForAdd(aCommandToObserve).OrInsert([]() {
         return new ObserverList;
       });

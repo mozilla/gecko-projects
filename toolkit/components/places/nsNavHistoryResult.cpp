@@ -1974,13 +1974,6 @@ nsNavHistoryQueryResultNode::GetSkipTags(bool* aSkipTags) {
 }
 
 NS_IMETHODIMP
-nsNavHistoryQueryResultNode::GetSkipDescendantsOnItemRemoval(
-    bool* aSkipDescendantsOnItemRemoval) {
-  *aSkipDescendantsOnItemRemoval = false;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsNavHistoryQueryResultNode::OnBeginUpdateBatch() { return NS_OK; }
 
 NS_IMETHODIMP
@@ -2056,7 +2049,7 @@ nsresult nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
 
       // Fall through to check the time, if the time is not present it will
       // still match.
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     }
 
     case QUERYUPDATE_TIME: {
@@ -2077,7 +2070,7 @@ nsresult nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
       }
       // Now we know that our visit satisfies the time range, fall through to
       // the QUERYUPDATE_SIMPLE case below.
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     }
 
     case QUERYUPDATE_SIMPLE: {
@@ -2451,14 +2444,15 @@ nsresult nsNavHistoryQueryResultNode::OnItemAdded(
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNavHistoryQueryResultNode::OnItemRemoved(int64_t aItemId, int64_t aParentId,
-                                           int32_t aIndex, uint16_t aItemType,
-                                           nsIURI* aURI,
-                                           const nsACString& aGUID,
-                                           const nsACString& aParentGUID,
-                                           uint16_t aSource) {
-  if (aItemType == nsINavBookmarksService::TYPE_BOOKMARK &&
+nsresult nsNavHistoryQueryResultNode::OnItemRemoved(
+    int64_t aItemId, int64_t aParentFolder, int32_t aIndex, uint16_t aItemType,
+    nsIURI* aURI, const nsACString& aGUID, const nsACString& aParentGUID,
+    uint16_t aSource) {
+  if ((aItemType == nsINavBookmarksService::TYPE_BOOKMARK ||
+       (aItemType == nsINavBookmarksService::TYPE_FOLDER &&
+        mOptions->ResultType() ==
+            nsINavHistoryQueryOptions::RESULTS_AS_TAGS_ROOT &&
+        aParentGUID.EqualsLiteral(TAGS_ROOT_GUID))) &&
       mLiveUpdate != QUERYUPDATE_SIMPLE && mLiveUpdate != QUERYUPDATE_TIME &&
       mLiveUpdate != QUERYUPDATE_MOBILEPREF) {
     nsresult rv = Refresh();
@@ -3037,13 +3031,6 @@ nsNavHistoryFolderResultNode::GetSkipTags(bool* aSkipTags) {
 }
 
 NS_IMETHODIMP
-nsNavHistoryFolderResultNode::GetSkipDescendantsOnItemRemoval(
-    bool* aSkipDescendantsOnItemRemoval) {
-  *aSkipDescendantsOnItemRemoval = false;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsNavHistoryFolderResultNode::OnBeginUpdateBatch() { return NS_OK; }
 
 NS_IMETHODIMP
@@ -3167,8 +3154,7 @@ nsresult nsNavHistoryQueryResultNode::OnMobilePrefChanged(bool newValue) {
   return RemoveChildAt(existingIndex);
 }
 
-NS_IMETHODIMP
-nsNavHistoryFolderResultNode::OnItemRemoved(
+nsresult nsNavHistoryFolderResultNode::OnItemRemoved(
     int64_t aItemId, int64_t aParentFolder, int32_t aIndex, uint16_t aItemType,
     nsIURI* aURI, const nsACString& aGUID, const nsACString& aParentGUID,
     uint16_t aSource) {
@@ -3475,6 +3461,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsNavHistoryResult)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAllBookmarksObservers)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mHistoryObservers)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRefreshParticipants)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsNavHistoryResult)
@@ -3539,7 +3526,7 @@ nsNavHistoryResult::~nsNavHistoryResult() {
 }
 
 void nsNavHistoryResult::StopObserving() {
-  AutoTArray<PlacesEventType, 2> events;
+  AutoTArray<PlacesEventType, 3> events;
   if (mIsBookmarkFolderObserver || mIsAllBookmarksObserver) {
     nsNavBookmarks* bookmarks = nsNavBookmarks::GetBookmarksService();
     if (bookmarks) {
@@ -3548,6 +3535,7 @@ void nsNavHistoryResult::StopObserving() {
       mIsAllBookmarksObserver = false;
     }
     events.AppendElement(PlacesEventType::Bookmark_added);
+    events.AppendElement(PlacesEventType::Bookmark_removed);
   }
   if (mIsMobilePrefObserver) {
     Preferences::UnregisterCallback(OnMobilePrefChangedCallback,
@@ -3594,8 +3582,9 @@ void nsNavHistoryResult::AddAllBookmarksObserver(
       return;
     }
     bookmarks->AddObserver(this, true);
-    AutoTArray<PlacesEventType, 1> events;
+    AutoTArray<PlacesEventType, 2> events;
     events.AppendElement(PlacesEventType::Bookmark_added);
+    events.AppendElement(PlacesEventType::Bookmark_removed);
     PlacesObservers::AddListener(events, this);
     mIsAllBookmarksObserver = true;
   }
@@ -3631,8 +3620,9 @@ void nsNavHistoryResult::AddBookmarkFolderObserver(
       return;
     }
     bookmarks->AddObserver(this, true);
-    AutoTArray<PlacesEventType, 1> events;
+    AutoTArray<PlacesEventType, 2> events;
     events.AppendElement(PlacesEventType::Bookmark_added);
+    events.AppendElement(PlacesEventType::Bookmark_removed);
     PlacesObservers::AddListener(events, this);
     mIsBookmarkFolderObserver = true;
   }
@@ -3824,13 +3814,6 @@ nsNavHistoryResult::GetSkipTags(bool* aSkipTags) {
 }
 
 NS_IMETHODIMP
-nsNavHistoryResult::GetSkipDescendantsOnItemRemoval(
-    bool* aSkipDescendantsOnItemRemoval) {
-  *aSkipDescendantsOnItemRemoval = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsNavHistoryResult::OnBeginUpdateBatch() {
   // Since we could be observing both history and bookmarks, it's possible both
   // notify the batch.  We can safely ignore nested calls.
@@ -3864,26 +3847,6 @@ nsNavHistoryResult::OnEndUpdateBatch() {
     NOTIFY_RESULT_OBSERVERS(this, Batching(false));
   }
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNavHistoryResult::OnItemRemoved(int64_t aItemId, int64_t aParentId,
-                                  int32_t aIndex, uint16_t aItemType,
-                                  nsIURI* aURI, const nsACString& aGUID,
-                                  const nsACString& aParentGUID,
-                                  uint16_t aSource) {
-  NS_ENSURE_ARG(aItemType != nsINavBookmarksService::TYPE_BOOKMARK || aURI);
-
-  ENUMERATE_BOOKMARK_FOLDER_OBSERVERS(
-      aParentId, OnItemRemoved(aItemId, aParentId, aIndex, aItemType, aURI,
-                               aGUID, aParentGUID, aSource));
-  ENUMERATE_ALL_BOOKMARKS_OBSERVERS(OnItemRemoved(aItemId, aParentId, aIndex,
-                                                  aItemType, aURI, aGUID,
-                                                  aParentGUID, aSource));
-  ENUMERATE_HISTORY_OBSERVERS(OnItemRemoved(aItemId, aParentId, aIndex,
-                                            aItemType, aURI, aGUID, aParentGUID,
-                                            aSource));
   return NS_OK;
 }
 
@@ -4111,6 +4074,31 @@ void nsNavHistoryResult::HandlePlacesEvent(const PlacesEventSequence& aEvents) {
             OnItemAdded(item->mId, item->mParentId, item->mIndex,
                         item->mItemType, uri, item->mDateAdded * 1000,
                         item->mGuid, item->mParentGuid, item->mSource));
+        break;
+      }
+      case PlacesEventType::Bookmark_removed: {
+        const dom::PlacesBookmarkRemoved* item =
+            event->AsPlacesBookmarkRemoved();
+        if (NS_WARN_IF(!item)) {
+          continue;
+        }
+
+        nsCOMPtr<nsIURI> uri;
+
+        if (item->mIsDescendantRemoval) {
+          continue;
+        }
+        ENUMERATE_BOOKMARK_FOLDER_OBSERVERS(
+            item->mParentId,
+            OnItemRemoved(item->mId, item->mParentId, item->mIndex,
+                          item->mItemType, uri, item->mGuid, item->mParentGuid,
+                          item->mSource));
+        ENUMERATE_ALL_BOOKMARKS_OBSERVERS(OnItemRemoved(
+            item->mId, item->mParentId, item->mIndex, item->mItemType, uri,
+            item->mGuid, item->mParentGuid, item->mSource));
+        ENUMERATE_HISTORY_OBSERVERS(OnItemRemoved(
+            item->mId, item->mParentId, item->mIndex, item->mItemType, uri,
+            item->mGuid, item->mParentGuid, item->mSource));
         break;
       }
       default: {

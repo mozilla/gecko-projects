@@ -20,7 +20,7 @@ use api::channel::{MsgReceiver, MsgSender, Payload};
 use api::CaptureBits;
 #[cfg(feature = "replay")]
 use api::CapturedDocument;
-use crate::clip_scroll_tree::SpatialNodeIndex;
+use crate::spatial_tree::SpatialNodeIndex;
 use crate::composite::{CompositorKind, CompositeDescriptor};
 #[cfg(feature = "debugger")]
 use crate::debug_server;
@@ -31,7 +31,7 @@ use crate::hit_test::{HitTest, HitTester};
 use crate::intern::DataStore;
 use crate::internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
-use crate::picture::RetainedTiles;
+use crate::picture::{RetainedTiles, TileCacheLogger};
 use crate::prim_store::{PrimitiveScratchBuffer, PrimitiveInstance};
 use crate::prim_store::{PrimitiveInstanceKind, PrimTemplateCommonData};
 use crate::prim_store::interned::*;
@@ -309,6 +309,10 @@ impl DataStores {
                 let prim_data = &self.radial_grad[data_handle];
                 &prim_data.common
             }
+            PrimitiveInstanceKind::ConicGradient { data_handle, .. } => {
+                let prim_data = &self.conic_grad[data_handle];
+                &prim_data.common
+            }
             PrimitiveInstanceKind::TextRun { data_handle, .. }  => {
                 let prim_data = &self.text_run[data_handle];
                 &prim_data.common
@@ -456,11 +460,10 @@ impl Document {
                     }
                 };
 
-                if self.hit_tester.is_some() {
-                    if self.scroll_nearest_scrolling_ancestor(delta, node_index) {
-                        self.hit_tester_is_valid = false;
-                        self.frame_is_valid = false;
-                    }
+                if self.hit_tester.is_some()
+                    && self.scroll_nearest_scrolling_ancestor(delta, node_index) {
+                    self.hit_tester_is_valid = false;
+                    self.frame_is_valid = false;
                 }
 
                 return DocumentOps {
@@ -506,13 +509,13 @@ impl Document {
             }
             FrameMsg::GetScrollNodeState(tx) => {
                 profile_scope!("GetScrollNodeState");
-                tx.send(self.scene.clip_scroll_tree.get_scroll_node_state()).unwrap();
+                tx.send(self.scene.spatial_tree.get_scroll_node_state()).unwrap();
             }
             FrameMsg::UpdateDynamicProperties(property_bindings) => {
                 self.dynamic_properties.set_properties(property_bindings);
             }
-            FrameMsg::AppendDynamicProperties(property_bindings) => {
-                self.dynamic_properties.add_properties(property_bindings);
+            FrameMsg::AppendDynamicTransformProperties(property_bindings) => {
+                self.dynamic_properties.add_transforms(property_bindings);
             }
             FrameMsg::SetPinchZoom(factor) => {
                 if self.view.pinch_zoom_factor != factor.get() {
@@ -521,7 +524,7 @@ impl Document {
                 }
             }
             FrameMsg::SetIsTransformAsyncZooming(is_zooming, animation_id) => {
-                let node = self.scene.clip_scroll_tree.spatial_nodes.iter_mut()
+                let node = self.scene.spatial_tree.spatial_nodes.iter_mut()
                     .find(|node| node.is_transform_bound_to_property(animation_id));
                 if let Some(node) = node {
                     if node.is_async_zooming != is_zooming {
@@ -541,6 +544,7 @@ impl Document {
         gpu_cache: &mut GpuCache,
         resource_profile: &mut ResourceProfileCounters,
         debug_flags: DebugFlags,
+        tile_cache_logger: &mut TileCacheLogger,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
@@ -567,6 +571,7 @@ impl Document {
                 &mut self.scratch,
                 &mut self.render_task_counters,
                 debug_flags,
+                tile_cache_logger,
             );
             self.hit_tester = Some(self.scene.create_hit_tester(&self.data_stores.clip));
             frame
@@ -588,7 +593,7 @@ impl Document {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
 
-            self.scene.clip_scroll_tree.update_tree(
+            self.scene.spatial_tree.update_tree(
                 pan,
                 accumulated_scale_factor,
                 &self.dynamic_properties,
@@ -608,7 +613,7 @@ impl Document {
     }
 
     pub fn discard_frame_state_for_pipeline(&mut self, pipeline_id: PipelineId) {
-        self.scene.clip_scroll_tree
+        self.scene.spatial_tree
             .discard_frame_state_for_pipeline(pipeline_id);
     }
 
@@ -618,7 +623,7 @@ impl Document {
         scroll_location: ScrollLocation,
         scroll_node_index: Option<SpatialNodeIndex>,
     ) -> bool {
-        self.scene.clip_scroll_tree.scroll_nearest_scrolling_ancestor(scroll_location, scroll_node_index)
+        self.scene.spatial_tree.scroll_nearest_scrolling_ancestor(scroll_location, scroll_node_index)
     }
 
     /// Returns true if the node actually changed position or false otherwise.
@@ -628,7 +633,7 @@ impl Document {
         id: ExternalScrollId,
         clamp: ScrollClamping
     ) -> bool {
-        self.scene.clip_scroll_tree.scroll_node(origin, id, clamp)
+        self.scene.spatial_tree.scroll_node(origin, id, clamp)
     }
 
     pub fn new_async_scene_ready(
@@ -648,7 +653,7 @@ impl Document {
         // build.
         let mut retained_tiles = RetainedTiles::new();
         self.scene.prim_store.destroy(&mut retained_tiles);
-        let old_scrolling_states = self.scene.clip_scroll_tree.drain();
+        let old_scrolling_states = self.scene.spatial_tree.drain();
 
         self.scene = built_scene;
 
@@ -658,7 +663,7 @@ impl Document {
 
         self.scratch.recycle(recycler);
 
-        self.scene.clip_scroll_tree.finalize_and_apply_pending_scroll_offsets(old_scrolling_states);
+        self.scene.spatial_tree.finalize_and_apply_pending_scroll_offsets(old_scrolling_states);
     }
 }
 
@@ -708,11 +713,13 @@ pub struct RenderBackend {
     resource_cache: ResourceCache,
 
     frame_config: FrameBuilderConfig,
+    default_compositor_kind: CompositorKind,
     documents: FastHashMap<DocumentId, Document>,
 
     notifier: Box<dyn RenderNotifier>,
     recorder: Option<Box<dyn ApiRecordingReceiver>>,
     logrecorder: Option<Box<LogRecorder>>,
+    tile_cache_logger: TileCacheLogger,
     sampler: Option<Box<dyn AsyncPropertySampler + Send>>,
     size_of_ops: Option<MallocSizeOfOps>,
     debug_flags: DebugFlags,
@@ -751,10 +758,12 @@ impl RenderBackend {
             resource_cache,
             gpu_cache: GpuCache::new(),
             frame_config,
+            default_compositor_kind : frame_config.compositor_kind,
             documents: FastHashMap::default(),
             notifier,
             recorder,
             logrecorder: None,
+            tile_cache_logger: TileCacheLogger::new(500usize),
             sampler,
             size_of_ops,
             debug_flags,
@@ -1131,12 +1140,15 @@ impl RenderBackend {
                         // that are created.
                         self.frame_config
                             .dual_source_blending_is_enabled = enable;
-
-                        self.low_priority_scene_tx.send(SceneBuilderRequest::SetFrameBuilderConfig(
-                            self.frame_config.clone()
-                        )).unwrap();
+                        self.update_frame_builder_config();
 
                         // We don't want to forward this message to the renderer.
+                        return RenderBackendStatus::Continue;
+                    }
+                    DebugCommand::SetPictureTileSize(tile_size) => {
+                        self.frame_config.tile_size_override = tile_size;
+                        self.update_frame_builder_config();
+
                         return RenderBackendStatus::Continue;
                     }
                     DebugCommand::FetchDocuments => {
@@ -1146,7 +1158,7 @@ impl RenderBackend {
                         return RenderBackendStatus::Continue;
                     }
                     DebugCommand::FetchClipScrollTree => {
-                        let json = self.get_clip_scroll_tree_for_debugger();
+                        let json = self.get_spatial_tree_for_debugger();
                         ResultMsg::DebugOutput(DebugOutput::FetchClipScrollTree(json))
                     }
                     #[cfg(feature = "capture")]
@@ -1215,6 +1227,39 @@ impl RenderBackend {
                         self.resource_cache.clear(mask);
                         return RenderBackendStatus::Continue;
                     }
+                    DebugCommand::EnableNativeCompositor(enable) => {
+                        // Default CompositorKind should be Native
+                        if let CompositorKind::Draw { .. } = self.default_compositor_kind {
+                            unreachable!();
+                        }
+
+                        let compositor_kind = if enable {
+                            self.default_compositor_kind
+                        } else {
+                            CompositorKind::default()
+                        };
+
+                        for (_, doc) in &mut self.documents {
+                            doc.scene.config.compositor_kind = compositor_kind;
+                            doc.frame_is_valid = false;
+                        }
+
+                        self.frame_config.compositor_kind = compositor_kind;
+                        self.update_frame_builder_config();
+
+                        // We don't want to forward this message to the renderer.
+                        return RenderBackendStatus::Continue;
+                    }
+                    DebugCommand::EnableMultithreading(enable) => {
+                        self.resource_cache.enable_multithreading(enable);
+                        return RenderBackendStatus::Continue;
+                    }
+                    DebugCommand::SetBatchingLookback(count) => {
+                        self.frame_config.batch_lookback_count = count as usize;
+                        self.update_frame_builder_config();
+
+                        return RenderBackendStatus::Continue;
+                    }
                     DebugCommand::SimulateLongSceneBuild(time_ms) => {
                         self.scene_tx.send(SceneBuilderRequest::SimulateLongSceneBuild(time_ms)).unwrap();
                         return RenderBackendStatus::Continue;
@@ -1266,6 +1311,12 @@ impl RenderBackend {
         }
 
         RenderBackendStatus::Continue
+    }
+
+    fn update_frame_builder_config(&self) {
+        self.low_priority_scene_tx.send(SceneBuilderRequest::SetFrameBuilderConfig(
+            self.frame_config.clone()
+        )).unwrap();
     }
 
     fn prepare_for_frames(&mut self) {
@@ -1456,6 +1507,12 @@ impl RenderBackend {
         // If there are any additions or removals of clip modes
         // during the scene build, apply them to the data store now.
         if let Some(updates) = interner_updates {
+            #[cfg(feature = "capture")]
+            {
+                if self.debug_flags.contains(DebugFlags::TILE_CACHE_LOGGING_DBG) {
+                    self.tile_cache_logger.serialize_updates(&updates);
+                }
+            }
             doc.data_stores.apply_updates(updates, profile_counters);
         }
 
@@ -1504,7 +1561,7 @@ impl RenderBackend {
         // external image with NativeTexture or when platform requested to composite frame.
         if invalidate_rendered_frame {
             doc.rendered_frame_is_valid = false;
-            if let CompositorKind::Draw { max_partial_present_rects } = self.frame_config.compositor_kind {
+            if let CompositorKind::Draw { max_partial_present_rects } = doc.scene.config.compositor_kind {
               // When partial present is enabled, we need to force redraw.
               if max_partial_present_rects > 0 {
                   let msg = ResultMsg::ForceRedraw;
@@ -1530,6 +1587,7 @@ impl RenderBackend {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    &mut self.tile_cache_logger,
                 );
 
                 debug!("generated frame for document {:?} with {} passes",
@@ -1611,21 +1669,21 @@ impl RenderBackend {
     }
 
     #[cfg(not(feature = "debugger"))]
-    fn get_clip_scroll_tree_for_debugger(&self) -> String {
+    fn get_spatial_tree_for_debugger(&self) -> String {
         String::new()
     }
 
     #[cfg(feature = "debugger")]
-    fn get_clip_scroll_tree_for_debugger(&self) -> String {
+    fn get_spatial_tree_for_debugger(&self) -> String {
         use crate::print_tree::PrintableTree;
 
-        let mut debug_root = debug_server::ClipScrollTreeList::new();
+        let mut debug_root = debug_server::SpatialTreeList::new();
 
         for (_, doc) in &self.documents {
-            let debug_node = debug_server::TreeNode::new("document clip-scroll tree");
+            let debug_node = debug_server::TreeNode::new("document spatial tree");
             let mut builder = debug_server::TreeNodeBuilder::new(debug_node);
 
-            doc.scene.clip_scroll_tree.print_with(&mut builder);
+            doc.scene.spatial_tree.print_with(&mut builder);
 
             debug_root.add(builder.build());
         }
@@ -1633,19 +1691,19 @@ impl RenderBackend {
         serde_json::to_string(&debug_root).unwrap()
     }
 
-    fn report_memory(&mut self, tx: MsgSender<MemoryReport>) {
-        let mut report = MemoryReport::default();
+    fn report_memory(&mut self, tx: MsgSender<Box<MemoryReport>>) {
+        let mut report = Box::new(MemoryReport::default());
         let ops = self.size_of_ops.as_mut().unwrap();
         let op = ops.size_of_op;
         report.gpu_cache_metadata = self.gpu_cache.size_of(ops);
-        for (_id, doc) in &self.documents {
+        for doc in self.documents.values() {
             report.clip_stores += doc.scene.clip_store.size_of(ops);
             report.hit_testers += doc.hit_tester.size_of(ops);
 
             doc.data_stores.report_memory(ops, &mut report)
         }
 
-        report += self.resource_cache.report_memory(op);
+        (*report) += self.resource_cache.report_memory(op);
 
         // Send a message to report memory on the scene-builder thread, which
         // will add its report to this one and send the result back to the original
@@ -1707,6 +1765,7 @@ impl RenderBackend {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    &mut self.tile_cache_logger,
                 );
                 // After we rendered the frames, there are pending updates to both
                 // GPU cache and resources. Instead of serializing them, we are going to make sure
@@ -1718,8 +1777,8 @@ impl RenderBackend {
                 // which may capture necessary details for some cases.
                 let file_name = format!("frame-{}-{}", id.namespace_id.0, id.id);
                 config.serialize(&rendered_document.frame, file_name);
-                let file_name = format!("clip-scroll-{}-{}", id.namespace_id.0, id.id);
-                config.serialize_tree(&doc.scene.clip_scroll_tree, file_name);
+                let file_name = format!("spatial-{}-{}", id.namespace_id.0, id.id);
+                config.serialize_tree(&doc.scene.spatial_tree, file_name);
                 let file_name = format!("builder-{}-{}", id.namespace_id.0, id.id);
                 config.serialize(&doc.frame_builder, file_name);
                 let file_name = format!("scratch-{}-{}", id.namespace_id.0, id.id);
@@ -1753,6 +1812,11 @@ impl RenderBackend {
 
         debug!("\tresource cache");
         let (resources, deferred) = self.resource_cache.save_capture(&config.root);
+
+        if config.bits.contains(CaptureBits::TILE_CACHE) {
+            debug!("\ttile cache");
+            self.tile_cache_logger.save_capture(&config.root);
+        }
 
         info!("\tbackend");
         let backend = PlainRenderBackend {
@@ -1886,7 +1950,7 @@ impl RenderBackend {
 
             scenes_to_build.push(LoadScene {
                 document_id: id,
-                scene: scene,
+                scene,
                 view: view.clone(),
                 config: self.frame_config.clone(),
                 output_pipelines: doc.output_pipelines.clone(),

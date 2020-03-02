@@ -7,8 +7,8 @@ package org.mozilla.geckoview.test
 import android.graphics.Matrix
 import android.os.Bundle
 import android.os.LocaleList
-import android.support.test.filters.MediumTest
-import android.support.test.runner.AndroidJUnit4
+import androidx.test.filters.MediumTest
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import android.util.Pair
 import android.util.SparseArray
 import android.view.View
@@ -184,13 +184,7 @@ class AutofillDelegateTest : BaseSessionTest() {
         // Wait on the promises and check for correct values.
         for ((key, actual, expected, eventInterface) in promises.map { it.value.asJSList<String>() }) {
             assertThat("Auto-filled value must match ($key)", actual, equalTo(expected))
-
-            // <input type=number> nodes don't get InputEvent events.
-            if (key == "#number1") {
-                assertThat("input type=number event should be dispatched with Event interface", eventInterface, equalTo("Event"))
-            } else {
-                assertThat("input event should be dispatched with InputEvent interface", eventInterface, equalTo("InputEvent"))
-            }
+            assertThat("input event should be dispatched with InputEvent interface", eventInterface, equalTo("InputEvent"))
         }
     }
 
@@ -406,6 +400,35 @@ class AutofillDelegateTest : BaseSessionTest() {
         })
         assertThat("Should have one focused field",
                 countAutofillNodes({ it.focused }), equalTo(1))
+    }
+
+    @WithDisplay(width = 100, height = 100)
+    @Test fun autofillAutocompleteAttribute() {
+        mainSession.loadTestPath(FORMS_AUTOCOMPLETE_HTML_PATH)
+        sessionRule.waitUntilCalled(object : Callbacks.AutofillDelegate {
+            @AssertCalled(count = 3)
+            override fun onAutofill(session: GeckoSession,
+                                    notification: Int,
+                                    node: Autofill.Node?) {
+            }
+        });
+
+        fun checkAutofillChild(child: Autofill.Node): Int {
+            var sum = 0
+            for (c in child.children) {
+               sum += checkAutofillChild(c!!)
+            }
+            if (child.hint == Autofill.Hint.NONE) {
+                return sum
+            }
+            assertThat("Should have HTML tag", child.tag, equalTo("input"))
+            return sum + 1
+        }
+
+        val root = mainSession.autofillSession.root
+        // Each page has 3 nodes for autofill.
+        assertThat("autofill hint count",
+                   checkAutofillChild(root), equalTo(6))
     }
 
     class MockViewNode : ViewStructure() {

@@ -299,19 +299,18 @@ class MOZ_STACK_CLASS WebRenderScrollDataWrapper final {
         PixelCastJustification::MovingDownToChildren);
   }
 
-  LayerIntRect GetRemoteDocumentRect() const {
+  LayerIntSize GetRemoteDocumentSize() const {
     MOZ_ASSERT(IsValid());
 
     if (mLayer->GetReferentId().isNothing()) {
-      return LayerIntRect();
+      return LayerIntSize();
     }
 
     if (AtBottomLayer()) {
-      return mLayer->GetRemoteDocumentRect();
+      return mLayer->GetRemoteDocumentSize();
     }
 
-    return ViewAs<LayerPixel>(TransformBy(mLayer->GetTransformTyped(),
-                                          mLayer->GetRemoteDocumentRect()),
+    return ViewAs<LayerPixel>(mLayer->GetRemoteDocumentSize(),
                               PixelCastJustification::MovingDownToChildren);
   }
 
@@ -372,6 +371,35 @@ class MOZ_STACK_CLASS WebRenderScrollDataWrapper final {
   SideBits GetFixedPositionSides() const {
     MOZ_ASSERT(IsValid());
     return mLayer->GetFixedPositionSides();
+  }
+
+  bool GetIsStickyPosition() const {
+    MOZ_ASSERT(IsValid());
+
+    // TODO: Bug 1610731 Implement this for WebRender.
+    return false;
+  }
+
+  ScrollableLayerGuid::ViewID GetStickyScrollContainerId() const {
+    MOZ_ASSERT(IsValid());
+
+    // TODO: Bug 1610731 Implement this for WebRender.
+    return ScrollableLayerGuid::NULL_SCROLL_ID;
+  }
+
+  const LayerRectAbsolute& GetStickyScrollRangeOuter() const {
+    MOZ_ASSERT(IsValid());
+    static const LayerRectAbsolute dummy;
+
+    // TODO: Bug 1610731 Implement this for WebRender.
+    return dummy;
+  }
+  const LayerRectAbsolute& GetStickyScrollRangeInner() const {
+    MOZ_ASSERT(IsValid());
+    static const LayerRectAbsolute dummy;
+
+    // TODO: Bug 1610731 Implement this for WebRender.
+    return dummy;
   }
 
   Maybe<uint64_t> GetZoomAnimationId() const {

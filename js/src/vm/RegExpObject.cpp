@@ -165,17 +165,17 @@ void RegExpObject::trace(JSTracer* trc) {
 }
 
 static const JSClassOps RegExpObjectClassOps = {
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* enumerate */
-    nullptr, /* newEnumerate */
-    nullptr, /* resolve */
-    nullptr, /* mayResolve */
-    nullptr, /* finalize */
-    nullptr, /* call */
-    nullptr, /* hasInstance */
-    nullptr, /* construct */
-    RegExpObject::trace,
+    nullptr,              // addProperty
+    nullptr,              // delProperty
+    nullptr,              // enumerate
+    nullptr,              // newEnumerate
+    nullptr,              // resolve
+    nullptr,              // mayResolve
+    nullptr,              // finalize
+    nullptr,              // call
+    nullptr,              // hasInstance
+    nullptr,              // construct
+    RegExpObject::trace,  // trace
 };
 
 static const ClassSpec RegExpObjectClassSpec = {
@@ -318,7 +318,7 @@ Shape* RegExpObject::assignInitialShape(JSContext* cx,
                                         Handle<RegExpObject*> self) {
   MOZ_ASSERT(self->empty());
 
-  JS_STATIC_ASSERT(LAST_INDEX_SLOT == 0);
+  static_assert(LAST_INDEX_SLOT == 0);
 
   /* The lastIndex property alone is writable but non-configurable. */
   return NativeObject::addDataProperty(cx, self, cx->names().lastIndex,

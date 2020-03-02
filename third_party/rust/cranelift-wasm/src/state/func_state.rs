@@ -9,7 +9,7 @@
 use crate::environ::{FuncEnvironment, GlobalVariable, WasmResult};
 use crate::translation_utils::{FuncIndex, GlobalIndex, MemoryIndex, SignatureIndex, TableIndex};
 use crate::{HashMap, Occupied, Vacant};
-use cranelift_codegen::ir::{self, Ebb, Inst, Value};
+use cranelift_codegen::ir::{self, Block, Inst, Value};
 use std::vec::Vec;
 
 /// Information about the presence of an associated `else` for an `if`, or the
@@ -35,24 +35,24 @@ pub enum ElseData {
     /// these cases, we pre-allocate the `else` block.
     WithElse {
         /// This is the `else` block.
-        else_block: Ebb,
+        else_block: Block,
     },
 }
 
 /// A control stack frame can be an `if`, a `block` or a `loop`, each one having the following
 /// fields:
 ///
-/// - `destination`: reference to the `Ebb` that will hold the code after the control block;
+/// - `destination`: reference to the `Block` that will hold the code after the control block;
 /// - `num_return_values`: number of values returned by the control block;
 /// - `original_stack_size`: size of the value stack at the beginning of the control block.
 ///
 /// Moreover, the `if` frame has the `branch_inst` field that points to the `brz` instruction
 /// separating the `true` and `false` branch. The `loop` frame has a `header` field that references
-/// the `Ebb` that contains the beginning of the body of the loop.
+/// the `Block` that contains the beginning of the body of the loop.
 #[derive(Debug)]
 pub enum ControlStackFrame {
     If {
-        destination: Ebb,
+        destination: Block,
         else_data: ElseData,
         num_param_values: usize,
         num_return_values: usize,
@@ -72,15 +72,15 @@ pub enum ControlStackFrame {
         // `state.reachable` when we hit the `end` in the `if .. else .. end`.
     },
     Block {
-        destination: Ebb,
+        destination: Block,
         num_param_values: usize,
         num_return_values: usize,
         original_stack_size: usize,
         exit_is_branched_to: bool,
     },
     Loop {
-        destination: Ebb,
-        header: Ebb,
+        destination: Block,
+        header: Block,
         num_param_values: usize,
         num_return_values: usize,
         original_stack_size: usize,
@@ -115,14 +115,14 @@ impl ControlStackFrame {
             } => num_param_values,
         }
     }
-    pub fn following_code(&self) -> Ebb {
+    pub fn following_code(&self) -> Block {
         match *self {
             Self::If { destination, .. }
             | Self::Block { destination, .. }
             | Self::Loop { destination, .. } => destination,
         }
     }
-    pub fn br_destination(&self) -> Ebb {
+    pub fn br_destination(&self) -> Block {
         match *self {
             Self::If { destination, .. } | Self::Block { destination, .. } => destination,
             Self::Loop { header, .. } => header,
@@ -254,7 +254,7 @@ impl FuncTranslationState {
     ///
     /// This resets the state to containing only a single block representing the whole function.
     /// The exit block is the last block in the function which will contain the return instruction.
-    pub(crate) fn initialize(&mut self, sig: &ir::Signature, exit_block: Ebb) {
+    pub(crate) fn initialize(&mut self, sig: &ir::Signature, exit_block: Block) {
         self.clear();
         self.push_block(
             exit_block,
@@ -306,35 +306,44 @@ impl FuncTranslationState {
         (v1, v2, v3)
     }
 
+    /// Helper to ensure the the stack size is at least as big as `n`; note that due to
+    /// `debug_assert` this will not execute in non-optimized builds.
+    #[inline]
+    fn ensure_length_is_at_least(&self, n: usize) {
+        debug_assert!(
+            n <= self.stack.len(),
+            "attempted to access {} values but stack only has {} values",
+            n,
+            self.stack.len()
+        )
+    }
+
     /// Pop the top `n` values on the stack.
     ///
     /// The popped values are not returned. Use `peekn` to look at them before popping.
     pub(crate) fn popn(&mut self, n: usize) {
-        debug_assert!(
-            n <= self.stack.len(),
-            "popn({}) but stack only has {} values",
-            n,
-            self.stack.len()
-        );
+        self.ensure_length_is_at_least(n);
         let new_len = self.stack.len() - n;
         self.stack.truncate(new_len);
     }
 
     /// Peek at the top `n` values on the stack in the order they were pushed.
     pub(crate) fn peekn(&self, n: usize) -> &[Value] {
-        debug_assert!(
-            n <= self.stack.len(),
-            "peekn({}) but stack only has {} values",
-            n,
-            self.stack.len()
-        );
+        self.ensure_length_is_at_least(n);
         &self.stack[self.stack.len() - n..]
+    }
+
+    /// Peek at the top `n` values on the stack in the order they were pushed.
+    pub(crate) fn peekn_mut(&mut self, n: usize) -> &mut [Value] {
+        self.ensure_length_is_at_least(n);
+        let len = self.stack.len();
+        &mut self.stack[len - n..]
     }
 
     /// Push a block on the control stack.
     pub(crate) fn push_block(
         &mut self,
-        following_code: Ebb,
+        following_code: Block,
         num_param_types: usize,
         num_result_types: usize,
     ) {
@@ -351,8 +360,8 @@ impl FuncTranslationState {
     /// Push a loop on the control stack.
     pub(crate) fn push_loop(
         &mut self,
-        header: Ebb,
-        following_code: Ebb,
+        header: Block,
+        following_code: Block,
         num_param_types: usize,
         num_result_types: usize,
     ) {
@@ -369,7 +378,7 @@ impl FuncTranslationState {
     /// Push an if on the control stack.
     pub(crate) fn push_if(
         &mut self,
-        destination: Ebb,
+        destination: Block,
         else_data: ElseData,
         num_param_types: usize,
         num_result_types: usize,
@@ -465,7 +474,7 @@ impl FuncTranslationState {
             Occupied(entry) => Ok(*entry.get()),
             Vacant(entry) => {
                 let sig = environ.make_indirect_sig(func, index)?;
-                Ok(*entry.insert((sig, normal_args(&func.dfg.signatures[sig]))))
+                Ok(*entry.insert((sig, num_wasm_parameters(environ, &func.dfg.signatures[sig]))))
             }
         }
     }
@@ -486,17 +495,20 @@ impl FuncTranslationState {
             Vacant(entry) => {
                 let fref = environ.make_direct_func(func, index)?;
                 let sig = func.dfg.ext_funcs[fref].signature;
-                Ok(*entry.insert((fref, normal_args(&func.dfg.signatures[sig]))))
+                Ok(*entry.insert((
+                    fref,
+                    num_wasm_parameters(environ, &func.dfg.signatures[sig]),
+                )))
             }
         }
     }
 }
 
-/// Count the number of normal parameters in a signature.
-/// Exclude special-purpose parameters that represent runtime stuff and not WebAssembly arguments.
-fn normal_args(sig: &ir::Signature) -> usize {
-    sig.params
-        .iter()
-        .filter(|arg| arg.purpose == ir::ArgumentPurpose::Normal)
+fn num_wasm_parameters<FE: FuncEnvironment + ?Sized>(
+    environ: &FE,
+    signature: &ir::Signature,
+) -> usize {
+    (0..signature.params.len())
+        .filter(|index| environ.is_wasm_parameter(signature, *index))
         .count()
 }

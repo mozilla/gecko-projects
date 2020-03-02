@@ -513,8 +513,8 @@ static bool IsCacheableNoProperty(JSContext* cx, JSObject* obj,
 
   // If we're doing a name lookup, we have to throw a ReferenceError. If
   // extra warnings are enabled, we may have to report a warning.
-  // Note that Ion does not generate idempotent caches for JSOP_GETBOUNDNAME.
-  if ((pc && *pc == JSOP_GETBOUNDNAME) ||
+  // Note that Ion does not generate idempotent caches for JSOp::GetBoundName.
+  if ((pc && JSOp(*pc) == JSOp::GetBoundName) ||
       cx->realm()->behaviors().extraWarnings(cx)) {
     return false;
   }
@@ -1641,7 +1641,7 @@ AttachDecision GetPropIRGenerator::tryAttachProxy(HandleObject obj,
       break;
     case ProxyStubType::DOMExpando:
       TRY_ATTACH(tryAttachDOMProxyExpando(obj, objId, id));
-      MOZ_FALLTHROUGH;  // Fall through to the generic shadowed case.
+      [[fallthrough]];  // Fall through to the generic shadowed case.
     case ProxyStubType::DOMShadowed:
       return tryAttachDOMProxyShadowed(obj, objId, id);
     case ProxyStubType::DOMUnshadowed:
@@ -1828,7 +1828,7 @@ AttachDecision GetPropIRGenerator::tryAttachModuleNamespace(HandleObject obj,
     return AttachDecision::NoAction;
   }
 
-  if (IsIonEnabled()) {
+  if (IsIonEnabled(cx_)) {
     EnsureTrackPropertyTypes(cx_, env, shape->propid());
   }
 
@@ -1846,6 +1846,8 @@ AttachDecision GetPropIRGenerator::tryAttachModuleNamespace(HandleObject obj,
 
 AttachDecision GetPropIRGenerator::tryAttachPrimitive(ValOperandId valId,
                                                       HandleId id) {
+  MOZ_ASSERT(!isSuper(), "SuperBase is guaranteed to be an object");
+
   JSProtoKey protoKey;
   switch (val_.type()) {
     case ValueType::String:
@@ -1894,7 +1896,7 @@ AttachDecision GetPropIRGenerator::tryAttachPrimitive(ValOperandId valId,
     case CanAttachReadSlot: {
       if (holder) {
         // Instantiate this property, for use during Ion compilation.
-        if (IsIonEnabled()) {
+        if (IsIonEnabled(cx_)) {
           EnsureTrackPropertyTypes(cx_, holder, id);
         }
       }
@@ -1916,11 +1918,6 @@ AttachDecision GetPropIRGenerator::tryAttachPrimitive(ValOperandId valId,
     case CanAttachScriptedGetter:
     case CanAttachNativeGetter: {
       MOZ_ASSERT(!idempotent());
-
-      // The primitive stubs don't currently support |super| access.
-      if (isSuper()) {
-        return AttachDecision::NoAction;
-      }
 
       if (val_.isNumber()) {
         writer.guardIsNumber(valId);
@@ -2492,7 +2489,7 @@ AttachDecision GetNameIRGenerator::tryAttachGlobalNameValue(ObjOperandId objId,
   }
 
   // Instantiate this global property, for use during Ion compilation.
-  if (IsIonEnabled()) {
+  if (IsIonEnabled(cx_)) {
     EnsureTrackPropertyTypes(cx_, holder, id);
   }
 
@@ -2560,7 +2557,7 @@ AttachDecision GetNameIRGenerator::tryAttachGlobalNameGetter(ObjOperandId objId,
     return AttachDecision::NoAction;
   }
 
-  if (IsIonEnabled()) {
+  if (IsIonEnabled(cx_)) {
     EnsureTrackPropertyTypes(cx_, holder, id);
   }
 
@@ -3322,7 +3319,7 @@ static Shape* LookupShapeForSetSlot(JSOp op, NativeObject* obj, jsid id) {
     return nullptr;
   }
 
-  // If this is an op like JSOP_INITELEM / [[DefineOwnProperty]], the
+  // If this is an op like JSOp::InitElem / [[DefineOwnProperty]], the
   // property's attributes may have to be changed too, so make sure it's a
   // simple data property.
   if (IsPropertyInitOp(op) &&
@@ -3377,7 +3374,7 @@ AttachDecision SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj,
                                       : AttachDecision::NoAction;
   }
 
-  // Don't attach a megamorphic store slot stub for ops like JSOP_INITELEM.
+  // Don't attach a megamorphic store slot stub for ops like JSOp::InitElem.
   if (mode_ == ICState::Mode::Megamorphic && cacheKind_ == CacheKind::SetProp &&
       IsPropertySetOp(JSOp(*pc_))) {
     writer.megamorphicStoreSlot(objId, JSID_TO_ATOM(id)->asPropertyName(),
@@ -3604,7 +3601,7 @@ static bool CanAttachSetter(JSContext* cx, jsbytecode* pc, HandleObject obj,
                             HandleId id, MutableHandleObject holder,
                             MutableHandleShape propShape,
                             bool* isTemporarilyUnoptimizable) {
-  // Don't attach a setter stub for ops like JSOP_INITELEM.
+  // Don't attach a setter stub for ops like JSOp::InitElem.
   MOZ_ASSERT(IsPropertySetOp(JSOp(*pc)));
 
   PropertyResult prop;
@@ -3687,7 +3684,7 @@ AttachDecision SetPropIRGenerator::tryAttachSetArrayLength(HandleObject obj,
                                                            ObjOperandId objId,
                                                            HandleId id,
                                                            ValOperandId rhsId) {
-  // Don't attach an array length stub for ops like JSOP_INITELEM.
+  // Don't attach an array length stub for ops like JSOp::InitElem.
   MOZ_ASSERT(IsPropertySetOp(JSOp(*pc_)));
 
   if (!obj->is<ArrayObject>() || !JSID_IS_ATOM(id, cx_->names().length) ||
@@ -3717,7 +3714,7 @@ AttachDecision SetPropIRGenerator::tryAttachSetDenseElement(
     return AttachDecision::NoAction;
   }
 
-  // Don't optimize INITELEM (DefineProperty) on non-extensible objects: when
+  // Don't optimize InitElem (DefineProperty) on non-extensible objects: when
   // the elements are sealed, we have to throw an exception. Note that we have
   // to check !isExtensible instead of denseElementsAreSealed because sealing
   // a (non-extensible) object does not necessarily trigger a Shape change.
@@ -3802,7 +3799,7 @@ AttachDecision SetPropIRGenerator::tryAttachSetDenseElementHole(
   JSOp op = JSOp(*pc_);
   MOZ_ASSERT(IsPropertySetOp(op) || IsPropertyInitOp(op));
 
-  if (op == JSOP_INITHIDDENELEM) {
+  if (op == JSOp::InitHiddenElem) {
     return AttachDecision::NoAction;
   }
 
@@ -3849,7 +3846,7 @@ AttachDecision SetPropIRGenerator::tryAttachSetDenseElementHole(
   }
   TestMatchingNativeReceiver(writer, nobj, objId);
 
-  // Also shape guard the proto chain, unless this is an INITELEM or we know
+  // Also shape guard the proto chain, unless this is an InitElem or we know
   // the proto chain has no indexed props.
   if (IsPropertySetOp(op) && maybeHasExtraIndexedProps_) {
     ShapeGuardProtoChain(writer, obj, objId);
@@ -3872,7 +3869,7 @@ AttachDecision SetPropIRGenerator::tryAttachAddOrUpdateSparseElement(
   JSOp op = JSOp(*pc_);
   MOZ_ASSERT(IsPropertySetOp(op) || IsPropertyInitOp(op));
 
-  if (op != JSOP_SETELEM && op != JSOP_STRICTSETELEM) {
+  if (op != JSOp::SetElem && op != JSOp::StrictSetElem) {
     return AttachDecision::NoAction;
   }
 
@@ -3944,7 +3941,7 @@ AttachDecision SetPropIRGenerator::tryAttachAddOrUpdateSparseElement(
 
   writer.callAddOrUpdateSparseElementHelper(
       objId, indexId, rhsId,
-      /* strict = */ op == JSOP_STRICTSETELEM);
+      /* strict = */ op == JSOp::StrictSetElem);
   writer.returnFromIC();
 
   trackAttached("AddOrUpdateSparseElement");
@@ -4192,7 +4189,7 @@ AttachDecision SetPropIRGenerator::tryAttachProxy(HandleObject obj,
                                                   ObjOperandId objId,
                                                   HandleId id,
                                                   ValOperandId rhsId) {
-  // Don't attach a proxy stub for ops like JSOP_INITELEM.
+  // Don't attach a proxy stub for ops like JSOp::InitElem.
   MOZ_ASSERT(IsPropertySetOp(JSOp(*pc_)));
 
   ProxyStubType type = GetProxyStubType(cx_, obj, id);
@@ -4210,7 +4207,7 @@ AttachDecision SetPropIRGenerator::tryAttachProxy(HandleObject obj,
       break;
     case ProxyStubType::DOMExpando:
       TRY_ATTACH(tryAttachDOMProxyExpando(obj, objId, id, rhsId));
-      MOZ_FALLTHROUGH;  // Fall through to the generic shadowed case.
+      [[fallthrough]];  // Fall through to the generic shadowed case.
     case ProxyStubType::DOMShadowed:
       return tryAttachDOMProxyShadowed(obj, objId, id, rhsId);
     case ProxyStubType::DOMUnshadowed:
@@ -4228,7 +4225,7 @@ AttachDecision SetPropIRGenerator::tryAttachProxy(HandleObject obj,
 AttachDecision SetPropIRGenerator::tryAttachProxyElement(HandleObject obj,
                                                          ObjOperandId objId,
                                                          ValOperandId rhsId) {
-  // Don't attach a proxy stub for ops like JSOP_INITELEM.
+  // Don't attach a proxy stub for ops like JSOp::InitElem.
   MOZ_ASSERT(IsPropertySetOp(JSOp(*pc_)));
 
   if (!obj->is<ProxyObject>()) {
@@ -4706,7 +4703,7 @@ AttachDecision GetIteratorIRGenerator::tryAttachStub() {
 
 AttachDecision GetIteratorIRGenerator::tryAttachNativeIterator(
     ObjOperandId objId, HandleObject obj) {
-  MOZ_ASSERT(JSOp(*pc_) == JSOP_ITER);
+  MOZ_ASSERT(JSOp(*pc_) == JSOp::Iter);
 
   PropertyIteratorObject* iterobj = LookupInIteratorCache(cx_, obj);
   if (!iterobj) {
@@ -4816,7 +4813,7 @@ AttachDecision CallIRGenerator::tryAttachArrayPush() {
   // This is a soft assert, documenting the fact that we pass 'true'
   // for needsTypeBarrier when constructing typeCheckInfo_ for CallIRGenerator.
   // Can be removed safely if the assumption becomes false.
-  MOZ_ASSERT(typeCheckInfo_.needsTypeBarrier());
+  MOZ_ASSERT_IF(IsTypeInferenceEnabled(), typeCheckInfo_.needsTypeBarrier());
 
   // Guard that the group and shape matches.
   if (typeCheckInfo_.needsTypeBarrier()) {
@@ -4948,7 +4945,12 @@ AttachDecision CallIRGenerator::tryAttachIsSuspendedGenerator() {
   return AttachDecision::Attach;
 }
 
-AttachDecision CallIRGenerator::tryAttachFunCall() {
+AttachDecision CallIRGenerator::tryAttachFunCall(HandleFunction calleeFunc) {
+  MOZ_ASSERT(calleeFunc->isNative());
+  if (calleeFunc->native() != fun_call) {
+    return AttachDecision::NoAction;
+  }
+
   if (!thisval_.isObject() || !thisval_.toObject().is<JSFunction>()) {
     return AttachDecision::NoAction;
   }
@@ -4998,7 +5000,12 @@ AttachDecision CallIRGenerator::tryAttachFunCall() {
   return AttachDecision::Attach;
 }
 
-AttachDecision CallIRGenerator::tryAttachFunApply() {
+AttachDecision CallIRGenerator::tryAttachFunApply(HandleFunction calleeFunc) {
+  MOZ_ASSERT(calleeFunc->isNative());
+  if (calleeFunc->native() != fun_apply) {
+    return AttachDecision::NoAction;
+  }
+
   if (argc_ != 2) {
     return AttachDecision::NoAction;
   }
@@ -5073,16 +5080,8 @@ AttachDecision CallIRGenerator::tryAttachSpecialCaseCallNative(
   MOZ_ASSERT(mode_ == ICState::Mode::Specialized);
   MOZ_ASSERT(callee->isNative());
 
-  // Check for fun_call and fun_apply.
-  if (op_ == JSOP_FUNCALL && callee->native() == fun_call) {
-    return tryAttachFunCall();
-  }
-  if (op_ == JSOP_FUNAPPLY && callee->native() == fun_apply) {
-    return tryAttachFunApply();
-  }
-
-  // Other functions are only optimized for normal calls.
-  if (op_ != JSOP_CALL && op_ != JSOP_CALL_IGNORES_RV) {
+  // Special case functions are only optimized for normal calls.
+  if (op_ != JSOp::Call && op_ != JSOp::CallIgnoresRv) {
     return AttachDecision::NoAction;
   }
 
@@ -5107,10 +5106,14 @@ bool CallIRGenerator::getTemplateObjectForScripted(HandleFunction calleeFunc,
                                                    bool* skipAttach) {
   MOZ_ASSERT(!*skipAttach);
 
-  // Saving the template object is unsound for super(), as a single
-  // callsite can have multiple possible prototype objects created
-  // (via different newTargets)
-  bool isSuper = op_ == JSOP_SUPERCALL || op_ == JSOP_SPREADSUPERCALL;
+  // Some constructors allocate their own |this| object.
+  if (calleeFunc->constructorNeedsUninitializedThis()) {
+    return true;
+  }
+
+  // Don't allocate a template object for super() calls as Ion doesn't support
+  // super() yet.
+  bool isSuper = op_ == JSOp::SuperCall || op_ == JSOp::SpreadSuperCall;
   if (isSuper) {
     return true;
   }
@@ -5130,8 +5133,8 @@ bool CallIRGenerator::getTemplateObjectForScripted(HandleFunction calleeFunc,
   if (protov.isObject()) {
     AutoRealm ar(cx_, calleeFunc);
     TaggedProto proto(&protov.toObject());
-    ObjectGroup* group =
-        ObjectGroup::defaultNewGroup(cx_, nullptr, proto, newTarget);
+    ObjectGroup* group = ObjectGroup::defaultNewGroup(cx_, &PlainObject::class_,
+                                                      proto, newTarget);
     if (!group) {
       return false;
     }
@@ -5162,16 +5165,16 @@ bool CallIRGenerator::getTemplateObjectForScripted(HandleFunction calleeFunc,
 
 AttachDecision CallIRGenerator::tryAttachCallScripted(
     HandleFunction calleeFunc) {
-  // Never attach optimized scripted call stubs for JSOP_FUNAPPLY.
+  // Never attach optimized scripted call stubs for JSOp::FunApply.
   // MagicArguments may escape the frame through them.
-  if (op_ == JSOP_FUNAPPLY) {
+  if (op_ == JSOp::FunApply) {
     return AttachDecision::NoAction;
   }
 
   bool isSpecialized = mode_ == ICState::Mode::Specialized;
 
-  bool isConstructing = IsConstructorCallPC(pc_);
-  bool isSpread = IsSpreadCallPC(pc_);
+  bool isConstructing = IsConstructPC(pc_);
+  bool isSpread = IsSpreadPC(pc_);
   bool isSameRealm = isSpecialized && cx_->realm() == calleeFunc->realm();
   CallFlags flags(isConstructing, isSpread, isSameRealm);
 
@@ -5200,7 +5203,7 @@ AttachDecision CallIRGenerator::tryAttachCallScripted(
 
   // Keep track of the function's |prototype| property in type
   // information, for use during Ion compilation.
-  if (IsIonEnabled()) {
+  if (IsIonEnabled(cx_)) {
     EnsureTrackPropertyTypes(cx_, calleeFunc, NameToId(cx_->names().prototype));
   }
 
@@ -5263,10 +5266,9 @@ bool CallIRGenerator::getTemplateObjectForNative(HandleFunction calleeFunc,
                                                  MutableHandleObject res) {
   AutoRealm ar(cx_, calleeFunc);
 
-  // Saving the template object is unsound for super(), as a single
-  // callsite can have multiple possible prototype objects created
-  // (via different newTargets)
-  bool isSuper = op_ == JSOP_SUPERCALL || op_ == JSOP_SPREADSUPERCALL;
+  // Don't allocate a template object for super() calls as Ion doesn't support
+  // super() yet.
+  bool isSuper = op_ == JSOp::SuperCall || op_ == JSOp::SpreadSuperCall;
   if (isSuper) {
     return true;
   }
@@ -5362,9 +5364,9 @@ AttachDecision CallIRGenerator::tryAttachCallNative(HandleFunction calleeFunc) {
 
   bool isSpecialized = mode_ == ICState::Mode::Specialized;
 
-  bool isSpread = IsSpreadCallPC(pc_);
+  bool isSpread = IsSpreadPC(pc_);
   bool isSameRealm = isSpecialized && cx_->realm() == calleeFunc->realm();
-  bool isConstructing = IsConstructorCallPC(pc_);
+  bool isConstructing = IsConstructPC(pc_);
   CallFlags flags(isConstructing, isSpread, isSameRealm);
 
   if (isConstructing && !calleeFunc->isConstructor()) {
@@ -5427,36 +5429,8 @@ AttachDecision CallIRGenerator::tryAttachCallNative(HandleFunction calleeFunc) {
   return AttachDecision::Attach;
 }
 
-bool CallIRGenerator::getTemplateObjectForClassHook(
-    HandleObject calleeObj, MutableHandleObject result) {
-  MOZ_ASSERT(IsConstructorCallPC(pc_));
-  JSNative hook = calleeObj->constructHook();
-
-  // Saving the template object is unsound for super(), as a single
-  // callsite can have multiple possible prototype objects created
-  // (via different newTargets)
-  bool isSuper = op_ == JSOP_SUPERCALL || op_ == JSOP_SPREADSUPERCALL;
-  if (isSuper) {
-    return true;
-  }
-
-  if (calleeObj->nonCCWRealm() != cx_->realm()) {
-    return true;
-  }
-
-  if (hook == TypedObject::construct) {
-    Rooted<TypeDescr*> descr(cx_, calleeObj.as<TypeDescr>());
-    result.set(TypedObject::createZeroed(cx_, descr, gc::TenuredHeap));
-    if (!result) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 AttachDecision CallIRGenerator::tryAttachCallHook(HandleObject calleeObj) {
-  if (op_ == JSOP_FUNAPPLY) {
+  if (op_ == JSOp::FunApply) {
     return AttachDecision::NoAction;
   }
 
@@ -5467,19 +5441,12 @@ AttachDecision CallIRGenerator::tryAttachCallHook(HandleObject calleeObj) {
     return AttachDecision::NoAction;
   }
 
-  bool isSpread = IsSpreadCallPC(pc_);
-  bool isConstructing = IsConstructorCallPC(pc_);
+  bool isSpread = IsSpreadPC(pc_);
+  bool isConstructing = IsConstructPC(pc_);
   CallFlags flags(isConstructing, isSpread);
   JSNative hook =
       isConstructing ? calleeObj->constructHook() : calleeObj->callHook();
   if (!hook) {
-    return AttachDecision::NoAction;
-  }
-
-  RootedObject templateObj(cx_);
-  if (isConstructing &&
-      !getTemplateObjectForClassHook(calleeObj, &templateObj)) {
-    cx_->clearPendingException();
     return AttachDecision::NoAction;
   }
 
@@ -5492,15 +5459,10 @@ AttachDecision CallIRGenerator::tryAttachCallHook(HandleObject calleeObj) {
   ObjOperandId calleeObjId = writer.guardToObject(calleeValId);
 
   // Ensure the callee's class matches the one in this stub.
-  FieldOffset classOffset =
-      writer.guardAnyClass(calleeObjId, calleeObj->getClass());
+  writer.guardAnyClass(calleeObjId, calleeObj->getClass());
 
   writer.callClassHook(calleeObjId, argcId, hook, flags);
   writer.typeMonitorResult();
-
-  if (templateObj) {
-    writer.metaClassTemplateObject(templateObj, classOffset);
-  }
 
   cacheIRStubKind_ = BaselineCacheIRStubKind::Monitored;
   trackAttached("Call native func");
@@ -5513,16 +5475,16 @@ AttachDecision CallIRGenerator::tryAttachStub() {
 
   // Some opcodes are not yet supported.
   switch (op_) {
-    case JSOP_CALL:
-    case JSOP_CALL_IGNORES_RV:
-    case JSOP_CALLITER:
-    case JSOP_SPREADCALL:
-    case JSOP_NEW:
-    case JSOP_SPREADNEW:
-    case JSOP_SUPERCALL:
-    case JSOP_SPREADSUPERCALL:
-    case JSOP_FUNCALL:
-    case JSOP_FUNAPPLY:
+    case JSOp::Call:
+    case JSOp::CallIgnoresRv:
+    case JSOp::CallIter:
+    case JSOp::SpreadCall:
+    case JSOp::New:
+    case JSOp::SpreadNew:
+    case JSOp::SuperCall:
+    case JSOp::SpreadSuperCall:
+    case JSOp::FunCall:
+    case JSOp::FunApply:
       break;
     default:
       return AttachDecision::NoAction;
@@ -5549,6 +5511,12 @@ AttachDecision CallIRGenerator::tryAttachStub() {
 
   // Check for native-function optimizations.
   if (calleeFunc->isNative()) {
+    if (op_ == JSOp::FunCall) {
+        return tryAttachFunCall(calleeFunc);
+    }
+    if (op_ == JSOp::FunApply) {
+        return tryAttachFunApply(calleeFunc);
+    }
     return tryAttachCallNative(calleeFunc);
   }
 
@@ -5559,7 +5527,7 @@ AttachDecision CallIRGenerator::tryAttachDeferredStub(HandleValue result) {
   AutoAssertNoPendingException aanpe(cx_);
 
   // Ensure that the opcode makes sense.
-  MOZ_ASSERT(op_ == JSOP_CALL || op_ == JSOP_CALL_IGNORES_RV);
+  MOZ_ASSERT(op_ == JSOp::Call || op_ == JSOp::CallIgnoresRv);
 
   // Ensure that the mode makes sense.
   MOZ_ASSERT(mode_ == ICState::Mode::Specialized);
@@ -5680,7 +5648,7 @@ AttachDecision CompareIRGenerator::tryAttachStrictDifferentTypes(
     ValOperandId lhsId, ValOperandId rhsId) {
   MOZ_ASSERT(IsEqualityOp(op_));
 
-  if (op_ != JSOP_STRICTEQ && op_ != JSOP_STRICTNE) {
+  if (op_ != JSOp::StrictEq && op_ != JSOp::StrictNe) {
     return AttachDecision::NoAction;
   }
 
@@ -5697,7 +5665,7 @@ AttachDecision CompareIRGenerator::tryAttachStrictDifferentTypes(
 
   // Now that we've passed the guard, we know differing types, so return the
   // bool result.
-  writer.loadBooleanResult(op_ == JSOP_STRICTNE ? true : false);
+  writer.loadBooleanResult(op_ == JSOp::StrictNe ? true : false);
   writer.returnFromIC();
 
   trackAttached("StrictDifferentTypes");
@@ -5718,7 +5686,7 @@ AttachDecision CompareIRGenerator::tryAttachInt32(ValOperandId lhsId,
 
   // Strictly different types should have been handed by
   // tryAttachStrictDifferentTypes
-  MOZ_ASSERT_IF(op_ == JSOP_STRICTEQ || op_ == JSOP_STRICTNE,
+  MOZ_ASSERT_IF(op_ == JSOp::StrictEq || op_ == JSOp::StrictNe,
                 lhsVal_.isInt32() == rhsVal_.isInt32());
 
   writer.compareInt32Result(op_, lhsIntId, rhsIntId);
@@ -5765,7 +5733,7 @@ AttachDecision CompareIRGenerator::tryAttachObjectUndefined(
       !(rhsVal_.isNullOrUndefined() && lhsVal_.isObject()))
     return AttachDecision::NoAction;
 
-  if (op_ != JSOP_EQ && op_ != JSOP_NE) {
+  if (op_ != JSOp::Eq && op_ != JSOp::Ne) {
     return AttachDecision::NoAction;
   }
 
@@ -5801,9 +5769,9 @@ AttachDecision CompareIRGenerator::tryAttachNumberUndefined(
     writer.guardIsUndefined(rhsId);
   }
 
-  // Comparing a number with undefined will always be true for NE/STRICTNE,
+  // Comparing a number with undefined will always be true for Ne/StrictNe,
   // and always be false for other compare ops.
-  writer.loadBooleanResult(op_ == JSOP_NE || op_ == JSOP_STRICTNE);
+  writer.loadBooleanResult(op_ == JSOp::Ne || op_ == JSOp::StrictNe);
   writer.returnFromIC();
 
   trackAttached("NumberUndefined");
@@ -5857,8 +5825,8 @@ AttachDecision CompareIRGenerator::tryAttachPrimitiveUndefined(
                        : writer.guardIsNullOrUndefined(rhsId);
 
   // Comparing a primitive with undefined/null will always be true for
-  // NE/STRICTNE, and always be false for other compare ops.
-  writer.loadBooleanResult(op_ == JSOP_NE || op_ == JSOP_STRICTNE);
+  // Ne/StrictNe, and always be false for other compare ops.
+  writer.loadBooleanResult(op_ == JSOp::Ne || op_ == JSOp::StrictNe);
   writer.returnFromIC();
 
   trackAttached("PrimitiveUndefined");
@@ -5872,11 +5840,11 @@ AttachDecision CompareIRGenerator::tryAttachNullUndefined(ValOperandId lhsId,
     return AttachDecision::NoAction;
   }
 
-  if (op_ == JSOP_EQ || op_ == JSOP_NE) {
+  if (op_ == JSOp::Eq || op_ == JSOp::Ne) {
     writer.guardIsNullOrUndefined(lhsId);
     writer.guardIsNullOrUndefined(rhsId);
     // Sloppy equality means we actually only care about the op:
-    writer.loadBooleanResult(op_ == JSOP_EQ);
+    writer.loadBooleanResult(op_ == JSOp::Eq);
     trackAttached("SloppyNullUndefined");
   } else {
     // Strict equality only hits this branch, and only in the
@@ -5887,7 +5855,7 @@ AttachDecision CompareIRGenerator::tryAttachNullUndefined(ValOperandId lhsId,
                      : writer.guardIsUndefined(lhsId);
     rhsVal_.isNull() ? writer.guardIsNull(rhsId)
                      : writer.guardIsUndefined(rhsId);
-    writer.loadBooleanResult(op_ == JSOP_STRICTEQ);
+    writer.loadBooleanResult(op_ == JSOp::StrictEq);
     trackAttached("StrictNullUndefinedEquality");
   }
 
@@ -5904,7 +5872,7 @@ AttachDecision CompareIRGenerator::tryAttachStringNumber(ValOperandId lhsId,
   }
 
   // Case should have been handled by tryAttachStrictlDifferentTypes
-  MOZ_ASSERT(op_ != JSOP_STRICTEQ && op_ != JSOP_STRICTNE);
+  MOZ_ASSERT(op_ != JSOp::StrictEq && op_ != JSOp::StrictNe);
 
   auto createGuards = [&](HandleValue v, ValOperandId vId) {
     if (v.isString()) {
@@ -5971,9 +5939,9 @@ AttachDecision CompareIRGenerator::tryAttachPrimitiveSymbol(
     writer.guardToSymbol(rhsId);
   }
 
-  // Comparing a primitive with symbol will always be true for NE/STRICTNE, and
+  // Comparing a primitive with symbol will always be true for Ne/StrictNe, and
   // always be false for other compare ops.
-  writer.loadBooleanResult(op_ == JSOP_NE || op_ == JSOP_STRICTNE);
+  writer.loadBooleanResult(op_ == JSOp::Ne || op_ == JSOp::StrictNe);
   writer.returnFromIC();
 
   trackAttached("PrimitiveSymbol");
@@ -5989,7 +5957,7 @@ AttachDecision CompareIRGenerator::tryAttachBoolStringOrNumber(
   }
 
   // Case should have been handled by tryAttachStrictlDifferentTypes
-  MOZ_ASSERT(op_ != JSOP_STRICTEQ && op_ != JSOP_STRICTNE);
+  MOZ_ASSERT(op_ != JSOp::StrictEq && op_ != JSOp::StrictNe);
 
   // Case should have been handled by tryAttachInt32
   MOZ_ASSERT(!lhsVal_.isInt32() && !rhsVal_.isInt32());
@@ -6025,7 +5993,7 @@ AttachDecision CompareIRGenerator::tryAttachBigIntInt32(ValOperandId lhsId,
   }
 
   // Case should have been handled by tryAttachStrictlDifferentTypes
-  MOZ_ASSERT(op_ != JSOP_STRICTEQ && op_ != JSOP_STRICTNE);
+  MOZ_ASSERT(op_ != JSOp::StrictEq && op_ != JSOp::StrictNe);
 
   auto createGuards = [&](HandleValue v, ValOperandId vId) {
     if (v.isBoolean()) {
@@ -6061,7 +6029,7 @@ AttachDecision CompareIRGenerator::tryAttachBigIntNumber(ValOperandId lhsId,
   }
 
   // Case should have been handled by tryAttachStrictlDifferentTypes
-  MOZ_ASSERT(op_ != JSOP_STRICTEQ && op_ != JSOP_STRICTNE);
+  MOZ_ASSERT(op_ != JSOp::StrictEq && op_ != JSOp::StrictNe);
 
   if (lhsVal_.isBigInt()) {
     BigIntOperandId bigIntId = writer.guardToBigInt(lhsId);
@@ -6089,7 +6057,7 @@ AttachDecision CompareIRGenerator::tryAttachBigIntString(ValOperandId lhsId,
   }
 
   // Case should have been handled by tryAttachStrictlDifferentTypes
-  MOZ_ASSERT(op_ != JSOP_STRICTEQ && op_ != JSOP_STRICTNE);
+  MOZ_ASSERT(op_ != JSOp::StrictEq && op_ != JSOp::StrictNe);
 
   if (lhsVal_.isBigInt()) {
     BigIntOperandId bigIntId = writer.guardToBigInt(lhsId);
@@ -6363,19 +6331,19 @@ AttachDecision UnaryArithIRGenerator::tryAttachInt32() {
 
   Int32OperandId intId = writer.guardToInt32(valId);
   switch (op_) {
-    case JSOP_BITNOT:
+    case JSOp::BitNot:
       writer.int32NotResult(intId);
       trackAttached("UnaryArith.Int32Not");
       break;
-    case JSOP_NEG:
+    case JSOp::Neg:
       writer.int32NegationResult(intId);
       trackAttached("UnaryArith.Int32Neg");
       break;
-    case JSOP_INC:
+    case JSOp::Inc:
       writer.int32IncResult(intId);
       trackAttached("UnaryArith.Int32Inc");
       break;
-    case JSOP_DEC:
+    case JSOp::Dec:
       writer.int32DecResult(intId);
       trackAttached("UnaryArith.Int32Dec");
       break;
@@ -6396,20 +6364,20 @@ AttachDecision UnaryArithIRGenerator::tryAttachNumber() {
   NumberOperandId numId = writer.guardIsNumber(valId);
   Int32OperandId truncatedId;
   switch (op_) {
-    case JSOP_BITNOT:
+    case JSOp::BitNot:
       truncatedId = writer.truncateDoubleToUInt32(numId);
       writer.int32NotResult(truncatedId);
       trackAttached("UnaryArith.DoubleNot");
       break;
-    case JSOP_NEG:
+    case JSOp::Neg:
       writer.doubleNegationResult(numId);
       trackAttached("UnaryArith.DoubleNeg");
       break;
-    case JSOP_INC:
+    case JSOp::Inc:
       writer.doubleIncResult(numId);
       trackAttached("UnaryArith.DoubleInc");
       break;
-    case JSOP_DEC:
+    case JSOp::Dec:
       writer.doubleDecResult(numId);
       trackAttached("UnaryArith.DoubleDec");
       break;
@@ -6429,19 +6397,19 @@ AttachDecision UnaryArithIRGenerator::tryAttachBigInt() {
   ValOperandId valId(writer.setInputOperandId(0));
   BigIntOperandId bigIntId = writer.guardToBigInt(valId);
   switch (op_) {
-    case JSOP_BITNOT:
+    case JSOp::BitNot:
       writer.bigIntNotResult(bigIntId);
       trackAttached("UnaryArith.BigIntNot");
       break;
-    case JSOP_NEG:
+    case JSOp::Neg:
       writer.bigIntNegationResult(bigIntId);
       trackAttached("UnaryArith.BigIntNeg");
       break;
-    case JSOP_INC:
+    case JSOp::Inc:
       writer.bigIntIncResult(bigIntId);
       trackAttached("UnaryArith.BigIntInc");
       break;
-    case JSOP_DEC:
+    case JSOp::Dec:
       writer.bigIntDecResult(bigIntId);
       trackAttached("UnaryArith.BigIntDec");
       break;
@@ -6505,8 +6473,8 @@ AttachDecision BinaryArithIRGenerator::tryAttachStub() {
 
 AttachDecision BinaryArithIRGenerator::tryAttachBitwise() {
   // Only bit-wise and shifts.
-  if (op_ != JSOP_BITOR && op_ != JSOP_BITXOR && op_ != JSOP_BITAND &&
-      op_ != JSOP_LSH && op_ != JSOP_RSH && op_ != JSOP_URSH) {
+  if (op_ != JSOp::BitOr && op_ != JSOp::BitXor && op_ != JSOp::BitAnd &&
+      op_ != JSOp::Lsh && op_ != JSOp::Rsh && op_ != JSOp::Ursh) {
     return AttachDecision::NoAction;
   }
 
@@ -6516,8 +6484,8 @@ AttachDecision BinaryArithIRGenerator::tryAttachBitwise() {
     return AttachDecision::NoAction;
   }
 
-  // All ops, with the exception of URSH produce Int32 values.
-  MOZ_ASSERT_IF(op_ != JSOP_URSH, res_.isInt32());
+  // All ops, with the exception of Ursh produce Int32 values.
+  MOZ_ASSERT_IF(op_ != JSOp::Ursh, res_.isInt32());
 
   ValOperandId lhsId(writer.setInputOperandId(0));
   ValOperandId rhsId(writer.setInputOperandId(1));
@@ -6539,27 +6507,27 @@ AttachDecision BinaryArithIRGenerator::tryAttachBitwise() {
   Int32OperandId rhsIntId = guardToInt32(rhsId, rhs_);
 
   switch (op_) {
-    case JSOP_BITOR:
+    case JSOp::BitOr:
       writer.int32BitOrResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Bitwise.BitOr");
       break;
-    case JSOP_BITXOR:
+    case JSOp::BitXor:
       writer.int32BitXOrResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Bitwise.BitXOr");
       break;
-    case JSOP_BITAND:
+    case JSOp::BitAnd:
       writer.int32BitAndResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Bitwise.BitAnd");
       break;
-    case JSOP_LSH:
+    case JSOp::Lsh:
       writer.int32LeftShiftResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Bitwise.LeftShift");
       break;
-    case JSOP_RSH:
+    case JSOp::Rsh:
       writer.int32RightShiftResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Bitwise.RightShift");
       break;
-    case JSOP_URSH:
+    case JSOp::Ursh:
       writer.int32URightShiftResult(lhsIntId, rhsIntId, res_.isDouble());
       trackAttached("BinaryArith.Bitwise.UnsignedRightShift");
       break;
@@ -6573,8 +6541,8 @@ AttachDecision BinaryArithIRGenerator::tryAttachBitwise() {
 
 AttachDecision BinaryArithIRGenerator::tryAttachDouble() {
   // Check valid opcodes
-  if (op_ != JSOP_ADD && op_ != JSOP_SUB && op_ != JSOP_MUL &&
-      op_ != JSOP_DIV && op_ != JSOP_MOD) {
+  if (op_ != JSOp::Add && op_ != JSOp::Sub && op_ != JSOp::Mul &&
+      op_ != JSOp::Div && op_ != JSOp::Mod) {
     return AttachDecision::NoAction;
   }
 
@@ -6590,23 +6558,23 @@ AttachDecision BinaryArithIRGenerator::tryAttachDouble() {
   NumberOperandId rhs = writer.guardIsNumber(rhsId);
 
   switch (op_) {
-    case JSOP_ADD:
+    case JSOp::Add:
       writer.doubleAddResult(lhs, rhs);
       trackAttached("BinaryArith.Double.Add");
       break;
-    case JSOP_SUB:
+    case JSOp::Sub:
       writer.doubleSubResult(lhs, rhs);
       trackAttached("BinaryArith.Double.Sub");
       break;
-    case JSOP_MUL:
+    case JSOp::Mul:
       writer.doubleMulResult(lhs, rhs);
       trackAttached("BinaryArith.Double.Mul");
       break;
-    case JSOP_DIV:
+    case JSOp::Div:
       writer.doubleDivResult(lhs, rhs);
       trackAttached("BinaryArith.Double.Div");
       break;
-    case JSOP_MOD:
+    case JSOp::Mod:
       writer.doubleModResult(lhs, rhs);
       trackAttached("BinaryArith.Double.Mod");
       break;
@@ -6630,8 +6598,8 @@ AttachDecision BinaryArithIRGenerator::tryAttachInt32() {
     return AttachDecision::NoAction;
   }
 
-  if (op_ != JSOP_ADD && op_ != JSOP_SUB && op_ != JSOP_MUL &&
-      op_ != JSOP_DIV && op_ != JSOP_MOD) {
+  if (op_ != JSOp::Add && op_ != JSOp::Sub && op_ != JSOp::Mul &&
+      op_ != JSOp::Div && op_ != JSOp::Mod) {
     return AttachDecision::NoAction;
   }
 
@@ -6650,23 +6618,23 @@ AttachDecision BinaryArithIRGenerator::tryAttachInt32() {
   Int32OperandId rhsIntId = guardToInt32(rhsId, rhs_);
 
   switch (op_) {
-    case JSOP_ADD:
+    case JSOp::Add:
       writer.int32AddResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Int32.Add");
       break;
-    case JSOP_SUB:
+    case JSOp::Sub:
       writer.int32SubResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Int32.Sub");
       break;
-    case JSOP_MUL:
+    case JSOp::Mul:
       writer.int32MulResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Int32.Mul");
       break;
-    case JSOP_DIV:
+    case JSOp::Div:
       writer.int32DivResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Int32.Div");
       break;
-    case JSOP_MOD:
+    case JSOp::Mod:
       writer.int32ModResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.Int32.Mod");
       break;
@@ -6680,7 +6648,7 @@ AttachDecision BinaryArithIRGenerator::tryAttachInt32() {
 
 AttachDecision BinaryArithIRGenerator::tryAttachStringNumberConcat() {
   // Only Addition
-  if (op_ != JSOP_ADD) {
+  if (op_ != JSOp::Add) {
     return AttachDecision::NoAction;
   }
 
@@ -6719,7 +6687,7 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringNumberConcat() {
 
 AttachDecision BinaryArithIRGenerator::tryAttachStringBooleanConcat() {
   // Only Addition
-  if (op_ != JSOP_ADD) {
+  if (op_ != JSOp::Add) {
     return AttachDecision::NoAction;
   }
 
@@ -6752,7 +6720,7 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringBooleanConcat() {
 
 AttachDecision BinaryArithIRGenerator::tryAttachStringConcat() {
   // Only Addition
-  if (op_ != JSOP_ADD) {
+  if (op_ != JSOp::Add) {
     return AttachDecision::NoAction;
   }
 
@@ -6776,7 +6744,7 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringConcat() {
 
 AttachDecision BinaryArithIRGenerator::tryAttachStringObjectConcat() {
   // Only Addition
-  if (op_ != JSOP_ADD) {
+  if (op_ != JSOp::Add) {
     return AttachDecision::NoAction;
   }
 
@@ -6813,20 +6781,20 @@ AttachDecision BinaryArithIRGenerator::tryAttachBigInt() {
   }
 
   switch (op_) {
-    case JSOP_ADD:
-    case JSOP_SUB:
-    case JSOP_MUL:
-    case JSOP_DIV:
-    case JSOP_MOD:
-    case JSOP_POW:
+    case JSOp::Add:
+    case JSOp::Sub:
+    case JSOp::Mul:
+    case JSOp::Div:
+    case JSOp::Mod:
+    case JSOp::Pow:
       // Arithmetic operations.
       break;
 
-    case JSOP_BITOR:
-    case JSOP_BITXOR:
-    case JSOP_BITAND:
-    case JSOP_LSH:
-    case JSOP_RSH:
+    case JSOp::BitOr:
+    case JSOp::BitXor:
+    case JSOp::BitAnd:
+    case JSOp::Lsh:
+    case JSOp::Rsh:
       // Bitwise operations.
       break;
 
@@ -6841,47 +6809,47 @@ AttachDecision BinaryArithIRGenerator::tryAttachBigInt() {
   BigIntOperandId rhsBigIntId = writer.guardToBigInt(rhsId);
 
   switch (op_) {
-    case JSOP_ADD:
+    case JSOp::Add:
       writer.bigIntAddResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.Add");
       break;
-    case JSOP_SUB:
+    case JSOp::Sub:
       writer.bigIntSubResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.Sub");
       break;
-    case JSOP_MUL:
+    case JSOp::Mul:
       writer.bigIntMulResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.Mul");
       break;
-    case JSOP_DIV:
+    case JSOp::Div:
       writer.bigIntDivResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.Div");
       break;
-    case JSOP_MOD:
+    case JSOp::Mod:
       writer.bigIntModResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.Mod");
       break;
-    case JSOP_POW:
+    case JSOp::Pow:
       writer.bigIntPowResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.Pow");
       break;
-    case JSOP_BITOR:
+    case JSOp::BitOr:
       writer.bigIntBitOrResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.BitOr");
       break;
-    case JSOP_BITXOR:
+    case JSOp::BitXor:
       writer.bigIntBitXorResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.BitXor");
       break;
-    case JSOP_BITAND:
+    case JSOp::BitAnd:
       writer.bigIntBitAndResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.BitAnd");
       break;
-    case JSOP_LSH:
+    case JSOp::Lsh:
       writer.bigIntLeftShiftResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.LeftShift");
       break;
-    case JSOP_RSH:
+    case JSOp::Rsh:
       writer.bigIntRightShiftResult(lhsBigIntId, rhsBigIntId);
       trackAttached("BinaryArith.BigInt.RightShift");
       break;

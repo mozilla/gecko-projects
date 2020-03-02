@@ -71,7 +71,17 @@ void a11y::ProxyStateChangeEvent(ProxyAccessible* aTarget, uint64_t aState,
   }
 
   if (aState & states::CHECKED) {
-    sessionAcc->SendClickedEvent(WrapperFor(aTarget), aEnabled);
+    sessionAcc->SendClickedEvent(
+        WrapperFor(aTarget),
+        java::SessionAccessibility::FLAG_CHECKABLE |
+            (aEnabled ? java::SessionAccessibility::FLAG_CHECKED : 0));
+  }
+
+  if (aState & states::EXPANDED) {
+    sessionAcc->SendClickedEvent(
+        WrapperFor(aTarget),
+        java::SessionAccessibility::FLAG_EXPANDABLE |
+            (aEnabled ? java::SessionAccessibility::FLAG_EXPANDED : 0));
   }
 
   if (aState & states::SELECTED) {
@@ -132,7 +142,7 @@ void a11y::ProxyVirtualCursorChangeEvent(
 
   if (aReason == nsIAccessiblePivot::REASON_POINT) {
     sessionAcc->SendHoverEnterEvent(WrapperFor(aNewPosition));
-  } else {
+  } else if (aBoundaryType == nsIAccessiblePivot::NO_BOUNDARY) {
     RefPtr<AccessibleWrap> wrapperForNewPosition = WrapperFor(aNewPosition);
     sessionAcc->SendAccessibilityFocusedEvent(wrapperForNewPosition);
   }

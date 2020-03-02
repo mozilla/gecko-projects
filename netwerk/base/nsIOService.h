@@ -119,7 +119,7 @@ class nsIOService final : public nsIIOService,
   bool SocketProcessReady();
   static void NotifySocketProcessPrefsChanged(const char* aName, void* aSelf);
   void NotifySocketProcessPrefsChanged(const char* aName);
-  bool UseSocketProcess();
+  static bool UseSocketProcess();
 
   bool IsSocketProcessLaunchComplete();
 
@@ -133,6 +133,8 @@ class nsIOService final : public nsIIOService,
 
   friend SocketProcessMemoryReporter;
   RefPtr<MemoryReportingProcess> GetSocketProcessMemoryReporter();
+
+  static void OnTLSPrefChange(const char* aPref, void* aSelf);
 
  private:
   // These shouldn't be called directly:
@@ -172,7 +174,7 @@ class nsIOService final : public nsIIOService,
       const mozilla::Maybe<mozilla::dom::ClientInfo>& aLoadingClientInfo,
       const mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
       uint32_t aSecurityFlags, uint32_t aContentPolicyType,
-      nsIChannel** result);
+      uint32_t aSandboxFlags, nsIChannel** result);
 
   nsresult NewChannelFromURIWithProxyFlagsInternal(nsIURI* aURI,
                                                    nsIURI* aProxyURI,

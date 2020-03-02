@@ -41,7 +41,7 @@
 
 MSG_DEF(JSMSG_NOT_AN_ERROR,            0, JSEXN_ERR, "<Error #0 is reserved>")
 MSG_DEF(JSMSG_NOT_DEFINED,             1, JSEXN_REFERENCEERR, "{0} is not defined")
-MSG_DEF(JSMSG_MORE_ARGS_NEEDED,        4, JSEXN_TYPEERR, "{0} requires at least {1} argument{2}, but only {3} were passed")
+MSG_DEF(JSMSG_MORE_ARGS_NEEDED,        4, JSEXN_TYPEERR, "{0}: At least {1} argument{2} required, but only {3} passed")
 MSG_DEF(JSMSG_INCOMPATIBLE_PROTO,      3, JSEXN_TYPEERR, "{0}.prototype.{1} called on incompatible {2}")
 MSG_DEF(JSMSG_NO_CONSTRUCTOR,          1, JSEXN_TYPEERR, "{0} has no constructor")
 MSG_DEF(JSMSG_BAD_SORT_ARG,            0, JSEXN_TYPEERR, "invalid Array.prototype.sort argument")
@@ -55,6 +55,8 @@ MSG_DEF(JSMSG_CANT_CONVERT_TO,         2, JSEXN_TYPEERR, "can't convert {0} to {
 MSG_DEF(JSMSG_TOPRIMITIVE_NOT_CALLABLE, 2, JSEXN_TYPEERR, "can't convert {0} to {1}: its [Symbol.toPrimitive] property is not a function")
 MSG_DEF(JSMSG_TOPRIMITIVE_RETURNED_OBJECT, 2, JSEXN_TYPEERR, "can't convert {0} to {1}: its [Symbol.toPrimitive] method returned an object")
 MSG_DEF(JSMSG_NO_PROPERTIES,           1, JSEXN_TYPEERR, "{0} has no properties")
+MSG_DEF(JSMSG_PROPERTY_FAIL,           2, JSEXN_TYPEERR, "can't access property {0} of {1}")
+MSG_DEF(JSMSG_PROPERTY_FAIL_EXPR,      3, JSEXN_TYPEERR, "can't access property {0}, {1} is {2}")
 MSG_DEF(JSMSG_BAD_REGEXP_FLAG,         1, JSEXN_SYNTAXERR, "invalid regular expression flag {0}")
 MSG_DEF(JSMSG_INVALID_DATA_VIEW_LENGTH, 0, JSEXN_RANGEERR, "invalid data view length")
 MSG_DEF(JSMSG_OFFSET_LARGER_THAN_FILESIZE, 0, JSEXN_RANGEERR, "offset is larger than filesize")
@@ -362,6 +364,8 @@ MSG_DEF(JSMSG_BAD_COLUMN_NUMBER,       0, JSEXN_RANGEERR, "column number out of 
 MSG_DEF(JSMSG_COMPUTED_NAME_IN_PATTERN,0, JSEXN_SYNTAXERR, "computed property names aren't supported in this destructuring declaration")
 MSG_DEF(JSMSG_DEFAULT_IN_PATTERN,      0, JSEXN_SYNTAXERR, "destructuring defaults aren't supported in this destructuring declaration")
 MSG_DEF(JSMSG_BAD_NEWTARGET,           0, JSEXN_SYNTAXERR, "new.target only allowed within functions")
+MSG_DEF(JSMSG_BAD_NEW_OPTIONAL,        0, JSEXN_SYNTAXERR, "new keyword cannot be used with an optional chain")
+MSG_DEF(JSMSG_BAD_OPTIONAL_TEMPLATE,   0, JSEXN_SYNTAXERR, "tagged template cannot be used with optional chain")
 MSG_DEF(JSMSG_ESCAPED_KEYWORD,         0, JSEXN_SYNTAXERR, "keywords must be written literally, without embedded escapes")
 MSG_DEF(JSMSG_FIELDS_NOT_SUPPORTED,    0, JSEXN_SYNTAXERR, "fields are not currently supported")
 MSG_DEF(JSMSG_PRIVATE_FIELDS_NOT_SUPPORTED, 0, JSEXN_SYNTAXERR, "private fields are not currently supported")
@@ -372,6 +376,9 @@ MSG_DEF(JSMSG_NOT_ENOUGH_CODE_UNITS,   5, JSEXN_SYNTAXERR, "{0} byte in UTF-8 mu
 MSG_DEF(JSMSG_BAD_TRAILING_UTF8_UNIT,  1, JSEXN_SYNTAXERR, "bad trailing UTF-8 byte {0} doesn't match the pattern 0b10xxxxxx")
 MSG_DEF(JSMSG_FORBIDDEN_UTF8_CODE_POINT,2,JSEXN_SYNTAXERR, "{0} isn't a valid code point because {1}")
 MSG_DEF(JSMSG_BAD_CODE_UNITS,          1, JSEXN_NOTE, "the code units comprising this invalid code point were: {0}")
+
+// SmooshMonkey
+MSG_DEF(JSMSG_SMOOSH_COMPILE_ERROR,    1, JSEXN_SYNTAXERR, "{0}")
 
 // asm.js
 MSG_DEF(JSMSG_USE_ASM_TYPE_FAIL,       1, JSEXN_TYPEERR, "asm.js type error: {0}")
@@ -485,6 +492,7 @@ MSG_DEF(JSMSG_DEBUG_BAD_LINE,          0, JSEXN_TYPEERR, "invalid line number")
 MSG_DEF(JSMSG_DEBUG_BAD_OFFSET,        0, JSEXN_TYPEERR, "invalid script offset")
 MSG_DEF(JSMSG_DEBUG_BAD_REFERENT,      2, JSEXN_TYPEERR, "{0} does not refer to {1}")
 MSG_DEF(JSMSG_DEBUG_BAD_RESUMPTION,    0, JSEXN_TYPEERR, "debugger resumption value must be undefined, {throw: val}, {return: val}, or null")
+MSG_DEF(JSMSG_DEBUG_RESUMPTION_CONFLICT, 0, JSEXN_TYPEERR, "debugger hook returned a resumption, but an earlier hook already did")
 MSG_DEF(JSMSG_DEBUG_BAD_YIELD,         0, JSEXN_TYPEERR, "generator yielded invalid value")
 MSG_DEF(JSMSG_DEBUG_CANT_DEBUG_GLOBAL, 0, JSEXN_TYPEERR, "passing non-debuggable global to addDebuggee")
 MSG_DEF(JSMSG_DEBUG_SAME_COMPARTMENT,  0, JSEXN_TYPEERR, "debugger and debuggee must be in different compartments")
@@ -714,7 +722,7 @@ MSG_DEF(JSMSG_RESPONSE_ALREADY_CONSUMED,                 0, JSEXN_TYPEERR,  "Res
 
 // BigInt
 MSG_DEF(JSMSG_BIGINT_TO_NUMBER, 0, JSEXN_TYPEERR, "can't convert BigInt to number")
-MSG_DEF(JSMSG_NUMBER_TO_BIGINT, 0, JSEXN_RANGEERR, "can't convert non-finite number to BigInt")
+MSG_DEF(JSMSG_NONINTEGER_NUMBER_TO_BIGINT, 1, JSEXN_RANGEERR, "{0} can't be converted to BigInt because it isn't an integer")
 MSG_DEF(JSMSG_BIGINT_TOO_LARGE, 0, JSEXN_RANGEERR, "BigInt is too large to allocate")
 MSG_DEF(JSMSG_BIGINT_DIVISION_BY_ZERO, 0, JSEXN_RANGEERR, "BigInt division by zero")
 MSG_DEF(JSMSG_BIGINT_NEGATIVE_EXPONENT, 0, JSEXN_RANGEERR, "BigInt negative exponent")
@@ -728,7 +736,7 @@ MSG_DEF(JSMSG_BINAST,                                    1, JSEXN_SYNTAXERR, "Bi
 // FinalizationGroup
 MSG_DEF(JSMSG_NOT_A_FINALIZATION_GROUP,                  1, JSEXN_TYPEERR, "{0} is not a FinalizationGroup")
 MSG_DEF(JSMSG_NOT_A_FINALIZATION_ITERATOR,               1, JSEXN_TYPEERR, "{0} is not a FinalizationGroupCleanupIterator")
-MSG_DEF(JSMSG_BAD_HOLDINGS,                              0, JSEXN_TYPEERR, "The holdings passed to FinalizationGroup.register must not be the same as its target object")
+MSG_DEF(JSMSG_BAD_HELD_VALUE,                            0, JSEXN_TYPEERR, "The heldValue parameter passed to FinalizationGroup.register must not be the same as the target parameter")
 MSG_DEF(JSMSG_BAD_UNREGISTER_TOKEN,                      1, JSEXN_TYPEERR, "Invalid unregister token passed to {0}")
 MSG_DEF(JSMSG_STALE_FINALIZATION_GROUP_ITERATOR,         0, JSEXN_TYPEERR, "Can't use stale finalization group iterator")
 MSG_DEF(JSMSG_BAD_CLEANUP_STATE,                         0, JSEXN_TYPEERR, "Can't call FinalizeGroup.cleanupSome while cleanup is in progress")

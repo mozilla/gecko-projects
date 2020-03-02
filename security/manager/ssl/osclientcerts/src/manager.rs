@@ -6,12 +6,16 @@
 use pkcs11::types::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(target_os = "macos")]
+use crate::backend_macos as backend;
 #[cfg(target_os = "windows")]
 use crate::backend_windows as backend;
 use backend::*;
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 /// Helper type for sending `ManagerArguments` to the real `Manager`.
 type ManagerArgumentsSender = Sender<ManagerArguments>;
@@ -80,13 +84,14 @@ macro_rules! manager_proxy_fn_impl {
 pub struct ManagerProxy {
     sender: ManagerArgumentsSender,
     receiver: ManagerReturnValueReceiver,
+    thread_handle: Option<JoinHandle<()>>,
 }
 
 impl ManagerProxy {
     pub fn new() -> ManagerProxy {
         let (proxy_sender, manager_receiver) = channel();
         let (manager_sender, proxy_receiver) = channel();
-        thread::spawn(move || {
+        let thread_handle = thread::spawn(move || {
             let mut real_manager = Manager::new();
             loop {
                 let arguments = match manager_receiver.recv() {
@@ -157,6 +162,7 @@ impl ManagerProxy {
         ManagerProxy {
             sender: proxy_sender,
             receiver: proxy_receiver,
+            thread_handle: Some(thread_handle),
         }
     }
 
@@ -280,7 +286,22 @@ impl ManagerProxy {
     }
 
     pub fn stop(&mut self) -> Result<(), ()> {
-        manager_proxy_fn_impl!(self, ManagerArguments::Stop, ManagerReturnValue::Stop)
+        manager_proxy_fn_impl!(self, ManagerArguments::Stop, ManagerReturnValue::Stop)?;
+        let thread_handle = match self.thread_handle.take() {
+            Some(thread_handle) => thread_handle,
+            None => {
+                error!("stop should only be called once");
+                return Err(());
+            }
+        };
+        match thread_handle.join() {
+            Ok(()) => {}
+            Err(e) => {
+                error!("manager thread panicked: {:?}", e);
+                return Err(());
+            }
+        };
+        Ok(())
     }
 }
 
@@ -306,6 +327,9 @@ struct Manager {
     next_session: CK_SESSION_HANDLE,
     /// The next object handle to hand out.
     next_handle: CK_OBJECT_HANDLE,
+    /// The last time the implementation looked for new objects in the backend.
+    /// The implementation does this search no more than once every 3 seconds.
+    last_scan_time: Option<Instant>,
 }
 
 impl Manager {
@@ -319,15 +343,27 @@ impl Manager {
             key_ids: BTreeSet::new(),
             next_session: 1,
             next_handle: 1,
+            last_scan_time: None,
         };
-        manager.find_new_objects();
+        manager.maybe_find_new_objects();
         manager
     }
 
-    /// When a new `Manager` is created and when a new session is opened, this searches for
-    /// certificates and keys to expose. We de-duplicate previously-found certificates and keys by
-    /// keeping track of their IDs.
-    fn find_new_objects(&mut self) {
+    /// When a new `Manager` is created and when a new session is opened (provided at least 3
+    /// seconds have elapsed since the last session was opened), this searches for certificates and
+    /// keys to expose. We de-duplicate previously-found certificates and keys by / keeping track of
+    /// their IDs.
+    fn maybe_find_new_objects(&mut self) {
+        let now = Instant::now();
+        match self.last_scan_time {
+            Some(last_scan_time) => {
+                if now.duration_since(last_scan_time) < Duration::new(3, 0) {
+                    return;
+                }
+            }
+            None => {}
+        }
+        self.last_scan_time = Some(now);
         let objects = list_objects();
         debug!("found {} objects", objects.len());
         for object in objects {
@@ -353,7 +389,7 @@ impl Manager {
     }
 
     pub fn open_session(&mut self) -> Result<CK_SESSION_HANDLE, ()> {
-        self.find_new_objects();
+        self.maybe_find_new_objects();
         let next_session = self.next_session;
         self.next_session += 1;
         self.sessions.insert(next_session);
@@ -390,6 +426,14 @@ impl Manager {
     ) -> Result<(), ()> {
         if self.searches.contains_key(&session) {
             return Err(());
+        }
+        // If the search is for an attribute we don't support, no objects will match. This check
+        // saves us having to look through all of our objects.
+        for (attr, _) in attrs {
+            if !SUPPORTED_ATTRIBUTES.contains(attr) {
+                self.searches.insert(session, Vec::new());
+                return Ok(());
+            }
         }
         let mut handles = Vec::new();
         for (handle, object) in &self.objects {

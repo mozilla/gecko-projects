@@ -101,14 +101,9 @@ class TrySelect(MachCommandBase):
         special preset handling. They can all save and load presets the same
         way.
         """
-        from tryselect.preset import migrate_old_presets
         from tryselect.util.dicttools import merge
 
         user_presets = self.presets.handlers[0]
-
-        # TODO: Remove after Jan 1, 2020.
-        migrate_old_presets(user_presets)
-
         if preset_action == 'list':
             self.presets.list()
             sys.exit()
@@ -426,5 +421,16 @@ class TrySelect(MachCommandBase):
                 parser=get_parser('release'))
     def try_release(self, **kwargs):
         """Push the current tree to try, configured for a staging release.
+        """
+        return self.run(**kwargs)
+
+    @SubCommand('try',
+                'scriptworker',
+                description='Run scriptworker tasks against a recent release.',
+                parser=get_parser('scriptworker'))
+    def try_scriptworker(self, **kwargs):
+        """Run scriptworker tasks against a recent release.
+
+        Requires VPN and shipit access.
         """
         return self.run(**kwargs)

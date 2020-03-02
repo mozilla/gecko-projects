@@ -15,10 +15,11 @@
 //       which the deadline will be 15ms + throttle threshold
 //#define COMPOSITOR_PERFORMANCE_WARNING
 
-#include <stdint.h>              // for uint64_t
-#include "Layers.h"              // for Layer
-#include "mozilla/Assertions.h"  // for MOZ_ASSERT_HELPER2
-#include "mozilla/Attributes.h"  // for override
+#include <stdint.h>                   // for uint64_t
+#include "Layers.h"                   // for Layer
+#include "mozilla/Assertions.h"       // for MOZ_ASSERT_HELPER2
+#include "mozilla/Attributes.h"       // for override
+#include "mozilla/GfxMessageUtils.h"  // for WebGLVersion
 #include "mozilla/Maybe.h"
 #include "mozilla/Monitor.h"    // for Monitor
 #include "mozilla/RefPtr.h"     // for RefPtr
@@ -32,7 +33,7 @@
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorVsyncSchedulerOwner.h"
 #include "mozilla/layers/GeckoContentController.h"
-#include "mozilla/layers/ISurfaceAllocator.h"  // for ShmemAllocator
+#include "mozilla/layers/ISurfaceAllocator.h"  // for IShmemAllocator
 #include "mozilla/layers/LayersMessages.h"     // for TargetConfig
 #include "mozilla/layers/MetricsSharingController.h"
 #include "mozilla/layers/PCompositorBridgeTypes.h"
@@ -53,10 +54,10 @@ namespace mozilla {
 
 class CancelableRunnable;
 
-namespace webgpu {
-class PWebGPUParent;
-class WebGPUParent;
-}  // namespace webgpu
+namespace dom {
+class HostWebGLCommandSink;
+class WebGLParent;
+}  // namespace dom
 
 namespace gfx {
 class DrawTarget;
@@ -70,6 +71,11 @@ class Shmem;
 class ProtocolFuzzerHelper;
 #endif
 }  // namespace ipc
+
+namespace webgpu {
+class PWebGPUParent;
+class WebGPUParent;
+}  // namespace webgpu
 
 namespace layers {
 
@@ -106,7 +112,7 @@ struct ScopedLayerTreeRegistration {
 
 class CompositorBridgeParentBase : public PCompositorBridgeParent,
                                    public HostIPCAllocator,
-                                   public ShmemAllocator,
+                                   public mozilla::ipc::IShmemAllocator,
                                    public MetricsSharingController {
   friend class PCompositorBridgeParent;
 
@@ -149,7 +155,7 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   virtual void RegisterPayloads(LayerTransactionParent* aLayerTree,
                                 const nsTArray<CompositionPayload>& aPayload) {}
 
-  ShmemAllocator* AsShmemAllocator() override { return this; }
+  IShmemAllocator* AsShmemAllocator() override { return this; }
 
   CompositorBridgeParentBase* AsCompositorBridgeParentBase() override {
     return this;
@@ -170,14 +176,14 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   void SendAsyncMessage(
       const nsTArray<AsyncParentMessageData>& aMessage) override;
 
-  // ShmemAllocator
+  // IShmemAllocator
   bool AllocShmem(size_t aSize,
                   mozilla::ipc::SharedMemory::SharedMemoryType aType,
                   mozilla::ipc::Shmem* aShmem) override;
   bool AllocUnsafeShmem(size_t aSize,
                         mozilla::ipc::SharedMemory::SharedMemoryType aType,
                         mozilla::ipc::Shmem* aShmem) override;
-  void DeallocShmem(mozilla::ipc::Shmem& aShmem) override;
+  bool DeallocShmem(mozilla::ipc::Shmem& aShmem) override;
 
   // MetricsSharingController
   NS_IMETHOD_(MozExternalRefCountType) AddRef() override {
@@ -296,6 +302,9 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
       DxgiAdapterDesc* desc) {
     return IPC_FAIL_NO_REASON(this);
   }
+
+  virtual already_AddRefed<PWebGLParent> AllocPWebGLParent(
+      const webgl::InitContextDesc&, webgl::InitContextResult* out) = 0;
 
   bool mCanSend;
 
@@ -434,6 +443,8 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   bool IsSameProcess() const override;
 
   void NotifyWebRenderContextPurge();
+  void NotifyWebRenderDisableNativeCompositor();
+
   void NotifyPipelineRendered(const wr::PipelineId& aPipelineId,
                               const wr::Epoch& aEpoch,
                               const VsyncId& aCompositeStartId,
@@ -441,7 +452,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
                               TimeStamp& aRenderStart, TimeStamp& aCompositeEnd,
                               wr::RendererStats* aStats = nullptr);
   void NotifyDidSceneBuild(const nsTArray<wr::RenderRoot>& aRenderRoots,
-                           RefPtr<wr::WebRenderPipelineInfo> aInfo);
+                           RefPtr<const wr::WebRenderPipelineInfo> aInfo);
   RefPtr<AsyncImagePipelineManager> GetAsyncImagePipelineManager() const;
 
   PCompositorWidgetParent* AllocPCompositorWidgetParent(
@@ -516,6 +527,11 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
    * This must be called on the compositor thread.
    */
   void InvalidateRemoteLayers();
+
+  /**
+   * Initialize statics.
+   */
+  static void InitializeStatics();
 
   /**
    * Returns a pointer to the CompositorBridgeParent corresponding to the given
@@ -683,8 +699,14 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
   WebRenderBridgeParent* GetWrBridge() { return mWrBridge; }
-
   webgpu::WebGPUParent* GetWebGPUBridge() { return mWebGPUBridge; }
+
+  already_AddRefed<PWebGLParent> AllocPWebGLParent(
+      const webgl::InitContextDesc&, webgl::InitContextResult*) override {
+    MOZ_ASSERT_UNREACHABLE(
+        "This message is CrossProcessCompositorBridgeParent only");
+    return nullptr;
+  }
 
  private:
   void Initialize();
@@ -701,6 +723,26 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
    * Must run on the content main thread.
    */
   static void DeallocateLayerTreeId(LayersId aId);
+
+  /**
+   * Notify the compositor the quality settings have been updated.
+   */
+  static void UpdateQualitySettings();
+
+  /**
+   * Notify the compositor the debug flags have been updated.
+   */
+  static void UpdateDebugFlags();
+
+  /**
+   * Notify the compositor the debug flags have been updated.
+   */
+  static void UpdateWebRenderMultithreading();
+
+  /**
+   * Notify the compositor webrender batching parameters have been updated.
+   */
+  static void UpdateWebRenderBatchingParameters();
 
   /**
    * Wrap the data structure to be sent over IPC.
@@ -781,6 +823,11 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   // Callback should take (LayerTreeState* aState, const LayersId& aLayersId)
   template <typename Lambda>
   inline void ForEachIndirectLayerTree(const Lambda& aCallback);
+
+  // The indirect layer tree lock must be held before calling this function.
+  // Callback should take (LayerTreeState* aState, const LayersId& aLayersId)
+  template <typename Lambda>
+  static inline void ForEachWebRenderBridgeParent(const Lambda& aCallback);
 
   RefPtr<HostLayerManager> mLayerManager;
   RefPtr<Compositor> mCompositor;

@@ -3,8 +3,8 @@
 
 "use strict";
 
-add_task(async function sendToAttachedTarget({ Target }) {
-  await getDiscoveredTargets(Target);
+add_task(async function sendToAttachedTarget({ client }) {
+  const { Target } = client;
   const { targetInfo } = await openTab(Target);
 
   const attachedToTarget = Target.attachedToTarget();

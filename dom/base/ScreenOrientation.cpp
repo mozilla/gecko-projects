@@ -102,10 +102,10 @@ class ScreenOrientation::FullscreenEventListener final
 
 class ScreenOrientation::VisibleEventListener final
     : public nsIDOMEventListener {
-  ~VisibleEventListener() {}
+  ~VisibleEventListener() = default;
 
  public:
-  VisibleEventListener() {}
+  VisibleEventListener() = default;
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
@@ -148,7 +148,7 @@ ScreenOrientation::LockOrientationTask::LockOrientationTask(
   MOZ_ASSERT(aDocument);
 }
 
-ScreenOrientation::LockOrientationTask::~LockOrientationTask() {}
+ScreenOrientation::LockOrientationTask::~LockOrientationTask() = default;
 
 bool ScreenOrientation::LockOrientationTask::OrientationLockContains(
     OrientationType aOrientationType) {
@@ -454,8 +454,7 @@ ScreenOrientation::GetLockOrientationPermission(bool aCheckSandbox) const {
   }
 
   // Chrome can always lock the screen orientation.
-  nsIDocShell* docShell = owner->GetDocShell();
-  if (docShell && docShell->ItemType() == nsIDocShellTreeItem::typeChrome) {
+  if (owner->GetBrowsingContext()->IsChrome()) {
     return LOCK_ALLOWED;
   }
 
@@ -615,9 +614,9 @@ ScreenOrientation::VisibleEventListener::HandleEvent(Event* aEvent) {
 
   BrowsingContext* bc = doc->GetBrowsingContext();
   if (bc && bc->GetCurrentOrientationType() !=
-      orientation->DeviceType(CallerType::System)) {
+                orientation->DeviceType(CallerType::System)) {
     bc->SetCurrentOrientation(orientation->DeviceType(CallerType::System),
-                               orientation->DeviceAngle(CallerType::System));
+                              orientation->DeviceAngle(CallerType::System));
 
     nsCOMPtr<nsIRunnable> runnable =
         orientation->DispatchChangeEventAndResolvePromise();

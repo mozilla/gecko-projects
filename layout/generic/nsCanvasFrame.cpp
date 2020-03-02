@@ -24,6 +24,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/ComputedStyle.h"
+#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/dom/AnonymousContent.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/RenderRootStateManager.h"
@@ -390,14 +391,12 @@ bool nsDisplayCanvasBackgroundColor::CreateWebRenderCommands(
   return true;
 }
 
-#ifdef MOZ_DUMP_PAINTING
 void nsDisplayCanvasBackgroundColor::WriteDebugInfo(
     std::stringstream& aStream) {
   aStream << " (rgba " << (int)NS_GET_R(mColor) << "," << (int)NS_GET_G(mColor)
           << "," << (int)NS_GET_B(mColor) << "," << (int)NS_GET_A(mColor)
           << ")";
 }
-#endif
 
 void nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
                                            gfxContext* aCtx) {
@@ -457,7 +456,7 @@ class nsDisplayCanvasFocus : public nsPaintedDisplayItem {
       : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayCanvasFocus);
   }
-  virtual ~nsDisplayCanvasFocus() { MOZ_COUNT_DTOR(nsDisplayCanvasFocus); }
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayCanvasFocus)
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override {
@@ -500,6 +499,8 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         dependentFrame = nullptr;
       }
     }
+    aLists.BorderBackground()->AppendNewToTop<nsDisplayCanvasBackgroundColor>(
+        aBuilder, this);
 
     if (isThemed) {
       aLists.BorderBackground()
@@ -511,29 +512,25 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       return;
     }
 
-    const nsStyleImageLayers& layers = bg->StyleBackground()->mImage;
-    if (layers.mImageCount == 0 ||
-        layers.mLayers[0].mAttachment != StyleImageLayerAttachment::Fixed) {
-      // Put a scrolled background color item in place. The color of this item
-      // will be filled in during PresShell::AddCanvasBackgroundColorItem.
-      // Do not add this item if there's a fixed background image at the bottom;
-      // in that case, it's better to allow the fixed background image to
-      // combine itself with a non-scrolled background color directly
-      // underneath, rather than interleaving the two with a scrolled background
-      // color. PresShell::AddCanvasBackgroundColorItem makes sure there always
-      // is a non-scrolled background color item at the bottom.
-      aLists.BorderBackground()->AppendNewToTop<nsDisplayCanvasBackgroundColor>(
-          aBuilder, this);
-    }
-
     const ActiveScrolledRoot* asr = aBuilder->CurrentActiveScrolledRoot();
 
     bool needBlendContainer = false;
     nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
 
+    // In high-contrast-mode, we suppress background-image on the canvas frame
+    // (even when backplating), because users expect site backgrounds to conform
+    // to their HCM background color when a solid color is rendered, and some
+    // websites use solid-color images instead of an overwritable background
+    // color.
+    const bool suppressBackgroundImage =
+        !PresContext()->PrefSheetPrefs().mUseDocumentColors &&
+        StaticPrefs::
+            browser_display_suppress_canvas_background_image_on_forced_colors();
+
     // Create separate items for each background layer.
+    const nsStyleImageLayers& layers = bg->StyleBackground()->mImage;
     NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, layers) {
-      if (layers.mLayers[i].mImage.IsEmpty()) {
+      if (layers.mLayers[i].mImage.IsNone() || suppressBackgroundImage) {
         continue;
       }
       if (layers.mLayers[i].mBlendMode != NS_STYLE_BLEND_NORMAL) {

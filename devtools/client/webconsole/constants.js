@@ -10,6 +10,7 @@ const actionTypes = {
   AUTOCOMPLETE_DATA_RECEIVE: "AUTOCOMPLETE_DATA_RECEIVE",
   AUTOCOMPLETE_PENDING_REQUEST: "AUTOCOMPLETE_PENDING_REQUEST",
   AUTOCOMPLETE_RETRIEVE_FROM_CACHE: "AUTOCOMPLETE_RETRIEVE_FROM_CACHE",
+  AUTOCOMPLETE_TOGGLE: "AUTOCOMPLETE_TOGGLE",
   BATCH_ACTIONS: "BATCH_ACTIONS",
   CLEAR_HISTORY: "CLEAR_HISTORY",
   EDITOR_TOGGLE: "EDITOR_TOGGLE",
@@ -47,9 +48,11 @@ const actionTypes = {
   REVERSE_SEARCH_NEXT: "REVERSE_SEARCH_NEXT",
   REVERSE_SEARCH_BACK: "REVERSE_SEARCH_BACK",
   PAUSED_EXECUTION_POINT: "PAUSED_EXECUTION_POINT",
+  EAGER_EVALUATION_TOGGLE: "EAGER_EVALUATION_TOGGLE",
   WARNING_GROUPS_TOGGLE: "WARNING_GROUPS_TOGGLE",
   WILL_NAVIGATE: "WILL_NAVIGATE",
   EDITOR_SET_WIDTH: "EDITOR_SET_WIDTH",
+  TARGET_AVAILABLE: "TARGET_AVAILABLE",
 };
 
 const prefs = {
@@ -81,6 +84,8 @@ const prefs = {
       EDITOR_WIDTH: "input.editorWidth",
       // Show the Editor onboarding UI
       EDITOR_ONBOARDING: "devtools.webconsole.input.editorOnboarding",
+      // Show the Input Context the selector
+      CONTEXT_SELECTOR: "devtools.webconsole.input.context",
     },
     FEATURES: {
       // We use the same pref to enable the sidebar on webconsole and browser console.

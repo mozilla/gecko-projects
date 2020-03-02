@@ -1,14 +1,12 @@
-if (Services.prefs.getBoolPref("fission.autostart")) {
+if (SpecialPowers.useRemoteSubframes) {
   requestLongerTimeout(2);
 }
 
 add_task(async function setup() {
   Services.prefs.setBoolPref("privacy.firstparty.isolate", true);
-  Services.prefs.setBoolPref("signon.management.page.enabled", true);
 
   registerCleanupFunction(function() {
     Services.prefs.clearUserPref("privacy.firstparty.isolate");
-    Services.prefs.clearUserPref("signon.management.page.enabled");
   });
 });
 
@@ -81,15 +79,6 @@ add_task(async function test_nonremote_window_open_aboutBlank() {
   win.close();
 });
 
-function frame_script() {
-  content.document.body.innerHTML = `
-    <a href="data:text/plain,hello" id="test">hello</a>
-  `;
-
-  let element = content.document.getElementById("test");
-  element.click();
-}
-
 /**
  * Check if data: URI inherits firstPartyDomain from about:blank correctly.
  */
@@ -101,8 +90,14 @@ add_task(async function test_remote_window_open_data_uri() {
   });
   let win = await BrowserTestUtils.openNewBrowserWindow({ remote: true });
   let browser = win.gBrowser.selectedBrowser;
-  let mm = browser.messageManager;
-  mm.loadFrameScript("data:,(" + frame_script.toString() + ")();", true);
+
+  await SpecialPowers.spawn(browser, [], () => {
+    content.document.body.innerHTML = `
+      <a href="data:text/plain,hello" id="test">hello</a>`;
+
+    let element = content.document.getElementById("test");
+    element.click();
+  });
 
   await BrowserTestUtils.browserLoaded(browser, false, function(url) {
     return url == "data:text/plain,hello";

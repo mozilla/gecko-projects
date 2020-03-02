@@ -626,7 +626,7 @@ void gfxUserFontEntry::DoLoadNextSrc(bool aForceAsync) {
             }
             return;
           } else {
-            mFontSet->LogMessage(this, "download failed",
+            mFontSet->LogMessage(this, "failed to start download",
                                  nsIScriptError::errorFlag, rv);
           }
         }
@@ -1138,7 +1138,7 @@ gfxUserFontFamily* gfxUserFontSet::GetFamily(const nsACString& aFamilyName) {
   gfxUserFontFamily* family = mFontFamilies.GetWeak(key);
   if (!family) {
     family = new gfxUserFontFamily(aFamilyName);
-    mFontFamilies.Put(key, family);
+    mFontFamilies.Put(key, RefPtr{family});
   }
   return family;
 }

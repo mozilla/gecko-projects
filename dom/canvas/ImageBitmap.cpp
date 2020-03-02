@@ -96,7 +96,7 @@ class ImageBitmapShutdownObserver final : public nsIObserver {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
  private:
-  ~ImageBitmapShutdownObserver() {}
+  ~ImageBitmapShutdownObserver() = default;
 
   class SendShutdownToWorkerThread : public MainThreadWorkerControlRunnable {
    public:
@@ -615,6 +615,12 @@ UniquePtr<ImageBitmapCloneData> ImageBitmap::ToCloneData() const {
   result->mPictureRect = mPictureRect;
   result->mAlphaType = mAlphaType;
   RefPtr<SourceSurface> surface = mData->GetAsSourceSurface();
+  if (!surface) {
+    // It might just not be possible to get/map the surface. (e.g. from another
+    // process)
+    return nullptr;
+  }
+
   result->mSurface = surface->GetDataSurface();
   MOZ_ASSERT(result->mSurface);
   result->mWriteOnly = mWriteOnly;
@@ -866,7 +872,7 @@ already_AddRefed<ImageBitmap> ImageBitmap::CreateInternal(
   DebugOnly<bool> inited = array.Init(aImageData.GetDataObject());
   MOZ_ASSERT(inited);
 
-  array.ComputeLengthAndData();
+  array.ComputeState();
   const SurfaceFormat FORMAT = SurfaceFormat::R8G8B8A8;
   // ImageData's underlying data is not alpha-premultiplied.
   const auto alphaType = gfxAlphaType::NonPremult;
@@ -1085,7 +1091,7 @@ class CreateImageBitmapFromBlob final : public CancelableRunnable,
         mMainThreadEventTarget(aMainThreadEventTarget),
         mThread(PR_GetCurrentThread()) {}
 
-  virtual ~CreateImageBitmapFromBlob() {}
+  virtual ~CreateImageBitmapFromBlob() = default;
 
   bool IsCurrentThread() const { return mThread == PR_GetCurrentThread(); }
 
@@ -1674,7 +1680,7 @@ void CreateImageBitmapFromBlob::
     imageBitmap->SetPictureRect(mCropRect.ref(), rv);
 
     if (rv.Failed()) {
-      mPromise->MaybeReject(rv);
+      mPromise->MaybeReject(std::move(rv));
       return;
     }
   }

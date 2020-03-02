@@ -23,7 +23,7 @@ class RenderCompositorEGL : public RenderCompositor {
   virtual ~RenderCompositorEGL();
 
   bool BeginFrame() override;
-  RenderedFrameId EndFrame(const FfiVec<DeviceIntRect>& aDirtyRects) final;
+  RenderedFrameId EndFrame(const nsTArray<DeviceIntRect>& aDirtyRects) final;
   void Pause() override;
   bool Resume() override;
 
@@ -41,6 +41,10 @@ class RenderCompositorEGL : public RenderCompositor {
   void DestroyEGLSurface();
 
   EGLSurface mEGLSurface;
+#ifdef MOZ_WIDGET_ANDROID
+  // On android we must track our own surface size.
+  LayoutDeviceIntSize mEGLSurfaceSize;
+#endif
 };
 
 }  // namespace wr

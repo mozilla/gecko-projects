@@ -33,9 +33,14 @@ LauncherVoidResultWithLineInfo InitializeDllBlocklistOOP(
   return mozilla::Ok();
 }
 
+LauncherVoidResultWithLineInfo InitializeDllBlocklistOOPFromLauncher(
+    const wchar_t* aFullImagePath, HANDLE aChildProcess) {
+  return mozilla::Ok();
+}
+
 #else
 
-LauncherVoidResultWithLineInfo InitializeDllBlocklistOOP(
+static LauncherVoidResultWithLineInfo InitializeDllBlocklistOOPInternal(
     const wchar_t* aFullImagePath, HANDLE aChildProcess) {
   CrossProcessDllInterceptor intcpt(aChildProcess);
   intcpt.Init(L"ntdll.dll");
@@ -65,11 +70,11 @@ LauncherVoidResultWithLineInfo InitializeDllBlocklistOOP(
   // safely make its ntdll calls.
 
   HMODULE ourModule;
-#if defined(_MSC_VER)
+#  if defined(_MSC_VER)
   ourModule = reinterpret_cast<HMODULE>(&__ImageBase);
-#else
+#  else
   ourModule = ::GetModuleHandleW(nullptr);
-#endif  // defined(_MSC_VER)
+#  endif  // defined(_MSC_VER)
 
   mozilla::nt::PEHeaders ourExeImage(ourModule);
   if (!ourExeImage) {
@@ -84,7 +89,7 @@ LauncherVoidResultWithLineInfo InitializeDllBlocklistOOP(
     return importDirRestored;
   }
 
-  Maybe<Span<IMAGE_THUNK_DATA>> ntdllThunks =
+  Maybe<Span<IMAGE_THUNK_DATA> > ntdllThunks =
       ourExeImage.GetIATThunksForModule("ntdll.dll");
   if (!ntdllThunks) {
     return LAUNCHER_ERROR_FROM_WIN32(ERROR_INVALID_DATA);
@@ -125,6 +130,23 @@ LauncherVoidResultWithLineInfo InitializeDllBlocklistOOP(
   }
 
   return Ok();
+}
+
+LauncherVoidResultWithLineInfo InitializeDllBlocklistOOP(
+    const wchar_t* aFullImagePath, HANDLE aChildProcess) {
+  // We come here when the browser process launches a sandbox process.
+  // If the launcher process already failed to bootstrap the browser process,
+  // we should not attempt to bootstrap a child process.
+  if (!(gBlocklistInitFlags & eDllBlocklistInitFlagWasBootstrapped)) {
+    return Ok();
+  }
+
+  return InitializeDllBlocklistOOPInternal(aFullImagePath, aChildProcess);
+}
+
+LauncherVoidResultWithLineInfo InitializeDllBlocklistOOPFromLauncher(
+    const wchar_t* aFullImagePath, HANDLE aChildProcess) {
+  return InitializeDllBlocklistOOPInternal(aFullImagePath, aChildProcess);
 }
 
 #endif  // defined(MOZ_ASAN) || defined(_M_ARM64)

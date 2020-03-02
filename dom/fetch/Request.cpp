@@ -70,7 +70,7 @@ Request::Request(nsIGlobalObject* aOwner, InternalRequest* aRequest,
   }
 }
 
-Request::~Request() {}
+Request::~Request() = default;
 
 already_AddRefed<InternalRequest> Request::GetInternalRequest() {
   RefPtr<InternalRequest> r = mRequest;
@@ -323,7 +323,7 @@ already_AddRefed<Request> Request::Constructor(const GlobalObject& aGlobal,
                                        : fallbackCredentials;
 
   if (mode == RequestMode::Navigate) {
-    aRv.ThrowTypeError<MSG_INVALID_REQUEST_MODE>(NS_LITERAL_STRING("navigate"));
+    aRv.ThrowTypeError<MSG_INVALID_REQUEST_MODE>(u"navigate");
     return nullptr;
   }
   if (aInit.IsAnyMemberPresent() && request->Mode() == RequestMode::Navigate) {

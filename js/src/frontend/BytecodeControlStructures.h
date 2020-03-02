@@ -95,18 +95,18 @@ class LoopControl : public BreakableControl {
   // Here's the basic structure of a loop:
   //
   //   head:
-  //     JSOP_LOOPHEAD
+  //     JSOp::LoopHead
   //     {loop condition/body}
   //
   //   continueTarget:
   //     {loop update if present}
   //
   //     # Loop end, backward jump
-  //     JSOP_GOTO/JSOP_IFNE head
+  //     JSOp::Goto/JSOp::IfNe head
   //
   //   breakTarget:
 
-  // The bytecode offset of JSOP_LOOPHEAD.
+  // The bytecode offset of JSOp::LoopHead.
   JumpTarget head_;
 
   // Stack depth when this loop was pushed on the control stack.
@@ -125,11 +125,8 @@ class LoopControl : public BreakableControl {
 
   MOZ_MUST_USE bool emitContinueTarget(BytecodeEmitter* bce);
 
-  // Emit a jump to break target from the top level of the loop.
-  MOZ_MUST_USE bool emitSpecialBreakForDone(BytecodeEmitter* bce);
-
   // `nextPos` is the offset in the source code for the character that
-  // corresponds to the next instruction after JSOP_LOOPHEAD.
+  // corresponds to the next instruction after JSOp::LoopHead.
   // Can be Nothing() if not available.
   MOZ_MUST_USE bool emitLoopHead(BytecodeEmitter* bce,
                                  const mozilla::Maybe<uint32_t>& nextPos);

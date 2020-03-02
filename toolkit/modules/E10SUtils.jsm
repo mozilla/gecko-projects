@@ -137,6 +137,8 @@ const kSafeSchemes = [
   "xmpp",
 ];
 
+const kDocumentChannelAllowedSchemes = ["http", "https", "ftp", "data"];
+
 // Note that even if the scheme fits the criteria for a web-handled scheme
 // (ie it is compatible with the checks registerProtocolHandler uses), it may
 // not be web-handled - it could still be handled via the OS by another app.
@@ -254,16 +256,14 @@ function validatedWebRemoteType(
 
   if (
     allowLinkedWebInFileUriProcess &&
+    // This is not supported with documentchannel
+    !documentChannel &&
     aPreferredRemoteType == FILE_REMOTE_TYPE
   ) {
     // If aCurrentUri is passed then we should only allow FILE_REMOTE_TYPE
     // when it is same origin as target or the current URI is already a
     // file:// URI.
     if (aCurrentUri) {
-      if (documentChannel && aCurrentUri.scheme == "file") {
-        return aPreferredRemoteType;
-      }
-
       try {
         // checkSameOriginURI throws when not same origin.
         // todo: if you intend to update CheckSameOriginURI to log the error to the
@@ -716,6 +716,18 @@ var E10SUtils = {
     }
 
     let mustChangeProcess = requiredRemoteType != currentRemoteType;
+
+    // If we already have a content process, and the load will be
+    // handled using DocumentChannel, then we can skip switching
+    // for now, and let DocumentChannel do it during the response.
+    if (
+      currentRemoteType != NOT_REMOTE &&
+      uriObject &&
+      (remoteSubframes || documentChannel) &&
+      kDocumentChannelAllowedSchemes.includes(uriObject.scheme)
+    ) {
+      mustChangeProcess = false;
+    }
     let newFrameloader = false;
     if (
       browser.getAttribute("preloadedState") === "consumed" &&
@@ -781,11 +793,9 @@ var E10SUtils = {
     // We should never be sending a POST request from the parent process to a
     // http(s) uri, so make sure we switch if we're currently in that process.
     if (
+      Services.appinfo.remoteType != NOT_REMOTE &&
       (useRemoteSubframes || documentChannel) &&
-      (aURI.scheme == "http" ||
-        aURI.scheme == "https" ||
-        aURI.scheme == "data") &&
-      Services.appinfo.remoteType != NOT_REMOTE
+      kDocumentChannelAllowedSchemes.includes(aURI.scheme)
     ) {
       return true;
     }
@@ -844,12 +854,13 @@ var E10SUtils = {
     aFlags,
     aCsp
   ) {
+    const actor = aDocShell.domWindow.windowGlobalChild.getActor("BrowserTab");
+
     // Retarget the load to the correct process
-    let messageManager = aDocShell.messageManager;
     let sessionHistory = aDocShell.QueryInterface(Ci.nsIWebNavigation)
       .sessionHistory;
 
-    messageManager.sendAsyncMessage("Browser:LoadURI", {
+    actor.sendAsyncMessage("Browser:LoadURI", {
       loadOptions: {
         uri: aURI.spec,
         flags: aFlags || Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
@@ -927,7 +938,7 @@ var E10SUtils = {
       let stack = [aBrowser.browsingContext];
       while (stack.length) {
         let bc = stack.pop();
-        stack.push(...bc.getChildren());
+        stack.push(...bc.children);
         if (bc.currentWindowGlobal) {
           let pid = bc.currentWindowGlobal.osPid;
           if (pid != tabPid) {

@@ -19,7 +19,6 @@
 #include "nsContentUtils.h"
 #include "nsCSSAnonBoxes.h"
 #include "mozilla/css/ErrorReporter.h"
-#include "nsCSSKeywords.h"
 #include "nsCSSProps.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
@@ -32,7 +31,6 @@
 #include "nsGkAtoms.h"
 #include "nsImageFrame.h"
 #include "mozilla/GlobalStyleSheetCache.h"
-#include "nsRange.h"
 #include "nsRegion.h"
 #include "nsRepeatService.h"
 #include "nsFloatManager.h"
@@ -69,6 +67,7 @@
 
 #include "AudioChannelService.h"
 #include "mozilla/dom/PromiseDebugging.h"
+#include "mozilla/dom/nsMixedContentBlocker.h"
 
 #ifdef MOZ_XUL
 #  include "nsXULPopupManager.h"
@@ -112,6 +111,7 @@
 #include "mozilla/HTMLEditorController.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
+#include "mozilla/dom/AbstractRange.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/IPCBlobInputStreamStorage.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
@@ -150,7 +150,6 @@ nsresult nsLayoutStatics::Initialize() {
 
   ContentParent::StartUp();
 
-  nsCSSKeywords::AddRefTable();
   nsCSSProps::AddRefTable();
   nsColorNames::AddRefTable();
 
@@ -319,6 +318,7 @@ void nsLayoutStatics::Shutdown() {
     URLExtraData::ReleaseDummy();
   }
 
+  mozilla::dom::AbstractRange::Shutdown();
   Document::Shutdown();
   nsMessageManagerScriptExecutor::Shutdown();
   nsFocusManager::Shutdown();
@@ -346,7 +346,6 @@ void nsLayoutStatics::Shutdown() {
   // Release all of our atoms
   nsColorNames::ReleaseTable();
   nsCSSProps::ReleaseTable();
-  nsCSSKeywords::ReleaseTable();
   nsRepeatService::Shutdown();
   nsStackLayout::Shutdown();
   nsBox::Shutdown();
@@ -369,6 +368,7 @@ void nsLayoutStatics::Shutdown() {
 
   nsAttrValue::Shutdown();
   nsContentUtils::Shutdown();
+  nsMixedContentBlocker::Shutdown();
   GlobalStyleSheetCache::Shutdown();
 
   ShutdownJSEnvironment();

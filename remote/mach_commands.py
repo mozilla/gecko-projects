@@ -216,9 +216,9 @@ class PuppeteerRunner(MozbuildObject):
 
         if product == "firefox":
             env["BINARY"] = binary
-            command = ["run", "funit", "--verbose"]
+            command = ["run", "funit", "--", "--verbose"]
         elif product == "chrome":
-            command = ["run", "unit", "--verbose"]
+            command = ["run", "unit", "--", "--verbose"]
 
         if params.get("jobs"):
             env["PPTR_PARALLEL_TESTS"] = str(params["jobs"])
@@ -229,7 +229,7 @@ class PuppeteerRunner(MozbuildObject):
             prefs[k] = mozprofile.Preferences.cast(v)
 
         if prefs:
-            extra_options["extraPrefs"] = prefs
+            extra_options["extraPrefsFirefox"] = prefs
 
         if extra_options:
             env["EXTRA_LAUNCH_OPTIONS"] = json.dumps(extra_options)
@@ -248,6 +248,9 @@ class PuppeteerTest(MachCommandBase):
     @CommandArgument("--binary",
                      type=str,
                      help="Path to browser binary.  Defaults to local Firefox build.")
+    @CommandArgument("--enable-fission",
+                     action="store_true",
+                     help="Enable Fission (site isolation) in Gecko.")
     @CommandArgument("-z", "--headless",
                      action="store_true",
                      help="Run browser in headless mode.")
@@ -266,9 +269,17 @@ class PuppeteerTest(MachCommandBase):
                      type=int,
                      metavar="<N>",
                      help="Optionally run tests in parallel.")
+    @CommandArgument("-v",
+                     dest="verbosity",
+                     action="count",
+                     default=0,
+                     help="Increase remote agent logging verbosity to include "
+                          "debug level messages with -v, trace messages with -vv,"
+                          "and to not truncate long trace messages with -vvv")
     @CommandArgument("tests", nargs="*")
-    def puppeteer_test(self, binary=None, headless=False, extra_prefs=None,
-                       extra_options=None, jobs=1, tests=None, product="firefox", **kwargs):
+    def puppeteer_test(self, binary=None, enable_fission=False, headless=False,
+                       extra_prefs=None, extra_options=None, jobs=1, verbosity=0,
+                       tests=None, product="firefox", **kwargs):
         # moztest calls this programmatically with test objects or manifests
         if "test_objects" in kwargs and tests is not None:
             raise ValueError("Expected either 'test_objects' or 'tests'")
@@ -294,6 +305,18 @@ class PuppeteerTest(MachCommandBase):
             if len(kv) != 2:
                 exit(EX_USAGE, "syntax error in --setopt={}".format(s))
             options[kv[0]] = kv[1].strip()
+
+        if enable_fission:
+            prefs.update({"fission.autostart": True,
+                          "dom.serviceWorkers.parent_intercept": True,
+                          "browser.tabs.documentchannel": True})
+
+        if verbosity == 1:
+            prefs["remote.log.level"] = "Debug"
+        elif verbosity > 1:
+            prefs["remote.log.level"] = "Trace"
+        if verbosity > 2:
+            prefs["remote.log.truncate"] = False
 
         self.install_puppeteer(product)
 

@@ -20,8 +20,8 @@ import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDisplay
 import org.mozilla.geckoview.test.util.Callbacks
 
 import android.support.annotation.AnyThread
-import android.support.test.filters.MediumTest
-import android.support.test.runner.AndroidJUnit4
+import androidx.test.filters.MediumTest
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import android.util.Pair
 import android.util.SparseArray
 import android.view.Surface
@@ -311,9 +311,9 @@ class ContentDelegateTest : BaseSessionTest() {
                 assertThat("short_name should match", manifest.getString("short_name"), equalTo("app"))
                 assertThat("display should match", manifest.getString("display"), equalTo("standalone"))
 
-                // The color here is "cadetblue" converted to hex.
-                assertThat("theme_color should match", manifest.getString("theme_color"), equalTo("#5f9ea0"))
-                assertThat("background_color should match", manifest.getString("background_color"), equalTo("#c0feee"))
+                // The color here is "cadetblue" converted to #aarrggbb.
+                assertThat("theme_color should match", manifest.getString("theme_color"), equalTo("#ff5f9ea0"))
+                assertThat("background_color should match", manifest.getString("background_color"), equalTo("#eec0ffee"))
                 assertThat("start_url should match", manifest.getString("start_url"), endsWith("/assets/www/start/index.html"))
 
                 val icon = manifest.getJSONArray("icons").getJSONObject(0);
@@ -327,6 +327,33 @@ class ContentDelegateTest : BaseSessionTest() {
         })
     }
 
+    @Test fun viewportFit() {
+        mainSession.loadTestPath(VIEWPORT_PATH)
+        mainSession.waitUntilCalled(object : Callbacks.All {
+            @AssertCalled(count = 1)
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+                assertThat("Page load should succeed", success, equalTo(true))
+            }
+
+            @AssertCalled(count = 1)
+            override fun onMetaViewportFitChange(session: GeckoSession, viewportFit: String) {
+                assertThat("viewport-fit should match", viewportFit, equalTo("cover"))
+            }
+        })
+
+        mainSession.loadTestPath(HELLO_HTML_PATH)
+        mainSession.waitUntilCalled(object : Callbacks.All {
+            @AssertCalled(count = 1)
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+                assertThat("Page load should succeed", success, equalTo(true))
+            }
+
+            @AssertCalled(count = 1)
+            override fun onMetaViewportFitChange(session: GeckoSession, viewportFit: String) {
+                assertThat("viewport-fit should match", viewportFit, equalTo("auto"))
+            }
+        })
+    }
 
     /**
      * Preferences to induce wanted behaviour.

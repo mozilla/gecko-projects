@@ -107,6 +107,22 @@ async function getElementFromPopupByText(text) {
 }
 
 /**
+ * This function looks inside of a document for some element that contains
+ * the given text. It runs in a loop every requestAnimationFrame until it
+ * finds the element. If it doesn't find the element it throws an error.
+ *
+ * @param {HTMLDocument} document
+ * @param {string} text
+ * @returns {Promise<HTMLElement>}
+ */
+async function getElementFromDocumentByText(document, text) {
+  const xpath = `//*[contains(text(), '${text}')]`;
+  return waitUntil(
+    () => getElementByXPath(document, xpath),
+    `Trying to find the element with the text "${text}".`
+  );
+}
+/**
  * This function is similar to getElementFromPopupByText, but it immediately
  * returns and does not wait for an element to exist.
  * @param {string} text
@@ -247,6 +263,26 @@ async function checkTabLoadedProfile({
 }
 
 /**
+ * This function checks the document title of a tab as an easy way to pass
+ * messages from a content page to the mochitest.
+ * @param {string} title
+ */
+async function waitForTabTitle(title) {
+  const logPeriodically = createPeriodicLogger();
+
+  info(`Waiting for the selected tab to have the title "${title}".`);
+
+  return waitUntil(() => {
+    if (gBrowser.selectedTab.textContent === title) {
+      ok(true, `The selected tab has the title ${title}`);
+      return true;
+    }
+    logPeriodically(`> Waiting for the tab title to change.`);
+    return false;
+  });
+}
+
+/**
  * Close the popup, and wait for it to be destroyed.
  */
 async function closePopup() {
@@ -277,4 +313,161 @@ async function closePopup() {
     }
     await tick();
   }
+}
+
+/**
+ * Open about:profiling in a new tab, and output helpful log messages.
+ *
+ * @template T
+ * @param {(Document) => T} callback
+ * @returns {Promise<T>}
+ */
+function openAboutProfiling(callback) {
+  info("Begin to open about:profiling in a new tab.");
+  return BrowserTestUtils.withNewTab(
+    "about:profiling",
+    async contentBrowser => {
+      info("about:profiling is now open in a tab.");
+      return callback(contentBrowser.contentDocument);
+    }
+  );
+}
+
+/**
+ * Start and stop the profiler to get the current active configuration. This is
+ * done programmtically through the nsIProfiler interface, rather than through click
+ * interactions, since the about:profiling page does not include buttons to control
+ * the recording.
+ *
+ * @returns {Object}
+ */
+function getActiveConfiguration() {
+  const { startProfiler, stopProfiler } = ChromeUtils.import(
+    "resource://devtools/client/performance-new/popup/background.jsm.js"
+  );
+
+  info("Start the profiler with the current about:profiling configuration.");
+  startProfiler();
+
+  // Immediately pause the sampling, to make sure the test runs fast. The profiler
+  // only needs to be started to initialize the configuration.
+  Services.profiler.PauseSampling();
+
+  const { activeConfiguration } = Services.profiler;
+  if (!activeConfiguration) {
+    throw new Error(
+      "Expected to find an active configuration for the profile."
+    );
+  }
+
+  info("Stop the profiler after getting the active configuration.");
+  stopProfiler();
+
+  return activeConfiguration;
+}
+
+/**
+ * Start the profiler programmatically and check that the active configuration has
+ * a feature enabled
+ *
+ * @param {string} feature
+ * @return {boolean}
+ */
+function activeConfigurationHasFeature(feature) {
+  const { features } = getActiveConfiguration();
+  return features.includes(feature);
+}
+
+/**
+ * Start the profiler programmatically and check that the active configuration is
+ * tracking a thread.
+ *
+ * @param {string} thread
+ * @return {boolean}
+ */
+function activeConfigurationHasThread(thread) {
+  const { threads } = getActiveConfiguration();
+  return threads.includes(thread);
+}
+
+/**
+ * Grabs the associated input from the element, or it walks up the DOM from a text
+ * element and tries to query select an input.
+ *
+ * @param {Document} document
+ * @param {string} text
+ * @param {HTMLInputElement}
+ */
+async function getNearestInputFromText(document, text) {
+  const textElement = await getElementFromDocumentByText(document, text);
+  if (textElement.control) {
+    // This is a label, just grab the input.
+    return textElement.control;
+  }
+  // A non-label node
+  let next = textElement;
+  while ((next = next.parentElement)) {
+    const input = next.querySelector("input");
+    if (input) {
+      return input;
+    }
+  }
+  throw new Error("Could not find an input near text element.");
+}
+
+/**
+ * Wait until the profiler menu button is added.
+ *
+ * @returns Promise<void>
+ */
+async function waitForProfilerMenuButton() {
+  info("Checking if the profiler menu button is enabled.");
+  await waitUntil(
+    () => gBrowser.ownerDocument.getElementById("profiler-button"),
+    "> Waiting until the profiler button is added to the browser."
+  );
+}
+
+/**
+ * Make sure the profiler popup is disabled for the test.
+ */
+async function makeSureProfilerPopupIsDisabled() {
+  info("Make sure the profiler popup is dsiabled.");
+
+  info("> Load the profiler menu button module.");
+  const { ProfilerMenuButton } = ChromeUtils.import(
+    "resource://devtools/client/performance-new/popup/menu-button.jsm.js"
+  );
+
+  const originallyIsEnabled = ProfilerMenuButton.isEnabled();
+
+  if (originallyIsEnabled) {
+    info("> The menu button is enabled, turn it off for this test.");
+    ProfilerMenuButton.toggle(document);
+  } else {
+    info("> The menu button was already disabled.");
+  }
+
+  registerCleanupFunction(() => {
+    info("Revert the profiler menu button to its original enabled state.");
+    if (originallyIsEnabled !== ProfilerMenuButton.isEnabled()) {
+      ProfilerMenuButton.toggle(document);
+    }
+  });
+}
+
+/**
+ * Open the WebChannel test document, that will enable the profiler popup via
+ * WebChannel.
+ * @param {Function} callback
+ */
+function withWebChannelTestDocument(callback) {
+  return BrowserTestUtils.withNewTab(
+    {
+      gBrowser,
+      url:
+        "http://example.com/browser/devtools/client/performance-new/test/browser/webchannel.html",
+    },
+    callback
+  );
 }

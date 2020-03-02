@@ -8,8 +8,9 @@
 
 #include "mozilla/Assertions.h"  // for AssertionConditionType
 #include "mozilla/HashTable.h"   // for HashMapEntry, HashTable<>::Ptr, HashMap
-#include "mozilla/Move.h"        // for std::move
 #include "mozilla/UniquePtr.h"   // for UniquePtr
+
+#include <utility>  // for std::move
 
 #include "jsapi.h"
 
@@ -71,6 +72,8 @@ DebugScript* DebugScript::getOrCreate(JSContext* cx, JSScript* script) {
 
     script->zone()->debugScriptMap = std::move(map);
   }
+
+  MOZ_ASSERT(script->hasBytecode());
 
   DebugScript* borrowed = debug.get();
   if (!script->zone()->debugScriptMap->putNew(script, std::move(debug))) {
@@ -156,8 +159,12 @@ void DebugScript::destroyBreakpointSite(JSFreeOp* fop, JSScript* script,
 /* static */
 void DebugScript::clearBreakpointsIn(JSFreeOp* fop, Realm* realm, Debugger* dbg,
                                      JSObject* handler) {
-  for (auto script = realm->zone()->cellIter<JSScript>(); !script.done();
-       script.next()) {
+  for (auto base = realm->zone()->cellIter<BaseScript>(); !base.done();
+       base.next()) {
+    if (base->isLazyScript()) {
+      continue;
+    }
+    JSScript* script = static_cast<JSScript*>(base.get());
     if (script->realm() == realm && script->hasDebugScript()) {
       clearBreakpointsIn(fop, script, dbg, handler);
     }
@@ -257,7 +264,7 @@ bool DebugScript::incrementGeneratorObserverCount(JSContext* cx,
 
   // It is our caller's responsibility, before bumping the generator observer
   // count, to make sure that the baseline code includes the necessary
-  // JSOP_AFTERYIELD instrumentation by calling
+  // JSOp::AfterYield instrumentation by calling
   // {ensure,update}ExecutionObservabilityOfScript.
   MOZ_ASSERT_IF(script->hasBaselineScript(),
                 script->baselineScript()->hasDebugInstrumentation());

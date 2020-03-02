@@ -42,8 +42,7 @@
 #  include "ScaledFontDWrite.h"
 #endif
 
-namespace mozilla {
-namespace gfx {
+namespace mozilla::gfx {
 
 class GradientStopsSkia : public GradientStops {
  public:
@@ -247,6 +246,11 @@ static sk_sp<SkImage> GetSkImageForSurface(SourceSurface* aSurface,
     return nullptr;
   }
 
+  // Skia doesn't support RGBX surfaces so ensure that the alpha value is opaque
+  // white.
+  MOZ_ASSERT(VerifyRGBXCorners(surf->GetData(), surf->GetSize(), surf->Stride(),
+                               surf->GetFormat(), aBounds, aMatrix));
+
   SkPixmap pixmap(MakeSkiaImageInfo(surf->GetSize(), surf->GetFormat()),
                   surf->GetData(), surf->Stride());
   sk_sp<SkImage> image =
@@ -256,10 +260,6 @@ static sk_sp<SkImage> GetSkImageForSurface(SourceSurface* aSurface,
     gfxDebug() << "Failed making Skia raster image for temporary surface";
   }
 
-  // Skia doesn't support RGBX surfaces so ensure that the alpha value is opaque
-  // white.
-  MOZ_ASSERT(VerifyRGBXCorners(surf->GetData(), surf->GetSize(), surf->Stride(),
-                               surf->GetFormat(), aBounds, aMatrix));
   return image;
 }
 
@@ -318,6 +318,14 @@ already_AddRefed<SourceSurface> DrawTargetSkia::Snapshot() {
   }
 
   return snapshot.forget();
+}
+
+already_AddRefed<SourceSurface> DrawTargetSkia::GetBackingSurface() {
+  if (mBackingSurface) {
+    RefPtr<SourceSurface> snapshot = mBackingSurface;
+    return snapshot.forget();
+  }
+  return Snapshot();
 }
 
 bool DrawTargetSkia::LockBits(uint8_t** aData, IntSize* aSize, int32_t* aStride,
@@ -486,6 +494,42 @@ static void SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern,
             points[0], SkFloatToScalar(pat.mRadius1), points[1],
             SkFloatToScalar(pat.mRadius2), &stops->mColors.front(),
             &stops->mPositions.front(), stops->mCount, mode, 0, &mat);
+        if (shader) {
+          aPaint.setShader(shader);
+        } else {
+          aPaint.setColor(SK_ColorTRANSPARENT);
+        }
+      }
+      break;
+    }
+    case PatternType::CONIC_GRADIENT: {
+      const ConicGradientPattern& pat =
+          static_cast<const ConicGradientPattern&>(aPattern);
+      GradientStopsSkia* stops =
+          static_cast<GradientStopsSkia*>(pat.mStops.get());
+      if (!stops || stops->mCount < 2 || !pat.mCenter.IsFinite() ||
+          !IsFinite(pat.mAngle)) {
+        aPaint.setColor(SK_ColorTRANSPARENT);
+      } else {
+        SkMatrix mat;
+        GfxMatrixToSkiaMatrix(pat.mMatrix, mat);
+        if (aMatrix) {
+          mat.postConcat(*aMatrix);
+        }
+
+        SkScalar cx = SkFloatToScalar(pat.mCenter.x);
+        SkScalar cy = SkFloatToScalar(pat.mCenter.y);
+
+        // Skia's sweep gradient angles are relative to the x-axis, not the
+        // y-axis.
+        Float angle = (pat.mAngle * 180.0 / M_PI) - 90.0;
+        if (angle != 0.0) {
+          mat.preRotate(angle, cx, cy);
+        }
+
+        sk_sp<SkShader> shader = SkGradientShader::MakeSweep(
+            cx, cy, &stops->mColors.front(), &stops->mPositions.front(),
+            stops->mCount, 0, &mat);
         if (shader) {
           aPaint.setShader(shader);
         } else {
@@ -1707,6 +1751,43 @@ bool DrawTargetSkia::Init(unsigned char* aData, const IntSize& aSize,
   return true;
 }
 
+bool DrawTargetSkia::Init(RefPtr<DataSourceSurface>&& aSurface) {
+  auto map =
+      new DataSourceSurface::ScopedMap(aSurface, DataSourceSurface::READ_WRITE);
+  if (!map->IsMapped()) {
+    delete map;
+    return false;
+  }
+
+  SurfaceFormat format = aSurface->GetFormat();
+  IntSize size = aSurface->GetSize();
+  MOZ_ASSERT((format != SurfaceFormat::B8G8R8X8) ||
+             VerifyRGBXFormat(map->GetData(), size, map->GetStride(), format));
+
+  SkSurfaceProps props(0, GetSkPixelGeometry());
+  mSurface = SkSurface::MakeRasterDirectReleaseProc(
+      MakeSkiaImageInfo(size, format), map->GetData(), map->GetStride(),
+      DrawTargetSkia::ReleaseMappedSkSurface, map, &props);
+  if (!mSurface) {
+    delete map;
+    return false;
+  }
+
+  // map is now owned by mSurface
+  mBackingSurface = std::move(aSurface);
+  mSize = size;
+  mFormat = format;
+  mCanvas = mSurface->getCanvas();
+  SetPermitSubpixelAA(IsOpaque(format));
+  return true;
+}
+
+/* static */ void DrawTargetSkia::ReleaseMappedSkSurface(void* aPixels,
+                                                         void* aContext) {
+  auto map = reinterpret_cast<DataSourceSurface::ScopedMap*>(aContext);
+  delete map;
+}
+
 void DrawTargetSkia::SetTransform(const Matrix& aTransform) {
   SkMatrix mat;
   GfxMatrixToSkiaMatrix(aTransform, mat);
@@ -1884,5 +1965,4 @@ void DrawTargetSkia::MarkChanged() {
   }
 }
 
-}  // namespace gfx
-}  // namespace mozilla
+}  // namespace mozilla::gfx

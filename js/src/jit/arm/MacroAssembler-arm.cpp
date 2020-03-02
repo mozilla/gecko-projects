@@ -2909,7 +2909,7 @@ void MacroAssemblerARMCompat::loadInt32OrDouble(Register base, Register index,
                                                 int32_t shift) {
   Label notInt32, end;
 
-  JS_STATIC_ASSERT(NUNBOX32_PAYLOAD_OFFSET == 0);
+  static_assert(NUNBOX32_PAYLOAD_OFFSET == 0);
 
   ScratchRegisterScope scratch(asMasm());
 
@@ -3180,7 +3180,7 @@ void MacroAssemblerARMCompat::storePayload(const Value& val,
   // If NUNBOX32_PAYLOAD_OFFSET is not zero, the memory operand [base + index
   // << shift + imm] cannot be encoded into a single instruction, and cannot
   // be integrated into the as_dtr call.
-  JS_STATIC_ASSERT(NUNBOX32_PAYLOAD_OFFSET == 0);
+  static_assert(NUNBOX32_PAYLOAD_OFFSET == 0);
 
   // If an offset is used, modify the base so that a [base + index << shift]
   // instruction format can be used.
@@ -3207,7 +3207,7 @@ void MacroAssemblerARMCompat::storePayload(Register src,
   // If NUNBOX32_PAYLOAD_OFFSET is not zero, the memory operand [base + index
   // << shift + imm] cannot be encoded into a single instruction, and cannot
   // be integrated into the as_dtr call.
-  JS_STATIC_ASSERT(NUNBOX32_PAYLOAD_OFFSET == 0);
+  static_assert(NUNBOX32_PAYLOAD_OFFSET == 0);
 
   // Save/restore the base if the BaseIndex has an offset, as above.
   if (dest.offset != 0) {
@@ -3357,7 +3357,7 @@ void MacroAssemblerARMCompat::handleFailureWithHandlerTail(
   jump(r0);
 
   // If we found a finally block, this must be a baseline frame. Push two
-  // values expected by JSOP_RETSUB: BooleanValue(true) and the exception.
+  // values expected by JSOp::Retsub: BooleanValue(true) and the exception.
   bind(&finally);
   ValueOperand exception = ValueOperand(r1, r2);
   loadValue(Operand(sp, offsetof(ResumeFromException, exception)), exception);
@@ -4512,8 +4512,8 @@ void MacroAssembler::moveValue(const ValueOperand& src,
       return;
     }
     // If only one is, copy that source first.
-    mozilla::Swap(s0, s1);
-    mozilla::Swap(d0, d1);
+    std::swap(s0, s1);
+    std::swap(d0, d1);
   }
 
   if (s0 != d0) {
@@ -4568,7 +4568,8 @@ void MacroAssembler::branchValueIsNurseryCell(Condition cond,
   Register tag = temp;
   tag = extractTag(address, tag);
   branchTestObject(Assembler::Equal, tag, &checkAddress);
-  branchTestString(Assembler::NotEqual, tag,
+  branchTestString(Assembler::Equal, tag, &checkAddress);
+  branchTestBigInt(Assembler::NotEqual, tag,
                    cond == Assembler::Equal ? &done : label);
 
   bind(&checkAddress);
@@ -4586,7 +4587,8 @@ void MacroAssembler::branchValueIsNurseryCell(Condition cond,
   Label done, checkAddress;
 
   branchTestObject(Assembler::Equal, value.typeReg(), &checkAddress);
-  branchTestString(Assembler::NotEqual, value.typeReg(),
+  branchTestString(Assembler::Equal, value.typeReg(), &checkAddress);
+  branchTestBigInt(Assembler::NotEqual, value.typeReg(),
                    cond == Assembler::Equal ? &done : label);
 
   bind(&checkAddress);
@@ -5940,7 +5942,7 @@ void MacroAssemblerARM::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
   BufferOffset load;
   if (out64 != Register64::Invalid()) {
     if (type == Scalar::Int64) {
-      MOZ_ASSERT(INT64LOW_OFFSET == 0);
+      static_assert(INT64LOW_OFFSET == 0);
 
       load = ma_dataTransferN(IsLoad, 32, /* signed = */ false, memoryBase, ptr,
                               out64.low);
@@ -6007,7 +6009,7 @@ void MacroAssemblerARM::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
 
   BufferOffset store;
   if (type == Scalar::Int64) {
-    MOZ_ASSERT(INT64LOW_OFFSET == 0);
+    static_assert(INT64LOW_OFFSET == 0);
 
     store = ma_dataTransferN(IsStore, 32 /* bits */, /* signed */ false,
                              memoryBase, ptr, val64.low);

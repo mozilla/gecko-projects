@@ -40,7 +40,7 @@ class RenderCompositorANGLE : public RenderCompositor {
   bool Initialize();
 
   bool BeginFrame() override;
-  RenderedFrameId EndFrame(const FfiVec<DeviceIntRect>& aDirtyRects) final;
+  RenderedFrameId EndFrame(const nsTArray<DeviceIntRect>& aDirtyRects) final;
   bool WaitForGPU() override;
   RenderedFrameId GetLastCompletedFrameId() final;
   RenderedFrameId UpdateFrameId() final;
@@ -64,6 +64,8 @@ class RenderCompositorANGLE : public RenderCompositor {
 
   bool SurfaceOriginIsTopLeft() override { return true; }
 
+  bool SupportAsyncScreenshot() override;
+
   bool ShouldUseNativeCompositor() override;
   uint32_t GetMaxUpdateRects() override;
 
@@ -71,16 +73,17 @@ class RenderCompositorANGLE : public RenderCompositor {
   void CompositorBeginFrame() override;
   void CompositorEndFrame() override;
   void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-            wr::DeviceIntRect aDirtyRect) override;
+            wr::DeviceIntRect aDirtyRect,
+            wr::DeviceIntRect aValidRect) override;
   void Unbind() override;
-  void CreateSurface(wr::NativeSurfaceId aId,
-                     wr::DeviceIntSize aTileSize) override;
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aTileSize,
+                     bool aIsOpaque) override;
   void DestroySurface(NativeSurfaceId aId) override;
-  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY,
-                  bool aIsOpaque) override;
+  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void DestroyTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
                   wr::DeviceIntRect aClipRect) override;
+  void EnableNativeCompositor(bool aEnable) override;
 
   // Interface for partial present
   bool UsePartialPresent() override;
@@ -96,16 +99,18 @@ class RenderCompositorANGLE : public RenderCompositor {
   void InitializeUsePartialPresent();
   void InsertGraphicsCommandsFinishedWaitQuery(
       RenderedFrameId aRenderedFrameId);
-  bool WaitForPreviousGraphicsCommandsFinishedQuery();
+  bool WaitForPreviousGraphicsCommandsFinishedQuery(bool aWaitAll = false);
   bool ResizeBufferIfNeeded();
   bool CreateEGLSurface();
   void DestroyEGLSurface();
   ID3D11Device* GetDeviceOfEGLDisplay();
+  bool CreateSwapChain();
   void CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFactory2);
   RefPtr<IDXGISwapChain1> CreateSwapChainForDComp(bool aUseTripleBuffering,
                                                   bool aUseAlpha);
   bool SutdownEGLLibraryIfNecessary();
   RefPtr<ID3D11Query> GetD3D11Query();
+  void ReleaseNativeCompositorResources();
 
   EGLConfig mEGLConfig;
   EGLSurface mEGLSurface;
@@ -126,8 +131,11 @@ class RenderCompositorANGLE : public RenderCompositor {
   RenderedFrameId mLastCompletedFrameId;
 
   Maybe<LayoutDeviceIntSize> mBufferSize;
+  bool mUseNativeCompositor;
   bool mUsePartialPresent;
   bool mFullRender;
+  // Used to know a timing of disabling native compositor.
+  bool mDisablingNativeCompositor;
 };
 
 }  // namespace wr

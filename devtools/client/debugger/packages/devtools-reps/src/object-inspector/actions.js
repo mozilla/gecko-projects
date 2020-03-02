@@ -63,7 +63,7 @@ function nodeLoadProperties(node: Node, actor) {
 
       // If the client does not have a releaseActor function, it means the actors are
       // handled directly by the consumer, so we don't need to track them.
-      if (!client.releaseActor) {
+      if (!client || !client.releaseActor) {
         actor = null;
       }
 
@@ -165,27 +165,21 @@ function rootsChanged(props: Props) {
 
 async function releaseActors(state, client, dispatch) {
   const actors = getActors(state);
-  if (!client.releaseActor || actors.size === 0) {
+  if (!client || !client.releaseActor || actors.size === 0) {
     return;
   }
 
-  const watchpoints = getWatchpoints(state);
-  let released = false;
+  let promises = [];
   for (const actor of actors) {
-    // Watchpoints are stored in object actors.
-    // If we release the actor we lose the watchpoint.
-    if (!watchpoints.has(actor)) {
-      await client.releaseActor(actor);
-      released = true;
-    }
+    promises.push(client.releaseActor(actor));
   }
 
-  if (released) {
-    dispatch({
-      type: "RELEASED_ACTORS",
-      data: { actors },
-    });
-  }
+  await Promise.all(promises);
+
+  dispatch({
+    type: "RELEASED_ACTORS",
+    data: { actors },
+  });
 }
 
 function invokeGetter(node: Node, receiverId: string | null) {

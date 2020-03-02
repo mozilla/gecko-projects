@@ -363,24 +363,26 @@ class XPCOMEventTargetWrapper final
 
   bool IsOnCurrentThread() { return mTarget->IsOnCurrentThread(); }
 
-  // Instantiates a wrapper. The Java code calls this only once per wrapped
-  // thread, and caches the result.
-  static java::XPCOMEventTarget::LocalRef CreateWrapper(
-      mozilla::jni::String::Param aName) {
-    nsString name(aName->ToString());
-    nsCOMPtr<nsIEventTarget> target;
-    if (name.EqualsLiteral("main")) {
-      target = do_GetMainThread();
-    } else if (name.EqualsLiteral("launcher")) {
-      target = ipc::GetIPCLauncher();
-    } else {
-      MOZ_CRASH("Trying to create JNI wrapper for unknown XPCOM thread");
+  static void Init() {
+    java::XPCOMEventTarget::Natives<XPCOMEventTargetWrapper>::Init();
+    CreateWrapper(NS_LITERAL_STRING("main"), do_GetMainThread());
+    if (XRE_IsParentProcess()) {
+      CreateWrapper(NS_LITERAL_STRING("launcher"), ipc::GetIPCLauncher());
     }
+  }
 
+  static void CreateWrapper(mozilla::jni::String::Param aName,
+                            nsCOMPtr<nsIEventTarget> aTarget) {
     auto java = java::XPCOMEventTarget::New();
-    auto native = MakeUnique<XPCOMEventTargetWrapper>(target.forget());
+    auto native = MakeUnique<XPCOMEventTargetWrapper>(aTarget.forget());
     AttachNative(java, std::move(native));
-    return java;
+
+    java::XPCOMEventTarget::SetTarget(aName, java);
+  }
+
+  static void ResolveAndDispatchNative(mozilla::jni::String::Param aName,
+                                       mozilla::jni::Object::Param aRunnable) {
+    java::XPCOMEventTarget::ResolveAndDispatch(aName, aRunnable);
   }
 
   explicit XPCOMEventTargetWrapper(already_AddRefed<nsIEventTarget> aTarget)
@@ -527,6 +529,7 @@ nsresult nsAppShell::Init() {
       mozilla::services::GetObserverService();
   if (obsServ) {
     obsServ->AddObserver(this, "browser-delayed-startup-finished", false);
+    obsServ->AddObserver(this, "geckoview-startup-complete", false);
     obsServ->AddObserver(this, "profile-after-change", false);
     obsServ->AddObserver(this, "quit-application", false);
     obsServ->AddObserver(this, "quit-application-granted", false);
@@ -576,7 +579,12 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
   } else if (!strcmp(aTopic, "browser-delayed-startup-finished")) {
     NS_CreateServicesFromCategory("browser-delayed-startup-finished", nullptr,
                                   "browser-delayed-startup-finished");
-
+  } else if (!strcmp(aTopic, "geckoview-startup-complete")) {
+    if (jni::IsAvailable()) {
+      java::GeckoThread::CheckAndSetState(
+          java::GeckoThread::State::PROFILE_READY(),
+          java::GeckoThread::State::RUNNING());
+    }
   } else if (!strcmp(aTopic, "profile-after-change")) {
     if (jni::IsAvailable()) {
       java::GeckoThread::SetState(java::GeckoThread::State::PROFILE_READY());
@@ -599,13 +607,6 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
     nsCOMPtr<dom::Document> doc = do_QueryInterface(aSubject);
     MOZ_ASSERT(doc);
     if (const RefPtr<nsWindow> window = nsWindow::From(doc->GetWindow())) {
-      if (jni::IsAvailable()) {
-        // When our first window has loaded, assume any JS
-        // initialization has run and set Gecko to ready.
-        java::GeckoThread::CheckAndSetState(
-            java::GeckoThread::State::PROFILE_READY(),
-            java::GeckoThread::State::RUNNING());
-      }
       window->OnGeckoViewReady();
     }
   } else if (!strcmp(aTopic, "quit-application")) {

@@ -7,6 +7,7 @@
 #ifndef mozilla_layers_ContentCompositorBridgeParent_h
 #define mozilla_layers_ContentCompositorBridgeParent_h
 
+#include "mozilla/layers/CanvasTranslator.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/UniquePtr.h"
@@ -18,7 +19,6 @@ class PWebGPUParent;
 
 namespace layers {
 
-class CanvasParent;
 class CompositorOptions;
 
 /**
@@ -161,6 +161,9 @@ class ContentCompositorBridgeParent final : public CompositorBridgeParentBase {
     return IPC_FAIL_NO_REASON(this);
   }
 
+  already_AddRefed<dom::PWebGLParent> AllocPWebGLParent(
+      const webgl::InitContextDesc&, webgl::InitContextResult* out) override;
+
   // Use DidCompositeLocked if you already hold a lock on
   // sIndirectLayerTreesLock; Otherwise use DidComposite, which would request
   // the lock automatically.
@@ -241,7 +244,7 @@ class ContentCompositorBridgeParent final : public CompositorBridgeParentBase {
   bool mNotifyAfterRemotePaint;
   bool mDestroyCalled;
 
-  RefPtr<CanvasParent> mCanvasParent;
+  RefPtr<CanvasTranslator> mCanvasTranslator;
 };
 
 }  // namespace layers

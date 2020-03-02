@@ -15,10 +15,6 @@
 #if defined(OS_WIN)
 #  include <windows.h>
 #  include <tlhelp32.h>
-#  include <io.h>
-#  ifndef STDOUT_FILENO
-#    define STDOUT_FILENO 1
-#  endif
 #elif defined(OS_LINUX) || defined(__GLIBC__)
 #  include <dirent.h>
 #  include <limits.h>
@@ -31,11 +27,6 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <stdio.h>
-#include <stdlib.h>
-#ifndef OS_WIN
-#  include <unistd.h>
-#endif
 
 #include "base/command_line.h"
 #include "base/process.h"
@@ -44,15 +35,15 @@
 #include "mozilla/ipc/EnvironmentMap.h"
 
 #if defined(MOZ_ENABLE_FORKSERVER)
-#include "nsString.h"
-#include "mozilla/Tuple.h"
-#include "mozilla/ipc/FileDescriptorShuffle.h"
+#  include "nsString.h"
+#  include "mozilla/Tuple.h"
+#  include "mozilla/ipc/FileDescriptorShuffle.h"
 
 namespace mozilla {
 namespace ipc {
 class FileDescriptor;
 }
-}
+}  // namespace mozilla
 #endif
 
 #if defined(OS_MACOSX)
@@ -195,7 +186,7 @@ EnvironmentArray BuildEnvironmentArray(const environment_map& env_vars_to_set);
  * and second step, that is why two steps.
  */
 class AppProcessBuilder {
-public:
+ public:
   AppProcessBuilder();
   // This function will fork a new process for use as a
   // content processes.
@@ -209,10 +200,10 @@ public:
   // The message loop may allocate resources like file descriptors.
   // If this function is called before the end of the loop, the
   // reosurces may be destroyed while the loop is still alive.
-  void InitAppProcess(int *argcp, char*** argvp);
+  void InitAppProcess(int* argcp, char*** argvp);
 
-private:
-  void ReplaceArguments(int *argcp, char*** argvp);
+ private:
+  void ReplaceArguments(int* argcp, char*** argvp);
 
   mozilla::ipc::FileDescriptorShuffle shuffle_;
   std::vector<std::string> argv_;
@@ -256,36 +247,22 @@ namespace mozilla {
 
 class EnvironmentLog {
  public:
-  explicit EnvironmentLog(const char* varname) {
-    const char* e = getenv(varname);
-    if (e && *e) {
-      fname_ = e;
-    }
-  }
+  template <size_t N>
+  explicit EnvironmentLog(const char (&varname)[N])
+      : EnvironmentLog(varname, N) {}
 
   ~EnvironmentLog() {}
 
-  void print(const char* format, ...) {
-    if (!fname_.size()) return;
-
-    FILE* f;
-    if (fname_.compare("-") == 0) {
-      f = fdopen(dup(STDOUT_FILENO), "a");
-    } else {
-      f = fopen(fname_.c_str(), "a");
-    }
-
-    if (!f) return;
-
-    va_list a;
-    va_start(a, format);
-    vfprintf(f, format, a);
-    va_end(a);
-    fclose(f);
-  }
+  void print(const char* format, ...);
 
  private:
+  explicit EnvironmentLog(const char* varname, size_t len);
+
+#if defined(OS_WIN)
+  std::wstring fname_;
+#else
   std::string fname_;
+#endif
 
   DISALLOW_EVIL_CONSTRUCTORS(EnvironmentLog);
 };

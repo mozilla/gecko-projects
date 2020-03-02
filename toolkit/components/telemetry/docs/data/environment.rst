@@ -82,6 +82,7 @@ Structure:
           content: <string>, // identifier to indicate the particular link within a campaign
           variation: <string>, // name/id of the variation cohort used in the enrolled funnel experiment
           experiment: <string>, // name/id of the enrolled funnel experiment
+          ua: <string>, // identifier derived from the user agent downloading the installer, e.g., chrome, Google Chrome 123
         },
         sandbox: {
           effectiveContentProcessLevel: <integer>,
@@ -150,6 +151,8 @@ Structure:
             windowsUBR: <number>, // windows 10 only or null on failure
             installYear: <number>, // windows only or null on failure
             locale: <string>, // "en" or null on failure
+            hasPrefetch: <bool>, // windows only, or null on failure
+            hasSuperfetch: <bool>, // windows only, or nul on failure
         },
         hdd: {
           profile: { // hdd where the profile folder is located
@@ -210,6 +213,7 @@ Structure:
               //   "unavailable" - Safe Mode or OS restriction prevents use.
               //   "blocked"     - Blocked due to an internal condition such as safe mode.
               //   "blacklisted" - Blocked due to a blacklist restriction.
+              //   "denied"      - Blocked due to allowlist restrictions.
               //   "disabled"    - User explicitly disabled this default feature.
               //   "failed"      - This feature was attempted but failed to initialize.
               //   "available"   - User has this feature available.
@@ -379,6 +383,8 @@ The following is a partial list of collected preferences.
 
 - ``browser.search.suggest.enabled``: The "master switch" for search suggestions everywhere in Firefox (search bar, urlbar, etc.). Defaults to true.
 
+- ``browser.urlbar.openViewOnFocus``: False if the user has disabled the "open top sites when focusing the address bar" feature. Defaults to true.
+
 - ``browser.urlbar.suggest.searches``: True if search suggestions are enabled in the urlbar. Defaults to false.
 
 - ``browser.zoom.full`` (deprecated): True if zoom is enabled for both text and images, that is if "Zoom Text Only" is not enabled. Defaults to true. This preference was collected in Firefox 50 to 52 (`Bug 979323 <https://bugzilla.mozilla.org/show_bug.cgi?id=979323>`_).
@@ -469,6 +475,8 @@ This object contains operating system information.
 - ``windowsUBR``: the Windows UBR number, only available for Windows >= 10. This value is incremented by Windows cumulative updates patches.
 - ``installYear``: the Windows only integer representing the year the OS was installed.
 - ``locale``: the string representing the OS locale.
+- ``hasPrefetch``: the Windows-only boolean representing whether or not the OS-based prefetch application start-up optimization is set to use the default settings.
+- ``hasSuperfetch``: the Windows-only boolean representing whether or not the OS-based superfetch application start-up optimization service is running and using the default settings.
 
 addons
 ------

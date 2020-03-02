@@ -17,6 +17,7 @@
 #include "mozilla/Array.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/DeferredFinalize.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/CallbackObject.h"
 #include "mozilla/dom/DOMJSClass.h"
@@ -32,7 +33,6 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryReporting.h"
-#include "nsAutoPtr.h"
 #include "mozilla/dom/Document.h"
 #include "nsIGlobalObject.h"
 #include "nsIVariant.h"
@@ -821,9 +821,9 @@ struct IsRefcounted {
 
  private:
   // This struct only works if T is fully declared (not just forward declared).
-  // The IsBaseOf check will ensure that, we don't really need it for any other
-  // reason (the static assert will of course always be true).
-  static_assert(!IsBaseOf<nsISupports, T>::value || IsRefcounted::value,
+  // The std::is_base_of check will ensure that, we don't really need it for any
+  // other reason (the static assert will of course always be true).
+  static_assert(!std::is_base_of<nsISupports, T>::value || IsRefcounted::value,
                 "Classes derived from nsISupports are refcounted!");
 };
 
@@ -832,7 +832,7 @@ struct IsRefcounted {
 #undef HAS_MEMBER_TYPEDEFS
 
 #ifdef DEBUG
-template <class T, bool isISupports = IsBaseOf<nsISupports, T>::value>
+template <class T, bool isISupports = std::is_base_of<nsISupports, T>::value>
 struct CheckWrapperCacheCast {
   static bool Check() {
     return reinterpret_cast<uintptr_t>(
@@ -982,13 +982,13 @@ template <class T>
 struct TypeNeedsOuterization {
   // We only need to outerize Window objects, so anything inheriting from
   // nsGlobalWindow (which inherits from EventTarget itself).
-  static const bool value = IsBaseOf<nsGlobalWindowInner, T>::value ||
-                            IsBaseOf<nsGlobalWindowOuter, T>::value ||
+  static const bool value = std::is_base_of<nsGlobalWindowInner, T>::value ||
+                            std::is_base_of<nsGlobalWindowOuter, T>::value ||
                             IsSame<EventTarget, T>::value;
 };
 
 #ifdef DEBUG
-template <typename T, bool isISupports = IsBaseOf<nsISupports, T>::value>
+template <typename T, bool isISupports = std::is_base_of<nsISupports, T>::value>
 struct CheckWrapperCacheTracing {
   static inline void Check(T* aObject) {}
 };
@@ -1058,7 +1058,7 @@ MOZ_ALWAYS_INLINE bool DoGetOrCreateDOMReflector(
     }
 
 #ifdef DEBUG
-    if (IsBaseOf<nsWrapperCache, T>::value) {
+    if (std::is_base_of<nsWrapperCache, T>::value) {
       CheckWrapperCacheTracing<T>::Check(value);
     }
 #endif
@@ -1076,7 +1076,7 @@ MOZ_ALWAYS_INLINE bool DoGetOrCreateDOMReflector(
     //     reinterpret_castable to nsWrapperCache.
     MOZ_ASSERT(clasp, "What happened here?");
     MOZ_ASSERT_IF(clasp->mDOMObjectIsISupports,
-                  (IsBaseOf<nsISupports, T>::value));
+                  (std::is_base_of<nsISupports, T>::value));
     MOZ_ASSERT(CheckWrapperCacheCast<T>::Check());
   }
 #endif
@@ -1189,7 +1189,7 @@ inline bool WrapNewBindingNonWrapperCachedObject(
 // true if the JSObject took ownership
 template <class T>
 inline bool WrapNewBindingNonWrapperCachedObject(
-    JSContext* cx, JS::Handle<JSObject*> scopeArg, nsAutoPtr<T>& value,
+    JSContext* cx, JS::Handle<JSObject*> scopeArg, UniquePtr<T>& value,
     JS::MutableHandle<JS::Value> rval,
     JS::Handle<JSObject*> givenProto = nullptr) {
   static_assert(!IsRefcounted<T>::value, "Only pass owned classes in here.");
@@ -1232,7 +1232,8 @@ inline bool WrapNewBindingNonWrapperCachedObject(
       return false;
     }
 
-    value.forget();
+    // JS object took ownership
+    Unused << value.release();
   }
 
   // We can end up here in all sorts of compartments, per above.  Make
@@ -1285,8 +1286,8 @@ inline bool EnumValueNotFound<true>(JSContext* cx, JS::HandleString str,
   if (!deflated) {
     return false;
   }
-  return ThrowErrorMessage(cx, MSG_INVALID_ENUM_VALUE, sourceDescription,
-                           deflated.get(), type);
+  return ThrowErrorMessage<MSG_INVALID_ENUM_VALUE>(cx, sourceDescription,
+                                                   deflated.get(), type);
 }
 
 template <typename CharT>
@@ -1677,7 +1678,7 @@ struct FindAssociatedGlobalForNative<T, false> {
 };
 
 // Helper for calling GetOrCreateDOMReflector with smart pointers
-// (nsAutoPtr/nsRefPtr/nsCOMPtr) or references.
+// (UniquePtr/RefPtr/nsCOMPtr) or references.
 template <class T, bool isSmartPtr = IsSmartPtr<T>::value>
 struct GetOrCreateDOMReflectorHelper {
   static inline bool GetOrCreate(JSContext* cx, const T& value,
@@ -1706,7 +1707,7 @@ inline bool GetOrCreateDOMReflector(
 }
 
 // Helper for calling GetOrCreateDOMReflectorNoWrap with smart pointers
-// (nsAutoPtr/nsRefPtr/nsCOMPtr) or references.
+// (UniquePtr/RefPtr/nsCOMPtr) or references.
 template <class T, bool isSmartPtr = IsSmartPtr<T>::value>
 struct GetOrCreateDOMReflectorNoWrapHelper {
   static inline bool GetOrCreate(JSContext* cx, const T& value,
@@ -1782,6 +1783,10 @@ bool ThrowingConstructor(JSContext* cx, unsigned argc, JS::Value* vp);
 
 bool ThrowConstructorWithoutNew(JSContext* cx, const char* name);
 
+// Helper for throwing an "invalid this" exception.
+bool ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
+                      bool aSecurityError, prototypes::ID aProtoId);
+
 bool GetPropertyOnPrototype(JSContext* cx, JS::Handle<JSObject*> proxy,
                             JS::Handle<JS::Value> receiver, JS::Handle<jsid> id,
                             bool* found, JS::MutableHandle<JS::Value> vp);
@@ -1853,7 +1858,8 @@ static inline bool ConvertJSValueToString(JSContext* cx,
 
 MOZ_MUST_USE bool NormalizeUSVString(nsAString& aString);
 
-MOZ_MUST_USE bool NormalizeUSVString(binding_detail::FakeString& aString);
+MOZ_MUST_USE bool NormalizeUSVString(
+    binding_detail::FakeString<char16_t>& aString);
 
 template <typename T>
 static inline bool ConvertJSValueToUSVString(JSContext* cx,
@@ -1906,9 +1912,10 @@ void DoTraceSequence(JSTracer* trc, nsTArray<T>& seq);
 
 // Class used to trace sequences, with specializations for various
 // sequence types.
-template <typename T, bool isDictionary = IsBaseOf<DictionaryBase, T>::value,
-          bool isTypedArray = IsBaseOf<AllTypedArraysBase, T>::value,
-          bool isOwningUnion = IsBaseOf<AllOwningUnionBase, T>::value>
+template <typename T,
+          bool isDictionary = std::is_base_of<DictionaryBase, T>::value,
+          bool isTypedArray = std::is_base_of<AllTypedArraysBase, T>::value,
+          bool isOwningUnion = std::is_base_of<AllOwningUnionBase, T>::value>
 class SequenceTracer {
   explicit SequenceTracer() = delete;  // Should never be instantiated
 };
@@ -2389,29 +2396,34 @@ const T& NonNullHelper(const OwningNonNull<T>& aArg) {
   return aArg;
 }
 
-inline void NonNullHelper(NonNull<binding_detail::FakeString>& aArg) {
+template <typename CharT>
+inline void NonNullHelper(NonNull<binding_detail::FakeString<CharT>>& aArg) {
   // This overload is here to make sure that we never end up applying
   // NonNullHelper to a NonNull<binding_detail::FakeString>. If we
   // try to, it should fail to compile, since presumably the caller will try to
   // use our nonexistent return value.
 }
 
-inline void NonNullHelper(const NonNull<binding_detail::FakeString>& aArg) {
+template <typename CharT>
+inline void NonNullHelper(
+    const NonNull<binding_detail::FakeString<CharT>>& aArg) {
   // This overload is here to make sure that we never end up applying
   // NonNullHelper to a NonNull<binding_detail::FakeString>. If we
   // try to, it should fail to compile, since presumably the caller will try to
   // use our nonexistent return value.
 }
 
-inline void NonNullHelper(binding_detail::FakeString& aArg) {
+template <typename CharT>
+inline void NonNullHelper(binding_detail::FakeString<CharT>& aArg) {
   // This overload is here to make sure that we never end up applying
   // NonNullHelper to a FakeString before we've constified it.  If we
   // try to, it should fail to compile, since presumably the caller will try to
   // use our nonexistent return value.
 }
 
-MOZ_ALWAYS_INLINE
-const nsAString& NonNullHelper(const binding_detail::FakeString& aArg) {
+template <typename CharT>
+MOZ_ALWAYS_INLINE const nsTSubstring<CharT>& NonNullHelper(
+    const binding_detail::FakeString<CharT>& aArg) {
   return aArg;
 }
 
@@ -2500,7 +2512,30 @@ inline bool ByteStringToJsval(JSContext* cx, const nsACString& str,
   return NonVoidByteStringToJsval(cx, str, rval);
 }
 
-template <class T, bool isISupports = IsBaseOf<nsISupports, T>::value>
+// Convert an utf-8 encoded nsCString to jsval, returning true on success.
+//
+// TODO(bug 1606957): This could probably be better.
+inline bool NonVoidUTF8StringToJsval(JSContext* cx, const nsACString& str,
+                                     JS::MutableHandle<JS::Value> rval) {
+  JSString* jsStr =
+      JS_NewStringCopyUTF8N(cx, {str.BeginReading(), str.Length()});
+  if (!jsStr) {
+    return false;
+  }
+  rval.setString(jsStr);
+  return true;
+}
+
+inline bool UTF8StringToJsval(JSContext* cx, const nsACString& str,
+                              JS::MutableHandle<JS::Value> rval) {
+  if (str.IsVoid()) {
+    rval.setNull();
+    return true;
+  }
+  return NonVoidUTF8StringToJsval(cx, str, rval);
+}
+
+template <class T, bool isISupports = std::is_base_of<nsISupports, T>::value>
 struct PreserveWrapperHelper {
   static void PreserveWrapper(T* aObject) {
     aObject->PreserveWrapper(aObject, NS_CYCLE_COLLECTION_PARTICIPANT(T));
@@ -2519,7 +2554,7 @@ void PreserveWrapper(T* aObject) {
   PreserveWrapperHelper<T>::PreserveWrapper(aObject);
 }
 
-template <class T, bool isISupports = IsBaseOf<nsISupports, T>::value>
+template <class T, bool isISupports = std::is_base_of<nsISupports, T>::value>
 struct CastingAssertions {
   static bool ToSupportsIsCorrect(T*) { return true; }
   static bool ToSupportsIsOnPrimaryInheritanceChain(T*, nsWrapperCache*) {
@@ -2622,11 +2657,6 @@ class MOZ_STACK_CLASS BindingJSObjectCreator {
   void InitializationSucceeded() {
     T* pointer;
     mNative.forget(&pointer);
-
-    // Never collect binding objects while recording or replaying, to avoid
-    // non-deterministically releasing references during finalization.
-    recordreplay::HoldJSObject(mReflector);
-
     mReflector = nullptr;
   }
 
@@ -2634,7 +2664,7 @@ class MOZ_STACK_CLASS BindingJSObjectCreator {
   struct OwnedNative {
     // Make sure the native objects inherit from NonRefcountedDOMObject so
     // that we log their ctor and dtor.
-    static_assert(IsBaseOf<NonRefcountedDOMObject, T>::value,
+    static_assert(std::is_base_of<NonRefcountedDOMObject, T>::value,
                   "Non-refcounted objects with DOM bindings should inherit "
                   "from NonRefcountedDOMObject.");
 
@@ -2666,11 +2696,11 @@ struct DeferredFinalizerImpl {
   typedef typename Conditional<
       IsSame<T, nsISupports>::value, nsCOMPtr<T>,
       typename Conditional<IsRefcounted<T>::value, RefPtr<T>,
-                           nsAutoPtr<T>>::Type>::Type SmartPtr;
+                           UniquePtr<T>>::Type>::Type SmartPtr;
   typedef SegmentedVector<SmartPtr> SmartPtrArray;
 
   static_assert(
-      IsSame<T, nsISupports>::value || !IsBaseOf<nsISupports, T>::value,
+      IsSame<T, nsISupports>::value || !std::is_base_of<nsISupports, T>::value,
       "nsISupports classes should all use the nsISupports instantiation");
 
   static inline void AppendAndTake(
@@ -2683,7 +2713,7 @@ struct DeferredFinalizerImpl {
     smartPtrArray.InfallibleAppend(dont_AddRef(ptr));
   }
   template <class U>
-  static inline void AppendAndTake(SegmentedVector<nsAutoPtr<U>>& smartPtrArray,
+  static inline void AppendAndTake(SegmentedVector<UniquePtr<U>>& smartPtrArray,
                                    U* ptr) {
     smartPtrArray.InfallibleAppend(ptr);
   }
@@ -2713,7 +2743,7 @@ struct DeferredFinalizerImpl {
   }
 };
 
-template <class T, bool isISupports = IsBaseOf<nsISupports, T>::value>
+template <class T, bool isISupports = std::is_base_of<nsISupports, T>::value>
 struct DeferredFinalizer {
   static void AddForDeferredFinalization(T* aObject) {
     typedef DeferredFinalizerImpl<T> Impl;
@@ -2737,7 +2767,7 @@ static void AddForDeferredFinalization(T* aObject) {
 // This returns T's CC participant if it participates in CC and does not inherit
 // from nsISupports. Otherwise, it returns null. QI should be used to get the
 // participant if T inherits from nsISupports.
-template <class T, bool isISupports = IsBaseOf<nsISupports, T>::value>
+template <class T, bool isISupports = std::is_base_of<nsISupports, T>::value>
 class GetCCParticipant {
   // Helper for GetCCParticipant for classes that participate in CC.
   template <class U>
@@ -2796,8 +2826,8 @@ struct CreateGlobalOptionsWithXPConnect {
 
 template <class T>
 using IsGlobalWithXPConnect =
-    IntegralConstant<bool, IsBaseOf<nsGlobalWindowInner, T>::value ||
-                               IsBaseOf<MessageManagerGlobal, T>::value>;
+    IntegralConstant<bool, std::is_base_of<nsGlobalWindowInner, T>::value ||
+                               std::is_base_of<MessageManagerGlobal, T>::value>;
 
 template <class T>
 struct CreateGlobalOptions : Conditional<IsGlobalWithXPConnect<T>::value,
@@ -3027,7 +3057,7 @@ inline RefPtr<T> StrongOrRawPtr(RefPtr<S>&& aPtr) {
 }
 
 template <class T, class ReturnType = typename Conditional<
-                       IsRefcounted<T>::value, T*, nsAutoPtr<T>>::Type>
+                       IsRefcounted<T>::value, T*, UniquePtr<T>>::Type>
 inline ReturnType StrongOrRawPtr(T* aPtr) {
   return ReturnType(aPtr);
 }
@@ -3036,10 +3066,8 @@ template <class T, template <typename> class SmartPtr, class S>
 inline void StrongOrRawPtr(SmartPtr<S>&& aPtr) = delete;
 
 template <class T>
-struct StrongPtrForMember {
-  typedef typename Conditional<IsRefcounted<T>::value, RefPtr<T>,
-                               nsAutoPtr<T>>::Type Type;
-};
+using StrongPtrForMember =
+    typename Conditional<IsRefcounted<T>::value, RefPtr<T>, UniquePtr<T>>::Type;
 
 namespace binding_detail {
 inline JSObject* GetHackedNamespaceProtoObject(JSContext* aCx) {

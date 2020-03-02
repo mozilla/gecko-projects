@@ -52,7 +52,7 @@ var ecmaGlobals = [
   { name: "AggregateError", insecureContext: true, nightly: true },
   { name: "Array", insecureContext: true },
   { name: "ArrayBuffer", insecureContext: true },
-  { name: "Atomics", insecureContext: true, nightly: true },
+  { name: "Atomics", insecureContext: true, earlyBetaOrEarlier: true },
   { name: "BigInt", insecureContext: true },
   { name: "BigInt64Array", insecureContext: true },
   { name: "BigUint64Array", insecureContext: true },
@@ -89,7 +89,7 @@ var ecmaGlobals = [
   {
     name: "SharedArrayBuffer",
     insecureContext: true,
-    nightly: true,
+    earlyBetaOrEarlier: true,
   },
   { name: "String", insecureContext: true },
   { name: "Symbol", insecureContext: true },
@@ -237,7 +237,7 @@ var interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "Crypto", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "CryptoKey", insecureContext: true },
+  { name: "CryptoKey" },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "CSS", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -269,7 +269,7 @@ var interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "CSSPageRule", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "CSSPseudoElement", insecureContext: true, release: false },
+  { name: "CSSPseudoElement", insecureContext: true, disabled: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "CSSRule", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1050,7 +1050,9 @@ var interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "StyleSheetList", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "SubtleCrypto", insecureContext: true },
+  { name: "SubtleCrypto" },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "SubmitEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "SVGAElement", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1436,6 +1438,7 @@ function createInterfaceMap() {
           // will get treated as "insecureContext: false", which means exposed
           // only in secure contexts.
           (isInsecureContext && !entry.insecureContext) ||
+          entry.earlyBetaOrEarlier === !isEarlyBetaOrEarlier ||
           entry.disabled
         ) {
           interfaceMap[entry.name] = false;

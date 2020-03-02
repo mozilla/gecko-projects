@@ -98,6 +98,7 @@
 
 #include "builtin/BigInt.h"
 #include "gc/Allocator.h"
+#include "js/Conversions.h"
 #include "js/Initialization.h"
 #include "js/StableStringChars.h"
 #include "js/Utility.h"
@@ -106,6 +107,7 @@
 #include "vm/SelfHosting.h"
 
 #include "gc/FreeOp-inl.h"
+#include "gc/Nursery-inl.h"
 #include "vm/JSContext-inl.h"
 
 using namespace js;
@@ -136,24 +138,14 @@ static bool HasLeadingZeroes(BigInt* bi) {
 #endif
 
 BigInt* BigInt::createUninitialized(JSContext* cx, size_t digitLength,
-                                    bool isNegative) {
+                                    bool isNegative, gc::InitialHeap heap) {
   if (digitLength > MaxDigitLength) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_BIGINT_TOO_LARGE);
     return nullptr;
   }
 
-  UniquePtr<Digit[], JS::FreePolicy> heapDigits;
-  if (digitLength > InlineDigitsLength) {
-    heapDigits = cx->make_pod_array<Digit>(digitLength);
-    if (!heapDigits) {
-      return nullptr;
-    }
-  } else {
-    heapDigits = nullptr;
-  }
-
-  BigInt* x = Allocate<BigInt>(cx);
+  BigInt* x = AllocateBigInt(cx, heap);
   if (!x) {
     return nullptr;
   }
@@ -163,8 +155,15 @@ BigInt* BigInt::createUninitialized(JSContext* cx, size_t digitLength,
   MOZ_ASSERT(x->digitLength() == digitLength);
   MOZ_ASSERT(x->isNegative() == isNegative);
 
-  if (heapDigits) {
-    x->heapDigits_ = heapDigits.release();
+  if (digitLength > InlineDigitsLength) {
+    x->heapDigits_ = js::AllocateBigIntDigits(cx, x, digitLength);
+    if (!x->heapDigits_) {
+      // |x| is partially initialized, expose it as a BigInt using inline digits
+      // to the GC.
+      x->setLengthAndFlags(0, 0);
+      return nullptr;
+    }
+
     AddCellMemory(x, digitLength * sizeof(Digit), js::MemoryUse::BigIntDigits);
   }
 
@@ -177,6 +176,7 @@ void BigInt::initializeDigitsToZero() {
 }
 
 void BigInt::finalize(JSFreeOp* fop) {
+  MOZ_ASSERT(isTenured());
   if (hasHeapDigits()) {
     size_t size = digitLength() * sizeof(Digit);
     fop->free_(this, heapDigits_, size, js::MemoryUse::BigIntDigits);
@@ -193,8 +193,8 @@ size_t BigInt::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
   return hasInlineDigits() ? 0 : mallocSizeOf(heapDigits_);
 }
 
-BigInt* BigInt::zero(JSContext* cx) {
-  return createUninitialized(cx, 0, false);
+BigInt* BigInt::zero(JSContext* cx, gc::InitialHeap heap) {
+  return createUninitialized(cx, 0, false, heap);
 }
 
 BigInt* BigInt::createFromDigit(JSContext* cx, Digit d, bool isNegative) {
@@ -1429,6 +1429,17 @@ JSLinearString* BigInt::toStringGeneric(JSContext* cx, HandleBigInt x,
                                maximumCharactersRequired - writePos);
 }
 
+static void FreeDigits(JSContext* cx, BigInt* bi, BigInt::Digit* digits) {
+  if (cx->isHelperThreadContext()) {
+    js_free(digits);
+  } else if (bi->isTenured()) {
+    MOZ_ASSERT(!cx->nursery().isInside(digits));
+    js_free(digits);
+  } else {
+    cx->nursery().freeBuffer(digits);
+  }
+}
+
 BigInt* BigInt::destructivelyTrimHighZeroDigits(JSContext* cx, BigInt* x) {
   if (x->isZero()) {
     MOZ_ASSERT(!x->isNegative());
@@ -1454,22 +1465,22 @@ BigInt* BigInt::destructivelyTrimHighZeroDigits(JSContext* cx, BigInt* x) {
   if (newLength > InlineDigitsLength) {
     MOZ_ASSERT(x->hasHeapDigits());
 
-    auto* p =
-        cx->pod_realloc<Digit>(x->heapDigits_, x->digitLength(), newLength);
-    if (!p) {
+    size_t oldLength = x->digitLength();
+    Digit* newdigits =
+        js::ReallocateBigIntDigits(cx, x, x->heapDigits_, oldLength, newLength);
+    if (!newdigits) {
       return nullptr;
     }
-    x->heapDigits_ = p;
+    x->heapDigits_ = newdigits;
 
-    RemoveCellMemory(x, x->digitLength() * sizeof(Digit),
-                     js::MemoryUse::BigIntDigits);
+    RemoveCellMemory(x, oldLength * sizeof(Digit), js::MemoryUse::BigIntDigits);
     AddCellMemory(x, newLength * sizeof(Digit), js::MemoryUse::BigIntDigits);
   } else {
     if (x->hasHeapDigits()) {
       Digit digits[InlineDigitsLength];
       std::copy_n(x->heapDigits_, InlineDigitsLength, digits);
 
-      js_free(x->heapDigits_);
+      FreeDigits(cx, x, x->heapDigits_);
       RemoveCellMemory(x, x->digitLength() * sizeof(Digit),
                        js::MemoryUse::BigIntDigits);
 
@@ -1524,7 +1535,7 @@ template <typename CharT>
 BigInt* BigInt::parseLiteralDigits(JSContext* cx,
                                    const Range<const CharT> chars,
                                    unsigned radix, bool isNegative,
-                                   bool* haveParseError) {
+                                   bool* haveParseError, gc::InitialHeap heap) {
   MOZ_ASSERT(chars.length());
 
   RangedPtr<const CharT> start = chars.begin();
@@ -1534,7 +1545,7 @@ BigInt* BigInt::parseLiteralDigits(JSContext* cx,
   while (start[0] == '0') {
     start++;
     if (start == end) {
-      return zero(cx);
+      return zero(cx, heap);
     }
   }
 
@@ -1546,7 +1557,7 @@ BigInt* BigInt::parseLiteralDigits(JSContext* cx,
   if (!calculateMaximumDigitsRequired(cx, radix, end - start, &length)) {
     return nullptr;
   }
-  BigInt* result = createUninitialized(cx, length, isNegative);
+  BigInt* result = createUninitialized(cx, length, isNegative, heap);
   if (!result) {
     return nullptr;
   }
@@ -1584,26 +1595,31 @@ BigInt* BigInt::parseLiteral(JSContext* cx, const Range<const CharT> chars,
 
   MOZ_ASSERT(chars.length());
 
+  // This function is only called from the frontend when parsing BigInts. Parsed
+  // BigInts are stored in the script's data vector and therefore need to be
+  // allocated in the tenured heap.
+  constexpr gc::InitialHeap heap = gc::TenuredHeap;
+
   if (end - start > 2 && start[0] == '0') {
     if (start[1] == 'b' || start[1] == 'B') {
       // StringNumericLiteral ::: BinaryIntegerLiteral
       return parseLiteralDigits(cx, Range<const CharT>(start + 2, end), 2,
-                                isNegative, haveParseError);
+                                isNegative, haveParseError, heap);
     }
     if (start[1] == 'x' || start[1] == 'X') {
       // StringNumericLiteral ::: HexIntegerLiteral
       return parseLiteralDigits(cx, Range<const CharT>(start + 2, end), 16,
-                                isNegative, haveParseError);
+                                isNegative, haveParseError, heap);
     }
     if (start[1] == 'o' || start[1] == 'O') {
       // StringNumericLiteral ::: OctalIntegerLiteral
       return parseLiteralDigits(cx, Range<const CharT>(start + 2, end), 8,
-                                isNegative, haveParseError);
+                                isNegative, haveParseError, heap);
     }
   }
 
   return parseLiteralDigits(cx, Range<const CharT>(start, end), 10, isNegative,
-                            haveParseError);
+                            haveParseError, heap);
 }
 
 template <typename CharT>
@@ -1767,8 +1783,11 @@ BigInt* js::NumberToBigInt(JSContext* cx, double d) {
   // Step 1 is an assertion checked by the caller.
   // Step 2.
   if (!IsInteger(d)) {
+    char str[JS::MaximumNumberToStringLength];
+    JS::NumberToString(d, str);
+
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_NUMBER_TO_BIGINT);
+                              JSMSG_NONINTEGER_NUMBER_TO_BIGINT, str);
     return nullptr;
   }
 
@@ -1776,12 +1795,13 @@ BigInt* js::NumberToBigInt(JSContext* cx, double d) {
   return BigInt::createFromDouble(cx, d);
 }
 
-BigInt* BigInt::copy(JSContext* cx, HandleBigInt x) {
+BigInt* BigInt::copy(JSContext* cx, HandleBigInt x, gc::InitialHeap heap) {
   if (x->isZero()) {
-    return zero(cx);
+    return zero(cx, heap);
   }
 
-  BigInt* result = createUninitialized(cx, x->digitLength(), x->isNegative());
+  BigInt* result =
+      createUninitialized(cx, x->digitLength(), x->isNegative(), heap);
   if (!result) {
     return nullptr;
   }
@@ -3169,7 +3189,7 @@ int8_t BigInt::compare(BigInt* x, BigInt* y) {
   }
 
   if (xSign) {
-    mozilla::Swap(x, y);
+    std::swap(x, y);
   }
 
   return absoluteCompare(x, y);
@@ -3558,6 +3578,7 @@ BigInt* js::ParseBigIntLiteral(JSContext* cx,
   if (!res) {
     return nullptr;
   }
+  MOZ_ASSERT(res->isTenured());
   MOZ_RELEASE_ASSERT(!parseError);
   return res;
 }
@@ -3615,8 +3636,10 @@ void BigInt::dump(js::GenericPrinter& out) const {
 JS::ubi::Node::Size JS::ubi::Concrete<BigInt>::size(
     mozilla::MallocSizeOf mallocSizeOf) const {
   BigInt& bi = get();
-  MOZ_ASSERT(bi.isTenured());
-  size_t size = js::gc::Arena::thingSize(bi.asTenured().getAllocKind());
+  size_t size = sizeof(JS::BigInt);
+  if (IsInsideNursery(&bi)) {
+    size += Nursery::bigIntHeaderSize();
+  }
   size += bi.sizeOfExcludingThis(mallocSizeOf);
   return size;
 }
@@ -3658,7 +3681,8 @@ XDRResult js::XDRBigInt(XDRState<mode>* xdr, MutableHandleBigInt bi) {
   MOZ_TRY(xdr->codeBytes(buf.get(), length));
 
   if (mode == XDR_DECODE) {
-    BigInt* res = BigInt::createUninitialized(cx, digitLength, sign);
+    BigInt* res =
+        BigInt::createUninitialized(cx, digitLength, sign, gc::TenuredHeap);
     if (!res) {
       return xdr->fail(JS::TranscodeResult_Throw);
     }

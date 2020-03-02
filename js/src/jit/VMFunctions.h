@@ -773,19 +773,19 @@ struct LastArg;
 
 template <>
 struct LastArg<> {
-  typedef void Type;
+  using Type = void;
   static constexpr size_t nbArgs = 0;
 };
 
 template <typename HeadType>
 struct LastArg<HeadType> {
-  typedef HeadType Type;
+  using Type = HeadType;
   static constexpr size_t nbArgs = 1;
 };
 
 template <typename HeadType, typename... TailTypes>
 struct LastArg<HeadType, TailTypes...> {
-  typedef typename LastArg<TailTypes...>::Type Type;
+  using Type = typename LastArg<TailTypes...>::Type;
   static constexpr size_t nbArgs = LastArg<TailTypes...>::nbArgs + 1;
 };
 
@@ -854,9 +854,6 @@ MOZ_MUST_USE bool InvokeFunction(JSContext* cx, HandleObject obj0,
                                  bool constructing, bool ignoresReturnValue,
                                  uint32_t argc, Value* argv,
                                  MutableHandleValue rval);
-MOZ_MUST_USE bool InvokeFunctionShuffleNewTarget(
-    JSContext* cx, HandleObject obj, uint32_t numActualArgs,
-    uint32_t numFormalArgs, Value* argv, MutableHandleValue rval);
 
 class InterpreterStubExitFrameLayout;
 bool InvokeFromInterpreterStub(JSContext* cx,
@@ -930,8 +927,12 @@ bool OperatorInI(JSContext* cx, uint32_t index, HandleObject obj, bool* out);
 MOZ_MUST_USE bool GetIntrinsicValue(JSContext* cx, HandlePropertyName name,
                                     MutableHandleValue rval);
 
-MOZ_MUST_USE bool CreateThis(JSContext* cx, HandleObject callee,
-                             HandleObject newTarget, MutableHandleValue rval);
+MOZ_MUST_USE bool CreateThisFromIC(JSContext* cx, HandleObject callee,
+                                   HandleObject newTarget,
+                                   MutableHandleValue rval);
+MOZ_MUST_USE bool CreateThisFromIon(JSContext* cx, HandleObject callee,
+                                    HandleObject newTarget,
+                                    MutableHandleValue rval);
 
 bool GetDynamicNamePure(JSContext* cx, JSObject* scopeChain, JSString* str,
                         Value* vp);
@@ -950,8 +951,7 @@ int32_t GetIndexFromString(JSString* str);
 
 JSObject* WrapObjectPure(JSContext* cx, JSObject* obj);
 
-MOZ_MUST_USE bool DebugPrologue(JSContext* cx, BaselineFrame* frame,
-                                jsbytecode* pc, bool* mustReturn);
+MOZ_MUST_USE bool DebugPrologue(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool DebugEpilogue(JSContext* cx, BaselineFrame* frame,
                                 jsbytecode* pc, bool ok);
 MOZ_MUST_USE bool DebugEpilogueOnBaselineReturn(JSContext* cx,
@@ -966,14 +966,12 @@ MOZ_MUST_USE bool NormalSuspend(JSContext* cx, HandleObject obj,
                                 jsbytecode* pc);
 MOZ_MUST_USE bool FinalSuspend(JSContext* cx, HandleObject obj, jsbytecode* pc);
 MOZ_MUST_USE bool InterpretResume(JSContext* cx, HandleObject obj,
-                                  HandleValue val, HandlePropertyName kind,
-                                  MutableHandleValue rval);
-MOZ_MUST_USE bool DebugAfterYield(JSContext* cx, BaselineFrame* frame,
-                                  jsbytecode* pc, bool* mustReturn);
+                                  Value* stackValues, MutableHandleValue rval);
+MOZ_MUST_USE bool DebugAfterYield(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool GeneratorThrowOrReturn(
     JSContext* cx, BaselineFrame* frame,
     Handle<AbstractGeneratorObject*> genObj, HandleValue arg,
-    uint32_t resumeKindArg);
+    int32_t resumeKindArg);
 
 MOZ_MUST_USE bool GlobalNameConflictsCheckFromIon(JSContext* cx,
                                                   HandleScript script);
@@ -990,9 +988,8 @@ JSObject* InitRestParameter(JSContext* cx, uint32_t length, Value* rest,
                             HandleObject templateObj, HandleObject res);
 
 MOZ_MUST_USE bool HandleDebugTrap(JSContext* cx, BaselineFrame* frame,
-                                  uint8_t* retAddr, bool* mustReturn);
-MOZ_MUST_USE bool OnDebuggerStatement(JSContext* cx, BaselineFrame* frame,
-                                      jsbytecode* pc, bool* mustReturn);
+                                  uint8_t* retAddr);
+MOZ_MUST_USE bool OnDebuggerStatement(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool GlobalHasLiveOnDebuggerStatement(JSContext* cx);
 
 MOZ_MUST_USE bool EnterWith(JSContext* cx, BaselineFrame* frame,
@@ -1023,9 +1020,6 @@ MOZ_MUST_USE bool PopVarEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool InitBaselineFrameForOsr(BaselineFrame* frame,
                                           InterpreterFrame* interpFrame,
                                           uint32_t numStackValues);
-
-JSObject* CreateDerivedTypedObj(JSContext* cx, HandleObject descr,
-                                HandleObject owner, int32_t offset);
 
 MOZ_MUST_USE bool IonRecompile(JSContext* cx);
 MOZ_MUST_USE bool IonForcedRecompile(JSContext* cx);
@@ -1074,14 +1068,10 @@ bool ObjectIsConstructor(JSObject* obj);
 
 MOZ_MUST_USE bool ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber);
 
-MOZ_MUST_USE bool BaselineThrowUninitializedThis(JSContext* cx,
-                                                 BaselineFrame* frame);
-
-MOZ_MUST_USE bool BaselineThrowInitializedThis(JSContext* cx);
-
 MOZ_MUST_USE bool ThrowBadDerivedReturn(JSContext* cx, HandleValue v);
 
-MOZ_MUST_USE bool ThrowObjectCoercible(JSContext* cx, HandleValue v);
+MOZ_MUST_USE bool ThrowBadDerivedReturnOrUninitializedThis(JSContext* cx,
+                                                           HandleValue v);
 
 MOZ_MUST_USE bool BaselineGetFunctionThis(JSContext* cx, BaselineFrame* frame,
                                           MutableHandleValue res);
@@ -1143,7 +1133,7 @@ bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result);
 bool DoToNumber(JSContext* cx, HandleValue arg, MutableHandleValue ret);
 bool DoToNumeric(JSContext* cx, HandleValue arg, MutableHandleValue ret);
 
-void* AllocateBigIntNoGC(JSContext* cx);
+void* AllocateBigIntNoGC(JSContext* cx, bool requestMinorGC);
 
 template <EqualityKind Kind>
 bool BigIntEqual(BigInt* x, BigInt* y);

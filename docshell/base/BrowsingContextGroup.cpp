@@ -10,6 +10,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/ThrottledEventQueue.h"
+#include "nsFocusManager.h"
 
 namespace mozilla {
 namespace dom {
@@ -66,25 +67,44 @@ void BrowsingContextGroup::EnsureSubscribed(ContentParent* aProcess) {
 
   Subscribe(aProcess);
 
+  bool sendFocused = false;
+  bool sendActive = false;
+  BrowsingContext* focused = nullptr;
+  BrowsingContext* active = nullptr;
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
+  if (fm) {
+    focused = fm->GetFocusedBrowsingContextInChrome();
+    active = fm->GetActiveBrowsingContextInChrome();
+  }
+
   nsTArray<BrowsingContext::IPCInitializer> inits(mContexts.Count());
+  nsTArray<WindowContext::IPCInitializer> windowInits(mContexts.Count());
+
+  auto addInits = [&](BrowsingContext* aContext) {
+    inits.AppendElement(aContext->GetIPCInitializer());
+    if (focused == aContext) {
+      sendFocused = true;
+    }
+    if (active == aContext) {
+      sendActive = true;
+    }
+    for (auto& window : aContext->GetWindowContexts()) {
+      windowInits.AppendElement(window->GetIPCInitializer());
+    }
+  };
 
   // First, perform a pre-order walk of our BrowsingContext objects from our
   // toplevels. This should visit every active BrowsingContext.
   for (auto& context : mToplevels) {
     MOZ_DIAGNOSTIC_ASSERT(!IsContextCached(context),
                           "cached contexts must have a parent");
-
-    context->PreOrderWalk([&](BrowsingContext* aContext) {
-      inits.AppendElement(aContext->GetIPCInitializer());
-    });
+    context->PreOrderWalk(addInits);
   }
 
   // Ensure that cached BrowsingContext objects are also visited, by visiting
   // them after mToplevels.
   for (auto iter = mCachedContexts.Iter(); !iter.Done(); iter.Next()) {
-    iter.Get()->GetKey()->PreOrderWalk([&](BrowsingContext* aContext) {
-      inits.AppendElement(aContext->GetIPCInitializer());
-    });
+    iter.Get()->GetKey()->PreOrderWalk(addInits);
   }
 
   // We should have visited every browsing context.
@@ -92,7 +112,12 @@ void BrowsingContextGroup::EnsureSubscribed(ContentParent* aProcess) {
                         "Visited the wrong number of contexts!");
 
   // Send all of our contexts to the target content process.
-  Unused << aProcess->SendRegisterBrowsingContextGroup(inits);
+  Unused << aProcess->SendRegisterBrowsingContextGroup(inits, windowInits);
+
+  if (sendActive || sendFocused) {
+    Unused << aProcess->SendSetupFocusedAndActive(
+        sendFocused ? focused : nullptr, sendActive ? active : nullptr);
+  }
 }
 
 bool BrowsingContextGroup::IsContextCached(BrowsingContext* aContext) const {

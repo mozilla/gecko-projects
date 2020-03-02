@@ -5,10 +5,12 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::pedantic)]
 // Bindgen auto generated code
 // won't adhere to the clippy rules below
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::unseparated_literal_suffix)]
+#![allow(clippy::used_underscore_binding)]
 
 #[macro_use]
 mod exp;
@@ -39,7 +41,7 @@ pub use self::agent::{
 pub use self::constants::*;
 pub use self::err::{Error, PRErrorCode, Res};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-pub use self::p11::SymKey;
+pub use self::p11::{random, SymKey};
 pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
 pub use auth::AuthenticationStatus;
@@ -70,7 +72,7 @@ enum NssLoaded {
 impl Drop for NssLoaded {
     fn drop(&mut self) {
         match self {
-            NssLoaded::NoDb | NssLoaded::Db(_) => unsafe {
+            Self::NoDb | Self::Db(_) => unsafe {
                 secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
             },
             _ => {}
@@ -100,6 +102,18 @@ pub fn init() {
             NssLoaded::NoDb
         });
     }
+}
+
+/// This enables SSLTRACE by calling a simple, harmless function to trigger its
+/// side effects.  SSLTRACE is not enabled in NSS until a socket is made or
+/// global options are accessed.  Reading an option is the least impact approach.
+/// This allows us to use SSLTRACE in all of our unit tests and programs.
+#[cfg(debug_assertions)]
+fn enable_ssl_trace() {
+    let opt = ssl::Opt::Locking.as_int();
+    let mut _v: ::std::os::raw::c_int = 0;
+    secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut _v) })
+        .expect("SSL_OptionGetDefault failed");
 }
 
 pub fn init_db<P: Into<PathBuf>>(dir: P) {
@@ -133,7 +147,10 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             ))
             .expect("SSL_ConfigServerSessionIDCache failed");
 
-            NssLoaded::Db(path.to_path_buf().into_boxed_path())
+            #[cfg(debug_assertions)]
+            enable_ssl_trace();
+
+            NssLoaded::Db(path.into_boxed_path())
         });
     }
 }

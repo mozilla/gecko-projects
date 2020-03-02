@@ -10,7 +10,7 @@
 
 const {
   parsePacketsWithFronts,
-} = require("devtools/client/webconsole/test/browser/stub-generator-helpers");
+} = require("chrome://mochitests/content/browser/devtools/client/webconsole/test/browser/stub-generator-helpers");
 const { prepareMessage } = require("devtools/client/webconsole/utils/messages");
 const {
   ConsoleMessage,
@@ -72,6 +72,14 @@ rawPackets.set(`ReferenceError: asdf is not defined`, {
         "lineNumber": 111,
         "columnNumber": 29,
         "functionName": null
+      },
+      {
+        "filename": "resource://testing-common/content-task.js",
+        "sourceId": null,
+        "lineNumber": 64,
+        "columnNumber": 19,
+        "functionName": null,
+        "asyncCause": "MessageListener.receiveMessage"
       }
     ],
     "notes": null,
@@ -114,6 +122,14 @@ rawPackets.set(`SyntaxError: redeclaration of let a`, {
         "lineNumber": 111,
         "columnNumber": 29,
         "functionName": null
+      },
+      {
+        "filename": "resource://testing-common/content-task.js",
+        "sourceId": null,
+        "lineNumber": 64,
+        "columnNumber": 19,
+        "functionName": null,
+        "asyncCause": "MessageListener.receiveMessage"
       }
     ],
     "notes": [
@@ -180,6 +196,14 @@ rawPackets.set(`TypeError longString message`, {
         "lineNumber": 111,
         "columnNumber": 29,
         "functionName": null
+      },
+      {
+        "filename": "resource://testing-common/content-task.js",
+        "sourceId": null,
+        "lineNumber": 64,
+        "columnNumber": 19,
+        "functionName": null,
+        "asyncCause": "MessageListener.receiveMessage"
       }
     ],
     "notes": null,
@@ -228,6 +252,14 @@ rawPackets.set(`throw ""`, {
         "lineNumber": 111,
         "columnNumber": 29,
         "functionName": null
+      },
+      {
+        "filename": "resource://testing-common/content-task.js",
+        "sourceId": null,
+        "lineNumber": 64,
+        "columnNumber": 19,
+        "functionName": null,
+        "asyncCause": "MessageListener.receiveMessage"
       }
     ],
     "notes": null,
@@ -276,6 +308,14 @@ rawPackets.set(`throw "tomato"`, {
         "lineNumber": 111,
         "columnNumber": 29,
         "functionName": null
+      },
+      {
+        "filename": "resource://testing-common/content-task.js",
+        "sourceId": null,
+        "lineNumber": 64,
+        "columnNumber": 19,
+        "functionName": null,
+        "asyncCause": "MessageListener.receiveMessage"
       }
     ],
     "notes": null,

@@ -21,6 +21,7 @@
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/WinCompositorWidget.h"
 #include "mozilla/WindowsVersion.h"
+#include "mozilla/Telemetry.h"
 #include "FxROutputHandler.h"
 
 #undef NTDDI_VERSION
@@ -63,8 +64,10 @@ RenderCompositorANGLE::RenderCompositorANGLE(
       mEGLSurface(nullptr),
       mUseTripleBuffering(false),
       mUseAlpha(false),
+      mUseNativeCompositor(true),
       mUsePartialPresent(false),
-      mFullRender(false) {}
+      mFullRender(false),
+      mDisablingNativeCompositor(false) {}
 
 RenderCompositorANGLE::~RenderCompositorANGLE() {
   DestroyEGLSurface();
@@ -156,6 +159,40 @@ bool RenderCompositorANGLE::Initialize() {
     gfxCriticalNote << "[WR] failed to get immediate context.";
     return false;
   }
+
+  // Create DCLayerTree when DirectComposition is used.
+  if (gfx::gfxVars::UseWebRenderDCompWin()) {
+    HWND compositorHwnd = mWidget->AsWindows()->GetCompositorHwnd();
+    if (compositorHwnd) {
+      mDCLayerTree =
+          DCLayerTree::Create(gl, mEGLConfig, mDevice, compositorHwnd);
+    } else {
+      gfxCriticalNote << "Compositor window was not created";
+    }
+  }
+
+  // Create SwapChain when compositor is not used
+  if (!UseCompositor()) {
+    if (!CreateSwapChain()) {
+      // SwapChain creation failed.
+      return false;
+    }
+  }
+
+  mSyncObject = layers::SyncObjectHost::CreateSyncObjectHost(mDevice);
+  if (!mSyncObject->Init()) {
+    // Some errors occur. Clear the mSyncObject here.
+    // Then, there will be no texture synchronization.
+    return false;
+  }
+
+  InitializeUsePartialPresent();
+
+  return true;
+}
+
+bool RenderCompositorANGLE::CreateSwapChain() {
+  MOZ_ASSERT(!UseCompositor());
 
   HWND hwnd = mWidget->AsWindows()->GetHwnd();
 
@@ -252,28 +289,16 @@ bool RenderCompositorANGLE::Initialize() {
   // We need this because we don't want DXGI to respond to Alt+Enter.
   dxgiFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_WINDOW_CHANGES);
 
-  // SyncObject is used only by D3D11DXVA2Manager
-  mSyncObject = layers::SyncObjectHost::CreateSyncObjectHost(mDevice);
-  if (!mSyncObject->Init()) {
-    // Some errors occur. Clear the mSyncObject here.
-    // Then, there will be no texture synchronization.
+  if (!ResizeBufferIfNeeded()) {
     return false;
   }
-
-  if (!UseCompositor()) {
-    if (!ResizeBufferIfNeeded()) {
-      return false;
-    }
-  }
-
-  InitializeUsePartialPresent();
 
   return true;
 }
 
 void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     IDXGIFactory2* aDXGIFactory2) {
-  if (!aDXGIFactory2) {
+  if (!aDXGIFactory2 || !mDCLayerTree) {
     return;
   }
 
@@ -288,10 +313,6 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     return;
   }
 
-  mDCLayerTree = DCLayerTree::Create(gl(), mEGLConfig, mDevice, hwnd);
-  if (!mDCLayerTree) {
-    return;
-  }
   MOZ_ASSERT(XRE_IsGPUProcess());
 
   // When compositor is enabled, CompositionSurface is used for rendering.
@@ -414,15 +435,23 @@ bool RenderCompositorANGLE::BeginFrame() {
     return false;
   }
 
+  if (mSyncObject) {
+    if (!mSyncObject->Synchronize(/* aFallible */ true)) {
+      // It's timeout or other error. Handle the device-reset here.
+      RenderThread::Get()->HandleDeviceReset("SyncObject", /* aNotify */ true);
+      return false;
+    }
+  }
   return true;
 }
 
 RenderedFrameId RenderCompositorANGLE::EndFrame(
-    const FfiVec<DeviceIntRect>& aDirtyRects) {
+    const nsTArray<DeviceIntRect>& aDirtyRects) {
   RenderedFrameId frameId = GetNextRenderFrameId();
   InsertGraphicsCommandsFinishedWaitQuery(frameId);
 
   if (!UseCompositor()) {
+    auto start = TimeStamp::Now();
     if (mWidget->AsWindows()->HasFxrOutputHandler()) {
       // There is a Firefox Reality handler for this swapchain. Update this
       // window's contents to the VR window.
@@ -445,10 +474,10 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
       // Clear full render flag.
       mFullRender = false;
       // If there is no diry rect, we skip SwapChain present.
-      if (aDirtyRects.length > 0) {
-        StackArray<RECT, 1> rects(aDirtyRects.length);
-        for (uintptr_t i = 0; i < aDirtyRects.length; i++) {
-          const DeviceIntRect& rect = aDirtyRects.data[i];
+      if (!aDirtyRects.IsEmpty()) {
+        StackArray<RECT, 1> rects(aDirtyRects.Length());
+        for (size_t i = 0; i < aDirtyRects.Length(); ++i) {
+          const DeviceIntRect& rect = aDirtyRects[i];
           // Clip rect to bufferSize
           rects[i].left =
               std::max(0, std::min(rect.origin.x, bufferSize.width));
@@ -462,7 +491,7 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
 
         DXGI_PRESENT_PARAMETERS params;
         PodZero(&params);
-        params.DirtyRectsCount = aDirtyRects.length;
+        params.DirtyRectsCount = aDirtyRects.Length();
         params.pDirtyRects = rects.data();
 
         HRESULT hr;
@@ -475,10 +504,21 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
     } else {
       mSwapChain->Present(0, 0);
     }
+    auto end = TimeStamp::Now();
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::COMPOSITE_SWAP_TIME,
+                                   (end - start).ToMilliseconds() * 10.);
+  }
+
+  if (mDisablingNativeCompositor) {
+    // During disabling native compositor, we need to wait all gpu tasks
+    // complete. Otherwise, rendering window could cause white flash.
+    WaitForPreviousGraphicsCommandsFinishedQuery(/* aWaitAll */ true);
+    mDisablingNativeCompositor = false;
   }
 
   if (mDCLayerTree) {
     mDCLayerTree->MaybeUpdateDebug();
+    mDCLayerTree->MaybeCommit();
   }
 
   return frameId;
@@ -671,8 +711,12 @@ void RenderCompositorANGLE::InsertGraphicsCommandsFinishedWaitQuery(
   mWaitForPresentQueries.emplace(aFrameId, query);
 }
 
-bool RenderCompositorANGLE::WaitForPreviousGraphicsCommandsFinishedQuery() {
+bool RenderCompositorANGLE::WaitForPreviousGraphicsCommandsFinishedQuery(
+    bool aWaitAll) {
   size_t waitLatency = mUseTripleBuffering ? 3 : 2;
+  if (aWaitAll) {
+    waitLatency = 1;
+  }
 
   while (mWaitForPresentQueries.size() >= waitLatency) {
     auto queryPair = mWaitForPresentQueries.front();
@@ -724,10 +768,18 @@ bool RenderCompositorANGLE::IsContextLost() {
 }
 
 bool RenderCompositorANGLE::UseCompositor() {
+  if (!mUseNativeCompositor) {
+    return false;
+  }
+
   if (!mDCLayerTree || !gfx::gfxVars::UseWebRenderCompositor()) {
     return false;
   }
   return true;
+}
+
+bool RenderCompositorANGLE::SupportAsyncScreenshot() {
+  return !UseCompositor() && !mDisablingNativeCompositor;
 }
 
 bool RenderCompositorANGLE::ShouldUseNativeCompositor() {
@@ -752,24 +804,26 @@ void RenderCompositorANGLE::CompositorEndFrame() {
 
 void RenderCompositorANGLE::Bind(wr::NativeTileId aId,
                                  wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-                                 wr::DeviceIntRect aDirtyRect) {
-  mDCLayerTree->Bind(aId, aOffset, aFboId, aDirtyRect);
+                                 wr::DeviceIntRect aDirtyRect,
+                                 wr::DeviceIntRect aValidRect) {
+  mDCLayerTree->Bind(aId, aOffset, aFboId, aDirtyRect, aValidRect);
 }
 
 void RenderCompositorANGLE::Unbind() { mDCLayerTree->Unbind(); }
 
 void RenderCompositorANGLE::CreateSurface(wr::NativeSurfaceId aId,
-                                          wr::DeviceIntSize aTileSize) {
-  mDCLayerTree->CreateSurface(aId, aTileSize);
+                                          wr::DeviceIntSize aTileSize,
+                                          bool aIsOpaque) {
+  mDCLayerTree->CreateSurface(aId, aTileSize, aIsOpaque);
 }
 
 void RenderCompositorANGLE::DestroySurface(NativeSurfaceId aId) {
   mDCLayerTree->DestroySurface(aId);
 }
 
-void RenderCompositorANGLE::CreateTile(wr::NativeSurfaceId aId, int aX, int aY,
-                                       bool aIsOpaque) {
-  mDCLayerTree->CreateTile(aId, aX, aY, aIsOpaque);
+void RenderCompositorANGLE::CreateTile(wr::NativeSurfaceId aId, int aX,
+                                       int aY) {
+  mDCLayerTree->CreateTile(aId, aX, aY);
 }
 
 void RenderCompositorANGLE::DestroyTile(wr::NativeSurfaceId aId, int aX,
@@ -781,6 +835,42 @@ void RenderCompositorANGLE::AddSurface(wr::NativeSurfaceId aId,
                                        wr::DeviceIntPoint aPosition,
                                        wr::DeviceIntRect aClipRect) {
   mDCLayerTree->AddSurface(aId, aPosition, aClipRect);
+}
+
+void RenderCompositorANGLE::EnableNativeCompositor(bool aEnable) {
+  // XXX Re-enable native compositor is not handled yet.
+  MOZ_RELEASE_ASSERT(!mDisablingNativeCompositor);
+  MOZ_RELEASE_ASSERT(!aEnable);
+
+  if (!UseCompositor()) {
+    return;
+  }
+
+  mUseNativeCompositor = false;
+  mDCLayerTree->DisableNativeCompositor();
+
+  bool useAlpha = mWidget->AsWindows()->HasGlass();
+  DestroyEGLSurface();
+  mBufferSize.reset();
+
+  RefPtr<IDXGISwapChain1> swapChain1 =
+      CreateSwapChainForDComp(mUseTripleBuffering, useAlpha);
+  if (swapChain1) {
+    mSwapChain = swapChain1;
+    mUseAlpha = useAlpha;
+    mDCLayerTree->SetDefaultSwapChain(swapChain1);
+    // When alpha is used, we want to disable partial present.
+    // See Bug 1595027.
+    if (useAlpha) {
+      mFullRender = true;
+    }
+    ResizeBufferIfNeeded();
+  } else {
+    gfxCriticalNote << "Failed to re-create SwapChain";
+    RenderThread::Get()->HandleWebRenderError(WebRenderError::NEW_SURFACE);
+    return;
+  }
+  mDisablingNativeCompositor = true;
 }
 
 void RenderCompositorANGLE::InitializeUsePartialPresent() {
@@ -812,6 +902,8 @@ bool RenderCompositorANGLE::MaybeReadback(
   if (!UseCompositor()) {
     return false;
   }
+
+  auto start = TimeStamp::Now();
 
   HDC nulldc = ::GetDC(NULL);
   HDC dc = ::CreateCompatibleDC(nulldc);
@@ -865,6 +957,11 @@ bool RenderCompositorANGLE::MaybeReadback(
 
   ::DeleteObject(bitmap);
   ::DeleteDC(dc);
+
+  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
+  if (latencyMs > 500) {
+    gfxCriticalNote << "Readback took too long: " << latencyMs << " ms";
+  }
 
   return true;
 }

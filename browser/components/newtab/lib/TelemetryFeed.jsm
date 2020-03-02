@@ -31,6 +31,11 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
+  "AboutNewTabStartupRecorder",
+  "resource:///modules/AboutNewTabService.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
   "PingCentre",
   "resource:///modules/PingCentre.jsm"
 );
@@ -64,6 +69,10 @@ ChromeUtils.defineModuleGetter(
   "ClientID",
   "resource://gre/modules/ClientID.jsm"
 );
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
+});
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   gUUIDGenerator: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
@@ -100,6 +109,17 @@ const STRUCTURED_INGESTION_ENDPOINT_PREF =
 // They are defined in https://github.com/mozilla-services/mozilla-pipeline-schemas
 const STRUCTURED_INGESTION_NAMESPACE_AS = "activity-stream";
 const STRUCTURED_INGESTION_NAMESPACE_MS = "messaging-system";
+
+// Used as the missing value for timestamps in the session ping
+const TIMESTAMP_MISSING_VALUE = -1;
+
+// Page filter for onboarding telemetry, any value other than these will
+// be set as "other"
+const ONBOARDING_ALLOWED_PAGE_VALUES = [
+  "about:welcome",
+  "about:home",
+  "about:newtab",
+];
 
 this.TelemetryFeed = class TelemetryFeed {
   constructor(options) {
@@ -387,6 +407,18 @@ this.TelemetryFeed = class TelemetryFeed {
       session.session_duration = Math.round(
         perfService.absNow() - session.perf.visibility_event_rcvd_ts
       );
+
+      // Rounding all timestamps in perf to ease the data processing on the backend.
+      // NB: use `TIMESTAMP_MISSING_VALUE` if the value is missing.
+      session.perf.visibility_event_rcvd_ts = Math.round(
+        session.perf.visibility_event_rcvd_ts
+      );
+      session.perf.load_trigger_ts = Math.round(
+        session.perf.load_trigger_ts || TIMESTAMP_MISSING_VALUE
+      );
+      session.perf.topsites_first_painted_ts = Math.round(
+        session.perf.topsites_first_painted_ts || TIMESTAMP_MISSING_VALUE
+      );
     } else {
       // This session was never shown (i.e. the hidden preloaded newtab), there was no user session either.
       this.sessions.delete(portID);
@@ -485,7 +517,7 @@ this.TelemetryFeed = class TelemetryFeed {
   createPing(portID) {
     const ping = {
       addon_version: Services.appinfo.appBuildID,
-      locale: Services.locale.appLocaleAsLangTag,
+      locale: Services.locale.appLocaleAsBCP47,
       user_prefs: this.userPreferences,
     };
 
@@ -554,6 +586,9 @@ this.TelemetryFeed = class TelemetryFeed {
       session_duration: session.session_duration,
       action: "activity_stream_session",
       perf: session.perf,
+      profile_creation_date:
+        TelemetryEnvironment.currentEnvironment.profile.resetDate ||
+        TelemetryEnvironment.currentEnvironment.profile.creationDate,
     });
   }
 
@@ -565,8 +600,9 @@ this.TelemetryFeed = class TelemetryFeed {
     let event = {
       ...action.data,
       addon_version: Services.appinfo.appBuildID,
-      locale: Services.locale.appLocaleAsLangTag,
+      locale: Services.locale.appLocaleAsBCP47,
     };
+    const session = this.sessions.get(au.getPortIdOfSender(action));
     if (event.event_context && typeof event.event_context === "object") {
       event.event_context = JSON.stringify(event.event_context);
     }
@@ -581,7 +617,7 @@ this.TelemetryFeed = class TelemetryFeed {
       // Bug 1594125 added a new onboarding-like provider called `whats-new-panel`.
       case "whats-new-panel_user_event":
       case "onboarding_user_event":
-        event = await this.applyOnboardingPolicy(event);
+        event = await this.applyOnboardingPolicy(event, session);
         break;
       case "asrouter_undesired_event":
         event = this.applyUndesiredEventPolicy(event);
@@ -627,8 +663,29 @@ this.TelemetryFeed = class TelemetryFeed {
    * Per Bug 1482134, all the metrics for Onboarding in AS router use client_id in
    * all the release channels
    */
-  async applyOnboardingPolicy(ping) {
+  async applyOnboardingPolicy(ping, session) {
     ping.client_id = await this.telemetryClientId;
+    // Attach page info to `event_context` if there is a session associated with this ping
+    if (ping.action === "onboarding_user_event" && session && session.page) {
+      let event_context;
+
+      try {
+        event_context = ping.event_context
+          ? JSON.parse(ping.event_context)
+          : {};
+      } catch (e) {
+        // If `ping.event_context` is not a JSON serialized string, then we create a `value`
+        // key for it
+        event_context = { value: ping.event_context };
+      }
+
+      if (ONBOARDING_ALLOWED_PAGE_VALUES.includes(session.page)) {
+        event_context.page = session.page;
+      } else {
+        Cu.reportError(`Invalid 'page' for Onboarding event: ${session.page}`);
+      }
+      ping.event_context = JSON.stringify(event_context);
+    }
     delete ping.action;
     return { ping, pingType: "onboarding" };
   }
@@ -644,6 +701,9 @@ this.TelemetryFeed = class TelemetryFeed {
       case "activity_stream_user_event":
         this.sendEventPing(event_object);
         break;
+      case "activity_stream_session":
+        this.sendSessionPing(event_object);
+        break;
     }
   }
 
@@ -657,6 +717,17 @@ this.TelemetryFeed = class TelemetryFeed {
       ping,
       STRUCTURED_INGESTION_NAMESPACE_AS,
       "events",
+      1
+    );
+  }
+
+  async sendSessionPing(ping) {
+    delete ping.action;
+    ping.client_id = await this.telemetryClientId;
+    this.sendStructuredIngestionEvent(
+      ping,
+      STRUCTURED_INGESTION_NAMESPACE_AS,
+      "sessions",
       1
     );
   }
@@ -998,7 +1069,7 @@ this.TelemetryFeed = class TelemetryFeed {
       !HomePage.overridden &&
       Services.prefs.getIntPref("browser.startup.page") === 1
     ) {
-      aboutNewTabService.maybeRecordTopsitesPainted(timestamp);
+      AboutNewTabStartupRecorder.maybeRecordTopsitesPainted(timestamp);
     }
 
     Object.assign(session.perf, data);

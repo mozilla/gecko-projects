@@ -1,12 +1,12 @@
 #ifndef LUCET_SANDBOX_H
 #define LUCET_SANDBOX_H
 
+#include <stdint.h>
+#include <stdlib.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdint.h>
-#include <stdlib.h>
 
 struct LucetSandboxInstance;
 typedef struct LucetSandboxInstance LucetSandboxInstance;
@@ -46,7 +46,8 @@ typedef struct {
 } LucetFunctionTable;
 
 void lucet_ensure_linked();
-LucetSandboxInstance *lucet_load_module(const char *lucet_module_path);
+LucetSandboxInstance *lucet_load_module(const char *lucet_module_path,
+                                        bool allow_stdio);
 void lucet_drop_module(LucetSandboxInstance *inst);
 
 void* lucet_lookup_function(LucetSandboxInstance *inst,

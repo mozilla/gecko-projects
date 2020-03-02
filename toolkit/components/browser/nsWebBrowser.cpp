@@ -37,6 +37,7 @@
 
 // for painting the background window
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/ServoStyleConsts.h"
 
 // Printing Includes
 #ifdef NS_PRINTING
@@ -208,8 +209,8 @@ nsWebBrowser::InternalDestroy() {
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsWebBrowser)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsWebBrowser)
 
-NS_IMPL_CYCLE_COLLECTION(nsWebBrowser, mDocShell, mDocShellAsReq,
-                         mDocShellAsWin, mDocShellAsNav, mWebProgress)
+NS_IMPL_CYCLE_COLLECTION_WEAK(nsWebBrowser, mDocShell, mDocShellAsReq,
+                              mDocShellAsWin, mDocShellAsNav, mWebProgress)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsWebBrowser)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIWebBrowser)
@@ -733,10 +734,13 @@ NS_IMETHODIMP
 nsWebBrowser::SaveURI(nsIURI* aURI, nsIPrincipal* aPrincipal,
                       uint32_t aCacheKey, nsIReferrerInfo* aReferrerInfo,
                       nsIInputStream* aPostData, const char* aExtraHeaders,
-                      nsISupports* aFile, nsILoadContext* aPrivacyContext) {
+                      nsISupports* aFile,
+                      nsContentPolicyType aContentPolicyType,
+                      nsILoadContext* aPrivacyContext) {
   return SavePrivacyAwareURI(
       aURI, aPrincipal, aCacheKey, aReferrerInfo, aPostData, aExtraHeaders,
-      aFile, aPrivacyContext && aPrivacyContext->UsePrivateBrowsing());
+      aFile, aContentPolicyType,
+      aPrivacyContext && aPrivacyContext->UsePrivateBrowsing());
 }
 
 NS_IMETHODIMP
@@ -745,6 +749,7 @@ nsWebBrowser::SavePrivacyAwareURI(nsIURI* aURI, nsIPrincipal* aPrincipal,
                                   nsIReferrerInfo* aReferrerInfo,
                                   nsIInputStream* aPostData,
                                   const char* aExtraHeaders, nsISupports* aFile,
+                                  nsContentPolicyType aContentPolicyType,
                                   bool aIsPrivate) {
   if (mPersist) {
     uint32_t currentState;
@@ -777,7 +782,7 @@ nsWebBrowser::SavePrivacyAwareURI(nsIURI* aURI, nsIPrincipal* aPrincipal,
 
   rv = mPersist->SavePrivacyAwareURI(uri, aPrincipal, aCacheKey, aReferrerInfo,
                                      aPostData, aExtraHeaders, aFile,
-                                     aIsPrivate);
+                                     aContentPolicyType, aIsPrivate);
   if (NS_FAILED(rv)) {
     mPersist = nullptr;
   }

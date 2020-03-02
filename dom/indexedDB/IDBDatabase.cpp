@@ -36,7 +36,6 @@
 #include "mozilla/ipc/FileDescriptor.h"
 #include "mozilla/ipc/InputStreamParams.h"
 #include "mozilla/ipc/InputStreamUtils.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "mozilla/dom/Document.h"
 #include "nsIObserver.h"
@@ -71,10 +70,10 @@ class CancelableRunnableWrapper final : public CancelableRunnable {
   nsCOMPtr<nsIRunnable> mRunnable;
 
  public:
-  explicit CancelableRunnableWrapper(nsIRunnable* aRunnable)
+  explicit CancelableRunnableWrapper(nsCOMPtr<nsIRunnable> aRunnable)
       : CancelableRunnable("dom::CancelableRunnableWrapper"),
-        mRunnable(aRunnable) {
-    MOZ_ASSERT(aRunnable);
+        mRunnable(std::move(aRunnable)) {
+    MOZ_ASSERT(mRunnable);
   }
 
  private:
@@ -148,10 +147,11 @@ class IDBDatabase::Observer final : public nsIObserver {
 };
 
 IDBDatabase::IDBDatabase(IDBOpenDBRequest* aRequest, IDBFactory* aFactory,
-                         BackgroundDatabaseChild* aActor, DatabaseSpec* aSpec)
+                         BackgroundDatabaseChild* aActor,
+                         UniquePtr<DatabaseSpec> aSpec)
     : DOMEventTargetHelper(aRequest),
       mFactory(aFactory),
-      mSpec(aSpec),
+      mSpec(std::move(aSpec)),
       mBackgroundActor(aActor),
       mFileHandleDisabled(aRequest->IsFileHandleDisabled()),
       mClosed(false),
@@ -162,7 +162,7 @@ IDBDatabase::IDBDatabase(IDBOpenDBRequest* aRequest, IDBFactory* aFactory,
   MOZ_ASSERT(aFactory);
   aFactory->AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
-  MOZ_ASSERT(aSpec);
+  MOZ_ASSERT(mSpec);
 }
 
 IDBDatabase::~IDBDatabase() {
@@ -175,14 +175,15 @@ IDBDatabase::~IDBDatabase() {
 RefPtr<IDBDatabase> IDBDatabase::Create(IDBOpenDBRequest* aRequest,
                                         IDBFactory* aFactory,
                                         BackgroundDatabaseChild* aActor,
-                                        DatabaseSpec* aSpec) {
+                                        UniquePtr<DatabaseSpec> aSpec) {
   MOZ_ASSERT(aRequest);
   MOZ_ASSERT(aFactory);
   aFactory->AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
   MOZ_ASSERT(aSpec);
 
-  RefPtr<IDBDatabase> db = new IDBDatabase(aRequest, aFactory, aActor, aSpec);
+  RefPtr<IDBDatabase> db =
+      new IDBDatabase(aRequest, aFactory, aActor, std::move(aSpec));
 
   if (NS_IsMainThread()) {
     nsCOMPtr<nsPIDOMWindowInner> window =
@@ -207,7 +208,7 @@ RefPtr<IDBDatabase> IDBDatabase::Create(IDBOpenDBRequest* aRequest,
         NS_WARNING("Failed to add additional memory observers!");
       }
 
-      db->mObserver.swap(observer);
+      db->mObserver = std::move(observer);
     }
   }
 
@@ -280,7 +281,7 @@ void IDBDatabase::EnterSetVersionTransaction(uint64_t aNewVersion) {
   MOZ_ASSERT(mSpec);
   MOZ_ASSERT(!mPreviousSpec);
 
-  mPreviousSpec = new DatabaseSpec(*mSpec);
+  mPreviousSpec = MakeUnique<DatabaseSpec>(*mSpec);
 
   mSpec->metadata().version() = aNewVersion;
 }
@@ -360,7 +361,7 @@ RefPtr<IDBObjectStore> IDBDatabase::CreateObjectStore(
     return nullptr;
   }
 
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -378,11 +379,9 @@ RefPtr<IDBObjectStore> IDBDatabase::CreateObjectStore(
         return aName == objectStore.metadata().name();
       });
   if (foundIt != end) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR,
-        nsPrintfCString("Object store named '%s' already exists at index '%zu'",
-                        NS_ConvertUTF16toUTF8(aName).get(),
-                        foundIt.GetIndex()));
+    aRv.ThrowConstraintError(nsPrintfCString(
+        "Object store named '%s' already exists at index '%zu'",
+        NS_ConvertUTF16toUTF8(aName).get(), foundIt.GetIndex()));
     return nullptr;
   }
 
@@ -433,7 +432,7 @@ void IDBDatabase::DeleteObjectStore(const nsAString& aName, ErrorResult& aRv) {
     return;
   }
 
-  if (!transaction->CanAcceptRequests()) {
+  if (!transaction->IsActive()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return;
   }
@@ -482,55 +481,48 @@ RefPtr<IDBTransaction> IDBDatabase::Transaction(
     // certain enum values as depending on preferences so we just duplicate the
     // normal exception generation here.
     aRv.ThrowTypeError<MSG_INVALID_ENUM_VALUE>(
-        NS_LITERAL_STRING("Argument 2 of IDBDatabase.transaction"),
-        NS_LITERAL_STRING("readwriteflush"),
-        NS_LITERAL_STRING("IDBTransactionMode"));
+        u"Argument 2 of IDBDatabase.transaction", u"readwriteflush",
+        u"IDBTransactionMode");
     return nullptr;
-  }
-
-  RefPtr<IDBTransaction> transaction;
-  aRv = Transaction(aCx, aStoreNames, aMode, &transaction);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
-  return transaction;
-}
-
-nsresult IDBDatabase::Transaction(JSContext* aCx,
-                                  const StringOrStringSequence& aStoreNames,
-                                  IDBTransactionMode aMode,
-                                  RefPtr<IDBTransaction>* aTransaction) {
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aTransaction);
-
-  if (NS_WARN_IF((aMode == IDBTransactionMode::Readwriteflush ||
-                  aMode == IDBTransactionMode::Cleanup) &&
-                 !IndexedDatabaseManager::ExperimentalFeaturesEnabled())) {
-    IDB_REPORT_INTERNAL_ERR();
-    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   if (QuotaManager::IsShuttingDown()) {
     IDB_REPORT_INTERNAL_ERR();
-    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    aRv.ThrowUnknownError("Can't start IndexedDB transaction during shutdown");
+    return nullptr;
   }
 
-  if (mClosed || RunningVersionChangeTransaction()) {
-    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  // https://w3c.github.io/IndexedDB/#dom-idbdatabase-transaction
+  // Step 1.
+  if (RunningVersionChangeTransaction()) {
+    aRv.ThrowInvalidStateError(
+        "Can't start a transaction while running an upgrade transaction");
+    return nullptr;
   }
 
+  // Step 2.
+  if (mClosed) {
+    aRv.ThrowInvalidStateError(
+        "Can't start a transaction on a closed database");
+    return nullptr;
+  }
+
+  // Step 3.
   AutoTArray<nsString, 1> stackSequence;
 
   if (aStoreNames.IsString()) {
     stackSequence.AppendElement(aStoreNames.GetAsString());
   } else {
     MOZ_ASSERT(aStoreNames.IsStringSequence());
+    // Step 5, but it can be done before step 4 because those steps
+    // can't both throw.
     if (aStoreNames.GetAsStringSequence().IsEmpty()) {
-      return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+      aRv.ThrowInvalidAccessError("Empty scope passed in");
+      return nullptr;
     }
   }
 
+  // Step 4.
   const nsTArray<nsString>& storeNames =
       aStoreNames.IsString() ? stackSequence
                              : static_cast<const nsTArray<nsString>&>(
@@ -553,7 +545,11 @@ nsresult IDBDatabase::Transaction(JSContext* aCx,
           return objectStore.metadata().name() == name;
         });
     if (foundIt == end) {
-      return NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR;
+      // Not using nsPrintfCString in case "name" has embedded nulls.
+      aRv.ThrowNotFoundError(
+          NS_LITERAL_CSTRING("'") + NS_ConvertUTF16toUTF8(name) +
+          NS_LITERAL_CSTRING("' is not a known object store name"));
+      return nullptr;
     }
 
     sortedStoreNames.EmplaceBack(name);
@@ -585,19 +581,23 @@ nsresult IDBDatabase::Transaction(JSContext* aCx,
       mQuotaExceeded = false;
       break;
     case IDBTransactionMode::Versionchange:
-      return NS_ERROR_DOM_TYPE_ERR;
+      // Step 6.
+      aRv.ThrowTypeError(u"Invalid transaction mode");
+      return nullptr;
 
     default:
       MOZ_CRASH("Unknown mode!");
   }
 
-  *aTransaction = IDBTransaction::Create(aCx, this, sortedStoreNames, mode);
-  if (NS_WARN_IF(!*aTransaction)) {
+  RefPtr<IDBTransaction> transaction =
+      IDBTransaction::Create(aCx, this, sortedStoreNames, mode);
+  if (NS_WARN_IF(!transaction)) {
     IDB_REPORT_INTERNAL_ERR();
-    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    MOZ_ASSERT(!NS_IsMainThread(),
+               "Transaction creation can only fail on workers");
+    aRv.ThrowUnknownError("Failed to create IndexedDB transaction on worker");
+    return nullptr;
   }
-
-  const auto& transaction = *aTransaction;
 
   BackgroundTransactionChild* actor =
       new BackgroundTransactionChild(transaction);
@@ -618,7 +618,7 @@ nsresult IDBDatabase::Transaction(JSContext* aCx,
     ExpireFileActors(/* aExpireAll */ true);
   }
 
-  return NS_OK;
+  return transaction;
 }
 
 StorageType IDBDatabase::Storage() const {
@@ -673,12 +673,6 @@ RefPtr<IDBRequest> IDBDatabase::CreateMutableFile(
              "The event target shall be inherited from its manager actor.");
 
   return request;
-}
-
-RefPtr<IDBRequest> IDBDatabase::MozCreateFileHandle(
-    JSContext* aCx, const nsAString& aName, const Optional<nsAString>& aType,
-    ErrorResult& aRv) {
-  return CreateMutableFile(aCx, aName, aType, aRv);
 }
 
 void IDBDatabase::RegisterTransaction(IDBTransaction* aTransaction) {
@@ -870,8 +864,7 @@ void IDBDatabase::NoteInactiveTransaction() {
 
   if (!NS_IsMainThread()) {
     // Wrap as a nsICancelableRunnable to make workers happy.
-    RefPtr<Runnable> cancelable = new CancelableRunnableWrapper(runnable);
-    cancelable.swap(runnable);
+    runnable = MakeRefPtr<CancelableRunnableWrapper>(runnable.forget());
   }
 
   MOZ_ALWAYS_SUCCEEDS(
@@ -1081,8 +1074,7 @@ JSObject* IDBDatabase::WrapObject(JSContext* aCx,
 
 NS_IMETHODIMP
 CancelableRunnableWrapper::Run() {
-  nsCOMPtr<nsIRunnable> runnable;
-  mRunnable.swap(runnable);
+  const nsCOMPtr<nsIRunnable> runnable = std::move(mRunnable);
 
   if (runnable) {
     return runnable->Run();

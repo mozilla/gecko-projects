@@ -64,17 +64,17 @@ Management.on("uninstall", async (type, { id }) => {
   // Ensure managed preferences are cleared if they were
   // not cleared at the module level.
   await Management.asyncLoadSettingsModules();
-  return this.ExtensionPreferencesManager.removeAll(id);
+  return ExtensionPreferencesManager.removeAll(id);
 });
 
 Management.on("disable", async (type, id) => {
   await Management.asyncLoadSettingsModules();
-  return this.ExtensionPreferencesManager.disableAll(id);
+  return ExtensionPreferencesManager.disableAll(id);
 });
 
 Management.on("enabling", async (type, id) => {
   await Management.asyncLoadSettingsModules();
-  return this.ExtensionPreferencesManager.enableAll(id);
+  return ExtensionPreferencesManager.enableAll(id);
 });
 /* eslint-enable mozilla/balanced-listeners */
 
@@ -232,6 +232,29 @@ this.ExtensionPreferencesManager = {
    */
   getDefaultValue(prefName) {
     return defaultPreferences.get(prefName);
+  },
+
+  /**
+   * Returns a map of prefName to setting Name for use in about:config, about:preferences or
+   * other areas of Firefox that need to know whether a specific pref is controlled by an
+   * extension.
+   *
+   * Given a prefName, you can get the settingName.  Call EPM.getSetting(settingName) to
+   * get the details of the setting, including which id if any is in control of the
+   * setting.
+   *
+   * @returns {Promise}
+   *          Resolves to a Map of prefName->settingName
+   */
+  async getManagedPrefDetails() {
+    await Management.asyncLoadSettingsModules();
+    let prefs = new Map();
+    settingsMap.forEach((setting, name) => {
+      for (let prefName of setting.prefNames) {
+        prefs.set(prefName, name);
+      }
+    });
+    return prefs;
   },
 
   /**

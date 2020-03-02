@@ -104,30 +104,16 @@
                     <label data-l10n-id="content-blocking-fingerprinters"/>
                   </hbox>
                 </vbox>
-                <vbox class="content-blocking-warning reload-tabs" hidden="true">
-                  <html:div class="indent">
-                    <vbox>
-                      <spacer flex="1"/>
-                      <hbox>
-                        <vbox>
-                          <image class="content-blocking-info-image"/>
-                          <spacer flex="1"/>
-                        </vbox>
-                        <description>
-                          <html:span data-l10n-id="content-blocking-reload-description"></html:span>
-                        </description>
-                      </hbox>
-                      <spacer flex="1"/>
-                    </vbox>
-                    <vbox>
-                      <spacer flex="1"/>
-                      <button class="accessory-button reload-tabs-button"
-                              is="highlightable-button"
-                              data-l10n-id="content-blocking-reload-tabs-button"/>
-                      <spacer flex="1"/>
-                    </vbox>
+                <html:div class="content-blocking-warning reload-tabs" hidden="true">
+                  <html:div class="content-blocking-reload-desc-container">
+                    <image class="content-blocking-info-image"/>
+                    <html:span data-l10n-id="content-blocking-reload-description"
+                               class="content-blocking-reload-description" />
                   </html:div>
-                </vbox>
+                  <button class="accessory-button reload-tabs-button"
+                          is="highlightable-button"
+                          data-l10n-id="content-blocking-reload-tabs-button"/>
+                </html:div>
               </vbox>
             </vbox>
           </vbox>
@@ -188,30 +174,16 @@
                     <label data-l10n-id="content-blocking-fingerprinters"/>
                   </hbox>
                 </vbox>
-                <vbox class="content-blocking-warning reload-tabs" hidden="true">
-                  <html:div class="indent">
-                    <vbox>
-                      <spacer flex="1"/>
-                      <hbox>
-                        <vbox>
-                          <image class="content-blocking-info-image"/>
-                          <spacer flex="1"/>
-                        </vbox>
-                        <description>
-                          <html:span data-l10n-id="content-blocking-reload-description"></html:span>
-                        </description>
-                      </hbox>
-                      <spacer flex="1"/>
-                    </vbox>
-                    <vbox>
-                      <spacer flex="1"/>
-                      <button class="accessory-button reload-tabs-button"
-                              is="highlightable-button"
-                              data-l10n-id="content-blocking-reload-tabs-button"/>
-                      <spacer flex="1"/>
-                    </vbox>
+                <html:div class="content-blocking-warning reload-tabs" hidden="true">
+                  <html:div class="content-blocking-reload-desc-container">
+                    <image class="content-blocking-info-image"/>
+                    <html:span data-l10n-id="content-blocking-reload-description"
+                               class="content-blocking-reload-description" />
                   </html:div>
-                </vbox>
+                  <button class="accessory-button reload-tabs-button"
+                          is="highlightable-button"
+                          data-l10n-id="content-blocking-reload-tabs-button"/>
+                </html:div>
                 <vbox class="content-blocking-warning">
                   <vbox class="indent">
                     <hbox>
@@ -304,30 +276,16 @@
                             data-l10n-id="content-blocking-fingerprinters-label"
                             aria-describedby="contentBlockingCustomDesc"/>
                 </hbox>
-              <vbox class="content-blocking-warning reload-tabs" hidden="true">
-                <html:div class="indent">
-                  <vbox>
-                    <spacer flex="1"/>
-                    <hbox>
-                      <vbox>
-                        <image class="content-blocking-info-image"/>
-                        <spacer flex="1"/>
-                      </vbox>
-                      <description>
-                        <html:span data-l10n-id="content-blocking-reload-description"></html:span>
-                      </description>
-                    </hbox>
-                    <spacer flex="1"/>
-                  </vbox>
-                  <vbox>
-                    <spacer flex="1"/>
-                    <button class="accessory-button reload-tabs-button"
-                            is="highlightable-button"
-                            data-l10n-id="content-blocking-reload-tabs-button"/>
-                    <spacer flex="1"/>
-                  </vbox>
+              <html:div class="content-blocking-warning reload-tabs" hidden="true">
+                <html:div class="content-blocking-reload-desc-container">
+                  <image class="content-blocking-info-image"/>
+                  <html:span data-l10n-id="content-blocking-reload-description"
+                             class="content-blocking-reload-description" />
                 </html:div>
-              </vbox>
+                <button class="accessory-button reload-tabs-button"
+                        is="highlightable-button"
+                        data-l10n-id="content-blocking-reload-tabs-button"/>
+              </html:div>
               <vbox class="content-blocking-warning">
                 <vbox class="indent">
                   <hbox>
@@ -651,7 +609,6 @@
     <hbox id="locationSettingsRow" align="center" role="group" aria-labelledby="locationPermissionsLabel">
       <description flex="1">
         <image class="geo-icon permission-icon" />
-        <separator orient="vertical" class="thin"/>
         <label id="locationPermissionsLabel" data-l10n-id="permissions-location"/>
       </description>
       <hbox pack="end">
@@ -675,7 +632,6 @@
     <hbox id="cameraSettingsRow" align="center" role="group" aria-labelledby="cameraPermissionsLabel">
       <description flex="1">
         <image class="camera-icon permission-icon" />
-        <separator orient="vertical" class="thin"/>
         <label id="cameraPermissionsLabel" data-l10n-id="permissions-camera"/>
       </description>
       <hbox pack="end">
@@ -699,7 +655,6 @@
     <hbox id="microphoneSettingsRow" align="center" role="group" aria-labelledby="microphonePermissionsLabel">
       <description flex="1">
         <image class="microphone-icon permission-icon" />
-        <separator orient="vertical" class="thin"/>
         <label id="microphonePermissionsLabel" data-l10n-id="permissions-microphone"/>
       </description>
       <hbox pack="end">
@@ -723,7 +678,6 @@
     <hbox id="notificationSettingsRow" align="center" role="group" aria-labelledby="notificationPermissionsLabel">
       <description flex="1">
         <image class="desktop-notification-icon permission-icon" />
-        <separator orient="vertical" class="thin"/>
         <label id="notificationPermissionsLabel"
                class="tail-with-learn-more"
                data-l10n-id="permissions-notification"/>
@@ -757,7 +711,6 @@
     <hbox id="autoplaySettingsRow" align="center" role="group" aria-labelledby="autoplayPermissionsLabel">
       <description flex="1">
         <image class="autoplay-icon permission-icon" />
-        <separator orient="vertical" class="thin"/>
         <label id="autoplayPermissionsLabel"
                data-l10n-id="permissions-autoplay"/>
       </description>
@@ -780,7 +733,6 @@
     <hbox id="xrSettingsRow" align="center" role="group" aria-labelledby="xrPermissionsLabel">
       <description flex="1">
         <image class="xr-icon permission-icon" />
-        <separator orient="vertical" class="thin"/>
         <label id="xrPermissionsLabel" data-l10n-id="permissions-xr"/>
       </description>
       <hbox pack="end">

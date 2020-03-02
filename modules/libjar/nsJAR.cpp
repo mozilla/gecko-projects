@@ -602,7 +602,7 @@ nsresult nsZipReaderCache::GetZip(nsIFile* zipFile, nsIZipReader** result,
     }
 
     MOZ_ASSERT(!mZips.Contains(uri));
-    mZips.Put(uri, zip);
+    mZips.Put(uri, RefPtr{zip});
   }
   zip.forget(result);
   return rv;
@@ -658,7 +658,7 @@ nsZipReaderCache::GetInnerZip(nsIFile* zipFile, const nsACString& entry,
     }
 
     MOZ_ASSERT(!mZips.Contains(uri));
-    mZips.Put(uri, zip);
+    mZips.Put(uri, RefPtr{zip});
   }
   zip.forget(result);
   return rv;
@@ -692,8 +692,10 @@ nsZipReaderCache::GetFd(nsIFile* zipFile, PRFileDesc** aRetVal) {
   zip->ClearReleaseTime();
   rv = zip->GetNSPRFileDesc(aRetVal);
   // Do this to avoid possible deadlock on mLock with ReleaseZip().
-  MutexAutoUnlock unlock(mLock);
-  RefPtr<nsJAR> zipTemp = zip.forget();
+  {
+    MutexAutoUnlock unlock(mLock);
+    zip = nullptr;
+  }
   return rv;
 #endif /* XP_WIN */
 }

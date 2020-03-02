@@ -168,6 +168,7 @@ wasi-sysroot:
         toolchain-artifact: public/build/wasi-sysroot.tar.xz
     fetches:
         fetch:
+            - clang-9
             - wasi-sdk
         toolchain:
             - linux64-binutils
@@ -181,7 +182,7 @@ wrench-deps:
         docker-image: {in-tree: webrender}
     run:
         script: wrench-deps-vendoring.sh
-        sparse-profile: null  # need all of gfx/wr checked out for this script
+        sparse-profile: null
         resources:
             - 'gfx/wr/Cargo.lock'
         toolchain-artifact: public/build/wrench-deps.tar.bz2
@@ -189,9 +190,27 @@ wrench-deps:
         fetch:
             - android-rs-glue
         toolchain:
-            - linux64-rust-1.39  # whatever m-c is built with
+            - linux64-rust-1.41  # whatever m-c is built with
 
-lucetc:
+wgpu-deps:
+    description: "Downloads all the crates needed for testing wgpu"
+    treeherder:
+        symbol: Wgpu(deps)
+    worker:
+        docker-image: {in-tree: wgpu}
+    run:
+        script: wgpu-deps-vendoring.sh
+        sparse-profile: null
+        resources:
+            - 'gfx/wgpu/Cargo.lock'
+        toolchain-artifact: public/build/wgpu-deps.tar.bz2
+    fetches:
+        fetch:
+            - android-rs-glue
+        toolchain:
+            - linux64-rust-1.41  # whatever m-c is built with
+
+linux64-lucetc:
     description: "lucetc build process"
     treeherder:
         symbol: TL(lucetc)
@@ -206,3 +225,17 @@ lucetc:
             - linux64-binutils
             - linux64-clang
             - linux64-rust
+
+linux64-liblowercase:
+    description: "liblowercase"
+    treeherder:
+        symbol: TL(lc)
+    run:
+        script: build-liblowercase.sh
+        sparse-profile: liblowercase
+        toolchain-artifact: public/build/liblowercase.tar.xz
+        resources:
+            - build/liblowercase/
+    fetches:
+        toolchain:
+            - linux64-rust-1.41

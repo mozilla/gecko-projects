@@ -3,9 +3,8 @@
 
 "use strict";
 
-add_task(async function raisesWithoutArguments({ Target }, _, tab) {
-  await getDiscoveredTargets(Target);
-
+add_task(async function raisesWithoutArguments({ client, tab }) {
+  const { Target } = client;
   let exceptionThrown = false;
   try {
     await Target.closeTarget();
@@ -15,9 +14,8 @@ add_task(async function raisesWithoutArguments({ Target }, _, tab) {
   ok(exceptionThrown, "closeTarget raised error without an argument");
 });
 
-add_task(async function raisesWithUnknownTargetId({ Target }, _, tab) {
-  await getDiscoveredTargets(Target);
-
+add_task(async function raisesWithUnknownTargetId({ client, tab }) {
+  const { Target } = client;
   let exceptionThrown = false;
   try {
     await Target.closeTarget({ targetId: "-1" });
@@ -27,8 +25,8 @@ add_task(async function raisesWithUnknownTargetId({ Target }, _, tab) {
   ok(exceptionThrown, "closeTarget raised error with unkown target id");
 });
 
-add_task(async function triggersTargetDestroyed({ Target }, _, tab) {
-  await getDiscoveredTargets(Target);
+add_task(async function triggersTargetDestroyed({ client, tab }) {
+  const { Target } = client;
   const { targetInfo, newTab } = await openTab(Target);
 
   const tabClosed = BrowserTestUtils.waitForEvent(newTab, "TabClose");

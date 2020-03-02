@@ -290,6 +290,12 @@
         "ProviderURL": {
           "type": "URLorEmpty"
         },
+        "ExcludedDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "Locked": {
           "type": "boolean"
         }
@@ -318,6 +324,13 @@
         },
         "Fingerprinting": {
           "type": "boolean"
+        },
+        "Exceptions": {
+          "type": "array",
+          "strict": false,
+          "items": {
+            "type": "origin"
+          }
         }
       }
     },
@@ -594,6 +607,27 @@
 
             "Locked": {
               "type": "boolean"
+            }
+          }
+        },
+
+        "Autoplay": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "strict": false,
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "strict": false,
+              "items": {
+                "type": "origin"
+              }
             }
           }
         },
@@ -922,6 +956,9 @@
         },
         "OfflineApps": {
           "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
         }
       }
     },
@@ -1024,6 +1061,24 @@
         }
       },
       "required": ["Title", "URL"],
+    },
+
+    "UserMessaging": {
+      "type": "object",
+      "properties": {
+        "WhatsNew": {
+          "type": "boolean"
+        },
+        "ExtensionRecommendations": {
+          "type": "boolean"
+        },
+        "FeatureRecommendations": {
+          "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
+        }
+      }
     },
 
     "WebsiteFilter": {

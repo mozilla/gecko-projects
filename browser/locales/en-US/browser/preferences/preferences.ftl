@@ -245,6 +245,19 @@ colors-settings =
     .label = Colors…
     .accesskey = C
 
+# Zoom is a noun, and the message is used as header for a group of options
+preferences-zoom-header = Zoom
+
+preferences-default-zoom = Default zoom
+    .accesskey = z
+
+preferences-default-zoom-value =
+    .label = { $percentage }%
+
+preferences-zoom-text-only =
+    .label = Zoom text only
+    .accesskey = t
+
 language-header = Language
 
 choose-language-description = Choose your preferred language for displaying pages
@@ -699,6 +712,10 @@ containers-header = Container Tabs
 containers-add-button =
     .label = Add New Container
     .accesskey = A
+
+containers-new-tab-check =
+    .label = Select a container for each new tab
+    .accesskey = S
 
 containers-preferences-button =
     .label = Preferences

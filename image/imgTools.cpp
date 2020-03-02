@@ -86,7 +86,8 @@ class ImageDecoderListener final : public nsIStreamListener,
       : mURI(aURI),
         mImage(nullptr),
         mCallback(aCallback),
-        mObserver(aObserver ? new NotificationObserverWrapper(aObserver) : nullptr) {
+        mObserver(aObserver ? new NotificationObserverWrapper(aObserver)
+                            : nullptr) {
     MOZ_ASSERT(NS_IsMainThread());
   }
 
@@ -418,7 +419,7 @@ imgTools::DecodeImageAsync(nsIInputStream* aInStr, const nsACString& aMimeType,
     rv = NS_NewBufferedInputStream(getter_AddRefs(bufStream), stream.forget(),
                                    1024);
     NS_ENSURE_SUCCESS(rv, rv);
-    stream = bufStream.forget();
+    stream = std::move(bufStream);
   }
 
   // Create a new image container to hold the decoded data.

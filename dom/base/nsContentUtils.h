@@ -22,6 +22,7 @@
 #include "js/RootingAPI.h"
 #include "mozilla/dom/FromParser.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/CallState.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/GuardObjects.h"
@@ -132,6 +133,8 @@ class TextEditor;
 enum class StorageAccess;
 
 namespace dom {
+class BrowsingContext;
+class BrowsingContextGroup;
 class ContentFrameMessageManager;
 struct CustomElementDefinition;
 class DataTransfer;
@@ -204,9 +207,6 @@ struct EventNameMapping {
   bool mMaybeSpecialSVGorSMILEvent;
 };
 
-typedef bool (*CallOnRemoteChildFunction)(
-    mozilla::dom::BrowserParent* aBrowserParent, void* aArg);
-
 class nsContentUtils {
   friend class nsAutoScriptBlockerSuppressNodeRemoved;
   typedef mozilla::dom::Element Element;
@@ -224,7 +224,6 @@ class nsContentUtils {
 
   static bool IsCallerChrome();
   static bool ThreadsafeIsCallerChrome();
-  static bool IsCallerContentXBL();
   static bool IsCallerUAWidget();
   static bool IsFuzzingEnabled()
 #ifndef FUZZING
@@ -377,12 +376,18 @@ class nsContentUtils {
   static nsINode* Retarget(nsINode* aTargetA, nsINode* aTargetB);
 
   /*
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor.
+   *
    * This method fills the |aArray| with all ancestor nodes of |aNode|
    * including |aNode| at the zero index.
+   *
    */
-  static nsresult GetAncestors(nsINode* aNode, nsTArray<nsINode*>& aArray);
+  static nsresult GetInclusiveAncestors(nsINode* aNode,
+                                        nsTArray<nsINode*>& aArray);
 
   /*
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor.
+   *
    * This method fills |aAncestorNodes| with all ancestor nodes of |aNode|
    * including |aNode| (QI'd to nsIContent) at the zero index.
    * For each ancestor, there is a corresponding element in |aAncestorOffsets|
@@ -390,16 +395,19 @@ class nsContentUtils {
    *
    * This method just sucks.
    */
-  static nsresult GetAncestorsAndOffsets(nsINode* aNode, int32_t aOffset,
-                                         nsTArray<nsIContent*>* aAncestorNodes,
-                                         nsTArray<int32_t>* aAncestorOffsets);
+  static nsresult GetInclusiveAncestorsAndOffsets(
+      nsINode* aNode, int32_t aOffset, nsTArray<nsIContent*>* aAncestorNodes,
+      nsTArray<int32_t>* aAncestorOffsets);
 
   /**
-   * Returns the common ancestor, if any, for two nodes.
+   * Returns the closest common inclusive ancestor
+   * (https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor) , if any,
+   * for two nodes.
    *
    * Returns null if the nodes are disconnected.
    */
-  static nsINode* GetCommonAncestor(nsINode* aNode1, nsINode* aNode2) {
+  static nsINode* GetClosestCommonInclusiveAncestor(nsINode* aNode1,
+                                                    nsINode* aNode2) {
     if (aNode1 == aNode2) {
       return aNode1;
     }
@@ -467,6 +475,30 @@ class nsContentUtils {
   };
 
   /**
+   *  Utility routine to compare two "points", where a point is a node/offset
+   *  pair.
+   *  Pass a cache object as aParent1Cache if you expect to repeatedly
+   *  call this function with the same value as aParent1.
+   *
+   *  XXX aOffset1 and aOffset2 should be uint32_t since valid offset value is
+   *      between 0 - UINT32_MAX.  However, these methods work even with
+   *      negative offset values!  E.g., when aOffset1 is -1 and aOffset is 0,
+   *      these methods return -1.  Some root callers depend on this behavior.
+   *
+   *  @return -1 if point1 < point2,
+   *          1 if point1 > point2,
+   *          0 if point1 == point2.
+   *          `Nothing` if the two nodes aren't in the same connected subtree.
+   */
+  static Maybe<int32_t> ComparePoints(
+      const nsINode* aParent1, int32_t aOffset1, const nsINode* aParent2,
+      int32_t aOffset2, ComparePointsCache* aParent1Cache = nullptr);
+  template <typename FPT, typename FRT, typename SPT, typename SRT>
+  static Maybe<int32_t> ComparePoints(
+      const mozilla::RangeBoundaryBase<FPT, FRT>& aFirstBoundary,
+      const mozilla::RangeBoundaryBase<SPT, SRT>& aSecondBoundary);
+
+  /**
    *  Utility routine to compare two "points", where a point is a
    *  node/offset pair
    *  Returns -1 if point1 < point2, 1, if point1 > point2,
@@ -485,12 +517,12 @@ class nsContentUtils {
    *      On the other hand, nsINode can have ATTRCHILD_ARRAY_MAX_CHILD_COUN
    *      (0x3FFFFF) at most.  Therefore, they can be int32_t for now.
    */
-  static int32_t ComparePoints(const nsINode* aParent1, int32_t aOffset1,
-                               const nsINode* aParent2, int32_t aOffset2,
-                               bool* aDisconnected = nullptr,
-                               ComparePointsCache* aParent1Cache = nullptr);
+  static int32_t ComparePoints_Deprecated(
+      const nsINode* aParent1, int32_t aOffset1, const nsINode* aParent2,
+      int32_t aOffset2, bool* aDisconnected = nullptr,
+      ComparePointsCache* aParent1Cache = nullptr);
   template <typename FPT, typename FRT, typename SPT, typename SRT>
-  static int32_t ComparePoints(
+  static int32_t ComparePoints_Deprecated(
       const mozilla::RangeBoundaryBase<FPT, FRT>& aFirstBoundary,
       const mozilla::RangeBoundaryBase<SPT, SRT>& aSecondBoundary,
       bool* aDisconnected = nullptr);
@@ -1431,15 +1463,19 @@ class nsContentUtils {
   }
 
   /**
-   * This method dispatches "input" event with proper event class.  If it's
-   * unsafe to dispatch, this put the event into the script runner queue.
+   * This method dispatches "beforeinput" event with EditorInputEvent or
+   * "input" event with proper event class.  If it's unsafe to dispatch,
+   * this put the event into the script runner queue.  In such case, the
+   * event becomes not cancelable even if it's defined as cancelable by
+   * the spec.
    * Input Events spec defines as:
    *   Input events are dispatched on elements that act as editing hosts,
    *   including elements with the contenteditable attribute set, textarea
    *   elements, and input elements that permit text input.
    *
-   * @param aEventTarget        The event target element of the "input" event.
-   *                            Must not be nullptr.
+   * @param aEventTarget        The event target element of the "beforeinput"
+   *                            or "input" event.  Must not be nullptr.
+   * @param aEventMessage       Muse be eEditorBeforeInput or eEditorInput.
    * @param aEditorInputType    The inputType value of InputEvent.
    *                            If aEventTarget won't dispatch "input" event
    *                            with InputEvent, set EditorInputType::eUnknown.
@@ -1449,11 +1485,18 @@ class nsContentUtils {
    * @param aOptions            Optional.  If aEditorInputType value requires
    *                            some additional data, they should be properly
    *                            set with this argument.
+   * @param aEventStatus        Returns nsEventStatus_eConsumeNoDefault if
+   *                            the dispatching event is cancelable and the
+   *                            event was canceled by script (including
+   *                            chrome script).  Otherwise, returns given
+   *                            value.  Note that this can be nullptr only
+   *                            when the dispatching event is not cancelable.
    */
   MOZ_CAN_RUN_SCRIPT
   static nsresult DispatchInputEvent(Element* aEventTarget) {
-    return DispatchInputEvent(aEventTarget, mozilla::EditorInputType::eUnknown,
-                              nullptr, InputEventOptions());
+    return DispatchInputEvent(aEventTarget, mozilla::eEditorInput,
+                              mozilla::EditorInputType::eUnknown, nullptr,
+                              InputEventOptions());
   }
   struct MOZ_STACK_CLASS InputEventOptions final {
     InputEventOptions() = default;
@@ -1466,9 +1509,11 @@ class nsContentUtils {
   };
   MOZ_CAN_RUN_SCRIPT
   static nsresult DispatchInputEvent(Element* aEventTarget,
+                                     mozilla::EventMessage aEventMessage,
                                      mozilla::EditorInputType aEditorInputType,
                                      mozilla::TextEditor* aTextEditor,
-                                     const InputEventOptions& aOptions);
+                                     const InputEventOptions& aOptions,
+                                     nsEventStatus* aEventStatus = nullptr);
 
   /**
    * This method creates and dispatches a untrusted event.
@@ -1540,7 +1585,8 @@ class nsContentUtils {
    * Helper to dispatch a "framefocusrequested" event to chrome, which will only
    * bring the window to the foreground and switch tabs if aCanRaise is true.
    */
-  static void RequestFrameFocus(Element& aFrameElement, bool aCanRaise);
+  static void RequestFrameFocus(Element& aFrameElement, bool aCanRaise,
+                                mozilla::dom::CallerType aCallerType);
 
   /**
    * This method creates and dispatches a trusted event.
@@ -1709,12 +1755,19 @@ class nsContentUtils {
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, NS_ERROR_OUT_OF_MEMORY if aSourceBuffer is too
    *         long and NS_OK otherwise.
+   * @param aFlags defaults to -1 indicating that ParseFragmentHTML will do
+   *        default sanitization for system privileged calls to it. Only
+   *        ParserUtils::ParseFragment() should ever pass explicit aFlags
+   *        which will then used for sanitization of the fragment.
+   *        To pass explicit aFlags use any of the sanitization flags
+   *        listed in nsIParserUtils.idl.
    */
   static nsresult ParseFragmentHTML(const nsAString& aSourceBuffer,
                                     nsIContent* aTargetNode,
                                     nsAtom* aContextLocalName,
                                     int32_t aContextNamespace, bool aQuirks,
-                                    bool aPreventScriptExecution);
+                                    bool aPreventScriptExecution,
+                                    int32_t aFlags = -1);
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the XML parser.
@@ -1727,6 +1780,12 @@ class nsContentUtils {
    * @param aDocument the target document
    * @param aTagStack the namespace mapping context
    * @param aPreventExecution whether to mark scripts as already started
+   * @param aFlags, pass -1 and ParseFragmentXML will do default
+   *        sanitization for system privileged calls to it. Only
+   *        ParserUtils::ParseFragment() should ever pass explicit aFlags
+   *        which will then used for sanitization of the fragment.
+   *        To pass explicit aFlags use any of the sanitization flags
+   *        listed in nsIParserUtils.idl.
    * @param aReturn the result fragment
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, a return code from the XML parser.
@@ -1734,7 +1793,7 @@ class nsContentUtils {
   static nsresult ParseFragmentXML(const nsAString& aSourceBuffer,
                                    Document* aDocument,
                                    nsTArray<nsString>& aTagStack,
-                                   bool aPreventScriptExecution,
+                                   bool aPreventScriptExecution, int32_t aFlags,
                                    mozilla::dom::DocumentFragment** aReturn);
 
   /**
@@ -2336,7 +2395,8 @@ class nsContentUtils {
    * allowed for the given subject principal. These are only allowed if the user
    * initiated them (like with a mouse-click or key press).
    */
-  static bool IsCutCopyAllowed(nsIPrincipal& aSubjectPrincipal);
+  static bool IsCutCopyAllowed(Document* aDocument,
+                               nsIPrincipal& aSubjectPrincipal);
 
   /*
    * Returns true if the browser should attempt to prevent the given caller type
@@ -2449,6 +2509,12 @@ class nsContentUtils {
    * Checks if internal PDF viewer is enabled.
    */
   static bool IsPDFJSEnabled();
+
+  /**
+   * Checks to see whether the given principal is the internal PDF
+   * viewer principal.
+   */
+  static bool IsPDFJS(nsIPrincipal* aPrincipal);
 
   /**
    * Checks if internal SWF player is enabled.
@@ -2740,11 +2806,13 @@ class nsContentUtils {
 
   /*
    * Call the given callback on all remote children of the given top-level
-   * window. Return true from the callback to stop calling further children.
+   * window. Return Callstate::Stop from the callback to stop calling further
+   * children.
    */
-  static void CallOnAllRemoteChildren(nsPIDOMWindowOuter* aWindow,
-                                      CallOnRemoteChildFunction aCallback,
-                                      void* aArg);
+  static void CallOnAllRemoteChildren(
+      nsPIDOMWindowOuter* aWindow,
+      const std::function<mozilla::CallState(mozilla::dom::BrowserParent*)>&
+          aCallback);
 
   /*
    * Call nsPIDOMWindow::SetKeyboardIndicators all all remote children. This is
@@ -2875,12 +2943,6 @@ class nsContentUtils {
    */
   static bool IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
                                           nsIChannel* aChannel, nsIURI* aURI);
-
-  /*
-   * Returns true if this window's channel has been marked as a tracking
-   * resource.
-   */
-  static bool IsTrackingResourceWindow(nsPIDOMWindowInner* aWindow);
 
   /*
    * Returns true if this window's channel has been marked as a third-party
@@ -3219,9 +3281,10 @@ class nsContentUtils {
       const nsAttrValue* aAttrVal, mozilla::dom::AutocompleteInfo& aInfo,
       bool aGrantAllValidValue = false);
 
-  static bool CallOnAllRemoteChildren(
+  static mozilla::CallState CallOnAllRemoteChildren(
       mozilla::dom::MessageBroadcaster* aManager,
-      CallOnRemoteChildFunction aCallback, void* aArg);
+      const std::function<mozilla::CallState(mozilla::dom::BrowserParent*)>&
+          aCallback);
 
   static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
   static nsIContent* GetCommonFlattenedTreeAncestorHelper(
@@ -3389,6 +3452,26 @@ class MOZ_STACK_CLASS nsAutoScriptBlockerSuppressNodeRemoved
 
 namespace mozilla {
 namespace dom {
+
+/**
+ * Suppresses event handling and suspends the active inner window for all
+ * in-process documents in a BrowsingContextGroup. This should be used while
+ * spinning the event loop for a synchronous operation (like `window.open()`)
+ * which affects operations in any other window in the same BrowsingContext
+ * group.
+ */
+
+class MOZ_RAII AutoSuppressEventHandlingAndSuspend {
+ public:
+  explicit AutoSuppressEventHandlingAndSuspend(BrowsingContextGroup* aGroup);
+  ~AutoSuppressEventHandlingAndSuspend();
+
+ private:
+  void SuppressBrowsingContext(BrowsingContext* aBC);
+
+  AutoTArray<RefPtr<Document>, 16> mDocuments;
+  AutoTArray<nsCOMPtr<nsPIDOMWindowInner>, 16> mWindows;
+};
 
 class TreeOrderComparator {
  public:

@@ -6,6 +6,7 @@
 
 #include "nsLayoutUtils.h"
 
+#include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/dom/CanvasUtils.h"
@@ -1099,7 +1100,8 @@ static bool GetDisplayPortImpl(
     result = GetDisplayPortFromRectData(aContent, rectData, aMultiplier);
   } else if (isDisplayportSuppressed ||
              nsLayoutUtils::ShouldDisableApzForElement(aContent)) {
-    DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1, /*painted=*/false);
+    DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1,
+                                             /*painted=*/false);
     result = GetDisplayPortFromMarginsData(aContent, &noMargins, aMultiplier);
   } else {
     result = GetDisplayPortFromMarginsData(aContent, marginsData, aMultiplier);
@@ -1143,8 +1145,7 @@ bool nsLayoutUtils::GetDisplayPort(
   bool usingDisplayPort =
       GetDisplayPortImpl(aContent, aResult, multiplier,
                          MaxSizeExceededBehaviour::Assert, aOutPainted);
-  if (aResult && usingDisplayPort &&
-      aRelativeTo == RelativeTo::ScrollFrame) {
+  if (aResult && usingDisplayPort && aRelativeTo == RelativeTo::ScrollFrame) {
     TranslateFromScrollPortToScrollFrame(aContent, aResult);
   }
   return usingDisplayPort;
@@ -1382,8 +1383,8 @@ bool nsLayoutUtils::GetHighResolutionDisplayPort(nsIContent* aContent,
 }
 
 void nsLayoutUtils::RemoveDisplayPort(nsIContent* aContent) {
-  aContent->DeleteProperty(nsGkAtoms::DisplayPort);
-  aContent->DeleteProperty(nsGkAtoms::DisplayPortMargins);
+  aContent->RemoveProperty(nsGkAtoms::DisplayPort);
+  aContent->RemoveProperty(nsGkAtoms::DisplayPortMargins);
 }
 
 void nsLayoutUtils::NotifyPaintSkipTransaction(ViewID aScrollId) {
@@ -2018,7 +2019,7 @@ bool nsLayoutUtils::IsFixedPosFrameInDisplayPort(const nsIFrame* aFrame) {
   // their pages!
   nsIFrame* parent = aFrame->GetParent();
   if (!parent || parent->GetParent() ||
-      aFrame->StyleDisplay()->mPosition != NS_STYLE_POSITION_FIXED) {
+      aFrame->StyleDisplay()->mPosition != StylePositionProperty::Fixed) {
     return false;
   }
   return ViewportHasDisplayPort(aFrame->PresContext());
@@ -2076,7 +2077,7 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame,
       }
     }
     if ((aFlags & SCROLLABLE_FIXEDPOS_FINDS_ROOT) &&
-        f->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED &&
+        f->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
         nsLayoutUtils::IsReallyFixedPos(f)) {
       return f->PresShell()->GetRootScrollFrameAsScrollable();
     }
@@ -2088,11 +2089,11 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame,
 nsRect nsLayoutUtils::GetScrolledRect(nsIFrame* aScrolledFrame,
                                       const nsRect& aScrolledFrameOverflowArea,
                                       const nsSize& aScrollPortSize,
-                                      uint8_t aDirection) {
+                                      StyleDirection aDirection) {
   WritingMode wm = aScrolledFrame->GetWritingMode();
   // Potentially override the frame's direction to use the direction found
   // by ScrollFrameHelper::GetScrolledFrameDir()
-  wm.SetDirectionFromBidiLevel(aDirection == NS_STYLE_DIRECTION_RTL ? 1 : 0);
+  wm.SetDirectionFromBidiLevel(aDirection == StyleDirection::Rtl ? 1 : 0);
 
   nscoord x1 = aScrolledFrameOverflowArea.x,
           x2 = aScrolledFrameOverflowArea.XMost(),
@@ -2346,7 +2347,7 @@ void nsLayoutUtils::GetContainerAndOffsetAtEvent(PresShell* aPresShell,
   }
 }
 
-static void ConstrainToCoordValues(float& aStart, float& aSize) {
+void nsLayoutUtils::ConstrainToCoordValues(float& aStart, float& aSize) {
   MOZ_ASSERT(aSize >= 0);
 
   // Here we try to make sure that the resulting nsRect will continue to cover
@@ -2386,12 +2387,12 @@ static void ConstrainToCoordValues(gfxFloat& aVal) {
     aVal = nscoord_MAX;
 }
 
-static void ConstrainToCoordValues(gfxFloat& aStart, gfxFloat& aSize) {
+void nsLayoutUtils::ConstrainToCoordValues(gfxFloat& aStart, gfxFloat& aSize) {
   gfxFloat max = aStart + aSize;
 
   // Clamp the end points to within nscoord range
-  ConstrainToCoordValues(aStart);
-  ConstrainToCoordValues(max);
+  ::ConstrainToCoordValues(aStart);
+  ::ConstrainToCoordValues(max);
 
   aSize = max - aStart;
   // If the width if still greater than the max nscoord, then bring both
@@ -2408,45 +2409,6 @@ static void ConstrainToCoordValues(gfxFloat& aStart, gfxFloat& aSize) {
 
     aStart -= excess;
     aSize = nscoord_MIN;
-  }
-}
-
-nsRect nsLayoutUtils::RoundGfxRectToAppRect(const Rect& aRect, float aFactor) {
-  // Get a new Rect whose units are app units by scaling by the specified
-  // factor.
-  Rect scaledRect = aRect;
-  scaledRect.ScaleRoundOut(aFactor);
-
-  // We now need to constrain our results to the max and min values for coords.
-  ConstrainToCoordValues(scaledRect.x, scaledRect.width);
-  ConstrainToCoordValues(scaledRect.y, scaledRect.height);
-
-  // Now typecast everything back.  This is guaranteed to be safe.
-  if (aRect.IsEmpty()) {
-    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()), 0, 0);
-  } else {
-    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()),
-                  nscoord(scaledRect.Width()), nscoord(scaledRect.Height()));
-  }
-}
-
-nsRect nsLayoutUtils::RoundGfxRectToAppRect(const gfxRect& aRect,
-                                            float aFactor) {
-  // Get a new gfxRect whose units are app units by scaling by the specified
-  // factor.
-  gfxRect scaledRect = aRect;
-  scaledRect.ScaleRoundOut(aFactor);
-
-  // We now need to constrain our results to the max and min values for coords.
-  ConstrainToCoordValues(scaledRect.x, scaledRect.width);
-  ConstrainToCoordValues(scaledRect.y, scaledRect.height);
-
-  // Now typecast everything back.  This is guaranteed to be safe.
-  if (aRect.IsEmpty()) {
-    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()), 0, 0);
-  } else {
-    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()),
-                  nscoord(scaledRect.Width()), nscoord(scaledRect.Height()));
   }
 }
 
@@ -3542,7 +3504,7 @@ void PrintHitTestInfoStatsInternal(nsDisplayList* aList, int& aTotal,
       aHitTest++;
 
       const auto& hitTestInfo =
-          static_cast<nsDisplayHitTestInfoItem*>(i)->HitTestFlags();
+          static_cast<nsDisplayHitTestInfoBase*>(i)->HitTestFlags();
 
       if (hitTestInfo.size() > 1) {
         aSpecial++;
@@ -3914,7 +3876,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
   {
     AUTO_PROFILER_LABEL_CATEGORY_PAIR(GRAPHICS_DisplayListBuilding);
-    AUTO_PROFILER_TRACING("Paint", "DisplayList", GRAPHICS);
+    AUTO_PROFILER_TRACING_MARKER("Paint", "DisplayList", GRAPHICS);
     PerfStats::AutoMetricRecording<PerfStats::Metric::DisplayListBuilding>
         autoRecording;
 
@@ -4208,7 +4170,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
   builder->Check();
 
   {
-    AUTO_PROFILER_TRACING("Paint", "DisplayListResources", GRAPHICS);
+    AUTO_PROFILER_TRACING_MARKER("Paint", "DisplayListResources", GRAPHICS);
 
     builder->EndFrame();
 
@@ -6550,11 +6512,11 @@ SamplingFilter nsLayoutUtils::GetSamplingFilterForFrame(nsIFrame* aForFrame) {
   }
 
   switch (sc->StyleVisibility()->mImageRendering) {
-    case NS_STYLE_IMAGE_RENDERING_OPTIMIZESPEED:
+    case StyleImageRendering::Optimizespeed:
       return SamplingFilter::POINT;
-    case NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY:
+    case StyleImageRendering::Optimizequality:
       return SamplingFilter::LINEAR;
-    case NS_STYLE_IMAGE_RENDERING_CRISP_EDGES:
+    case StyleImageRendering::CrispEdges:
       return SamplingFilter::POINT;
     default:
       return defaultFilter;
@@ -7233,7 +7195,7 @@ static bool NonZeroCorner(const LengthPercentage& aLength) {
 
 /* static */
 bool nsLayoutUtils::HasNonZeroCorner(const BorderRadius& aCorners) {
-  NS_FOR_CSS_HALF_CORNERS(corner) {
+  for (const auto corner : mozilla::AllPhysicalHalfCorners()) {
     if (NonZeroCorner(aCorners.Get(corner))) return true;
   }
   return false;
@@ -7278,7 +7240,7 @@ bool nsLayoutUtils::HasNonZeroCornerOnSide(const BorderRadius& aCorners,
   static_assert(eCornerBottomLeftY / 2 == eCornerBottomLeft,
                 "Check for Non Zero on side");
 
-  NS_FOR_CSS_HALF_CORNERS(corner) {
+  for (const auto corner : mozilla::AllPhysicalHalfCorners()) {
     // corner is a "half corner" value, so dividing by two gives us a
     // "full corner" value.
     if (NonZeroCorner(aCorners.Get(corner)) &&
@@ -7506,7 +7468,7 @@ nsDeviceContext* nsLayoutUtils::GetDeviceContextForScreenInfo(
 
 /* static */
 bool nsLayoutUtils::IsReallyFixedPos(const nsIFrame* aFrame) {
-  MOZ_ASSERT(aFrame->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED,
+  MOZ_ASSERT(aFrame->StyleDisplay()->mPosition == StylePositionProperty::Fixed,
              "IsReallyFixedPos called on non-'position:fixed' frame");
   return MayBeReallyFixedPos(aFrame);
 }
@@ -7618,7 +7580,7 @@ nsLayoutUtils::SurfaceFromElementResult nsLayoutUtils::SurfaceFromElement(
       imgIContainer::FLAG_SYNC_DECODE | imgIContainer::FLAG_ASYNC_NOTIFY;
   if (aSurfaceFlags & SFE_NO_COLORSPACE_CONVERSION)
     frameFlags |= imgIContainer::FLAG_DECODE_NO_COLORSPACE_CONVERSION;
-  if (aSurfaceFlags & SFE_PREFER_NO_PREMULTIPLY_ALPHA) {
+  if (aSurfaceFlags & SFE_ALLOW_NON_PREMULT) {
     frameFlags |= imgIContainer::FLAG_DECODE_NO_PREMULTIPLY_ALPHA;
   }
 
@@ -7681,9 +7643,9 @@ nsLayoutUtils::SurfaceFromElementResult nsLayoutUtils::SurfaceFromElement(
   bool hadCrossOriginRedirects = true;
   imgRequest->GetHadCrossOriginRedirects(&hadCrossOriginRedirects);
 
-  result.mPrincipal = principal.forget();
+  result.mPrincipal = std::move(principal);
   result.mHadCrossOriginRedirects = hadCrossOriginRedirects;
-  result.mImageRequest = imgRequest.forget();
+  result.mImageRequest = std::move(imgRequest);
   result.mIsWriteOnly = CanvasUtils::CheckWriteOnlySecurity(
       result.mCORSUsed, result.mPrincipal, result.mHadCrossOriginRedirects);
 
@@ -7704,7 +7666,12 @@ nsLayoutUtils::SurfaceFromElementResult nsLayoutUtils::SurfaceFromElement(
 
   IntSize size = aElement->GetSize();
 
-  result.mSourceSurface = aElement->GetSurfaceSnapshot(&result.mAlphaType);
+  auto pAlphaType = &result.mAlphaType;
+  if (!(aSurfaceFlags & SFE_ALLOW_NON_PREMULT)) {
+    pAlphaType =
+        nullptr;  // Coersce GetSurfaceSnapshot to give us Opaque/Premult only.
+  }
+  result.mSourceSurface = aElement->GetSurfaceSnapshot(pAlphaType);
   if (!result.mSourceSurface) {
     // If the element doesn't have a context then we won't get a snapshot. The
     // canvas spec wants us to not error and just draw nothing, so return an
@@ -7784,7 +7751,7 @@ nsLayoutUtils::SurfaceFromElementResult nsLayoutUtils::SurfaceFromElement(
   result.mSize = result.mLayersImage->GetSize();
   result.mIntrinsicSize =
       gfx::IntSize(aElement->VideoWidth(), aElement->VideoHeight());
-  result.mPrincipal = principal.forget();
+  result.mPrincipal = std::move(principal);
   result.mHadCrossOriginRedirects = aElement->HadCrossOriginRedirects();
   result.mIsWriteOnly = CanvasUtils::CheckWriteOnlySecurity(
       result.mCORSUsed, result.mPrincipal, result.mHadCrossOriginRedirects);
@@ -9029,7 +8996,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
     if (void* paintRequestTime =
             aContent->GetProperty(nsGkAtoms::paintRequestTime)) {
       metrics.SetPaintRequestTime(*static_cast<TimeStamp*>(paintRequestTime));
-      aContent->DeleteProperty(nsGkAtoms::paintRequestTime);
+      aContent->RemoveProperty(nsGkAtoms::paintRequestTime);
     }
     scrollId = nsLayoutUtils::FindOrCreateIDFor(aContent);
     nsRect dp;
@@ -9072,6 +9039,10 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
         CSSPoint::FromAppUnits(scrollableFrame->GetApzScrollPosition());
     metrics.SetScrollOffset(scrollPosition);
     metrics.SetBaseScrollOffset(apzScrollPosition);
+    metrics.SetVisualViewportOffset(
+        aIsRootContent && presShell->IsVisualViewportOffsetSet()
+            ? CSSPoint::FromAppUnits(presShell->GetVisualViewportOffset())
+            : scrollPosition);
 
     if (aIsRootContent) {
       if (aLayerManager->GetIsFirstPaint() &&
@@ -9967,17 +9938,59 @@ static nsRect ComputeHTMLReferenceRect(nsIFrame* aFrame,
   return r;
 }
 
+static StyleGeometryBox ShapeBoxToGeometryBox(const StyleShapeBox& aBox) {
+  switch (aBox) {
+    case StyleShapeBox::BorderBox:
+      return StyleGeometryBox::BorderBox;
+    case StyleShapeBox::ContentBox:
+      return StyleGeometryBox::ContentBox;
+    case StyleShapeBox::MarginBox:
+      return StyleGeometryBox::MarginBox;
+    case StyleShapeBox::PaddingBox:
+      return StyleGeometryBox::PaddingBox;
+  }
+  MOZ_ASSERT_UNREACHABLE("Unknown shape box type");
+  return StyleGeometryBox::MarginBox;
+}
+
+static StyleGeometryBox ClipPathBoxToGeometryBox(
+    const StyleShapeGeometryBox& aBox) {
+  using Tag = StyleShapeGeometryBox::Tag;
+  switch (aBox.tag) {
+    case Tag::ShapeBox:
+      return ShapeBoxToGeometryBox(aBox.AsShapeBox());
+    case Tag::ElementDependent:
+      return StyleGeometryBox::NoBox;
+    case Tag::FillBox:
+      return StyleGeometryBox::FillBox;
+    case Tag::StrokeBox:
+      return StyleGeometryBox::StrokeBox;
+    case Tag::ViewBox:
+      return StyleGeometryBox::ViewBox;
+  }
+  MOZ_ASSERT_UNREACHABLE("Unknown shape box type");
+  return StyleGeometryBox::NoBox;
+}
+
 /* static */
 nsRect nsLayoutUtils::ComputeGeometryBox(nsIFrame* aFrame,
                                          StyleGeometryBox aGeometryBox) {
   // We use ComputeSVGReferenceRect for all SVG elements, except <svg>
   // element, which does have an associated CSS layout box. In this case we
   // should still use ComputeHTMLReferenceRect for region computing.
-  nsRect r = (aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT)
-                 ? ComputeSVGReferenceRect(aFrame, aGeometryBox)
-                 : ComputeHTMLReferenceRect(aFrame, aGeometryBox);
+  return aFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT)
+             ? ComputeSVGReferenceRect(aFrame, aGeometryBox)
+             : ComputeHTMLReferenceRect(aFrame, aGeometryBox);
+}
 
-  return r;
+nsRect nsLayoutUtils::ComputeGeometryBox(nsIFrame* aFrame,
+                                         const StyleShapeBox& aBox) {
+  return ComputeGeometryBox(aFrame, ShapeBoxToGeometryBox(aBox));
+}
+
+nsRect nsLayoutUtils::ComputeGeometryBox(nsIFrame* aFrame,
+                                         const StyleShapeGeometryBox& aBox) {
+  return ComputeGeometryBox(aFrame, ClipPathBoxToGeometryBox(aBox));
 }
 
 /* static */
@@ -10196,7 +10209,8 @@ static Maybe<ScreenRect> GetFrameVisibleRectOnScreen(const nsIFrame* aFrame) {
       PixelCastJustification::ContentProcessIsLayerInUiProcess);
 
   return Some(
-      browserChild->GetRemoteDocumentRect().Intersect(transformedToRoot));
+      browserChild->GetTopLevelViewportVisibleRectInBrowserCoords().Intersect(
+          transformedToRoot));
 }
 
 // static

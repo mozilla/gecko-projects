@@ -16,6 +16,8 @@ linux64/opt:
     worker-type: b-linux
     worker:
         max-run-time: 7200
+        env:
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -37,7 +39,7 @@ linux64/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-plain/opt:
@@ -75,7 +77,7 @@ linux64-plain/opt:
             - linux64-nasm
             - linux64-node
             - linux64-cbindgen
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-fuzzing/debug:
@@ -83,6 +85,8 @@ linux64-fuzzing/debug:
     index:
         product: firefox
         job-name: linux64-fuzzing-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/debug
         symbol: Bf
@@ -90,6 +94,7 @@ linux64-fuzzing/debug:
     worker:
         max-run-time: 5400
         env:
+            MOZ_LOW_PARALLELISM_BUILD: '1'
             PERFHERDER_EXTRA_OPTIONS: fuzzing
             FORCE_GCC: '1'
     run:
@@ -114,7 +119,7 @@ linux64-fuzzing/debug:
             - linux64-rust-size
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64/debug:
@@ -130,6 +135,8 @@ linux64/debug:
     worker-type: b-linux
     worker:
         max-run-time: 5400
+        env:
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -152,7 +159,7 @@ linux64/debug:
             - linux64-rust-size
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-plain/debug:
@@ -190,11 +197,11 @@ linux64-plain/debug:
             - linux64-nasm
             - linux64-node
             - linux64-cbindgen
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
-linux64-devedition-nightly/opt:
-    description: "Linux64 devedition Nightly"
+linux64-devedition/opt:
+    description: "Linux64 devedition (shippable)"
     use-pgo: linux64-shippable/opt
     attributes:
         nightly: true
@@ -211,6 +218,8 @@ linux64-devedition-nightly/opt:
     worker-type: b-linux
     worker:
         max-run-time: 7200
+        env:
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -235,7 +244,7 @@ linux64-devedition-nightly/opt:
             - linux64-cbindgen
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-base-toolchains/opt:
@@ -251,6 +260,7 @@ linux64-base-toolchains/opt:
         docker-image: {in-tree: debian7-amd64-build-base}
         max-run-time: 7200
         env:
+            MOZ_LOW_PARALLELISM_BUILD: '1'
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
             FORCE_GCC: '1'
     run:
@@ -267,12 +277,12 @@ linux64-base-toolchains/opt:
         toolchain:
             - linux64-clang-5.0
             - linux64-gcc-7
-            - linux64-rust-1.39
+            - linux64-rust-1.41
             - linux64-cbindgen
             - linux64-sccache
             - linux64-nasm-2.13.02
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-base-toolchains/debug:
@@ -288,6 +298,7 @@ linux64-base-toolchains/debug:
         docker-image: {in-tree: debian7-amd64-build-base}
         max-run-time: 7200
         env:
+            MOZ_LOW_PARALLELISM_BUILD: '1'
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
             FORCE_GCC: '1'
     run:
@@ -306,12 +317,12 @@ linux64-base-toolchains/debug:
         toolchain:
             - linux64-clang-5.0
             - linux64-gcc-7
-            - linux64-rust-1.39
+            - linux64-rust-1.41
             - linux64-cbindgen
             - linux64-sccache
             - linux64-nasm-2.13.02
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-base-toolchains-clang/opt:
@@ -343,11 +354,11 @@ linux64-base-toolchains-clang/opt:
         toolchain:
             - linux64-binutils
             - linux64-clang-5.0
-            - linux64-rust-1.39
+            - linux64-rust-1.41
             - linux64-cbindgen
             - linux64-nasm-2.13.02
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-base-toolchains-clang/debug:
@@ -381,11 +392,11 @@ linux64-base-toolchains-clang/debug:
         toolchain:
             - linux64-binutils
             - linux64-clang-5.0
-            - linux64-rust-1.39
+            - linux64-rust-1.41
             - linux64-cbindgen
             - linux64-nasm-2.13.02
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux/opt:
@@ -413,7 +424,7 @@ linux/opt:
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['try', 'release']
     fetches:
         toolchain:
             - linux64-binutils
@@ -424,7 +435,7 @@ linux/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux/debug:
@@ -453,6 +464,7 @@ linux/debug:
         mozconfig-variant: debug
         tooltool-downloads: public
         need-xvfb: true
+    run-on-projects: ['try', 'release']
     fetches:
         toolchain:
             - linux64-binutils
@@ -463,7 +475,7 @@ linux/debug:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux-rusttests/opt:
@@ -493,7 +505,7 @@ linux-rusttests/opt:
         mozconfig-variant: rusttests
         tooltool-downloads: public
         keep-artifacts: false
-    run-on-projects: ['trunk', 'try']
+    run-on-projects: ['try', 'mozilla-central']
     fetches:
         toolchain:
             - linux64-binutils
@@ -503,7 +515,7 @@ linux-rusttests/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux-rusttests/debug:
@@ -533,7 +545,7 @@ linux-rusttests/debug:
         mozconfig-variant: rusttests-debug
         tooltool-downloads: public
         keep-artifacts: false
-    run-on-projects: ['trunk', 'try']
+    run-on-projects: ['try', 'mozilla-central']
     fetches:
         toolchain:
             - linux64-binutils
@@ -543,11 +555,11 @@ linux-rusttests/debug:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
-linux-devedition-nightly/opt:
-    description: "Linux32 devedition Nightly"
+linux-devedition/opt:
+    description: "Linux32 devedition (shippable)"
     use-pgo: linux-shippable/opt
     attributes:
         nightly: true
@@ -565,6 +577,8 @@ linux-devedition-nightly/opt:
     worker:
         docker-image: {in-tree: debian7-i386-build}
         max-run-time: 7200
+        env:
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -589,7 +603,7 @@ linux-devedition-nightly/opt:
             - linux64-cbindgen
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux-shippable/opt:
@@ -611,6 +625,8 @@ linux-shippable/opt:
     worker:
         docker-image: {in-tree: debian7-i386-build}
         max-run-time: 9000
+        env:
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -622,6 +638,7 @@ linux-shippable/opt:
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
+    run-on-projects: ['try', 'release']
     fetches:
         toolchain:
             - linux64-binutils
@@ -631,7 +648,7 @@ linux-shippable/opt:
             - linux64-cbindgen
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux-reproduced/opt:
@@ -645,8 +662,6 @@ linux-reproduced/opt:
     treeherder:
         platform: linux32-shippable/opt
         symbol: Bpgo(repr)
-    # Limited to trunk until bug 1596350 is fixed.
-    run-on-projects: ['trunk', 'try']
     worker-type: b-linux
     worker:
         docker-image: {in-tree: debian7-i386-build}
@@ -664,6 +679,9 @@ linux-reproduced/opt:
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
+    # Original comment: Limited to trunk until bug 1596350 is fixed.
+    # Addendum: Do not run on autoland, Bug 1599197
+    run-on-projects: ['try', 'mozilla-central', 'comm-central']
     fetches:
         toolchain:
             - linux64-binutils
@@ -673,7 +691,7 @@ linux-reproduced/opt:
             - linux64-cbindgen
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-asan/opt:
@@ -689,6 +707,7 @@ linux64-asan/opt:
         env:
             PERFHERDER_EXTRA_OPTIONS: "opt asan"
             ASAN_OPTIONS: "detect_leaks=0"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
         max-run-time: 5400
     run:
         using: mozharness
@@ -712,7 +731,7 @@ linux64-asan/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-tsan/opt:
@@ -727,6 +746,7 @@ linux64-tsan/opt:
     worker:
         env:
             PERFHERDER_EXTRA_OPTIONS: "opt tsan"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
         max-run-time: 5400
     run:
         using: mozharness
@@ -750,7 +770,7 @@ linux64-tsan/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-tsan-fuzzing/opt:
@@ -788,7 +808,7 @@ linux64-tsan-fuzzing/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-asan-fuzzing/opt:
@@ -827,7 +847,7 @@ linux64-asan-fuzzing/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-asan-fuzzing-ccov/opt:
@@ -866,7 +886,7 @@ linux64-asan-fuzzing-ccov/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-fuzzing-ccov/opt:
@@ -882,6 +902,7 @@ linux64-fuzzing-ccov/opt:
     worker:
         max-run-time: 5400
         env:
+            MOZ_LOW_PARALLELISM_BUILD: '1'
             PERFHERDER_EXTRA_OPTIONS: fuzzing-ccov
             FORCE_GCC: '1'
             ASAN_OPTIONS: "detect_leaks=0"
@@ -907,7 +928,7 @@ linux64-fuzzing-ccov/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-asan-reporter-nightly/opt:
@@ -931,6 +952,7 @@ linux64-asan-reporter-nightly/opt:
         env:
             PERFHERDER_EXTRA_OPTIONS: asan-reporter
             ASAN_OPTIONS: "detect_leaks=0"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
         max-run-time: 3600
     run:
         using: mozharness
@@ -947,6 +969,8 @@ linux64-asan-reporter-nightly/opt:
         need-xvfb: true
         mar-channel-id:
             firefox-mozilla-central-asan
+        accepted-mar-channel-ids:
+            firefox-mozilla-central-asan
     fetches:
         toolchain:
             - linux64-binutils
@@ -956,7 +980,7 @@ linux64-asan-reporter-nightly/opt:
             - linux64-cbindgen
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-asan/debug:
@@ -995,7 +1019,7 @@ linux64-asan/debug:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-shippable/opt:
@@ -1016,6 +1040,8 @@ linux64-shippable/opt:
     worker-type: b-linux
     worker:
         max-run-time: 9000
+        env:
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -1036,7 +1062,7 @@ linux64-shippable/opt:
             - linux64-cbindgen
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-noopt/debug:
@@ -1066,7 +1092,7 @@ linux64-noopt/debug:
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
-    run-on-projects: ['trunk', 'try']
+    run-on-projects: ['mozilla-central', 'try']
     fetches:
         toolchain:
             - linux64-binutils
@@ -1077,7 +1103,7 @@ linux64-noopt/debug:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-rusttests/opt:
@@ -1106,7 +1132,7 @@ linux64-rusttests/opt:
         mozconfig-variant: rusttests
         tooltool-downloads: public
         keep-artifacts: false
-    run-on-projects: ['trunk', 'try']
+    run-on-projects: ['mozilla-central', 'try']
     fetches:
         toolchain:
             - linux64-binutils
@@ -1116,7 +1142,7 @@ linux64-rusttests/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-rusttests/debug:
@@ -1155,7 +1181,7 @@ linux64-rusttests/debug:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-tup/opt:
@@ -1196,7 +1222,7 @@ linux64-tup/opt:
             - linux64-tup
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-ccov/opt:
@@ -1211,10 +1237,16 @@ linux64-ccov/opt:
     run-on-projects: ['mozilla-central', 'try']
     worker-type: b-linux
     worker:
+        artifacts:
+            - name: public/code-coverage-grcov.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/code-coverage-grcov.zip
+              type: file
         max-run-time: 7200
         env:
+            MOZ_LOW_PARALLELISM_BUILD: '1'
             FORCE_GCC: '1'
             RUSTC_BOOTSTRAP: '1'
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         using: mozharness
         actions: [get-secrets, build]
@@ -1237,7 +1269,7 @@ linux64-ccov/opt:
             - linux64-nasm
             - linux64-node
             - linux64-grcov
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-add-on-devel/opt:
@@ -1264,7 +1296,7 @@ linux64-add-on-devel/opt:
         mozconfig-variant: add-on-devel
         tooltool-downloads: public
         need-xvfb: true
-    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45']
+    run-on-projects: ['mozilla-beta', 'mozilla-release']
     fetches:
         toolchain:
             - linux64-binutils
@@ -1275,7 +1307,7 @@ linux64-add-on-devel/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-aarch64/opt:
@@ -1315,7 +1347,7 @@ linux64-aarch64/opt:
             - linux64-cbindgen
             - linux64-sccache
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux-gcp/debug:
@@ -1347,6 +1379,7 @@ linux-gcp/debug:
         mozconfig-variant: debug
         tooltool-downloads: public
         need-xvfb: true
+    run-on-projects: ['try', 'release']
     fetches:
         toolchain:
             - linux64-binutils
@@ -1357,7 +1390,7 @@ linux-gcp/debug:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux-gcp/opt:
@@ -1387,7 +1420,7 @@ linux-gcp/opt:
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['try', 'release']
     fetches:
         toolchain:
             - linux64-binutils
@@ -1398,7 +1431,7 @@ linux-gcp/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-gcp/debug:
@@ -1439,7 +1472,7 @@ linux64-gcp/debug:
             - linux64-rust-size
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot
 
 linux64-gcp/opt:
@@ -1479,5 +1512,5 @@ linux64-gcp/opt:
             - linux64-sccache
             - linux64-nasm
             - linux64-node
-            - lucetc
+            - linux64-lucetc
             - wasi-sysroot

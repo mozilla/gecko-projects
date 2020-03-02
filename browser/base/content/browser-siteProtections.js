@@ -99,8 +99,8 @@ var Fingerprinting = {
     return this.isBlocking(state) || this.isAllowing(state);
   },
 
-  async updateSubView() {
-    let contentBlockingLog = await gBrowser.selectedBrowser.getContentBlockingLog();
+  updateSubView() {
+    let contentBlockingLog = gBrowser.selectedBrowser.getContentBlockingLog();
     contentBlockingLog = JSON.parse(contentBlockingLog);
 
     let fragment = document.createDocumentFragment();
@@ -229,8 +229,8 @@ var Cryptomining = {
     return this.isBlocking(state) || this.isAllowing(state);
   },
 
-  async updateSubView() {
-    let contentBlockingLog = await gBrowser.selectedBrowser.getContentBlockingLog();
+  updateSubView() {
+    let contentBlockingLog = gBrowser.selectedBrowser.getContentBlockingLog();
     contentBlockingLog = JSON.parse(contentBlockingLog);
 
     let fragment = document.createDocumentFragment();
@@ -426,7 +426,7 @@ var TrackingProtection = {
     let previousURI = gBrowser.currentURI.spec;
     let previousWindow = gBrowser.selectedBrowser.innerWindowID;
 
-    let contentBlockingLog = await gBrowser.selectedBrowser.getContentBlockingLog();
+    let contentBlockingLog = gBrowser.selectedBrowser.getContentBlockingLog();
     contentBlockingLog = JSON.parse(contentBlockingLog);
 
     let fragment = document.createDocumentFragment();
@@ -532,6 +532,7 @@ var ThirdPartyCookies = {
     // of the Preferences UI.
     Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN, // Block all third-party cookies
     Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER, // Block third-party cookies from trackers
+    Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN, // Block trackers and patition third-party trackers
     Ci.nsICookieService.BEHAVIOR_REJECT, // Block all cookies
   ],
 
@@ -645,6 +646,7 @@ var ThirdPartyCookies = {
           label = "contentBlocking.cookies.blockingUnvisited2.label";
           break;
         case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
+        case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN:
           label = "contentBlocking.cookies.blockingTrackers3.label";
           break;
         default:
@@ -681,8 +683,11 @@ var ThirdPartyCookies = {
     }
 
     if (
-      this.behaviorPref == Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER ||
-      this.behaviorPref == Ci.nsICookieService.BEHAVIOR_ACCEPT
+      [
+        Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN,
+        Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
+        Ci.nsICookieService.BEHAVIOR_ACCEPT,
+      ].includes(this.behaviorPref)
     ) {
       return (
         (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_TRACKER) != 0 ||
@@ -698,8 +703,8 @@ var ThirdPartyCookies = {
     return (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED) != 0;
   },
 
-  async updateSubView() {
-    let contentBlockingLog = await gBrowser.selectedBrowser.getContentBlockingLog();
+  updateSubView() {
+    let contentBlockingLog = gBrowser.selectedBrowser.getContentBlockingLog();
     contentBlockingLog = JSON.parse(contentBlockingLog);
 
     let categories = this._processContentBlockingLog(contentBlockingLog);
@@ -761,6 +766,7 @@ var ThirdPartyCookies = {
         this.subViewHeading.hidden = true;
         break;
       case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
+      case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN:
         title = "protections.blocking.cookies.trackers.title";
         break;
       default:
@@ -779,10 +785,7 @@ var ThirdPartyCookies = {
     for (let perm of Services.perms.getAllForPrincipal(
       gBrowser.contentPrincipal
     )) {
-      if (
-        perm.type == "3rdPartyStorage^" + origin ||
-        perm.type.startsWith("3rdPartyStorage^" + origin + "^")
-      ) {
+      if (perm.type == "3rdPartyStorage^" + origin) {
         return perm.capability;
       }
     }
@@ -799,10 +802,7 @@ var ThirdPartyCookies = {
     for (let perm of Services.perms.getAllForPrincipal(
       gBrowser.contentPrincipal
     )) {
-      if (
-        perm.type == "3rdPartyStorage^" + origin ||
-        perm.type.startsWith("3rdPartyStorage^" + origin + "^")
-      ) {
+      if (perm.type == "3rdPartyStorage^" + origin) {
         Services.perms.removePermission(perm);
       }
     }
@@ -1003,7 +1003,11 @@ var SocialTracking = {
       this.PREF_COOKIE_BEHAVIOR,
       false,
       this.updateCategoryItem.bind(this),
-      val => val == Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER
+      val =>
+        [
+          Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
+          Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN,
+        ].includes(val)
     );
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
@@ -1082,8 +1086,8 @@ var SocialTracking = {
     ));
   },
 
-  async updateSubView() {
-    let contentBlockingLog = await gBrowser.selectedBrowser.getContentBlockingLog();
+  updateSubView() {
+    let contentBlockingLog = gBrowser.selectedBrowser.getContentBlockingLog();
     contentBlockingLog = JSON.parse(contentBlockingLog);
 
     let fragment = document.createDocumentFragment();
@@ -1497,9 +1501,9 @@ var gProtectionsHandler = {
     );
   },
 
-  recordClick(object, value = null) {
+  recordClick(object, value = null, source = "protectionspopup") {
     Services.telemetry.recordEvent(
-      "security.ui.protectionspopup",
+      `security.ui.${source}`,
       "click",
       object,
       value
@@ -1678,13 +1682,12 @@ var gProtectionsHandler = {
     this._isStoppedState = !!(
       stateFlags & Ci.nsIWebProgressListener.STATE_STOP
     );
-
-    this.notifyContentBlockingEvent(gBrowser.securityUI.contentBlockingEvent);
+    this.notifyContentBlockingEvent(
+      gBrowser.selectedBrowser.getContentBlockingEvents()
+    );
   },
 
-  onContentBlockingEvent(event, webProgress, isSimulated) {
-    let previousState = gBrowser.securityUI.contentBlockingEvent;
-
+  onContentBlockingEvent(event, webProgress, isSimulated, previousState) {
     // Don't deal with about:, file: etc.
     if (!ContentBlockingAllowList.canHandle(gBrowser.selectedBrowser)) {
       this.iconBox.removeAttribute("animate");

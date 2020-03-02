@@ -16,13 +16,19 @@ add_task(async function() {
 
   info("Open a page that runs in the parent process");
   const { toolbox, ui } = await openStyleEditorForURL(PARENT_PROCESS_URI);
-  is(ui.editors.length, 3, `Three style sheets for ${PARENT_PROCESS_URI}`);
+  await waitUntil(() => ui.editors.length === 3);
+  ok(true, `Three style sheets for ${PARENT_PROCESS_URI}`);
 
   info("Navigate to a page that runs in the child process");
+  const onEditorReady = ui.editors[0].getSourceEditor();
+  const onTargetSwitched = toolbox.once("switched-target");
   await navigateToAndWaitForStyleSheets(CONTENT_PROCESS_URI, ui);
-  is(ui.editors.length, 2, `Two sheets present for ${CONTENT_PROCESS_URI}`);
+  // We also have to wait for the toolbox to complete the target switching
+  // in order to avoid pending requests during test teardown.
+  await onTargetSwitched;
+  await waitUntil(() => ui.editors.length === 2);
+  ok(true, `Two sheets present for ${CONTENT_PROCESS_URI}`);
 
-  const onToolboxDestroyed = gDevTools.once("toolbox-destroyed");
-  toolbox.closeToolbox();
-  await onToolboxDestroyed;
+  info("Wait until the editor is ready");
+  await onEditorReady;
 });

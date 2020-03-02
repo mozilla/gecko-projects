@@ -138,7 +138,7 @@ static JitExecStatus EnterBaseline(JSContext* cx, EnterJitData& data) {
 JitExecStatus jit::EnterBaselineInterpreterAtBranch(JSContext* cx,
                                                     InterpreterFrame* fp,
                                                     jsbytecode* pc) {
-  MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPHEAD);
+  MOZ_ASSERT(JSOp(*pc) == JSOp::LoopHead);
 
   EnterJitData data(cx);
 
@@ -198,7 +198,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   cx->check(script);
   MOZ_ASSERT(!script->hasBaselineScript());
   MOZ_ASSERT(script->canBaselineCompile());
-  MOZ_ASSERT(IsBaselineJitEnabled());
+  MOZ_ASSERT(IsBaselineJitEnabled(cx));
   AutoGeckoProfilerEntry pseudoFrame(
       cx, "Baseline script compilation",
       JS::ProfilingCategoryPair::JS_BaselineCompilation);
@@ -235,7 +235,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     return Method_Skipped;
   }
 
-  if (!IsBaselineJitEnabled()) {
+  if (!IsBaselineJitEnabled(cx)) {
     script->disableBaselineCompile();
     return Method_CantCompile;
   }
@@ -410,7 +410,7 @@ bool jit::BaselineCompileFromBaselineInterpreter(JSContext* cx,
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = frame->interpreterPC();
-  MOZ_ASSERT(pc == script->code() || *pc == JSOP_LOOPHEAD);
+  MOZ_ASSERT(pc == script->code() || JSOp(*pc) == JSOp::LoopHead);
 
   MethodStatus status = CanEnterBaselineJIT(cx, script,
                                             /* osrSourceFrame = */ frame);
@@ -424,7 +424,7 @@ bool jit::BaselineCompileFromBaselineInterpreter(JSContext* cx,
       return true;
 
     case Method_Compiled: {
-      if (*pc == JSOP_LOOPHEAD) {
+      if (JSOp(*pc) == JSOp::LoopHead) {
         MOZ_ASSERT(pc > script->code(),
                    "Prologue vs OSR cases must not be ambiguous");
         BaselineScript* baselineScript = script->baselineScript();
@@ -517,7 +517,7 @@ void BaselineScript::writeBarrierPre(Zone* zone, BaselineScript* script) {
 }
 
 void BaselineScript::Destroy(JSFreeOp* fop, BaselineScript* script) {
-  MOZ_ASSERT(!script->hasPendingIonBuilder());
+  MOZ_ASSERT(!script->hasPendingIonCompileTask());
 
   // This allocation is tracked by JSScript::setBaselineScriptImpl.
   fop->deleteUntracked(script);
@@ -746,25 +746,26 @@ void BaselineScript::toggleDebugTraps(JSScript* script, jsbytecode* pc) {
   }
 }
 
-void BaselineScript::setPendingIonBuilder(JSRuntime* rt, JSScript* script,
-                                          js::jit::IonBuilder* builder) {
+void BaselineScript::setPendingIonCompileTask(JSRuntime* rt, JSScript* script,
+                                              IonCompileTask* task) {
   MOZ_ASSERT(script->baselineScript() == this);
-  MOZ_ASSERT(builder);
-  MOZ_ASSERT(!hasPendingIonBuilder());
+  MOZ_ASSERT(task);
+  MOZ_ASSERT(!hasPendingIonCompileTask());
 
   if (script->isIonCompilingOffThread()) {
     script->jitScript()->clearIsIonCompilingOffThread(script);
   }
 
-  pendingBuilder_ = builder;
+  pendingIonCompileTask_ = task;
   script->updateJitCodeRaw(rt);
 }
 
-void BaselineScript::removePendingIonBuilder(JSRuntime* rt, JSScript* script) {
+void BaselineScript::removePendingIonCompileTask(JSRuntime* rt,
+                                                 JSScript* script) {
   MOZ_ASSERT(script->baselineScript() == this);
-  MOZ_ASSERT(hasPendingIonBuilder());
+  MOZ_ASSERT(hasPendingIonCompileTask());
 
-  pendingBuilder_ = nullptr;
+  pendingIonCompileTask_ = nullptr;
   script->updateJitCodeRaw(rt);
 }
 
@@ -974,8 +975,11 @@ void jit::ToggleBaselineProfiling(JSContext* cx, bool enable) {
   jrt->baselineInterpreter().toggleProfilerInstrumentation(enable);
 
   for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-    for (auto script = zone->cellIter<JSScript>(); !script.done();
-         script.next()) {
+    for (auto base = zone->cellIter<BaseScript>(); !base.done(); base.next()) {
+      if (base->isLazyScript()) {
+        continue;
+      }
+      JSScript* script = static_cast<JSScript*>(base.get());
       if (enable) {
         if (JitScript* jitScript = script->maybeJitScript()) {
           jitScript->ensureProfileString(cx, script);
@@ -993,11 +997,11 @@ void jit::ToggleBaselineProfiling(JSContext* cx, bool enable) {
 #ifdef JS_TRACE_LOGGING
 void jit::ToggleBaselineTraceLoggerScripts(JSRuntime* runtime, bool enable) {
   for (ZonesIter zone(runtime, SkipAtoms); !zone.done(); zone.next()) {
-    for (auto iter = zone->cellIter<JSScript>(); !iter.done(); iter.next()) {
-      JSScript* script = iter;
-      if (gc::IsAboutToBeFinalizedUnbarriered(&script)) {
+    for (auto base = zone->cellIter<BaseScript>(); !base.done(); base.next()) {
+      if (base->isLazyScript()) {
         continue;
       }
+      JSScript* script = static_cast<JSScript*>(base.get());
       if (!script->hasBaselineScript()) {
         continue;
       }
@@ -1008,11 +1012,11 @@ void jit::ToggleBaselineTraceLoggerScripts(JSRuntime* runtime, bool enable) {
 
 void jit::ToggleBaselineTraceLoggerEngine(JSRuntime* runtime, bool enable) {
   for (ZonesIter zone(runtime, SkipAtoms); !zone.done(); zone.next()) {
-    for (auto iter = zone->cellIter<JSScript>(); !iter.done(); iter.next()) {
-      JSScript* script = iter;
-      if (gc::IsAboutToBeFinalizedUnbarriered(&script)) {
+    for (auto base = zone->cellIter<BaseScript>(); !base.done(); base.next()) {
+      if (base->isLazyScript()) {
         continue;
       }
+      JSScript* script = static_cast<JSScript*>(base.get());
       if (!script->hasBaselineScript()) {
         continue;
       }
@@ -1025,7 +1029,6 @@ void jit::ToggleBaselineTraceLoggerEngine(JSRuntime* runtime, bool enable) {
 void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
                                uint32_t interpretOpNoDebugTrapOffset,
                                uint32_t bailoutPrologueOffset,
-                               uint32_t generatorThrowOrReturnCallOffset,
                                uint32_t profilerEnterToggleOffset,
                                uint32_t profilerExitToggleOffset,
                                uint32_t debugTrapHandlerOffset,
@@ -1038,7 +1041,6 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
   interpretOpOffset_ = interpretOpOffset;
   interpretOpNoDebugTrapOffset_ = interpretOpNoDebugTrapOffset;
   bailoutPrologueOffset_ = bailoutPrologueOffset;
-  generatorThrowOrReturnCallOffset_ = generatorThrowOrReturnCallOffset;
   profilerEnterToggleOffset_ = profilerEnterToggleOffset;
   profilerExitToggleOffset_ = profilerExitToggleOffset;
   debugTrapHandlerOffset_ = debugTrapHandlerOffset;

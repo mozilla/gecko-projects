@@ -114,6 +114,7 @@ static void CloseLiveIteratorIon(JSContext* cx,
 
   if (isDestructuring) {
     RootedValue doneValue(cx, si.read());
+    MOZ_RELEASE_ASSERT(!doneValue.isMagic());
     bool done = ToBoolean(doneValue);
     // Do not call IteratorClose if the destructuring iterator is already
     // done.
@@ -253,11 +254,6 @@ static void OnLeaveBaselineFrame(JSContext* cx, const JSJitFrameIter& frame,
     rfe->framePointer = frame.fp() - BaselineFrame::FramePointerOffset;
     rfe->stackPointer = reinterpret_cast<uint8_t*>(baselineFrame);
   }
-}
-
-static inline void ForcedReturn(JSContext* cx, const JSJitFrameIter& frame,
-                                jsbytecode* pc, ResumeFromException* rfe) {
-  OnLeaveBaselineFrame(cx, frame, pc, rfe, true);
 }
 
 static inline void BaselineFrameAndStackPointersFromTryNote(
@@ -404,7 +400,10 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         uint8_t* stackPointer;
         BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer,
                                                  &stackPointer);
+        // Note: if this ever changes, also update the JSTRY_DESTRUCTURING code
+        // in IonBuilder.cpp!
         RootedValue doneValue(cx, *(reinterpret_cast<Value*>(stackPointer)));
+        MOZ_RELEASE_ASSERT(!doneValue.isMagic());
         bool done = ToBoolean(doneValue);
         if (!done) {
           Value iterValue(*(reinterpret_cast<Value*>(stackPointer) + 1));
@@ -474,40 +473,19 @@ static void HandleExceptionBaseline(JSContext* cx, JSJitFrameIter& frame,
     }
   }
 
-  // We may be propagating a forced return from the interrupt
-  // callback, which cannot easily force a return.
-  if (cx->isPropagatingForcedReturn()) {
-    cx->clearPropagatingForcedReturn();
-    ForcedReturn(cx, frame, pc, rfe);
-    return;
-  }
-
   bool hasTryNotes = !script->trynotes().empty();
 
 again:
   if (cx->isExceptionPending()) {
     if (!cx->isClosingGenerator()) {
-      switch (DebugAPI::onExceptionUnwind(cx, frame.baselineFrame())) {
-        case ResumeMode::Terminate:
-          // Uncatchable exception.
-          MOZ_ASSERT(!cx->isExceptionPending());
+      if (!DebugAPI::onExceptionUnwind(cx, frame.baselineFrame())) {
+        if (!cx->isExceptionPending()) {
           goto again;
-
-        case ResumeMode::Continue:
-        case ResumeMode::Throw:
-          MOZ_ASSERT(cx->isExceptionPending());
-          break;
-
-        case ResumeMode::Return:
-          if (hasTryNotes) {
-            CloseLiveIteratorsBaselineForUncatchableException(cx, frame, pc);
-          }
-          ForcedReturn(cx, frame, pc, rfe);
-          return;
-
-        default:
-          MOZ_CRASH("Invalid onExceptionUnwind resume mode");
+        }
       }
+      // Ensure that the debugger hasn't returned 'true' while clearing the
+      // exception state.
+      MOZ_ASSERT(cx->isExceptionPending());
     }
 
     if (hasTryNotes) {
@@ -524,9 +502,16 @@ again:
     }
 
     frameOk = HandleClosingGeneratorReturn(cx, frame.baselineFrame(), frameOk);
-    frameOk = DebugAPI::onLeaveFrame(cx, frame.baselineFrame(), pc, frameOk);
-  } else if (hasTryNotes) {
-    CloseLiveIteratorsBaselineForUncatchableException(cx, frame, pc);
+  } else {
+    if (hasTryNotes) {
+      CloseLiveIteratorsBaselineForUncatchableException(cx, frame, pc);
+    }
+
+    // We may be propagating a forced return from a debugger hook function.
+    if (MOZ_UNLIKELY(cx->isPropagatingForcedReturn())) {
+      cx->clearPropagatingForcedReturn();
+      frameOk = true;
+    }
   }
 
   OnLeaveBaselineFrame(cx, frame, pc, rfe, frameOk);
@@ -566,6 +551,10 @@ void HandleExceptionWasm(JSContext* cx, wasm::WasmFrameIter* iter,
 void HandleException(ResumeFromException* rfe) {
   JSContext* cx = TlsContext.get();
   TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
+
+#ifdef DEBUG
+  cx->runtime()->jitRuntime()->clearDisallowArbitraryCode();
+#endif
 
   auto resetProfilerFrame = mozilla::MakeScopeExit([=] {
     if (!cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
@@ -2026,10 +2015,10 @@ void InlineFrameIterator::findNextFrame() {
     MOZ_ASSERT(IsIonInlinableOp(JSOp(*pc_)));
 
     // Recover the number of actual arguments from the script.
-    if (JSOp(*pc_) != JSOP_FUNAPPLY) {
+    if (JSOp(*pc_) != JSOp::FunApply) {
       numActualArgs_ = GET_ARGC(pc_);
     }
-    if (JSOp(*pc_) == JSOP_FUNCALL) {
+    if (JSOp(*pc_) == JSOp::FunCall) {
       MOZ_ASSERT(GET_ARGC(pc_) > 0);
       numActualArgs_ = GET_ARGC(pc_) - 1;
     } else if (IsGetPropPC(pc_) || IsGetElemPC(pc_)) {
@@ -2044,7 +2033,7 @@ void InlineFrameIterator::findNextFrame() {
     }
 
     // Skip over non-argument slots, as well as |this|.
-    bool skipNewTarget = IsConstructorCallPC(pc_);
+    bool skipNewTarget = IsConstructPC(pc_);
     unsigned skipCount =
         (si_.numAllocations() - 1) - numActualArgs_ - 1 - skipNewTarget;
     for (unsigned j = 0; j < skipCount; j++) {
@@ -2185,10 +2174,12 @@ MachineState MachineState::FromBailout(RegisterDump::GPRArray& regs,
   }
 #elif defined(JS_CODEGEN_ARM64)
   for (unsigned i = 0; i < FloatRegisters::TotalPhys; i++) {
-    machine.setRegisterLocation(FloatRegister(i, FloatRegisters::Single),
-                                &fpregs[i]);
-    machine.setRegisterLocation(FloatRegister(i, FloatRegisters::Double),
-                                &fpregs[i]);
+    machine.setRegisterLocation(
+        FloatRegister(FloatRegisters::Encoding(i), FloatRegisters::Single),
+        &fpregs[i]);
+    machine.setRegisterLocation(
+        FloatRegister(FloatRegisters::Encoding(i), FloatRegisters::Double),
+        &fpregs[i]);
   }
 
 #elif defined(JS_CODEGEN_NONE)
@@ -2212,9 +2203,9 @@ bool InlineFrameIterator::isConstructing() const {
     }
 
     // In the case of a JS frame, look up the pc from the snapshot.
-    MOZ_ASSERT(IsCallOp(parentOp) && !IsSpreadCallOp(parentOp));
+    MOZ_ASSERT(IsInvokeOp(parentOp) && !IsSpreadOp(parentOp));
 
-    return IsConstructorCallOp(parentOp);
+    return IsConstructOp(parentOp);
   }
 
   return frame_->isConstructing();
@@ -2267,7 +2258,7 @@ void InlineFrameIterator::dump() const {
           script()->lineno());
 
   fprintf(stderr, "  script = %p, pc = %p\n", (void*)script(), pc());
-  fprintf(stderr, "  current op: %s\n", CodeName[*pc()]);
+  fprintf(stderr, "  current op: %s\n", CodeName(JSOp(*pc())));
 
   if (!more()) {
     numActualArgs();

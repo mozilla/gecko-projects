@@ -9,7 +9,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/SharedThreadPool.h"
-#include "nsAutoPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "nsITimer.h"
 
 #include "MediaConduitInterface.h"
@@ -68,6 +68,7 @@ class WebrtcVideoDecoder : public VideoDecoder, public webrtc::VideoDecoder {};
  */
 class WebrtcVideoConduit
     : public VideoSessionConduit,
+      public webrtc::RtcpEventObserver,
       public webrtc::Transport,
       public webrtc::VideoEncoderFactory,
       public rtc::VideoSinkInterface<webrtc::VideoFrame>,
@@ -207,8 +208,9 @@ class WebrtcVideoConduit
    */
   void AddOrUpdateSink(rtc::VideoSinkInterface<webrtc::VideoFrame>* sink,
                        const rtc::VideoSinkWants& wants) override;
-  void AddOrUpdateSinkNotLocked(rtc::VideoSinkInterface<webrtc::VideoFrame>* sink,
-                                const rtc::VideoSinkWants& wants);
+  void AddOrUpdateSinkNotLocked(
+      rtc::VideoSinkInterface<webrtc::VideoFrame>* sink,
+      const rtc::VideoSinkWants& wants);
 
   void RemoveSink(rtc::VideoSinkInterface<webrtc::VideoFrame>* sink) override;
   void RemoveSinkNotLocked(rtc::VideoSinkInterface<webrtc::VideoFrame>* sink);
@@ -294,6 +296,12 @@ class WebrtcVideoConduit
     mSendStreamStats.RecordTelemetry();
     mRecvStreamStats.RecordTelemetry();
   }
+
+  void OnRtcpBye() override;
+
+  void OnRtcpTimeout() override;
+
+  void SetRtcpEventObserver(mozilla::RtcpEventObserver* observer) override;
 
  private:
   // Don't allow copying/assigning.
@@ -515,7 +523,7 @@ class WebrtcVideoConduit
   nsTArray<UniquePtr<VideoCodecConfig>> mRecvCodecList;
 
   // Written only on main thread. Guarded by mMutex, except for reads on main.
-  nsAutoPtr<VideoCodecConfig> mCurSendCodecConfig;
+  UniquePtr<VideoCodecConfig> mCurSendCodecConfig;
 
   bool mUpdateResolution = false;
   int mSinkWantsPixelCount = std::numeric_limits<int>::max();
@@ -640,6 +648,9 @@ class WebrtcVideoConduit
 
   // Accessed only on mStsThread
   Maybe<DOMHighResTimeStamp> mLastRtcpReceived;
+
+  // Accessed only on main thread.
+  mozilla::RtcpEventObserver* mRtcpEventObserver = nullptr;
 };
 }  // namespace mozilla
 

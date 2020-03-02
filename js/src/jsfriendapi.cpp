@@ -15,7 +15,6 @@
 
 #include "builtin/BigInt.h"
 #include "builtin/MapObject.h"
-#include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
 #include "gc/GC.h"
 #include "gc/PublicIterators.h"
@@ -33,6 +32,7 @@
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 #include "vm/Printer.h"
+#include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/Realm.h"
 #include "vm/Time.h"
 #include "vm/WrapperObject.h"
@@ -302,6 +302,8 @@ JS_FRIEND_API bool js::GetBuiltinClass(JSContext* cx, HandleObject obj,
     *cls = ESClass::Error;
   } else if (obj->is<BigIntObject>()) {
     *cls = ESClass::BigInt;
+  } else if (obj->is<JSFunction>()) {
+    *cls = ESClass::Function;
   } else {
     *cls = ESClass::Other;
   }
@@ -335,10 +337,10 @@ JS_FRIEND_API bool js::IsSystemRealm(JS::Realm* realm) {
   return realm->isSystem();
 }
 
-JS_FRIEND_API bool js::IsSystemZone(Zone* zone) { return zone->isSystem; }
+JS_FRIEND_API bool js::IsSystemZone(Zone* zone) { return zone->isSystemZone(); }
 
 JS_FRIEND_API bool js::IsAtomsZone(JS::Zone* zone) {
-  return zone->runtimeFromAnyThread()->isAtomsZone(zone);
+  return zone->isAtomsZone();
 }
 
 JS_FRIEND_API bool js::IsFunctionObject(JSObject* obj) {
@@ -567,17 +569,6 @@ JS_FRIEND_API void JS_SetAccumulateTelemetryCallback(
 JS_FRIEND_API void JS_SetSetUseCounterCallback(
     JSContext* cx, JSSetUseCounterCallback callback) {
   cx->runtime()->setUseCounterCallback(cx->runtime(), callback);
-}
-
-JS_FRIEND_API void JS_ReportFirstCompileTime(JS::HandleScript script,
-                                             mozilla::TimeDuration& parse,
-                                             mozilla::TimeDuration& emit) {
-  auto ss = script->scriptSource();
-  if (!ss) {
-    return;
-  }
-  parse = ss->parseTime();
-  emit = ss->emitTime();
 }
 
 JS_FRIEND_API JSObject* JS_CloneObject(JSContext* cx, HandleObject obj,
@@ -1469,10 +1460,6 @@ bool js::AddMozDateTimeFormatConstructor(JSContext* cx, JS::HandleObject intl) {
 }
 
 bool js::AddListFormatConstructor(JSContext* cx, JS::HandleObject intl) {
-  return IntlNotEnabled(cx);
-}
-
-bool js::AddLocaleConstructor(JSContext* cx, JS::HandleObject intl) {
   return IntlNotEnabled(cx);
 }
 

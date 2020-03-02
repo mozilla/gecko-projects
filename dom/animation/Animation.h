@@ -48,7 +48,7 @@ class Document;
 class Animation : public DOMEventTargetHelper,
                   public LinkedListElement<Animation> {
  protected:
-  virtual ~Animation() {}
+  virtual ~Animation() = default;
 
  public:
   explicit Animation(nsIGlobalObject* aGlobal)
@@ -63,7 +63,7 @@ class Animation : public DOMEventTargetHelper,
    * Utility function to get the target (pseudo-)element associated with an
    * animation.
    */
-  Maybe<NonOwningAnimationTarget> GetTargetForAnimation() const;
+  NonOwningAnimationTarget GetTargetForAnimation() const;
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
@@ -94,6 +94,7 @@ class Animation : public DOMEventTargetHelper,
   void SetEffectNoUpdate(AnimationEffect* aEffect);
 
   AnimationTimeline* GetTimeline() const { return mTimeline; }
+  // Animation.timeline setter is supported only on Nightly.
   void SetTimeline(AnimationTimeline* aTimeline);
   void SetTimelineNoUpdate(AnimationTimeline* aTimeline);
 

@@ -40,6 +40,9 @@ with Files("test/historySwipeAnimation/**"):
 with Files("test/keyboard/**"):
     BUG_COMPONENT = ("Firefox", "Keyboard Navigation")
 
+with Files("test/outOfProcess/**"):
+    BUG_COMPONENT = ("Firefox", "General")
+
 with Files("test/pageActions/**"):
     BUG_COMPONENT = ("Firefox", "Toolbars and Customization")
 
@@ -105,6 +108,9 @@ with Files("test/webextensions/**"):
 
 with Files("test/webrtc/**"):
     BUG_COMPONENT = ("Core", "WebRTC")
+
+with Files("test/zoom/**"):
+    BUG_COMPONENT = ("Firefox", "General")
 
 with Files("aboutNetError.xhtml"):
     BUG_COMPONENT = ("Firefox", "Security")

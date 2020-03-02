@@ -6,14 +6,14 @@
 
 // Directly relating to QUIC frames.
 
-use neqo_common::{matches, qdebug, Decoder, Encoder};
-use neqo_crypto::Epoch;
+use neqo_common::{matches, qdebug, qtrace, Decoder, Encoder};
 
-use crate::stream_id::StreamIndex;
+use crate::packet::PacketType;
+use crate::stream_id::{StreamId, StreamIndex};
 use crate::{AppError, TransportError};
 use crate::{ConnectionError, Error, Res};
 
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::convert::TryFrom;
 
 #[allow(clippy::module_name_repetitions)]
@@ -43,6 +43,7 @@ const FRAME_TYPE_PATH_CHALLENGE: FrameType = 0x1a;
 const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
 const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
 const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
+const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
 
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
@@ -58,15 +59,15 @@ pub enum StreamType {
 impl StreamType {
     fn frame_type_bit(self) -> u64 {
         match self {
-            StreamType::BiDi => 0,
-            StreamType::UniDi => 1,
+            Self::BiDi => 0,
+            Self::UniDi => 1,
         }
     }
-    fn from_type_bit(bit: u64) -> StreamType {
+    fn from_type_bit(bit: u64) -> Self {
         if (bit & 0x01) == 0 {
-            StreamType::BiDi
+            Self::BiDi
         } else {
-            StreamType::UniDi
+            Self::UniDi
         }
     }
 }
@@ -80,22 +81,22 @@ pub enum CloseError {
 impl CloseError {
     fn frame_type_bit(self) -> u64 {
         match self {
-            CloseError::Transport(_) => 0,
-            CloseError::Application(_) => 1,
+            Self::Transport(_) => 0,
+            Self::Application(_) => 1,
         }
     }
 
-    fn from_type_bit(bit: u64, code: u64) -> CloseError {
+    fn from_type_bit(bit: u64, code: u64) -> Self {
         if (bit & 0x01) == 0 {
-            CloseError::Transport(code)
+            Self::Transport(code)
         } else {
-            CloseError::Application(code)
+            Self::Application(code)
         }
     }
 
     fn code(&self) -> u64 {
         match self {
-            CloseError::Transport(c) | CloseError::Application(c) => *c,
+            Self::Transport(c) | Self::Application(c) => *c,
         }
     }
 }
@@ -103,8 +104,8 @@ impl CloseError {
 impl From<ConnectionError> for CloseError {
     fn from(err: ConnectionError) -> Self {
         match err {
-            ConnectionError::Transport(c) => CloseError::Transport(c.code()),
-            ConnectionError::Application(c) => CloseError::Application(c),
+            ConnectionError::Transport(c) => Self::Transport(c.code()),
+            ConnectionError::Application(c) => Self::Application(c),
         }
     }
 }
@@ -126,12 +127,12 @@ pub enum Frame {
         ack_ranges: Vec<AckRange>,
     },
     ResetStream {
-        stream_id: u64,
+        stream_id: StreamId,
         application_error_code: AppError,
         final_size: u64,
     },
     StopSending {
-        stream_id: u64,
+        stream_id: StreamId,
         application_error_code: AppError,
     },
     Crypto {
@@ -143,7 +144,7 @@ pub enum Frame {
     },
     Stream {
         fin: bool,
-        stream_id: u64,
+        stream_id: StreamId,
         offset: u64,
         data: Vec<u8>,
         fill: bool,
@@ -152,7 +153,7 @@ pub enum Frame {
         maximum_data: u64,
     },
     MaxStreamData {
-        stream_id: u64,
+        stream_id: StreamId,
         maximum_stream_data: u64,
     },
     MaxStreams {
@@ -163,7 +164,7 @@ pub enum Frame {
         data_limit: u64,
     },
     StreamDataBlocked {
-        stream_id: u64,
+        stream_id: StreamId,
         stream_data_limit: u64,
     },
     StreamsBlocked {
@@ -190,19 +191,20 @@ pub enum Frame {
         frame_type: u64,
         reason_phrase: Vec<u8>,
     },
+    HandshakeDone,
 }
 
 impl Frame {
     pub fn get_type(&self) -> FrameType {
         match self {
-            Frame::Padding => FRAME_TYPE_PADDING,
-            Frame::Ping => FRAME_TYPE_PING,
-            Frame::Ack { .. } => FRAME_TYPE_ACK, // We don't do ACK ECN.
-            Frame::ResetStream { .. } => FRAME_TYPE_RST_STREAM,
-            Frame::StopSending { .. } => FRAME_TYPE_STOP_SENDING,
-            Frame::Crypto { .. } => FRAME_TYPE_CRYPTO,
-            Frame::NewToken { .. } => FRAME_TYPE_NEW_TOKEN,
-            Frame::Stream {
+            Self::Padding => FRAME_TYPE_PADDING,
+            Self::Ping => FRAME_TYPE_PING,
+            Self::Ack { .. } => FRAME_TYPE_ACK, // We don't do ACK ECN.
+            Self::ResetStream { .. } => FRAME_TYPE_RST_STREAM,
+            Self::StopSending { .. } => FRAME_TYPE_STOP_SENDING,
+            Self::Crypto { .. } => FRAME_TYPE_CRYPTO,
+            Self::NewToken { .. } => FRAME_TYPE_NEW_TOKEN,
+            Self::Stream {
                 fin, offset, fill, ..
             } => {
                 let mut t = FRAME_TYPE_STREAM;
@@ -217,28 +219,29 @@ impl Frame {
                 }
                 t
             }
-            Frame::MaxData { .. } => FRAME_TYPE_MAX_DATA,
-            Frame::MaxStreamData { .. } => FRAME_TYPE_MAX_STREAM_DATA,
-            Frame::MaxStreams { stream_type, .. } => {
+            Self::MaxData { .. } => FRAME_TYPE_MAX_DATA,
+            Self::MaxStreamData { .. } => FRAME_TYPE_MAX_STREAM_DATA,
+            Self::MaxStreams { stream_type, .. } => {
                 FRAME_TYPE_MAX_STREAMS_BIDI + stream_type.frame_type_bit()
             }
-            Frame::DataBlocked { .. } => FRAME_TYPE_DATA_BLOCKED,
-            Frame::StreamDataBlocked { .. } => FRAME_TYPE_STREAM_DATA_BLOCKED,
-            Frame::StreamsBlocked { stream_type, .. } => {
+            Self::DataBlocked { .. } => FRAME_TYPE_DATA_BLOCKED,
+            Self::StreamDataBlocked { .. } => FRAME_TYPE_STREAM_DATA_BLOCKED,
+            Self::StreamsBlocked { stream_type, .. } => {
                 FRAME_TYPE_STREAMS_BLOCKED_BIDI + stream_type.frame_type_bit()
             }
-            Frame::NewConnectionId { .. } => FRAME_TYPE_NEW_CONNECTION_ID,
-            Frame::RetireConnectionId { .. } => FRAME_TYPE_RETIRE_CONNECTION_ID,
-            Frame::PathChallenge { .. } => FRAME_TYPE_PATH_CHALLENGE,
-            Frame::PathResponse { .. } => FRAME_TYPE_PATH_RESPONSE,
-            Frame::ConnectionClose { error_code, .. } => {
+            Self::NewConnectionId { .. } => FRAME_TYPE_NEW_CONNECTION_ID,
+            Self::RetireConnectionId { .. } => FRAME_TYPE_RETIRE_CONNECTION_ID,
+            Self::PathChallenge { .. } => FRAME_TYPE_PATH_CHALLENGE,
+            Self::PathResponse { .. } => FRAME_TYPE_PATH_RESPONSE,
+            Self::ConnectionClose { error_code, .. } => {
                 FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT + error_code.frame_type_bit()
             }
+            Self::HandshakeDone => FRAME_TYPE_HANDSHAKE_DONE,
         }
     }
 
     /// Create a CRYPTO frame that fits the available space and its length.
-    pub fn new_crypto(offset: u64, data: &[u8], space: usize) -> (Frame, usize) {
+    pub fn new_crypto(offset: u64, data: &[u8], space: usize) -> (Self, usize) {
         // Subtract the frame type and offset from available space.
         let mut remaining = space - 1 - Encoder::varint_len(offset);
         // Then subtract space for the length field.
@@ -246,7 +249,7 @@ impl Frame {
         remaining -= Encoder::varint_len(u64::try_from(data_len).unwrap());
         remaining = min(data.len(), remaining);
         (
-            Frame::Crypto {
+            Self::Crypto {
                 offset,
                 data: data[..remaining].to_vec(),
             },
@@ -262,49 +265,70 @@ impl Frame {
         data: &[u8],
         fin: bool,
         space: usize,
-    ) -> (Frame, usize) {
-        let mut remaining = space - 1 - Encoder::varint_len(stream_id);
+    ) -> Option<(Self, usize)> {
+        let mut overhead = 1 + Encoder::varint_len(stream_id);
         if offset > 0 {
-            remaining -= Encoder::varint_len(offset);
+            overhead += Encoder::varint_len(offset);
         }
-        let (fin, fill) = if data.len() > remaining {
+
+        let (fin, fill) = match (data.len() + overhead).cmp(&space) {
             // More data than fits, fill the packet and negate |fin|.
-            (false, true)
-        } else if data.len() == remaining {
+            Ordering::Greater => (false, true),
             // Exact fit, fill the packet, keep |fin|.
-            (fin, true)
-        } else {
+            Ordering::Equal => (fin, true),
             // Too small, so include a length.
-            let data_len = min(remaining - 1, data.len());
-            remaining -= Encoder::varint_len(u64::try_from(data_len).unwrap());
-            remaining = min(data.len(), remaining);
-            // In case the added length causes this to spill over, check |fin| again.
-            (fin && remaining == data.len(), false)
+            Ordering::Less => {
+                let data_len = min(space.saturating_sub(overhead + 1), data.len());
+                overhead += Encoder::varint_len(u64::try_from(data_len).unwrap());
+
+                // If all data isn't going to make it in the frame, don't keep fin.
+                let keep_fin = data.len() + overhead <= space;
+                (fin && keep_fin, false)
+            }
         };
+
+        if overhead > space {
+            qdebug!(
+                "Frame::new_stream -> None; ovr {} > space {}",
+                overhead,
+                space
+            );
+            return None;
+        }
+
+        let data_len = min(data.len(), space - overhead);
+        if data_len == 0 && !fin {
+            qdebug!("Frame::new_stream -> None; no data, no fin");
+            return None;
+        }
+
         qdebug!(
-            "Frame::new_stream fill {} fin {} data {}",
+            "Frame::new_stream fill {} fin {} data {} space {} ovr {}",
             fill,
             fin,
-            remaining
+            data_len,
+            space,
+            overhead
         );
-        (
-            Frame::Stream {
-                stream_id,
+
+        Some((
+            Self::Stream {
+                stream_id: stream_id.into(),
                 offset,
-                data: data[..remaining].to_vec(),
+                data: data[..data_len].to_vec(),
                 fin,
                 fill,
             },
-            remaining,
-        )
+            data_len,
+        ))
     }
 
     pub fn marshal(&self, enc: &mut Encoder) {
         enc.encode_varint(self.get_type());
 
         match self {
-            Frame::Padding | Frame::Ping => (),
-            Frame::Ack {
+            Self::Padding | Self::Ping => (),
+            Self::Ack {
                 largest_acknowledged,
                 ack_delay,
                 first_ack_range,
@@ -319,37 +343,37 @@ impl Frame {
                     enc.encode_varint(r.range);
                 }
             }
-            Frame::ResetStream {
+            Self::ResetStream {
                 stream_id,
                 application_error_code,
                 final_size,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*application_error_code);
                 enc.encode_varint(*final_size);
             }
-            Frame::StopSending {
+            Self::StopSending {
                 stream_id,
                 application_error_code,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*application_error_code);
             }
-            Frame::Crypto { offset, data } => {
+            Self::Crypto { offset, data } => {
                 enc.encode_varint(*offset);
                 enc.encode_vvec(&data);
             }
-            Frame::NewToken { token } => {
+            Self::NewToken { token } => {
                 enc.encode_vvec(token);
             }
-            Frame::Stream {
+            Self::Stream {
                 stream_id,
                 offset,
                 data,
                 fill,
                 ..
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 if *offset > 0 {
                     enc.encode_varint(*offset);
                 }
@@ -359,35 +383,35 @@ impl Frame {
                     enc.encode_vvec(&data);
                 }
             }
-            Frame::MaxData { maximum_data } => {
+            Self::MaxData { maximum_data } => {
                 enc.encode_varint(*maximum_data);
             }
-            Frame::MaxStreamData {
+            Self::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*maximum_stream_data);
             }
-            Frame::MaxStreams {
+            Self::MaxStreams {
                 maximum_streams, ..
             } => {
                 enc.encode_varint(maximum_streams.as_u64());
             }
-            Frame::DataBlocked { data_limit } => {
+            Self::DataBlocked { data_limit } => {
                 enc.encode_varint(*data_limit);
             }
-            Frame::StreamDataBlocked {
+            Self::StreamDataBlocked {
                 stream_id,
                 stream_data_limit,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*stream_data_limit);
             }
-            Frame::StreamsBlocked { stream_limit, .. } => {
+            Self::StreamsBlocked { stream_limit, .. } => {
                 enc.encode_varint(stream_limit.as_u64());
             }
-            Frame::NewConnectionId {
+            Self::NewConnectionId {
                 sequence_number,
                 retire_prior,
                 connection_id,
@@ -399,16 +423,16 @@ impl Frame {
                 enc.encode(connection_id);
                 enc.encode(stateless_reset_token);
             }
-            Frame::RetireConnectionId { sequence_number } => {
+            Self::RetireConnectionId { sequence_number } => {
                 enc.encode_varint(*sequence_number);
             }
-            Frame::PathChallenge { data } => {
+            Self::PathChallenge { data } => {
                 enc.encode(data);
             }
-            Frame::PathResponse { data } => {
+            Self::PathResponse { data } => {
                 enc.encode(data);
             }
-            Frame::ConnectionClose {
+            Self::ConnectionClose {
                 error_code,
                 frame_type,
                 reason_phrase,
@@ -417,11 +441,12 @@ impl Frame {
                 enc.encode_varint(*frame_type);
                 enc.encode_vvec(reason_phrase);
             }
+            Self::HandshakeDone => (),
         }
     }
 
     pub fn ack_eliciting(&self) -> bool {
-        !matches!(self, Frame::Ack { .. } | Frame::Padding | Frame::ConnectionClose { .. })
+        !matches!(self, Self::Ack { .. } | Self::Padding | Self::ConnectionClose { .. })
     }
 
     /// Converts AckRanges as encoded in a ACK frame (see -transport
@@ -469,12 +494,12 @@ impl Frame {
 
     pub fn dump(&self) -> Option<String> {
         match self {
-            Frame::Crypto { offset, data } => Some(format!(
+            Self::Crypto { offset, data } => Some(format!(
                 "Crypto {{ offset: {}, len: {} }}",
                 offset,
                 data.len()
             )),
-            Frame::Stream {
+            Self::Stream {
                 stream_id,
                 offset,
                 fill,
@@ -482,193 +507,190 @@ impl Frame {
                 fin,
             } => Some(format!(
                 "Stream {{ stream_id: {}, offset: {}, len: {}{} fin: {} }}",
-                stream_id,
+                stream_id.as_u64(),
                 offset,
                 if *fill { ">>" } else { "" },
                 data.len(),
                 fin,
             )),
-            Frame::Padding => None,
+            Self::Padding => None,
             _ => Some(format!("{:?}", self)),
         }
     }
 
-    pub fn is_allowed(&self, epoch: Epoch) -> bool {
-        qdebug!("is_allowed {:?} {}", self, epoch);
-        if matches!(self, Frame::Padding | Frame::Ping) {
+    pub fn is_allowed(&self, pt: PacketType) -> bool {
+        if matches!(self, Self::Padding | Self::Ping) {
             true
-        } else if matches!(self, Frame::Crypto {..} | Frame::Ack {..} | Frame::ConnectionClose { error_code: CloseError::Transport(_), .. })
+        } else if matches!(self, Self::Crypto {..} | Self::Ack {..} | Self::ConnectionClose { error_code: CloseError::Transport(_), .. })
         {
-            epoch != 1
-        } else if matches!(self, Frame::NewToken {..} | Frame::ConnectionClose {..}) {
-            epoch >= 3
+            pt != PacketType::ZeroRtt
+        } else if matches!(self, Self::NewToken {..} | Self::ConnectionClose {..}) {
+            pt == PacketType::Short
         } else {
-            epoch == 1 || epoch >= 3 // Application data
+            pt == PacketType::ZeroRtt || pt == PacketType::Short
         }
     }
-}
 
-#[allow(clippy::module_name_repetitions)]
-pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
-    macro_rules! d {
-        ($d:expr) => {
-            match $d {
-                Some(v) => v,
-                _ => return Err(Error::NoMoreData),
+    pub fn decode(dec: &mut Decoder) -> Res<Self> {
+        macro_rules! d {
+            ($d:expr) => {
+                match $d {
+                    Some(v) => v,
+                    _ => return Err(Error::NoMoreData),
+                }
+            };
+        }
+        macro_rules! dv {
+            ($d:expr) => {
+                d!($d.decode_varint())
+            };
+        }
+
+        // TODO(ekr@rtfm.com): check for minimal encoding
+        let t = d!(dec.decode_varint());
+        match t {
+            FRAME_TYPE_PADDING => Ok(Self::Padding),
+            FRAME_TYPE_PING => Ok(Self::Ping),
+            FRAME_TYPE_RST_STREAM => Ok(Self::ResetStream {
+                stream_id: dv!(dec).into(),
+                application_error_code: d!(dec.decode_varint()),
+                final_size: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NoMoreData),
+                },
+            }),
+            FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
+                let la = dv!(dec);
+                let ad = dv!(dec);
+                let nr = dv!(dec);
+                let fa = dv!(dec);
+                let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
+                for _ in 0..nr {
+                    let ar = AckRange {
+                        gap: dv!(dec),
+                        range: dv!(dec),
+                    };
+                    arr.push(ar);
+                }
+
+                // Now check for the values for ACK_ECN.
+                if t == FRAME_TYPE_ACK_ECN {
+                    dv!(dec);
+                    dv!(dec);
+                    dv!(dec);
+                }
+
+                Ok(Self::Ack {
+                    largest_acknowledged: la,
+                    ack_delay: ad,
+                    first_ack_range: fa,
+                    ack_ranges: arr,
+                })
             }
-        };
-    }
-    macro_rules! dv {
-        ($d:expr) => {
-            d!($d.decode_varint())
-        };
-    }
-
-    // TODO(ekr@rtfm.com): check for minimal encoding
-    let t = d!(dec.decode_varint());
-    qdebug!("Frame type byte={:0x}", t);
-    match t {
-        FRAME_TYPE_PADDING => Ok(Frame::Padding),
-        FRAME_TYPE_PING => Ok(Frame::Ping),
-        FRAME_TYPE_RST_STREAM => Ok(Frame::ResetStream {
-            stream_id: dv!(dec),
-            application_error_code: d!(dec.decode_varint()),
-            final_size: match dec.decode_varint() {
-                Some(v) => v,
-                _ => return Err(Error::NoMoreData),
-            },
-        }),
-        FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
-            let la = dv!(dec);
-            let ad = dv!(dec);
-            let nr = dv!(dec);
-            let fa = dv!(dec);
-            let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
-            for _ in 0..nr {
-                let ar = AckRange {
-                    gap: dv!(dec),
-                    range: dv!(dec),
+            FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
+                stream_id: dv!(dec).into(),
+                application_error_code: d!(dec.decode_varint()),
+            }),
+            FRAME_TYPE_CRYPTO => {
+                let o = dv!(dec);
+                Ok(Self::Crypto {
+                    offset: o,
+                    data: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
+                })
+            }
+            FRAME_TYPE_NEW_TOKEN => {
+                Ok(Self::NewToken {
+                    token: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
+                })
+            }
+            FRAME_TYPE_STREAM..=FRAME_TYPE_STREAM_MAX => {
+                let s = dv!(dec);
+                let o = if t & STREAM_FRAME_BIT_OFF == 0 {
+                    0
+                } else {
+                    dv!(dec)
                 };
-                arr.push(ar);
+                let fill = (t & STREAM_FRAME_BIT_LEN) == 0;
+                let data = if fill {
+                    qtrace!("STREAM frame, extends to the end of the packet");
+                    dec.decode_remainder()
+                } else {
+                    qtrace!("STREAM frame, with length");
+                    d!(dec.decode_vvec())
+                };
+                Ok(Self::Stream {
+                    fin: (t & STREAM_FRAME_BIT_FIN) != 0,
+                    stream_id: s.into(),
+                    offset: o,
+                    data: data.to_vec(), // TODO(mt) unnecessary copy.
+                    fill,
+                })
             }
-
-            // Now check for the values for ACK_ECN.
-            if t == FRAME_TYPE_ACK_ECN {
-                dv!(dec);
-                dv!(dec);
-                dv!(dec);
-            }
-
-            Ok(Frame::Ack {
-                largest_acknowledged: la,
-                ack_delay: ad,
-                first_ack_range: fa,
-                ack_ranges: arr,
-            })
-        }
-        FRAME_TYPE_STOP_SENDING => Ok(Frame::StopSending {
-            stream_id: dv!(dec),
-            application_error_code: d!(dec.decode_varint()),
-        }),
-        FRAME_TYPE_CRYPTO => {
-            let o = dv!(dec);
-            Ok(Frame::Crypto {
-                offset: o,
-                data: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
-            })
-        }
-        FRAME_TYPE_NEW_TOKEN => {
-            Ok(Frame::NewToken {
-                token: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
-            })
-        }
-        FRAME_TYPE_STREAM..=FRAME_TYPE_STREAM_MAX => {
-            let s = dv!(dec);
-            let o = if t & STREAM_FRAME_BIT_OFF == 0 {
-                0
-            } else {
-                dv!(dec)
-            };
-            qdebug!("STREAM {}", t);
-            let fill = (t & STREAM_FRAME_BIT_LEN) == 0;
-            let data = if fill {
-                qdebug!("STREAM frame extends to the end of the packet");
-                dec.decode_remainder()
-            } else {
-                qdebug!("STREAM frame has a length");
-                d!(dec.decode_vvec())
-            };
-            Ok(Frame::Stream {
-                fin: (t & STREAM_FRAME_BIT_FIN) != 0,
-                stream_id: s,
-                offset: o,
-                data: data.to_vec(), // TODO(mt) unnecessary copy.
-                fill,
-            })
-        }
-        FRAME_TYPE_MAX_DATA => Ok(Frame::MaxData {
-            maximum_data: dv!(dec),
-        }),
-        FRAME_TYPE_MAX_STREAM_DATA => Ok(Frame::MaxStreamData {
-            stream_id: dv!(dec),
-            maximum_stream_data: dv!(dec),
-        }),
-        FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Frame::MaxStreams {
-            stream_type: StreamType::from_type_bit(t),
-            maximum_streams: StreamIndex::new(dv!(dec)),
-        }),
-
-        FRAME_TYPE_DATA_BLOCKED => Ok(Frame::DataBlocked {
-            data_limit: dv!(dec),
-        }),
-        FRAME_TYPE_STREAM_DATA_BLOCKED => Ok(Frame::StreamDataBlocked {
-            stream_id: dv!(dec),
-            stream_data_limit: dv!(dec),
-        }),
-        FRAME_TYPE_STREAMS_BLOCKED_BIDI | FRAME_TYPE_STREAMS_BLOCKED_UNIDI => {
-            Ok(Frame::StreamsBlocked {
+            FRAME_TYPE_MAX_DATA => Ok(Self::MaxData {
+                maximum_data: dv!(dec),
+            }),
+            FRAME_TYPE_MAX_STREAM_DATA => Ok(Self::MaxStreamData {
+                stream_id: dv!(dec).into(),
+                maximum_stream_data: dv!(dec),
+            }),
+            FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Self::MaxStreams {
                 stream_type: StreamType::from_type_bit(t),
-                stream_limit: StreamIndex::new(dv!(dec)),
-            })
-        }
-        FRAME_TYPE_NEW_CONNECTION_ID => {
-            let s = dv!(dec);
-            let retire_prior = dv!(dec);
-            let cid = d!(dec.decode_vec(1)).to_vec(); // TODO(mt) unnecessary copy
-            let srt = d!(dec.decode(16));
-            let mut srtv: [u8; 16] = [0; 16];
-            srtv.copy_from_slice(&srt);
+                maximum_streams: StreamIndex::new(dv!(dec)),
+            }),
 
-            Ok(Frame::NewConnectionId {
-                sequence_number: s,
-                retire_prior,
-                connection_id: cid,
-                stateless_reset_token: srtv,
-            })
+            FRAME_TYPE_DATA_BLOCKED => Ok(Self::DataBlocked {
+                data_limit: dv!(dec),
+            }),
+            FRAME_TYPE_STREAM_DATA_BLOCKED => Ok(Self::StreamDataBlocked {
+                stream_id: dv!(dec).into(),
+                stream_data_limit: dv!(dec),
+            }),
+            FRAME_TYPE_STREAMS_BLOCKED_BIDI | FRAME_TYPE_STREAMS_BLOCKED_UNIDI => {
+                Ok(Self::StreamsBlocked {
+                    stream_type: StreamType::from_type_bit(t),
+                    stream_limit: StreamIndex::new(dv!(dec)),
+                })
+            }
+            FRAME_TYPE_NEW_CONNECTION_ID => {
+                let s = dv!(dec);
+                let retire_prior = dv!(dec);
+                let cid = d!(dec.decode_vec(1)).to_vec(); // TODO(mt) unnecessary copy
+                let srt = d!(dec.decode(16));
+                let mut srtv: [u8; 16] = [0; 16];
+                srtv.copy_from_slice(&srt);
+
+                Ok(Self::NewConnectionId {
+                    sequence_number: s,
+                    retire_prior,
+                    connection_id: cid,
+                    stateless_reset_token: srtv,
+                })
+            }
+            FRAME_TYPE_RETIRE_CONNECTION_ID => Ok(Self::RetireConnectionId {
+                sequence_number: dv!(dec),
+            }),
+            FRAME_TYPE_PATH_CHALLENGE => {
+                let data = d!(dec.decode(8));
+                let mut datav: [u8; 8] = [0; 8];
+                datav.copy_from_slice(&data);
+                Ok(Self::PathChallenge { data: datav })
+            }
+            FRAME_TYPE_PATH_RESPONSE => {
+                let data = d!(dec.decode(8));
+                let mut datav: [u8; 8] = [0; 8];
+                datav.copy_from_slice(&data);
+                Ok(Self::PathResponse { data: datav })
+            }
+            FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT | FRAME_TYPE_CONNECTION_CLOSE_APPLICATION => {
+                Ok(Self::ConnectionClose {
+                    error_code: CloseError::from_type_bit(t, d!(dec.decode_varint())),
+                    frame_type: dv!(dec),
+                    reason_phrase: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
+                })
+            }
+            FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
+            _ => Err(Error::UnknownFrameType),
         }
-        FRAME_TYPE_RETIRE_CONNECTION_ID => Ok(Frame::RetireConnectionId {
-            sequence_number: dv!(dec),
-        }),
-        FRAME_TYPE_PATH_CHALLENGE => {
-            let data = d!(dec.decode(8));
-            let mut datav: [u8; 8] = [0; 8];
-            datav.copy_from_slice(&data);
-            Ok(Frame::PathChallenge { data: datav })
-        }
-        FRAME_TYPE_PATH_RESPONSE => {
-            let data = d!(dec.decode(8));
-            let mut datav: [u8; 8] = [0; 8];
-            datav.copy_from_slice(&data);
-            Ok(Frame::PathResponse { data: datav })
-        }
-        FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT | FRAME_TYPE_CONNECTION_CLOSE_APPLICATION => {
-            Ok(Frame::ConnectionClose {
-                error_code: CloseError::from_type_bit(t, d!(dec.decode_varint())),
-                frame_type: dv!(dec),
-                reason_phrase: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
-            })
-        }
-        _ => Err(Error::UnknownFrameType),
     }
 }
 
@@ -689,7 +711,7 @@ mod tests {
         f.marshal(&mut d);
         assert_eq!(d, Encoder::from_hex(s));
 
-        let f2 = decode_frame(&mut d.as_decoder()).unwrap();
+        let f2 = Frame::decode(&mut d.as_decoder()).unwrap();
         assert_eq!(*f, f2);
     }
 
@@ -721,18 +743,18 @@ mod tests {
         // Try to parse ACK_ECN without ECN values
         let enc = Encoder::from_hex("035234523502523601020304");
         let mut dec = enc.as_decoder();
-        assert_eq!(decode_frame(&mut dec).unwrap_err(), Error::NoMoreData);
+        assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
 
         // Try to parse ACK_ECN without ECN values
         let enc = Encoder::from_hex("035234523502523601020304010203");
         let mut dec = enc.as_decoder();
-        assert_eq!(decode_frame(&mut dec).unwrap(), f);
+        assert_eq!(Frame::decode(&mut dec).unwrap(), f);
     }
 
     #[test]
     fn test_reset_stream() {
         let f = Frame::ResetStream {
-            stream_id: 0x1234,
+            stream_id: 0x1234.into(),
             application_error_code: 0x77,
             final_size: 0x3456,
         };
@@ -743,7 +765,7 @@ mod tests {
     #[test]
     fn test_stop_sending() {
         let f = Frame::StopSending {
-            stream_id: 63,
+            stream_id: 63.into(),
             application_error_code: 0x77,
         };
 
@@ -774,7 +796,7 @@ mod tests {
         // First, just set the length bit.
         let f = Frame::Stream {
             fin: false,
-            stream_id: 5,
+            stream_id: 5.into(),
             offset: 0,
             data: vec![1, 2, 3],
             fill: false,
@@ -785,7 +807,7 @@ mod tests {
         // Now with offset != 0 and FIN
         let f = Frame::Stream {
             fin: true,
-            stream_id: 5,
+            stream_id: 5.into(),
             offset: 1,
             data: vec![1, 2, 3],
             fill: false,
@@ -795,7 +817,7 @@ mod tests {
         // Now to fill the packet.
         let f = Frame::Stream {
             fin: true,
-            stream_id: 5,
+            stream_id: 5.into(),
             offset: 0,
             data: vec![1, 2, 3],
             fill: true,
@@ -815,7 +837,7 @@ mod tests {
     #[test]
     fn test_max_stream_data() {
         let f = Frame::MaxStreamData {
-            stream_id: 5,
+            stream_id: 5.into(),
             maximum_stream_data: 0x1234,
         };
 
@@ -849,7 +871,7 @@ mod tests {
     #[test]
     fn test_stream_data_blocked() {
         let f = Frame::StreamDataBlocked {
-            stream_id: 5,
+            stream_id: 5.into(),
             stream_data_limit: 0x1234,
         };
 
@@ -970,7 +992,7 @@ mod tests {
         ack_frame.marshal(&mut enc);
         println!("Encoded ACK={}", hex(&enc[..]));
 
-        let f = decode_frame(&mut enc.as_decoder()).unwrap();
+        let f = Frame::decode(&mut enc.as_decoder()).unwrap();
         if let Frame::Ack {
             largest_acknowledged,
             ack_delay,
@@ -992,5 +1014,146 @@ mod tests {
         let res = Frame::decode_ack_frame(7, 2, vec![AckRange { gap: 0, range: 3 }]);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), vec![(7, 5), (3, 0)]);
+    }
+
+    #[test]
+    fn new_stream_empty() {
+        // Stream frames with empty data and no fin never work.
+        assert!(Frame::new_stream(0, 10, &[], false, 2).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 4).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 5).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 100).is_none());
+
+        // Empty data with fin is only a problem if there is no space.
+        assert!(Frame::new_stream(0, 0, &[], true, 1).is_none());
+        assert!(Frame::new_stream(0, 0, &[], true, 2).is_some());
+        assert!(Frame::new_stream(0, 10, &[], true, 2).is_none());
+        assert!(Frame::new_stream(0, 10, &[], true, 3).is_some());
+        assert!(Frame::new_stream(0, 10, &[], true, 4).is_some());
+        assert!(Frame::new_stream(0, 10, &[], true, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[], true, 100).is_some());
+    }
+
+    #[test]
+    fn new_stream_minimum() {
+        // Add minimum data
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 4).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 4).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 100).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 100).is_some());
+    }
+
+    #[test]
+    fn new_stream_more() {
+        // Try more data
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 4).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 4).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 100).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 100).is_some());
+
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 1000).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 1000).is_some());
+    }
+
+    #[test]
+    fn new_stream_big_id() {
+        // A value that encodes to the largest varint.
+        const BIG: u64 = 1 << 30;
+
+        assert!(Frame::new_stream(BIG, BIG, &[], false, 16).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], true, 16).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], false, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], true, 17).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[], false, 18).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], true, 18).is_some());
+
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 18).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 18).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 19).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 19).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 100).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 100).is_some());
+    }
+
+    #[test]
+    fn new_stream_16384() {
+        // 16383/16384 is an odd boundary in STREAM frame construction.
+        // That is the boundary where a length goes from 2 bytes to 4 bytes.
+        // If the data fits in the available space, then it is simple:
+        let r = Frame::new_stream(0, 0, &[0x43; 16384], true, 16386);
+        let (f, used) = r.expect("Fit frame");
+        assert_eq!(used, 16384);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 16384);
+            assert!(fin);
+            assert!(fill);
+        } else {
+            panic!("Wrong frame type");
+        }
+
+        // However, if there is one extra byte of space, we will try to add a length.
+        // That length will then make the frame to be too large and the data will be
+        // truncated.  The frame could carry one more byte of data, but it's a corner
+        // case we don't want to address as it should be rare (if not impossible).
+        let r = Frame::new_stream(0, 0, &[0x43; 16384], true, 16387);
+        let (f, used) = r.expect("a frame");
+        assert_eq!(used, 16381);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 16381);
+            assert!(!fin);
+            assert!(!fill);
+        } else {
+            panic!("Wrong frame type");
+        }
+    }
+
+    #[test]
+    fn new_stream_64() {
+        // Unlike 16383/16384, the boundary at 63/64 is easy because the difference
+        // is just one byte.  We lose just the last byte when there is more space.
+        let r = Frame::new_stream(0, 0, &[0x43; 64], true, 66);
+        let (f, used) = r.expect("Fit frame");
+        assert_eq!(used, 64);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 64);
+            assert!(fin);
+            assert!(fill);
+        } else {
+            panic!("Wrong frame type");
+        }
+
+        let r = Frame::new_stream(0, 0, &[0x43; 64], true, 67);
+        let (f, used) = r.expect("a frame");
+        assert_eq!(used, 63);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 63);
+            assert!(!fin);
+            assert!(!fill);
+        } else {
+            panic!("Wrong frame type");
+        }
     }
 }

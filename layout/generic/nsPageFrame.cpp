@@ -96,7 +96,7 @@ void nsPageFrame::Reflow(nsPresContext* aPresContext,
     // If a margin is 'auto', use the margin from the print settings for that
     // side.
     const auto& marginStyle = kidReflowInput.mStyleMargin->mMargin;
-    NS_FOR_CSS_SIDES(side) {
+    for (const auto side : mozilla::AllPhysicalSides()) {
       if (marginStyle.Get(side).IsAuto()) {
         mPageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       } else {
@@ -117,7 +117,7 @@ void nsPageFrame::Reflow(nsPresContext* aPresContext,
     // back to the default.
     if (maxWidth < onePixelInTwips ||
         (maxHeight != NS_UNCONSTRAINEDSIZE && maxHeight < onePixelInTwips)) {
-      NS_FOR_CSS_SIDES(side) {
+      for (const auto side : mozilla::AllPhysicalSides()) {
         mPageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       }
       maxWidth = maxSize.width - mPageContentMargin.LeftRight() / scale;
@@ -447,9 +447,7 @@ class nsDisplayHeaderFooter final : public nsPaintedDisplayItem {
       : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayHeaderFooter);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayHeaderFooter() { MOZ_COUNT_DTOR(nsDisplayHeaderFooter); }
-#endif
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayHeaderFooter)
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      gfxContext* aCtx) override {

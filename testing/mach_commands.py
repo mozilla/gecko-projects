@@ -102,7 +102,7 @@ def create_parser_addtest():
     import addtest
     parser = argparse.ArgumentParser()
     parser.add_argument('--suite',
-                        choices=sorted(ADD_TEST_SUPPORTED_SUITES + SUITE_SYNONYMS.keys()),
+                        choices=sorted(ADD_TEST_SUPPORTED_SUITES + list(SUITE_SYNONYMS.keys())),
                         help='suite for the test. '
                         'If you pass a `test` argument this will be determined '
                         'based on the filename and the folder it is in')
@@ -139,6 +139,7 @@ class AddTest(MachCommandBase):
     def addtest(self, suite=None, test=None, doc=None, overwrite=False,
                 editor=MISSING_ARG, **kwargs):
         import addtest
+        import io
         from moztest.resolve import TEST_SUITES
 
         if not suite and not test:
@@ -205,7 +206,7 @@ class AddTest(MachCommandBase):
                 except OSError:
                     pass
 
-                with open(path, "w") as f:
+                with io.open(path, "w", newline='\n') as f:
                     f.write(template)
             else:
                 # write to stdout if you passed only suite and doc and not a file path

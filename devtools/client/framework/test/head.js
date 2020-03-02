@@ -26,14 +26,14 @@ function toggleAllTools(state) {
 }
 
 function getParentProcessActors(callback) {
-  const { DebuggerServer } = require("devtools/server/debugger-server");
-  const { DebuggerClient } = require("devtools/shared/client/debugger-client");
+  const { DevToolsServer } = require("devtools/server/devtools-server");
+  const { DevToolsClient } = require("devtools/shared/client/devtools-client");
 
-  DebuggerServer.init();
-  DebuggerServer.registerAllActors();
-  DebuggerServer.allowChromeProcess = true;
+  DevToolsServer.init();
+  DevToolsServer.registerAllActors();
+  DevToolsServer.allowChromeProcess = true;
 
-  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const client = new DevToolsClient(DevToolsServer.connectPipe());
   client
     .connect()
     .then(() => client.mainRoot.getMainProcess())
@@ -42,7 +42,7 @@ function getParentProcessActors(callback) {
     });
 
   SimpleTest.registerCleanupFunction(() => {
-    DebuggerServer.destroy();
+    DevToolsServer.destroy();
   });
 }
 
@@ -395,6 +395,16 @@ function getElementByToolId(toolbox, id) {
 function getElementByToolIdOrExtensionIdOrSelector(toolbox, idOrSelector) {
   const tabEl = getElementByToolId(toolbox, idOrSelector);
   return tabEl ? tabEl : toolbox.doc.querySelector(idOrSelector);
+}
+
+/**
+ * Returns a toolbox tab element, even if it's overflowed
+ **/
+function getToolboxTab(doc, toolId) {
+  return (
+    doc.getElementById(`toolbox-tab-${toolId}`) ||
+    doc.getElementById(`tools-chevron-menupopup-${toolId}`)
+  );
 }
 
 function getWindow(toolbox) {

@@ -7,13 +7,13 @@
 #ifndef nsProxyRelease_h__
 #define nsProxyRelease_h__
 
+#include <utility>
+
 #include "MainThreadUtils.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Move.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIEventTarget.h"
 #include "nsIThread.h"
@@ -128,8 +128,10 @@ template <class T>
 inline NS_HIDDEN_(void)
     NS_ProxyRelease(const char* aName, nsIEventTarget* aTarget,
                     already_AddRefed<T> aDoomed, bool aAlwaysProxy = false) {
-  ::detail::ProxyReleaseChooser<mozilla::IsBaseOf<nsISupports, T>::value>::
-      ProxyRelease(aName, aTarget, std::move(aDoomed), aAlwaysProxy);
+  ::detail::ProxyReleaseChooser<
+      std::is_base_of<nsISupports, T>::value>::ProxyRelease(aName, aTarget,
+                                                            std::move(aDoomed),
+                                                            aAlwaysProxy);
 }
 
 /**
@@ -319,18 +321,11 @@ class MOZ_IS_SMARTPTR_TO_REFCOUNTED nsMainThreadPtrHandle {
   explicit nsMainThreadPtrHandle(
       already_AddRefed<nsMainThreadPtrHolder<T>> aHolder)
       : mPtr(aHolder) {}
-  nsMainThreadPtrHandle(const nsMainThreadPtrHandle& aOther)
-      : mPtr(aOther.mPtr) {}
-  nsMainThreadPtrHandle(nsMainThreadPtrHandle&& aOther)
-      : mPtr(std::move(aOther.mPtr)) {}
-  nsMainThreadPtrHandle& operator=(const nsMainThreadPtrHandle& aOther) {
-    mPtr = aOther.mPtr;
-    return *this;
-  }
-  nsMainThreadPtrHandle& operator=(nsMainThreadPtrHandle&& aOther) {
-    mPtr = std::move(aOther.mPtr);
-    return *this;
-  }
+  nsMainThreadPtrHandle(const nsMainThreadPtrHandle& aOther) = default;
+  nsMainThreadPtrHandle(nsMainThreadPtrHandle&& aOther) = default;
+  nsMainThreadPtrHandle& operator=(const nsMainThreadPtrHandle& aOther) =
+      default;
+  nsMainThreadPtrHandle& operator=(nsMainThreadPtrHandle&& aOther) = default;
   nsMainThreadPtrHandle& operator=(nsMainThreadPtrHolder<T>* aHolder) {
     mPtr = aHolder;
     return *this;

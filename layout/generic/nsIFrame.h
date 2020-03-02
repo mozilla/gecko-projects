@@ -56,6 +56,7 @@
 #include "mozilla/AspectRatio.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/SmallPointerArray.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/WritingModes.h"
 #include "nsDirection.h"
 #include "nsFrameList.h"
@@ -99,6 +100,7 @@
 class nsAtom;
 class nsPresContext;
 class nsView;
+class nsFrameSelection;
 class nsIWidget;
 class nsISelectionController;
 class nsBoxLayoutState;
@@ -771,7 +773,7 @@ class nsIFrame : public nsQueryFrame {
   void SetComputedStyle(ComputedStyle* aStyle) {
     if (aStyle != mComputedStyle) {
       AssertNewStyleIsSane(*aStyle);
-      RefPtr<ComputedStyle> oldComputedStyle = mComputedStyle.forget();
+      RefPtr<ComputedStyle> oldComputedStyle = std::move(mComputedStyle);
       mComputedStyle = aStyle;
       DidSetComputedStyle(oldComputedStyle);
     }
@@ -1140,15 +1142,8 @@ class nsIFrame : public nsQueryFrame {
    * was stored in a frame property.
    */
   inline nsPoint GetNormalPosition(bool* aHasProperty = nullptr) const;
-
-  mozilla::LogicalPoint GetLogicalNormalPosition(
-      mozilla::WritingMode aWritingMode, const nsSize& aContainerSize) const {
-    // Subtract the size of this frame from the container size to get
-    // the correct position in rtl frames where the origin is on the
-    // right instead of the left
-    return mozilla::LogicalPoint(aWritingMode, GetNormalPosition(),
-                                 aContainerSize - mRect.Size());
-  }
+  inline mozilla::LogicalPoint GetLogicalNormalPosition(
+      mozilla::WritingMode aWritingMode, const nsSize& aContainerSize) const;
 
   virtual nsPoint GetPositionOfChildIgnoringScrolling(const nsIFrame* aChild) {
     return aChild->GetPosition();
@@ -1211,6 +1206,9 @@ class nsIFrame : public nsQueryFrame {
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(PreEffectsBBoxProperty, nsRect)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(PreTransformOverflowAreasProperty,
                                       nsOverflowAreas)
+
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedBorderImageDataProperty,
+                                      CachedBorderImageData)
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(OverflowAreasProperty, nsOverflowAreas)
 
@@ -1770,9 +1768,15 @@ class nsIFrame : public nsQueryFrame {
 
   /**
    * True if this frame has any animation of transform in effect.
-   *
    */
   bool HasAnimationOfTransform() const;
+
+  /**
+   * True if this frame has any animation of opacity in effect.
+   *
+   * EffectSet is just an optimization.
+   */
+  bool HasAnimationOfOpacity(mozilla::EffectSet* = nullptr) const;
 
   /**
    * Returns true if the frame is translucent or the frame has opacity
@@ -2010,11 +2014,30 @@ class nsIFrame : public nsQueryFrame {
   }
 
   /**
-   * Ensure that aImage gets notifed when the underlying image request loads
-   * or animates.
+   * Ensure that `this` gets notifed when `aImage`s underlying image request
+   * loads or animates.
+   *
+   * This in practice is only needed for the canvas frame and table cell
+   * backgrounds, which are the only cases that should paint a background that
+   * isn't its own. The canvas paints the background from the root element or
+   * body, and the table cell paints the background for its row.
+   *
+   * For regular frames, this is done in DidSetComputedStyle.
+   *
+   * NOTE: It's unclear if we even actually _need_ this for the second case, as
+   * invalidating the row should invalidate all the cells. For the canvas case
+   * this is definitely needed as it paints the background from somewhere "down"
+   * in the frame tree.
+   *
+   * Returns whether the image was in fact associated with the frame.
    */
-  void AssociateImage(const nsStyleImage& aImage, nsPresContext* aPresContext,
-                      uint32_t aImageLoaderFlags);
+  MOZ_MUST_USE bool AssociateImage(const mozilla::StyleImage&);
+
+  /**
+   * This needs to be called if the above caller returned true, once the above
+   * caller doesn't care about getting notified anymore.
+   */
+  void DisassociateImage(const mozilla::StyleImage&);
 
   enum class AllowCustomCursorImage {
     No,
@@ -2577,22 +2600,28 @@ class nsIFrame : public nsQueryFrame {
                       const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) = 0;
 
-  // Option flags for ReflowChild() and FinishReflowChild()
-  // member functions
+  // Option flags for ReflowChild(), FinishReflowChild(), and
+  // SyncFrameViewAfterReflow().
   enum class ReflowChildFlags : uint32_t {
     Default = 0,
+
+    // Don't position the frame's view. Set this if you don't want to
+    // automatically sync the frame and view.
     NoMoveView = 1 << 0,
+
+    // Don't move the frame. Also implies NoMoveView.
     NoMoveFrame = (1 << 1) | NoMoveView,
+
+    // Don't size the frame's view.
     NoSizeView = 1 << 2,
-    NoVisibility = 1 << 3,
 
     // Only applies to ReflowChild; if true, don't delete the next-in-flow, even
     // if the reflow is fully complete.
-    NoDeleteNextInFlowChild = 1 << 4,
+    NoDeleteNextInFlowChild = 1 << 3,
 
     // Only applies to FinishReflowChild.  Tell it to call
     // ApplyRelativePositioning.
-    ApplyRelativePositioning = 1 << 5
+    ApplyRelativePositioning = 1 << 4,
   };
 
   /**
@@ -2903,33 +2932,31 @@ class nsIFrame : public nsQueryFrame {
   enum {
     eMathML = 1 << 0,
     eSVG = 1 << 1,
-    eSVGForeignObject = 1 << 2,
-    eSVGContainer = 1 << 3,
-    eSVGGeometry = 1 << 4,
-    eSVGPaintServer = 1 << 5,
-    eBidiInlineContainer = 1 << 6,
+    eSVGContainer = 1 << 2,
+    eSVGPaintServer = 1 << 3,
+    eBidiInlineContainer = 1 << 4,
     // the frame is for a replaced element, such as an image
-    eReplaced = 1 << 7,
+    eReplaced = 1 << 5,
     // Frame that contains a block but looks like a replaced element
     // from the outside
-    eReplacedContainsBlock = 1 << 8,
+    eReplacedContainsBlock = 1 << 6,
     // A frame that participates in inline reflow, i.e., one that
     // requires ReflowInput::mLineLayout.
-    eLineParticipant = 1 << 9,
-    eXULBox = 1 << 10,
-    eCanContainOverflowContainers = 1 << 11,
-    eTablePart = 1 << 12,
-    eSupportsCSSTransforms = 1 << 13,
+    eLineParticipant = 1 << 7,
+    eXULBox = 1 << 8,
+    eCanContainOverflowContainers = 1 << 9,
+    eTablePart = 1 << 10,
+    eSupportsCSSTransforms = 1 << 11,
 
     // A replaced element that has replaced-element sizing
     // characteristics (i.e., like images or iframes), as opposed to
     // inline-block sizing characteristics (like form controls).
-    eReplacedSizing = 1 << 14,
+    eReplacedSizing = 1 << 12,
 
     // Does this frame class support 'contain: layout' and
     // 'contain:paint' (supporting one is equivalent to supporting the
     // other).
-    eSupportsContainLayoutAndPaint = 1 << 15,
+    eSupportsContainLayoutAndPaint = 1 << 13,
 
     // These are to allow nsFrame::Init to assert that IsFrameOfType
     // implementations all call the base class method.  They are only
@@ -2964,6 +2991,12 @@ class nsIFrame : public nsQueryFrame {
    * subclasses.
    */
   bool IsBlockFrameOrSubclass() const;
+
+  /**
+   * Returns true if the frame is an instance of nsSVGGeometryFrame or one
+   * of its subclasses.
+   */
+  inline bool IsSVGGeometryFrameOrSubclass() const;
 
   /**
    * Get this frame's CSS containing block.
@@ -3342,6 +3375,15 @@ class nsIFrame : public nsQueryFrame {
   }
 
   /**
+   * Shouldn't be called if this is a `nsTextFrame`. Call the
+   * `nsTextFrame::SelectionStateChanged` overload instead.
+   */
+  void SelectionStateChanged() {
+    MOZ_ASSERT(!IsTextFrame());
+    InvalidateFrameSubtree();  // TODO: should this deal with continuations?
+  }
+
+  /**
    * Called to discover where this frame, or a parent frame has user-select
    * style applied, which affects that way that it is selected.
    *
@@ -3668,17 +3710,17 @@ class nsIFrame : public nsQueryFrame {
   }
 
   template <typename T>
-  FrameProperties::PropertyType<T> RemoveProperty(
+  MOZ_MUST_USE FrameProperties::PropertyType<T> TakeProperty(
       FrameProperties::Descriptor<T> aProperty, bool* aFoundResult = nullptr) {
-    return mProperties.Remove(aProperty, aFoundResult);
+    return mProperties.Take(aProperty, aFoundResult);
   }
 
   template <typename T>
-  void DeleteProperty(FrameProperties::Descriptor<T> aProperty) {
-    mProperties.Delete(aProperty, this);
+  void RemoveProperty(FrameProperties::Descriptor<T> aProperty) {
+    mProperties.Remove(aProperty, this);
   }
 
-  void DeleteAllProperties() { mProperties.DeleteAll(this); }
+  void RemoveAllProperties() { mProperties.RemoveAll(this); }
 
   // nsIFrames themselves are in the nsPresArena, and so are not measured here.
   // Instead, this measures heap-allocated things hanging off the nsIFrame, and
@@ -3763,9 +3805,6 @@ class nsIFrame : public nsQueryFrame {
    */
   virtual nsSize GetXULMinSizeForScrollArea(
       nsBoxLayoutState& aBoxLayoutState) = 0;
-
-  // Implemented in nsBox, used in nsBoxFrame
-  int32_t GetXULOrdinal();
 
   virtual nscoord GetXULFlex() = 0;
   virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) = 0;
@@ -4215,7 +4254,6 @@ class nsIFrame : public nsQueryFrame {
   bool HasDisplayItems();
   bool HasDisplayItem(nsDisplayItemBase* aItem);
   bool HasDisplayItem(uint32_t aKey);
-  void DiscardOldItems();
 
   bool ForceDescendIntoIfVisible() const { return mForceDescendIntoIfVisible; }
   void SetForceDescendIntoIfVisible(bool aForce) {
@@ -4761,7 +4799,7 @@ class MOZ_NONHEAP_CLASS AutoWeakFrame {
     mPrev = nullptr;
   }
 
-  bool IsAlive() { return !!mFrame; }
+  bool IsAlive() const { return !!mFrame; }
 
   nsIFrame* GetFrame() const { return mFrame; }
 
@@ -4832,7 +4870,7 @@ class MOZ_HEAP_CLASS WeakFrame {
     mFrame = nullptr;
   }
 
-  bool IsAlive() { return !!mFrame; }
+  bool IsAlive() const { return !!mFrame; }
   nsIFrame* GetFrame() const { return mFrame; }
 
  private:
@@ -5051,22 +5089,6 @@ template <bool IsLessThanOrEqual(nsIFrame*, nsIFrame*)>
 
   // We made it to the end without returning early, so the list is sorted.
   return true;
-}
-
-// Needs to be defined here rather than nsIFrameInlines.h, because it is used
-// within this header.
-nsPoint nsIFrame::GetNormalPosition(bool* aHasProperty) const {
-  nsPoint* normalPosition = GetProperty(NormalPositionProperty());
-  if (normalPosition) {
-    if (aHasProperty) {
-      *aHasProperty = true;
-    }
-    return *normalPosition;
-  }
-  if (aHasProperty) {
-    *aHasProperty = false;
-  }
-  return GetPosition();
 }
 
 #endif /* nsIFrame_h___ */

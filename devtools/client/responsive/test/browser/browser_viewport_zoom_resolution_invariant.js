@@ -50,11 +50,6 @@ for (const { content, res_target } of TESTS) {
         `Using meta viewport content "${content}" with new RDM UI ${usingBrowserUI}.`
       );
 
-      // Turn on the pref that allows meta viewport support.
-      await SpecialPowers.pushPrefEnv({
-        set: [["devtools.responsive.metaViewport.enabled", true]],
-      });
-
       await setViewportSize(ui, manager, WIDTH, HEIGHT);
       await setTouchAndMetaViewportSupport(ui, true);
 
@@ -83,7 +78,8 @@ for (const { content, res_target } of TESTS) {
           `${content} zoom ${zoom} resolution should be near ${res_target}, and we got ${resolution}.`
         );
       }
-    },
-    true
+    }
+    // XXX: Enable testing against new browser UI.
+    // true
   );
 }

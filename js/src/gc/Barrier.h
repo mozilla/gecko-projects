@@ -299,6 +299,8 @@ bool CurrentThreadIsIonCompilingSafeForMinorGC();
 
 bool CurrentThreadIsGCSweeping();
 
+bool CurrentThreadIsGCFinalizing();
+
 bool IsMarkedBlack(JSObject* obj);
 
 bool CurrentThreadIsTouchingGrayThings();
@@ -347,13 +349,13 @@ struct InternalBarrierMethods<Value> {
 
     // If the target needs an entry, add it.
     js::gc::StoreBuffer* sb;
-    if ((next.isObject() || next.isString()) &&
+    if ((next.isObject() || next.isString() || next.isBigInt()) &&
         (sb = next.toGCThing()->storeBuffer())) {
       // If we know that the prev has already inserted an entry, we can
       // skip doing the lookup to add the new entry. Note that we cannot
       // safely assert the presence of the entry because it may have been
       // added via a different store buffer.
-      if ((prev.isObject() || prev.isString()) &&
+      if ((prev.isObject() || prev.isString() || prev.isBigInt()) &&
           prev.toGCThing()->storeBuffer()) {
         return;
       }
@@ -361,7 +363,7 @@ struct InternalBarrierMethods<Value> {
       return;
     }
     // Remove the prev entry if the new value does not need it.
-    if ((prev.isObject() || prev.isString()) &&
+    if ((prev.isObject() || prev.isString() || prev.isBigInt()) &&
         (sb = prev.toGCThing()->storeBuffer())) {
       sb->unputValue(vp);
     }
@@ -549,8 +551,9 @@ class GCPtr : public WriteBarriered<T> {
     //
     // Note that when sweeping the wrapped pointer may already have been
     // freed by this point.
-    MOZ_ASSERT(CurrentThreadIsGCSweeping() ||
-               this->value == JS::SafelyInitialized<T>());
+    MOZ_ASSERT_IF(
+        !CurrentThreadIsGCSweeping() && !CurrentThreadIsGCFinalizing(),
+        this->value == JS::SafelyInitialized<T>());
     Poison(this, JS_FREED_HEAP_PTR_PATTERN, sizeof(*this),
            MemCheckKind::MakeNoAccess);
   }
@@ -633,6 +636,7 @@ class HeapPtr : public WriteBarriered<T> {
   }
 
   void init(const T& v) {
+    MOZ_ASSERT(this->value == JS::SafelyInitialized<T>());
     AssertTargetIsNotGray(v);
     this->value = v;
     this->post(JS::SafelyInitialized<T>(), this->value);
@@ -802,7 +806,8 @@ class HeapSlot : public WriteBarriered<Value> {
 #ifdef DEBUG
     assertPreconditionForWriteBarrierPost(owner, kind, slot, target);
 #endif
-    if (this->value.isObject() || this->value.isString()) {
+    if (this->value.isObject() || this->value.isString() ||
+        this->value.isBigInt()) {
       gc::Cell* cell = this->value.toGCThing();
       if (cell->storeBuffer()) {
         cell->storeBuffer()->putSlot(owner, kind, slot, 1);
@@ -831,8 +836,8 @@ class HeapSlotArray {
   }
 
   operator const Value*() const {
-    JS_STATIC_ASSERT(sizeof(GCPtr<Value>) == sizeof(Value));
-    JS_STATIC_ASSERT(sizeof(HeapSlot) == sizeof(Value));
+    static_assert(sizeof(GCPtr<Value>) == sizeof(Value));
+    static_assert(sizeof(HeapSlot) == sizeof(Value));
     return reinterpret_cast<const Value*>(array);
   }
   operator HeapSlot*() const {
@@ -979,8 +984,8 @@ struct MovableCellHasher<WeakHeapPtr<T>> {
 /* Useful for hashtables with a HeapPtr as key. */
 template <class T>
 struct HeapPtrHasher {
-  typedef HeapPtr<T> Key;
-  typedef T Lookup;
+  using Key = HeapPtr<T>;
+  using Lookup = T;
 
   static HashNumber hash(Lookup obj) { return DefaultHasher<T>::hash(obj); }
   static bool match(const Key& k, Lookup l) { return k.get() == l; }
@@ -989,8 +994,8 @@ struct HeapPtrHasher {
 
 template <class T>
 struct PreBarrieredHasher {
-  typedef PreBarriered<T> Key;
-  typedef T Lookup;
+  using Key = PreBarriered<T>;
+  using Lookup = T;
 
   static HashNumber hash(Lookup obj) { return DefaultHasher<T>::hash(obj); }
   static bool match(const Key& k, Lookup l) { return k.get() == l; }
@@ -1000,8 +1005,8 @@ struct PreBarrieredHasher {
 /* Useful for hashtables with a WeakHeapPtr as key. */
 template <class T>
 struct WeakHeapPtrHasher {
-  typedef WeakHeapPtr<T> Key;
-  typedef T Lookup;
+  using Key = WeakHeapPtr<T>;
+  using Lookup = T;
 
   static HashNumber hash(Lookup obj) { return DefaultHasher<T>::hash(obj); }
   static bool match(const Key& k, Lookup l) { return k.unbarrieredGet() == l; }

@@ -152,6 +152,8 @@ class AudioContext final : public DOMEventTargetHelper,
 
   nsPIDOMWindowInner* GetParentObject() const { return GetOwner(); }
 
+  nsISerialEventTarget* GetMainThread() const;
+
   virtual void DisconnectFromOwner() override;
   virtual void BindToOwner(nsIGlobalObject* aNew) override;
 
@@ -185,7 +187,7 @@ class AudioContext final : public DOMEventTargetHelper,
 
   float SampleRate() const { return mSampleRate; }
 
-  bool ShouldSuspendNewTrack() const { return mSuspendCalled; }
+  bool ShouldSuspendNewTrack() const { return mSuspendCalled || mCloseCalled; }
 
   double CurrentTime();
 

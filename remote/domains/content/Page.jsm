@@ -92,7 +92,7 @@ class Page extends ContentProcessDomain {
   }
 
   async navigate({ url, referrer, transitionType, frameId } = {}) {
-    if (frameId && frameId != this.content.windowUtils.outerWindowID) {
+    if (frameId && frameId != this.docShell.browsingContext.id.toString()) {
       throw new UnsupportedError("frameId not supported");
     }
 
@@ -104,7 +104,7 @@ class Page extends ContentProcessDomain {
     this.docShell.loadURI(url, opts);
 
     return {
-      frameId: this.content.windowUtils.outerWindowID.toString(),
+      frameId: this.docShell.browsingContext.id.toString(),
     };
   }
 
@@ -118,7 +118,7 @@ class Page extends ContentProcessDomain {
   }
 
   getFrameTree() {
-    const frameId = this.content.windowUtils.outerWindowID.toString();
+    const frameId = this.docShell.browsingContext.id.toString();
     return {
       frameTree: {
         frame: {
@@ -175,7 +175,7 @@ class Page extends ContentProcessDomain {
    */
   createIsolatedWorld(options = {}) {
     const { frameId, worldName } = options;
-    if (frameId && frameId != this.content.windowUtils.outerWindowID) {
+    if (frameId && frameId != this.docShell.browsingContext.id.toString()) {
       throw new UnsupportedError("frameId not supported");
     }
     const Runtime = this.session.domains.get("Runtime");
@@ -198,7 +198,7 @@ class Page extends ContentProcessDomain {
    * @param {boolean} options.enabled
    *     If true, starts emitting lifecycle events.
    */
-  setLifecycleEventsEnabled(options) {
+  setLifecycleEventsEnabled(options = {}) {
     const { enabled } = options;
 
     this.lifecycleEnabled = enabled;
@@ -250,7 +250,7 @@ class Page extends ContentProcessDomain {
     }
 
     const timestamp = Date.now();
-    const frameId = target.defaultView.windowUtils.outerWindowID.toString();
+    const frameId = target.defaultView.docShell.browsingContext.id.toString();
     const url = target.location.href;
 
     switch (type) {
@@ -298,7 +298,7 @@ class Page extends ContentProcessDomain {
     }
   }
 
-  _contentSize() {
+  _contentRect() {
     const docEl = this.content.document.documentElement;
 
     return {
@@ -307,6 +307,10 @@ class Page extends ContentProcessDomain {
       width: docEl.scrollWidth,
       height: docEl.scrollHeight,
     };
+  }
+
+  _devicePixelRatio() {
+    return this.content.devicePixelRatio;
   }
 
   _getScrollbarSize() {

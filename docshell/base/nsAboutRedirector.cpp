@@ -59,7 +59,7 @@ class CrashChannel final : public nsBaseChannel {
   for that you need MAKE_LINKABLE.
  */
 static const RedirEntry kRedirMap[] = {
-    {"about", "chrome://global/content/aboutAbout.xhtml", 0},
+    {"about", "chrome://global/content/aboutAbout.html", 0},
     {"addons", "chrome://mozapps/content/extensions/extensions.xhtml",
      nsIAboutModule::ALLOW_SCRIPT},
     {"buildconfig", "chrome://global/content/buildconfig.html",
@@ -94,7 +94,7 @@ static const RedirEntry kRedirMap[] = {
      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
          nsIAboutModule::URI_CAN_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
          nsIAboutModule::HIDE_FROM_ABOUTABOUT},
-    {"networking", "chrome://global/content/aboutNetworking.xhtml",
+    {"networking", "chrome://global/content/aboutNetworking.html",
      nsIAboutModule::ALLOW_SCRIPT},
     {"performance", "chrome://global/content/aboutPerformance.xhtml",
      nsIAboutModule::ALLOW_SCRIPT},

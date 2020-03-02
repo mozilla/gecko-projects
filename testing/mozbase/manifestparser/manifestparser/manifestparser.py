@@ -4,8 +4,9 @@
 
 from __future__ import absolute_import, print_function
 
-import json
 import fnmatch
+import io
+import json
 import os
 import shutil
 import sys
@@ -74,7 +75,6 @@ class ManifestParser(object):
                                 variable in this case.
         """
         self._defaults = defaults or {}
-        self._ancestor_defaults = {}
         self.tests = []
         self.manifest_defaults = {}
         self.source_files = set()
@@ -121,16 +121,13 @@ class ManifestParser(object):
 
     # methods for reading manifests
 
-    def _read(self, root, filename, defaults, defaults_only=False, parentmanifest=None):
+    def _read(self, root, filename, defaults, parentmanifest=None):
         """
         Internal recursive method for reading and parsing manifests.
         Stores all found tests in self.tests
         :param root: The base path
         :param filename: File object or string path for the base manifest file
         :param defaults: Options that apply to all items
-        :param defaults_only: If True will only gather options, not include
-                              tests. Used for upstream parent includes
-                              (default False)
         :param parentmanifest: Filename of the parent manifest (default None)
         """
         def read_file(type):
@@ -158,9 +155,9 @@ class ManifestParser(object):
             filename = os.path.abspath(filename)
             self.source_files.add(filename)
             if self.finder:
-                fp = self.finder.get(filename)
+                fp = self.finder.get(filename).open(mode='r')
             else:
-                fp = open(filename)
+                fp = io.open(filename, encoding='utf-8')
             here = os.path.dirname(filename)
         else:
             fp = filename
@@ -168,8 +165,8 @@ class ManifestParser(object):
         defaults['here'] = here
 
         # read the configuration
-        sections = read_ini(fp=fp, variables=defaults, strict=self.strict,
-                            handle_defaults=self._handle_defaults)
+        sections, defaults = read_ini(fp=fp, defaults=defaults, strict=self.strict,
+                                      handle_defaults=self._handle_defaults)
         if parentmanifest and filename:
             # A manifest can be read multiple times, via "include:", optionally
             # with section-specific variables. These variables only apply to
@@ -185,24 +182,8 @@ class ManifestParser(object):
         else:
             self.manifest_defaults[filename] = defaults
 
-        parent_section_found = False
-
         # get the tests
         for section, data in sections:
-            # In case of defaults only, no other section than parent: has to
-            # be processed.
-            if defaults_only and not section.startswith('parent:'):
-                continue
-
-            # read the parent manifest if specified
-            if section.startswith('parent:'):
-                parent_section_found = True
-
-                include_file = read_file('parent:')
-                if include_file:
-                    self._read(root, include_file, {}, True)
-                continue
-
             # a file to include
             # TODO: keep track of included file structure:
             # self.manifests = {'manifest.ini': 'relative/path.ini'}
@@ -214,10 +195,7 @@ class ManifestParser(object):
                 continue
 
             # otherwise an item
-            # apply ancestor defaults, while maintaining current file priority
-            data = dict(list(self._ancestor_defaults.items()) + list(data.items()))
-
-            test = data
+            test = data.copy()
             test['name'] = section
 
             # Will be None if the manifest being read is a file-like object.
@@ -253,13 +231,6 @@ class ManifestParser(object):
 
             # append the item
             self.tests.append(test)
-
-        # if no parent: section was found for defaults-only, only read the
-        # defaults section of the manifest without interpreting variables
-        if defaults_only and not parent_section_found:
-            sections = read_ini(fp=fp, variables=defaults, defaults_only=True,
-                                strict=self.strict)
-            (section, self._ancestor_defaults) = sections[0]
 
     def read(self, *filenames, **defaults):
         """

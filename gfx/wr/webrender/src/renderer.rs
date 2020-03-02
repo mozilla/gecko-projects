@@ -45,11 +45,12 @@ use api::ExternalImage;
 use api::channel;
 use api::units::*;
 pub use api::DebugFlags;
-use api::channel::{MsgSender, PayloadReceiverHelperMethods};
+use api::channel::MsgSender;
 use crate::batch::{AlphaBatchContainer, BatchKind, BatchFeatures, BatchTextures, BrushBatchKind, ClipBatchList};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use crate::capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
-use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile, CompositorKind, Compositor, NativeTileId};
+use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile};
+use crate::composite::{CompositorKind, Compositor, NativeTileId, CompositeSurfaceFormat};
 use crate::composite::{CompositorConfig, NativeSurfaceOperationDetails, NativeSurfaceId, NativeSurfaceOperation};
 use crate::debug_colors;
 use crate::debug_render::{DebugItem, DebugRenderer};
@@ -141,6 +142,10 @@ const GPU_CACHE_RESIZE_TEST: bool = false;
 /// Number of GPU blocks per UV rectangle provided for an image.
 pub const BLOCKS_PER_UV_RECT: usize = 2;
 
+const GPU_TAG_BRUSH_OPACITY: GpuProfileTag = GpuProfileTag {
+    label: "B_Opacity",
+    color: debug_colors::DARKMAGENTA,
+};
 const GPU_TAG_BRUSH_LINEAR_GRADIENT: GpuProfileTag = GpuProfileTag {
     label: "B_LinearGradient",
     color: debug_colors::POWDERBLUE,
@@ -148,6 +153,10 @@ const GPU_TAG_BRUSH_LINEAR_GRADIENT: GpuProfileTag = GpuProfileTag {
 const GPU_TAG_BRUSH_RADIAL_GRADIENT: GpuProfileTag = GpuProfileTag {
     label: "B_RadialGradient",
     color: debug_colors::LIGHTPINK,
+};
+const GPU_TAG_BRUSH_CONIC_GRADIENT: GpuProfileTag = GpuProfileTag {
+    label: "B_ConicGradient",
+    color: debug_colors::GREEN,
 };
 const GPU_TAG_BRUSH_YUV_IMAGE: GpuProfileTag = GpuProfileTag {
     label: "B_YuvImage",
@@ -251,8 +260,10 @@ impl BatchKind {
                     BrushBatchKind::Blend => "Brush (Blend)",
                     BrushBatchKind::MixBlend { .. } => "Brush (Composite)",
                     BrushBatchKind::YuvImage(..) => "Brush (YuvImage)",
+                    BrushBatchKind::ConicGradient => "Brush (ConicGradient)",
                     BrushBatchKind::RadialGradient => "Brush (RadialGradient)",
                     BrushBatchKind::LinearGradient => "Brush (LinearGradient)",
+                    BrushBatchKind::Opacity => "Brush (Opacity)",
                 }
             }
             BatchKind::TextRun(_) => "TextRun",
@@ -269,8 +280,10 @@ impl BatchKind {
                     BrushBatchKind::Blend => GPU_TAG_BRUSH_BLEND,
                     BrushBatchKind::MixBlend { .. } => GPU_TAG_BRUSH_MIXBLEND,
                     BrushBatchKind::YuvImage(..) => GPU_TAG_BRUSH_YUV_IMAGE,
+                    BrushBatchKind::ConicGradient => GPU_TAG_BRUSH_CONIC_GRADIENT,
                     BrushBatchKind::RadialGradient => GPU_TAG_BRUSH_RADIAL_GRADIENT,
                     BrushBatchKind::LinearGradient => GPU_TAG_BRUSH_LINEAR_GRADIENT,
+                    BrushBatchKind::Opacity => GPU_TAG_BRUSH_OPACITY,
                 }
             }
             BatchKind::TextRun(_) => GPU_TAG_PRIM_TEXT_RUN,
@@ -448,9 +461,9 @@ pub(crate) mod desc {
                 kind: VertexAttributeKind::I32,
             },
             VertexAttribute {
-                name: "aOrientation",
+                name: "aAxisSelect",
                 count: 1,
-                kind: VertexAttributeKind::I32,
+                kind: VertexAttributeKind::F32,
             },
         ],
     };
@@ -831,13 +844,28 @@ pub(crate) mod desc {
                 kind: VertexAttributeKind::F32,
             },
             VertexAttribute {
-                name: "aLayer",
-                count: 1,
+                name: "aParams",
+                count: 4,
                 kind: VertexAttributeKind::F32,
             },
             VertexAttribute {
-                name: "aZId",
-                count: 1,
+                name: "aUvRect0",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aUvRect1",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aUvRect2",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aTextureLayers",
+                count: 3,
                 kind: VertexAttributeKind::F32,
             },
         ],
@@ -1156,7 +1184,7 @@ impl TextureResolver {
             TextureSource::External(external_image) => {
                 let texture = self.external_images
                     .get(&(external_image.id, external_image.channel_index))
-                    .expect(&format!("BUG: External image should be resolved by now"));
+                    .expect("BUG: External image should be resolved by now");
                 device.bind_external_texture(sampler, texture);
                 Swizzle::default()
             }
@@ -1221,6 +1249,26 @@ impl TextureResolver {
             }
             TextureSource::RenderTaskCache(saved_index, swizzle) => {
                 Some((&self.saved_targets[saved_index.0], swizzle))
+            }
+        }
+    }
+
+    // Retrieve the deferred / resolved UV rect if an external texture, otherwise
+    // return the default supplied UV rect.
+    fn get_uv_rect(
+        &self,
+        source: &TextureSource,
+        default_value: TexelRect,
+    ) -> TexelRect {
+        match source {
+            TextureSource::External(ref external_image) => {
+                let texture = self.external_images
+                    .get(&(external_image.id, external_image.channel_index))
+                    .expect("BUG: External image should be resolved by now");
+                texture.get_uv_rect()
+            }
+            _ => {
+                default_value
             }
         }
     }
@@ -1890,6 +1938,8 @@ pub struct Renderer {
     /// The compositing config, affecting how WR composites into the final scene.
     compositor_config: CompositorConfig,
 
+    current_compositor_kind: CompositorKind,
+
     /// Maintains a set of allocated native composite surfaces. This allows any
     /// currently allocated surfaces to be cleaned up as soon as deinit() is
     /// called (the normal bookkeeping for native surfaces exists in the
@@ -1955,6 +2005,10 @@ impl Renderer {
         shaders: Option<&mut WrShaders>,
         start_size: DeviceIntSize,
     ) -> Result<(Self, RenderApiSender), RendererError> {
+        if !wr_has_been_initialized() {
+            register_thread_with_profiler("Compositor".to_owned());
+        }
+
         HAS_BEEN_INITIALIZED.store(true, Ordering::SeqCst);
 
         let (api_tx, api_rx) = channel::msg_channel()?;
@@ -2014,8 +2068,6 @@ impl Renderer {
         let max_texture_size = device.max_texture_size();
         let max_texture_layers = device.max_texture_layers();
 
-        register_thread_with_profiler("Compositor".to_owned());
-
         device.begin_frame();
 
         let shaders = match shaders {
@@ -2027,11 +2079,11 @@ impl Renderer {
 
         let dither_matrix_texture = if options.enable_dithering {
             let dither_matrix: [u8; 64] = [
-                00,
+                0,
                 48,
                 12,
                 60,
-                03,
+                3,
                 51,
                 15,
                 63,
@@ -2043,13 +2095,13 @@ impl Renderer {
                 19,
                 47,
                 31,
-                08,
+                8,
                 56,
-                04,
+                4,
                 52,
                 11,
                 59,
-                07,
+                7,
                 55,
                 40,
                 24,
@@ -2059,11 +2111,11 @@ impl Renderer {
                 27,
                 39,
                 23,
-                02,
+                2,
                 50,
                 14,
                 62,
-                01,
+                1,
                 49,
                 13,
                 61,
@@ -2077,11 +2129,11 @@ impl Renderer {
                 29,
                 10,
                 58,
-                06,
+                6,
                 54,
-                09,
+                9,
                 57,
-                05,
+                5,
                 53,
                 42,
                 26,
@@ -2179,6 +2231,7 @@ impl Renderer {
             batch_lookback_count: options.batch_lookback_count,
             background_color: options.clear_color,
             compositor_kind,
+            tile_size_override: None,
         };
         info!("WR {:?}", config);
 
@@ -2276,6 +2329,7 @@ impl Renderer {
             scene_tx.clone()
         };
 
+        let enable_multithreading = options.enable_multithreading;
         thread::Builder::new().name(rb_thread_name.clone()).spawn(move || {
             register_thread_with_profiler(rb_thread_name.clone());
             if let Some(ref thread_listener) = *thread_listener_for_render_backend {
@@ -2286,7 +2340,7 @@ impl Renderer {
                 max_texture_size,
                 max_texture_layers,
                 if config.global_enable_picture_caching {
-                    tile_cache_sizes()
+                    tile_cache_sizes(config.testing)
                 } else {
                     &[]
                 },
@@ -2297,12 +2351,14 @@ impl Renderer {
 
             let glyph_cache = GlyphCache::new(max_glyph_cache_size);
 
-            let resource_cache = ResourceCache::new(
+            let mut resource_cache = ResourceCache::new(
                 texture_cache,
                 glyph_rasterizer,
                 glyph_cache,
                 blob_image_handler,
             );
+
+            resource_cache.enable_multithreading(enable_multithreading);
 
             let mut backend = RenderBackend::new(
                 api_rx,
@@ -2416,6 +2472,7 @@ impl Renderer {
             documents_seen: FastHashSet::default(),
             force_redraw: true,
             compositor_config: options.compositor_config,
+            current_compositor_kind: compositor_kind,
             allocated_native_surfaces: FastHashSet::default(),
             debug_overlay_state: DebugOverlayState::new(),
         };
@@ -2565,6 +2622,28 @@ impl Renderer {
                     resource_updates,
                     memory_pressure,
                 } => {
+                    if memory_pressure {
+                        // If a memory pressure event arrives _after_ a new scene has
+                        // been published that writes persistent targets (i.e. cached
+                        // render tasks to the texture cache, or picture cache tiles)
+                        // but _before_ the next update/render loop, those targets
+                        // will not be updated due to the active_documents list being
+                        // cleared at the end of this message. To work around that,
+                        // if any of the existing documents have not rendered yet, and
+                        // have picture/texture cache targets, force a render so that
+                        // those targets are updated.
+                        let must_be_drawn = self.active_documents
+                            .iter()
+                            .any(|(_, doc)| {
+                                doc.frame.must_be_drawn()
+                            });
+
+                        if must_be_drawn {
+                            let device_size = self.device_size;
+                            self.render_impl(device_size).ok();
+                        }
+                    }
+
                     self.pending_texture_updates.push(resource_updates.texture_updates);
                     self.pending_native_surface_updates.extend(resource_updates.native_surface_updates);
                     self.device.begin_frame();
@@ -2839,7 +2918,8 @@ impl Renderer {
     fn handle_debug_command(&mut self, command: DebugCommand) {
         match command {
             DebugCommand::EnableDualSourceBlending(_) |
-            DebugCommand::SetTransactionLogging(_) => {
+            DebugCommand::SetTransactionLogging(_) |
+            DebugCommand::SetPictureTileSize(_) => {
                 panic!("Should be handled by render backend");
             }
             DebugCommand::FetchDocuments |
@@ -2862,7 +2942,10 @@ impl Renderer {
             }
             DebugCommand::ClearCaches(_)
             | DebugCommand::SimulateLongSceneBuild(_)
-            | DebugCommand::SimulateLongLowPrioritySceneBuild(_) => {}
+            | DebugCommand::SimulateLongLowPrioritySceneBuild(_)
+            | DebugCommand::EnableNativeCompositor(_)
+            | DebugCommand::SetBatchingLookback(_)
+            | DebugCommand::EnableMultithreading(_) => {}
             DebugCommand::InvalidateGpuCache => {
                 match self.gpu_cache_texture.bus {
                     GpuCacheBus::PixelBuffer { ref mut rows, .. } => {
@@ -2953,7 +3036,9 @@ impl Renderer {
         );
 
         // Update the debug overlay surface, if we are running in native compositor mode.
-        if let CompositorConfig::Native { ref mut compositor, .. } = self.compositor_config {
+        if let CompositorKind::Native { .. } = self.current_compositor_kind {
+            let compositor = self.compositor_config.compositor().unwrap();
+
             // If there is a current surface, destroy it if we don't need it for this frame, or if
             // the size has changed.
             if let Some(current_size) = self.debug_overlay_state.current_size {
@@ -2968,10 +3053,10 @@ impl Renderer {
                 compositor.create_surface(
                     NativeSurfaceId::DEBUG_OVERLAY,
                     framebuffer_size,
+                    false,
                 );
                 compositor.create_tile(
                     NativeTileId::DEBUG_OVERLAY,
-                    false,
                 );
                 self.debug_overlay_state.current_size = Some(framebuffer_size);
             }
@@ -2982,12 +3067,17 @@ impl Renderer {
     fn bind_debug_overlay(&mut self) {
         // Debug overlay setup are only required in native compositing mode
         if self.debug_overlay_state.is_enabled {
-            if let CompositorConfig::Native { ref mut compositor, .. } = self.compositor_config {
+            if let CompositorKind::Native { .. } = self.current_compositor_kind {
+                let compositor = self.compositor_config.compositor().unwrap();
                 let surface_size = self.debug_overlay_state.current_size.unwrap();
 
                 // Bind the native surface
                 let surface_info = compositor.bind(
                     NativeTileId::DEBUG_OVERLAY,
+                    DeviceIntRect::new(
+                        DeviceIntPoint::zero(),
+                        surface_size,
+                    ),
                     DeviceIntRect::new(
                         DeviceIntPoint::zero(),
                         surface_size,
@@ -3016,7 +3106,8 @@ impl Renderer {
     fn unbind_debug_overlay(&mut self) {
         // Debug overlay setup are only required in native compositing mode
         if self.debug_overlay_state.is_enabled {
-            if let CompositorConfig::Native { ref mut compositor, .. } = self.compositor_config {
+            if let CompositorKind::Native { .. } = self.current_compositor_kind {
+                let compositor = self.compositor_config.compositor().unwrap();
                 // Unbind the draw target and add it to the visual tree to be composited
                 compositor.unbind();
 
@@ -3045,6 +3136,35 @@ impl Renderer {
         if self.active_documents.is_empty() {
             self.last_time = precise_time_ns();
             return Ok(results);
+        }
+
+        let compositor_kind = self.active_documents[0].1.frame.composite_state.compositor_kind;
+        // CompositorKind is updated
+        if self.current_compositor_kind != compositor_kind {
+            let enable = match (self.current_compositor_kind, compositor_kind) {
+                (CompositorKind::Native { .. }, CompositorKind::Draw { .. }) => {
+                    if self.debug_overlay_state.current_size.is_some() {
+                        self.compositor_config
+                            .compositor()
+                            .unwrap()
+                            .destroy_surface(NativeSurfaceId::DEBUG_OVERLAY);
+                        self.debug_overlay_state.current_size = None;
+                    }
+                    false
+                }
+                (CompositorKind::Draw { .. }, CompositorKind::Native { .. }) => {
+                    true
+                }
+                (_, _) => {
+                    unreachable!();
+                }
+            };
+
+            self.compositor_config
+                .compositor()
+                .unwrap()
+                .enable_native_compositor(enable);
+            self.current_compositor_kind = compositor_kind;
         }
 
         let mut frame_profiles = Vec::new();
@@ -3095,7 +3215,8 @@ impl Renderer {
         // Inform the client that we are starting a composition transaction if native
         // compositing is enabled. This needs to be done early in the frame, so that
         // we can create debug overlays after drawing the main surfaces.
-        if let CompositorConfig::Native { ref mut compositor, .. } = self.compositor_config {
+        if let CompositorKind::Native { .. } = self.current_compositor_kind {
+            let compositor = self.compositor_config.compositor().unwrap();
             compositor.begin_frame();
         }
 
@@ -3112,6 +3233,8 @@ impl Renderer {
 
             let last_document_index = active_documents.len() - 1;
             for (doc_index, (document_id, RenderedDocument { ref mut frame, .. })) in active_documents.iter_mut().enumerate() {
+                assert!(self.current_compositor_kind == frame.composite_state.compositor_kind);
+
                 if self.shared_texture_cache_cleared {
                     assert!(self.documents_seen.contains(&document_id),
                             "Cleared texture cache without sending new document frame.");
@@ -3131,7 +3254,7 @@ impl Renderer {
                     doc_index == 0,
                 );
 
-                if let Some(_) = device_size {
+                if device_size.is_some() {
                     self.draw_frame_debug_items(&frame.debug_items);
                 }
                 if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
@@ -3272,9 +3395,9 @@ impl Renderer {
                 let scale = if small_screen { 1.6 } else { 1.0 };
                 // TODO(gw): Tidy this up so that compositor config integrates better
                 //           with the (non-compositor) surface y-flip options.
-                let surface_origin_is_top_left = match self.compositor_config {
-                    CompositorConfig::Native { .. } => true,
-                    CompositorConfig::Draw { .. } => self.device.surface_origin_is_top_left(),
+                let surface_origin_is_top_left = match self.current_compositor_kind {
+                    CompositorKind::Native { .. } => true,
+                    CompositorKind::Draw { .. } => self.device.surface_origin_is_top_left(),
                 };
                 debug_renderer.render(
                     &mut self.device,
@@ -3303,7 +3426,8 @@ impl Renderer {
         // Inform the client that we are finished this composition transaction if native
         // compositing is enabled. This must be called after any debug / profiling compositor
         // surfaces have been drawn and added to the visual tree.
-        if let CompositorConfig::Native { ref mut compositor, .. } = self.compositor_config {
+        if let CompositorKind::Native { .. } = self.current_compositor_kind {
+            let compositor = self.compositor_config.compositor().unwrap();
             compositor.end_frame();
         }
 
@@ -3366,7 +3490,7 @@ impl Renderer {
 
         let mut upload_time = TimeProfileCounter::new("GPU cache upload time", false, Some(0.0..2.0));
         let updated_rows = upload_time.profile(|| {
-            return self.gpu_cache_texture.flush(&mut self.device);
+            self.gpu_cache_texture.flush(&mut self.device)
         });
         self.gpu_cache_upload_time += upload_time.get();
 
@@ -3930,7 +4054,7 @@ impl Renderer {
                 .iter()
                 .rev()
                 {
-                    if should_skip_batch(&batch.key.kind, &self.debug_flags) {
+                    if should_skip_batch(&batch.key.kind, self.debug_flags) {
                         continue;
                     }
 
@@ -3959,7 +4083,9 @@ impl Renderer {
             let _gl = self.gpu_profile.start_marker("alpha batches");
             let transparent_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
             self.set_blend(true, framebuffer_kind);
+
             let mut prev_blend_mode = BlendMode::None;
+            let shaders_rc = self.shaders.clone();
 
             // If the device supports pixel local storage, initialize the PLS buffer for
             // the transparent pass. This involves reading the current framebuffer value
@@ -3979,16 +4105,16 @@ impl Renderer {
             }
 
             for batch in &alpha_batch_container.alpha_batches {
-                if should_skip_batch(&batch.key.kind, &self.debug_flags) {
+                if should_skip_batch(&batch.key.kind, self.debug_flags) {
                     continue;
                 }
 
-                self.shaders.borrow_mut()
-                    .get(&batch.key, batch.features | BatchFeatures::ALPHA_PASS, self.debug_flags)
-                    .bind(
-                        &mut self.device, projection,
-                        &mut self.renderer_errors,
-                    );
+                let mut shaders = shaders_rc.borrow_mut();
+                let shader = shaders.get(
+                    &batch.key,
+                    batch.features | BatchFeatures::ALPHA_PASS,
+                    self.debug_flags,
+                );
 
                 if batch.key.blend_mode != prev_blend_mode {
                     match batch.key.blend_mode {
@@ -4021,6 +4147,12 @@ impl Renderer {
                             // /webrender/doc/text-rendering.md
                             //
                             self.device.set_blend_mode_subpixel_with_bg_color_pass0();
+                            // need to make sure the shader is bound
+                            shader.bind(
+                                &mut self.device,
+                                projection,
+                                &mut self.renderer_errors,
+                            );
                             self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass0 as _);
                         }
                         BlendMode::Advanced(mode) => {
@@ -4048,6 +4180,11 @@ impl Renderer {
                 }
 
                 let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
+                shader.bind(
+                    &mut self.device,
+                    projection,
+                    &mut self.renderer_errors,
+                );
 
                 self.draw_instanced_batch(
                     &batch.instances,
@@ -4058,6 +4195,12 @@ impl Renderer {
 
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     self.set_blend_mode_subpixel_with_bg_color_pass1(framebuffer_kind);
+                    // re-binding the shader after the blend mode change
+                    shader.bind(
+                        &mut self.device,
+                        projection,
+                        &mut self.renderer_errors,
+                    );
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
@@ -4068,6 +4211,12 @@ impl Renderer {
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                     self.set_blend_mode_subpixel_with_bg_color_pass2(framebuffer_kind);
+                    // re-binding the shader after the blend mode change
+                    shader.bind(
+                        &mut self.device,
+                        projection,
+                        &mut self.renderer_errors,
+                    );
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
 
                     self.device
@@ -4104,9 +4253,21 @@ impl Renderer {
     fn draw_tile_list<'a, I: Iterator<Item = &'a CompositeTile>>(
         &mut self,
         tiles_iter: I,
+        projection: &default::Transform3D<f32>,
         partial_present_mode: Option<PartialPresentMode>,
         stats: &mut RendererStats,
     ) {
+        self.shaders
+            .borrow_mut()
+            .get_composite_shader(
+                CompositeSurfaceFormat::Rgba,
+                ImageBufferKind::Texture2DArray,
+            ).bind(
+                &mut self.device,
+                projection,
+                &mut self.renderer_errors
+            );
+
         let mut current_textures = BatchTextures::no_texture();
         let mut instances = Vec::new();
 
@@ -4136,6 +4297,17 @@ impl Renderer {
             };
 
             let clip_rect = match partial_clip_rect.intersection(&tile.clip_rect) {
+                Some(rect) => rect,
+                None => continue,
+            };
+
+            // Simple compositor needs the valid rect in device space to match clip rect
+            let valid_device_rect = tile.valid_rect.translate(
+                tile.rect.origin.to_vector()
+            );
+
+            // Only composite the part of the tile that contains valid pixels
+            let clip_rect = match clip_rect.intersection(&valid_device_rect) {
                 Some(rect) => rect,
                 None => continue,
             };
@@ -4174,6 +4346,95 @@ impl Renderer {
         }
     }
 
+    /// Draw a list of external compositor surfaces
+    fn draw_external_surface_list(
+        &mut self,
+        composite_state: &CompositeState,
+        projection: &default::Transform3D<f32>,
+        stats: &mut RendererStats,
+    ) {
+        // Only opaque compositor surfaces are supported
+        let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
+        self.set_blend(false, FramebufferKind::Main);
+
+        let mut current_textures = BatchTextures::no_texture();
+        let mut instances = Vec::new();
+
+        for surface in &composite_state.external_surfaces {
+            // Bind an appropriate YUV shader for the texture format kind
+            self.shaders
+                .borrow_mut()
+                .get_composite_shader(
+                    CompositeSurfaceFormat::Yuv,
+                    surface.image_buffer_kind,
+                ).bind(
+                    &mut self.device,
+                    projection,
+                    &mut self.renderer_errors
+                );
+
+            let textures = BatchTextures {
+                colors: [
+                    surface.yuv_planes[0].texture,
+                    surface.yuv_planes[1].texture,
+                    surface.yuv_planes[2].texture,
+                ],
+            };
+
+            // Flush this batch if the textures aren't compatible
+            if !current_textures.is_compatible_with(&textures) {
+                self.draw_instanced_batch(
+                    &instances,
+                    VertexArrayKind::Composite,
+                    &current_textures,
+                    stats,
+                );
+                instances.clear();
+            }
+            current_textures = textures;
+
+            // When the texture is an external texture, the UV rect is not known when
+            // the external surface descriptor is created, because external textures
+            // are not resolved until the lock() callback is invoked at the start of
+            // the frame render. To handle this, query the texture resolver for the
+            // UV rect if it's an external texture, otherwise use the default UV rect.
+            let uv_rects = [
+                self.texture_resolver.get_uv_rect(&textures.colors[0], surface.yuv_planes[0].uv_rect),
+                self.texture_resolver.get_uv_rect(&textures.colors[1], surface.yuv_planes[1].uv_rect),
+                self.texture_resolver.get_uv_rect(&textures.colors[2], surface.yuv_planes[2].uv_rect),
+            ];
+
+            // Create the instance and add to current batch
+            let instance = CompositeInstance::new_yuv(
+                surface.device_rect,
+                surface.clip_rect,
+                surface.z_id,
+                surface.yuv_color_space,
+                surface.yuv_format,
+                surface.yuv_rescale,
+                [
+                    surface.yuv_planes[0].texture_layer as f32,
+                    surface.yuv_planes[1].texture_layer as f32,
+                    surface.yuv_planes[2].texture_layer as f32,
+                ],
+                uv_rects,
+            );
+            instances.push(instance);
+        }
+
+        // Flush the last batch
+        if !instances.is_empty() {
+            self.draw_instanced_batch(
+                &instances,
+                VertexArrayKind::Composite,
+                &current_textures,
+                stats,
+            );
+        }
+
+        self.gpu_profile.finish_sampler(opaque_sampler);
+    }
+
     /// Composite picture cache tiles into the framebuffer. This is currently
     /// the only way that picture cache tiles get drawn. In future, the tiles
     /// will often be handed to the OS compositor, and this method will be
@@ -4207,7 +4468,21 @@ impl Renderer {
                 // Work out how many dirty rects WR produced, and if that's more than
                 // what the device supports.
                 for tile in composite_state.opaque_tiles.iter().chain(composite_state.alpha_tiles.iter()) {
-                    combined_dirty_rect = combined_dirty_rect.union(&tile.dirty_rect);
+                    let dirty_rect = tile.dirty_rect.translate(tile.rect.origin.to_vector());
+                    combined_dirty_rect = combined_dirty_rect.union(&dirty_rect);
+                }
+
+                // Include any external surfaces in the partial present dirty rect. For now,
+                // we assume that the external surfaces are always dirty / updating and always
+                // need to be presented.
+                // TODO(gw): We could check if the epoch of the external image has changed, and
+                //           skip including the external surface in the partial present dirty
+                //           rect if it hasn't changed.
+                for surface in &composite_state.external_surfaces {
+                    let dirty_rect = surface.device_rect
+                        .intersection(&surface.clip_rect)
+                        .unwrap_or_else(DeviceRect::zero);
+                    combined_dirty_rect = combined_dirty_rect.union(&dirty_rect);
                 }
 
                 let combined_dirty_rect = combined_dirty_rect.round();
@@ -4254,17 +4529,20 @@ impl Renderer {
             }
         }
 
-        self.shaders.borrow_mut().composite.bind(
-            &mut self.device,
-            &projection,
-            &mut self.renderer_errors
-        );
-
         // We are only interested in tiles backed with actual cached pixels so we don't
         // count clear tiles here.
         let num_tiles = composite_state.opaque_tiles.len()
             + composite_state.alpha_tiles.len();
         self.profile_counters.total_picture_cache_tiles.set(num_tiles);
+
+        // Draw external compositor surfaces
+        if !composite_state.external_surfaces.is_empty() {
+            self.draw_external_surface_list(
+                composite_state,
+                projection,
+                &mut results.stats,
+            );
+        }
 
         // Draw opaque tiles first, front-to-back to get maxmum
         // z-reject efficiency.
@@ -4274,6 +4552,7 @@ impl Renderer {
             self.set_blend(false, FramebufferKind::Main);
             self.draw_tile_list(
                 composite_state.opaque_tiles.iter().rev(),
+                projection,
                 partial_present_mode,
                 &mut results.stats,
             );
@@ -4287,6 +4566,7 @@ impl Renderer {
             self.device.set_blend_mode_premultiplied_dest_out();
             self.draw_tile_list(
                 composite_state.clear_tiles.iter(),
+                projection,
                 partial_present_mode,
                 &mut results.stats,
             );
@@ -4301,6 +4581,7 @@ impl Renderer {
             self.set_blend_mode_premultiplied_alpha(FramebufferKind::Main);
             self.draw_tile_list(
                 composite_state.alpha_tiles.iter(),
+                projection,
                 partial_present_mode,
                 &mut results.stats,
             );
@@ -4537,7 +4818,7 @@ impl Renderer {
             let _gm2 = self.gpu_profile.start_marker("box-shadows");
             let textures = BatchTextures {
                 colors: [
-                    mask_texture_id.clone(),
+                    *mask_texture_id,
                     TextureSource::Invalid,
                     TextureSource::Invalid,
                 ],
@@ -4557,7 +4838,7 @@ impl Renderer {
             let _gm2 = self.gpu_profile.start_marker("clip images");
             let textures = BatchTextures {
                 colors: [
-                    mask_texture_id.clone(),
+                    *mask_texture_id,
                     TextureSource::Invalid,
                     TextureSource::Invalid,
                 ],
@@ -4895,7 +5176,12 @@ impl Renderer {
 
             let texture = match image.source {
                 ExternalImageSource::NativeTexture(texture_id) => {
-                    ExternalTexture::new(texture_id, texture_target, Swizzle::default())
+                    ExternalTexture::new(
+                        texture_id,
+                        texture_target,
+                        Swizzle::default(),
+                        image.uv,
+                    )
                 }
                 ExternalImageSource::Invalid => {
                     warn!("Invalid ext-image");
@@ -4905,7 +5191,12 @@ impl Renderer {
                         ext_image.channel_index
                     );
                     // Just use 0 as the gl handle for this failed case.
-                    ExternalTexture::new(0, texture_target, Swizzle::default())
+                    ExternalTexture::new(
+                        0,
+                        texture_target,
+                        Swizzle::default(),
+                        image.uv,
+                    )
                 }
                 ExternalImageSource::RawData(_) => {
                     panic!("Raw external data is not expected for deferred resolves!");
@@ -5070,18 +5361,18 @@ impl Renderer {
             CompositorConfig::Native { ref mut compositor, .. } => {
                 for op in self.pending_native_surface_updates.drain(..) {
                     match op.details {
-                        NativeSurfaceOperationDetails::CreateSurface { id, tile_size } => {
+                        NativeSurfaceOperationDetails::CreateSurface { id, tile_size, is_opaque } => {
                             let _inserted = self.allocated_native_surfaces.insert(id);
                             debug_assert!(_inserted, "bug: creating existing surface");
-                            compositor.create_surface(id, tile_size);
+                            compositor.create_surface(id, tile_size, is_opaque);
                         }
                         NativeSurfaceOperationDetails::DestroySurface { id } => {
                             let _existed = self.allocated_native_surfaces.remove(&id);
                             debug_assert!(_existed, "bug: removing unknown surface");
                             compositor.destroy_surface(id);
                         }
-                        NativeSurfaceOperationDetails::CreateTile { id, is_opaque } => {
-                            compositor.create_tile(id, is_opaque);
+                        NativeSurfaceOperationDetails::CreateTile { id } => {
+                            compositor.create_tile(id);
                         }
                         NativeSurfaceOperationDetails::DestroyTile { id } => {
                             compositor.destroy_tile(id);
@@ -5177,11 +5468,12 @@ impl Renderer {
                         if frame.composite_state.picture_caching_is_enabled {
                             // If we have a native OS compositor, then make use of that interface
                             // to specify how to composite each of the picture cache surfaces.
-                            match self.compositor_config {
-                                CompositorConfig::Native { ref mut compositor, .. } => {
+                            match self.current_compositor_kind {
+                                CompositorKind::Native { .. } => {
+                                    let compositor = self.compositor_config.compositor().unwrap();
                                     frame.composite_state.composite_native(&mut **compositor);
                                 }
-                                CompositorConfig::Draw { max_partial_present_rects, .. } => {
+                                CompositorKind::Draw { max_partial_present_rects, .. } => {
                                     self.composite_simple(
                                         &frame.composite_state,
                                         clear_framebuffer,
@@ -5260,11 +5552,16 @@ impl Renderer {
                                     )
                                 }
                                 ResolvedSurfaceTexture::Native { id, size } => {
-                                    let surface_info = match self.compositor_config {
-                                        CompositorConfig::Native { ref mut compositor, .. } => {
-                                            compositor.bind(id, picture_target.dirty_rect)
+                                    let surface_info = match self.current_compositor_kind {
+                                        CompositorKind::Native { .. } => {
+                                            let compositor = self.compositor_config.compositor().unwrap();
+                                            compositor.bind(
+                                                id,
+                                                picture_target.dirty_rect,
+                                                picture_target.valid_rect,
+                                            )
                                         }
-                                        CompositorConfig::Draw { .. } => {
+                                        CompositorKind::Draw { .. } => {
                                             unreachable!();
                                         }
                                     };
@@ -5297,11 +5594,12 @@ impl Renderer {
 
                             // Native OS surfaces must be unbound at the end of drawing to them
                             if let ResolvedSurfaceTexture::Native { .. } = picture_target.surface {
-                                match self.compositor_config {
-                                    CompositorConfig::Native { ref mut compositor, .. } => {
+                                match self.current_compositor_kind {
+                                    CompositorKind::Native { .. } => {
+                                        let compositor = self.compositor_config.compositor().unwrap();
                                         compositor.unbind();
                                     }
-                                    CompositorConfig::Draw { .. } => {
+                                    CompositorKind::Draw { .. } => {
                                         unreachable!();
                                     }
                                 }
@@ -5467,7 +5765,7 @@ impl Renderer {
         self.device.enable_pixel_local_storage(false);
     }
 
-    pub fn debug_renderer<'b>(&'b mut self) -> Option<&'b mut DebugRenderer> {
+    pub fn debug_renderer(&mut self) -> Option<&mut DebugRenderer> {
         self.debug.get_mut(&mut self.device)
     }
 
@@ -5809,7 +6107,7 @@ impl Renderer {
 
         let margin = 10.0;
         debug_renderer.add_quad(
-            &x0 - margin,
+            x0 - margin,
             y0 - margin,
             x0 + text_width + margin,
             y + margin,
@@ -5990,7 +6288,7 @@ impl Renderer {
 
     // Sets the blend mode. Blend is unconditionally set if the "show overdraw" debugging mode is
     // enabled.
-    fn set_blend(&self, mut blend: bool, framebuffer_kind: FramebufferKind) {
+    fn set_blend(&mut self, mut blend: bool, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             blend = true
@@ -5998,7 +6296,7 @@ impl Renderer {
         self.device.set_blend(blend)
     }
 
-    fn set_blend_mode_multiply(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_multiply(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6007,7 +6305,7 @@ impl Renderer {
         }
     }
 
-    fn set_blend_mode_premultiplied_alpha(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_premultiplied_alpha(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6016,7 +6314,7 @@ impl Renderer {
         }
     }
 
-    fn set_blend_mode_subpixel_with_bg_color_pass1(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_subpixel_with_bg_color_pass1(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6025,7 +6323,7 @@ impl Renderer {
         }
     }
 
-    fn set_blend_mode_subpixel_with_bg_color_pass2(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_subpixel_with_bg_color_pass2(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6135,6 +6433,7 @@ pub struct RendererOptions {
     pub scatter_gpu_cache_updates: bool,
     pub upload_method: UploadMethod,
     pub workers: Option<Arc<ThreadPool>>,
+    pub enable_multithreading: bool,
     pub blob_image_handler: Option<Box<dyn BlobImageHandler>>,
     pub recorder: Option<Box<dyn ApiRecordingReceiver>>,
     pub thread_listener: Option<Box<dyn ThreadListener + Send + Sync>>,
@@ -6191,7 +6490,7 @@ impl Default for RendererOptions {
             device_pixel_ratio: 1.0,
             resource_override_path: None,
             enable_aa: true,
-            enable_dithering: true,
+            enable_dithering: false,
             debug_flags: DebugFlags::empty(),
             max_recorded_profiles: 0,
             precache_flags: ShaderPrecacheFlags::empty(),
@@ -6208,6 +6507,7 @@ impl Default for RendererOptions {
             // but we are unable to make this decision here, so picking the reasonable medium.
             upload_method: UploadMethod::PixelBuffer(VertexUsageHint::Stream),
             workers: None,
+            enable_multithreading: true,
             blob_image_handler: None,
             recorder: None,
             thread_listener: None,
@@ -6732,9 +7032,7 @@ impl Renderer {
     }
 }
 
-fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs)
-               -> &'a VAO {
+fn get_vao(vertex_array_kind: VertexArrayKind, vaos: &RendererVAOs) -> &VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
@@ -6755,11 +7053,12 @@ enum FramebufferKind {
     Other,
 }
 
-fn should_skip_batch(kind: &BatchKind, flags: &DebugFlags) -> bool {
+fn should_skip_batch(kind: &BatchKind, flags: DebugFlags) -> bool {
     match kind {
         BatchKind::TextRun(_) => {
             flags.contains(DebugFlags::DISABLE_TEXT_PRIMS)
         }
+        BatchKind::Brush(BrushBatchKind::ConicGradient) |
         BatchKind::Brush(BrushBatchKind::RadialGradient) |
         BatchKind::Brush(BrushBatchKind::LinearGradient) => {
             flags.contains(DebugFlags::DISABLE_GRADIENT_PRIMS)

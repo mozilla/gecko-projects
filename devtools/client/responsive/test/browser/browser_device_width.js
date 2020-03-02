@@ -10,8 +10,6 @@ const TEST_URL =
 addRDMTask(
   TEST_URL,
   async function({ ui, manager }) {
-    await pushPref("devtools.responsive.metaViewport.enabled", true);
-
     ok(ui, "An instance of the RDM should be attached to the tab.");
     await setViewportSizeAndAwaitReflow(ui, manager, 110, 500);
 
@@ -47,8 +45,9 @@ addRDMTask(
 
     info("Checking for screen props once again.");
     await checkScreenProps2(ui);
-  },
-  true
+  }
+  // XXX: Enable testing against new browser UI.
+  // true
 );
 
 async function setViewportSizeWithInputKeys(ui) {

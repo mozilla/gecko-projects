@@ -105,6 +105,9 @@
 @BINPATH@/@DLL_PREFIX@mozwayland@DLL_SUFFIX@
 #endif
 #endif
+#ifdef MOZ_WASM_SANDBOXING_GRAPHITE
+@BINPATH@/@DLL_PREFIX@graphitewasm@DLL_SUFFIX@
+#endif
 
 ; We don't have a complete view of which dlls to expect when doing an artifact
 ; build because we haven't run the relevant parts of configure, so we guess
@@ -135,10 +138,8 @@
 @RESPATH@/update-settings.ini
 #endif
 @RESPATH@/platform.ini
-#ifndef MOZ_SYSTEM_SQLITE
 #ifndef MOZ_FOLD_LIBS
 @BINPATH@/@DLL_PREFIX@mozsqlite3@DLL_SUFFIX@
-#endif
 #endif
 @BINPATH@/@DLL_PREFIX@lgpllibs@DLL_SUFFIX@
 #ifdef MOZ_FFVPX
@@ -371,8 +372,12 @@ bin/libfreebl_64int_3.so
 @RESPATH@/chrome/pippki@JAREXT@
 @RESPATH@/chrome/pippki.manifest
 
-#if defined(XP_WIN) && !defined(_ARM64_)
+; preprocessor.py doesn't handle parentheses, so while the following could be
+; expressed in a single line, it's more clear to break them up.
+#if defined(XP_WIN) || defined(XP_MACOSX)
+#if !defined(_ARM64_)
 @BINPATH@/@DLL_PREFIX@osclientcerts@DLL_SUFFIX@
+#endif
 #endif
 
 ; For process sandboxing

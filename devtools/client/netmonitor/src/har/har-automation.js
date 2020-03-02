@@ -8,9 +8,13 @@
 
 const { Ci } = require("chrome");
 const Services = require("Services");
-const { HarCollector } = require("./har-collector");
-const { HarExporter } = require("./har-exporter");
-const { HarUtils } = require("./har-utils");
+const {
+  HarCollector,
+} = require("devtools/client/netmonitor/src/har/har-collector");
+const {
+  HarExporter,
+} = require("devtools/client/netmonitor/src/har/har-exporter");
+const { HarUtils } = require("devtools/client/netmonitor/src/har/har-utils");
 
 const prefDomain = "devtools.netmonitor.har.";
 
@@ -64,7 +68,7 @@ HarAutomation.prototype = {
       return;
     }
 
-    this.debuggerClient = client;
+    this.devToolsClient = client;
     this.webConsoleFront = await this.toolbox.target.getFront("console");
 
     this.tabWatcher = new TabWatcher(this.toolbox, this);
@@ -84,7 +88,7 @@ HarAutomation.prototype = {
     // data from events sent from the backend.
     this.collector = new HarCollector({
       webConsoleFront: this.webConsoleFront,
-      debuggerClient: this.debuggerClient,
+      devToolsClient: this.devToolsClient,
     });
 
     this.collector.start();

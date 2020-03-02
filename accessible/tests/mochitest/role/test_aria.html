@@ -14,6 +14,14 @@
 
   <script type="application/javascript">
 
+    // To test initial roles on body elements, we need to use an iframe.
+    function testBodyRole(iframeId, role) {
+      let iframe = getNode(iframeId);
+      let doc = iframe.contentDocument;
+      let docAcc = getAccessible(doc);
+      testRole(docAcc, role);
+    }
+
     function doTest() {
       // ARIA role map.
       testRole("aria_alert", ROLE_ALERT);
@@ -26,6 +34,7 @@
       testRole("aria_checkbox", ROLE_CHECKBUTTON);
       testRole("aria_columnheader", ROLE_COLUMNHEADER);
       testRole("aria_combobox", ROLE_EDITCOMBOBOX);
+      testRole("aria_comment", ROLE_COMMENT);
       testRole("aria_deletion", ROLE_CONTENT_DELETION);
       testRole("aria_dialog", ROLE_DIALOG);
       testRole("aria_directory", ROLE_LIST);
@@ -45,6 +54,7 @@
       testRole("aria_listbox", ROLE_LISTBOX);
       testRole("aria_listitem", ROLE_LISTITEM);
       testRole("aria_log", ROLE_TEXT); // weak role
+      testRole("aria_mark", ROLE_MARK);
       testRole("aria_marquee", ROLE_ANIMATION);
       testRole("aria_math", ROLE_FLAT_EQUATION);
       testRole("aria_menu", ROLE_MENUPOPUP);
@@ -71,6 +81,7 @@
       testRole("aria_slider", ROLE_SLIDER);
       testRole("aria_spinbutton", ROLE_SPINBUTTON);
       testRole("aria_status", ROLE_STATUSBAR);
+      testRole("aria_suggestion", ROLE_SUGGESTION);
       testRole("aria_switch", ROLE_SWITCH);
       testRole("aria_tab", ROLE_PAGETAB);
       testRole("aria_tablist", ROLE_PAGETABLIST);
@@ -159,12 +170,29 @@
       testRole(testDoc, ROLE_DOCUMENT);
       document.body.setAttribute("role", "application");
       testRole(testDoc, ROLE_APPLICATION);
+      document.body.setAttribute("role", "dialog");
+      testRole(testDoc, ROLE_DIALOG);
+      // Other roles aren't valid on body elements.
+      document.body.setAttribute("role", "document");
+      testRole(testDoc, ROLE_DOCUMENT);
+      document.body.setAttribute("role", "button");
+      testRole(testDoc, ROLE_DOCUMENT);
+      document.body.setAttribute("role", "main");
+      testRole(testDoc, ROLE_DOCUMENT);
 
       // Test equation image
       testRole("img_eq", ROLE_FLAT_EQUATION);
 
       // Test textual equation
       testRole("txt_eq", ROLE_FLAT_EQUATION);
+
+      // Test initial ARIA roles on the body element.
+      testBodyRole("iframe_aria_application", ROLE_APPLICATION);
+      testBodyRole("iframe_aria_dialog", ROLE_DIALOG);
+      // Other roles aren't valid on body elements.
+      testBodyRole("iframe_aria_document", ROLE_DOCUMENT);
+      testBodyRole("iframe_aria_button", ROLE_DOCUMENT);
+      testBodyRole("iframe_aria_button", ROLE_DOCUMENT);
 
       SimpleTest.finish();
     }
@@ -222,6 +250,7 @@
   <span id="aria_checkbox" role="checkbox"></span>
   <span id="aria_columnheader" role="columnheader"></span>
   <span id="aria_combobox" role="combobox"></span>
+  <span id="aria_comment" role="comment"></span>
   <span id="aria_deletion" role="deletion"></span>
   <span id="aria_dialog" role="dialog"></span>
   <span id="aria_directory" role="directory"></span>
@@ -241,6 +270,7 @@
   <span id="aria_listbox" role="listbox"></span>
   <span id="aria_listitem" role="listitem"></span>
   <span id="aria_log" role="log"></span>
+  <span id="aria_mark" role="mark"></span>
   <span id="aria_marquee" role="marquee"></span>
   <span id="aria_math" role="math"></span>
   <span id="aria_menu" role="menu"></span>
@@ -267,6 +297,7 @@
   <span id="aria_slider" role="slider"></span>
   <span id="aria_spinbutton" role="spinbutton"></span>
   <span id="aria_status" role="status"></span>
+  <span id="aria_suggestion" role="suggestion"></span>
   <span id="aria_switch" role="switch"></span>
   <span id="aria_tab" role="tab"></span>
   <span id="aria_tablist" role="tablist"></span>
@@ -375,6 +406,17 @@
   <p>Text:
     <span id="txt_eq" role="math" title="x^2 + y^2 + z^2">x<sup>2</sup> +
       y<sup>2</sup> + z<sup>2</sup></span>
+  </p>
 
+  <iframe id="iframe_aria_application"
+    src="data:text/html,<body role='application'>"></iframe>
+  <iframe id="iframe_aria_dialog"
+    src="data:text/html,<body role='dialog'>"></iframe>
+  <iframe id="iframe_aria_document"
+    src="data:text/html,<body role='document'>"></iframe>
+  <iframe id="iframe_aria_button"
+    src="data:text/html,<body role='button'>"></iframe>
+  <iframe id="iframe_aria_main"
+    src="data:text/html,<body role='main'>"></iframe>
 </body>
 </html>

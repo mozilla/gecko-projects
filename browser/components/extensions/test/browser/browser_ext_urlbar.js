@@ -70,6 +70,14 @@ add_task(async function setUp() {
   // failures due to the mock extensions not responding in time.
   let originalTimeout = UrlbarProviderExtension.notificationTimeout;
   UrlbarProviderExtension.notificationTimeout = 5000;
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      [
+        "browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts",
+        false,
+      ],
+    ],
+  });
   registerCleanupFunction(() => {
     UrlbarProviderExtension.notificationTimeout = originalTimeout;
   });
@@ -97,9 +105,7 @@ add_task(async function tip_onResultPicked_mainButton_noURL_mouse() {
     waitForFocus,
     value: "test",
   });
-  let mainButton = document.querySelector(
-    "#urlbarView-row-0 .urlbarView-tip-button"
-  );
+  let mainButton = gURLBar.querySelector(".urlbarView-tip-button");
   Assert.ok(mainButton);
   EventUtils.synthesizeMouseAtCenter(mainButton, {});
   await ext.awaitMessage("onResultPicked received");
@@ -138,9 +144,7 @@ add_task(async function tip_onResultPicked_mainButton_url_mouse() {
       waitForFocus,
       value: "test",
     });
-    let mainButton = document.querySelector(
-      "#urlbarView-row-0 .urlbarView-tip-button"
-    );
+    let mainButton = gURLBar.querySelector(".urlbarView-tip-button");
     Assert.ok(mainButton);
     let loadedPromise = BrowserTestUtils.browserLoaded(
       gBrowser.selectedBrowser
@@ -188,9 +192,7 @@ add_task(async function tip_onResultPicked_helpButton_url_mouse() {
       waitForFocus,
       value: "test",
     });
-    let helpButton = document.querySelector(
-      "#urlbarView-row-0 .urlbarView-tip-help"
-    );
+    let helpButton = gURLBar.querySelector(".urlbarView-tip-help");
     Assert.ok(helpButton);
     let loadedPromise = BrowserTestUtils.browserLoaded(
       gBrowser.selectedBrowser
@@ -232,6 +234,11 @@ add_task(async function search() {
 
 // Tests the search function with an empty string.
 add_task(async function searchEmpty() {
+  // We need to disable UrlbarProviderTopSites for some subtests in this file
+  // until we figure out how two restricting providers should interact.
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.openViewOnFocus", false]],
+  });
   gURLBar.blur();
 
   // Searching for an empty string shows the history view, but there may be no
@@ -280,10 +287,14 @@ add_task(async function searchEmpty() {
 
   await UrlbarTestUtils.promisePopupClose(window);
   await ext.unload();
+  await SpecialPowers.popPrefEnv();
 });
 
 // Tests the search function with `focus: false`.
 add_task(async function searchFocusFalse() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.openViewOnFocus", false]],
+  });
   await PlacesUtils.history.clear();
   await PlacesUtils.bookmarks.eraseEverything();
   await PlacesTestUtils.addVisits([
@@ -327,17 +338,20 @@ add_task(async function searchFocusFalse() {
 
   await UrlbarTestUtils.promisePopupClose(window);
   await ext.unload();
+  await SpecialPowers.popPrefEnv();
 });
 
 // Tests the search function with `focus: false` and an empty string.
 add_task(async function searchFocusFalseEmpty() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.openViewOnFocus", false]],
+  });
   await PlacesUtils.history.clear();
   await PlacesUtils.bookmarks.eraseEverything();
   await PlacesTestUtils.addVisits([
     "http://example.com/test1",
     "http://example.com/test2",
   ]);
-
   gURLBar.blur();
 
   let ext = ExtensionTestUtils.loadExtension({
@@ -370,6 +384,7 @@ add_task(async function searchFocusFalseEmpty() {
 
   await UrlbarTestUtils.promisePopupClose(window);
   await ext.unload();
+  await SpecialPowers.popPrefEnv();
 });
 
 // Tests the focus function with select = false.

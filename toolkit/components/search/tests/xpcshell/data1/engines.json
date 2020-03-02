@@ -1,10 +1,8 @@
 {
   "data": [
     {
-      "engineName": "engine1",
       "webExtension": {
-        "id": "engine1@search.mozilla.org",
-        "version": "1.0"
+        "id": "engine1@search.mozilla.org"
       },
       "orderHint": 10000,
       "appliesTo": [{
@@ -13,10 +11,8 @@
       }]
     },
     {
-      "engineName": "engine2",
       "webExtension": {
-        "id": "engine2@search.mozilla.org",
-        "version": "1.0"
+        "id": "engine2@search.mozilla.org"
       },
       "orderHint": 7000,
       "appliesTo": [{

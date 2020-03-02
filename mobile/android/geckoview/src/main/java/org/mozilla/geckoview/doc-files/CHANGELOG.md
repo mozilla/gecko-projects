@@ -13,6 +13,79 @@ exclude: true
 
 ⚠️  breaking change
 
+## v75
+- ⚠️ Remove [`GeckoRuntimeSettings.Builder#useContentProcessHint`]. The content
+  process is now preloaded by default if
+  [`GeckoRuntimeSettings.Builder#useMultiprocess`][75.1] is enabled.
+- ⚠️ Move [`GeckoSessionSettings.Builder#useMultiprocess`] to
+  [`GeckoRuntimeSettings.Builder#useMultiprocess`][75.1]. Multiprocess state is
+  no longer determined per session.
+- Added [`DebuggerDelegate#onExtensionListUpdated`][75.2] to notify that a temporary
+  extension has been installed by the debugger.
+  ([bug 1614295]({{bugzilla}}1614295))
+- ⚠️ Removed [`GeckoRuntimeSettings.setAutoplayDefault`][75.3], use
+  [`GeckoSession.PermissionDelegate#PERMISSION_AUTOPLAY_AUDIBLE`][73.12] and
+  [`GeckoSession.PermissionDelegate#PERMISSION_AUTOPLAY_INAUDIBLE`][73.13] to
+  control autoplay.
+  ([bug 1614894]({{bugzilla}}1614894))
+
+[75.1]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#useMultiprocess-boolean-
+[75.2]: {{javadoc_uri}}/WebExtensionController.DebuggerDelegate.html#onExtensionListUpdated--
+[75.3]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#autoplayDefault-boolean-
+
+## v74
+- Added [`WebExtensionController.enable`][74.1] and [`disable`][74.2] to
+  enable and disable extensions.
+  ([bug 1599585]({{bugzilla}}1599585))
+- ⚠️ Added ['GeckoSession.ProgressDelegate.SecurityInformation#certificate'][74.3], which is the
+  full server certificate in use, if any. The other certificate-related fields were removed.
+  ([bug 1508730]({{bugzilla}}1508730))
+- Added ['WebResponse#isSecure'][74.4], which indicates whether or not the response was
+  delivered over a secure connection.
+  ([bug 1508730]({{bugzilla}}1508730))
+- Added ['WebResponse#certificate'][74.5], which is the server certificate used for the
+  response, if any.
+  ([bug 1508730]({{bugzilla}}1508730))
+- Added ['WebRequestError#certificate'][74.6], which is the server certificate used in the
+  failed request, if any.
+  ([bug 1508730]({{bugzilla}}1508730))
+- ⚠️ Updated [`ContentBlockingController`][74.7] to use new representation for content blocking
+  exceptions and to add better support for removing exceptions. This deprecates [`ExceptionList`][74.8]
+  and [`restoreExceptionList`][74.9] with the intent to remove them in 76.
+  ([bug 1587552]({{bugzilla}}1587552))
+- Added [`GeckoSession.ContentDelegate.onMetaViewportFitChange`][74.10]. This exposes `viewport-fit` value that is CSS Round Display Level 1. ([bug 1574307]({{bugzilla}}1574307))
+- Extended [`LoginStorage.Delegate`][74.11] with [`onLoginUsed`][74.12] to
+  report when existing login entries are used for autofill.
+  ([bug 1610353]({{bugzilla}}1610353))
+- Added ['WebExtensionController#setTabActive'][74.13], which is used to notify extensions about
+  tab changes
+  ([bug 1597793]({{bugzilla}}1597793))
+- Added ['WebExtension.metaData.optionsUrl'][74.14] and ['WebExtension.metaData.openOptionsPageInTab'][74.15],
+  which is the addon metadata necessary to show their option pages.
+  ([bug 1598792]({{bugzilla}}1598792))
+- Added [`WebExtensionController.update`][74.16] to update extensions. ([bug 1599581]({{bugzilla}}1599581))
+- ⚠️ Replaced `subscription` argument in [`WebPushDelegate.onSubscriptionChanged`][74.17] from a [`WebPushSubscription`][74.18] to the [`String`][74.19] `scope`.
+
+[74.1]: {{javadoc_uri}}/WebExtensionController.html#enable-org.mozilla.geckoview.WebExtension-int-
+[74.2]: {{javadoc_uri}}/WebExtensionController.html#disable-org.mozilla.geckoview.WebExtension-int-
+[74.3]: {{javadoc_uri}}/GeckoSession.ProgressDelegate.SecurityInformation.html#certificate
+[74.4]: {{javadoc_uri}}/WebResponse.html#isSecure
+[74.5]: {{javadoc_uri}}/WebResponse.html#certificate
+[74.6]: {{javadoc_uri}}/WebRequestError.html#certificate
+[74.7]: {{javadoc_uri}}/ContentBlockingController.html
+[74.8]: {{javadoc_uri}}/ContentBlockingController.ExceptionList.html
+[74.9]: {{javadoc_uri}}/ContentBlockingController.html#restoreExceptionList-org.mozilla.geckoview.ContentBlockingController.ExceptionList-
+[74.10]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onMetaViewportFitChange-org.mozilla.geckoview.GeckoSession-java.lang.String-
+[74.11]: {{javadoc_uri}}/LoginStorage.Delegate.html
+[74.12]: {{javadoc_uri}}/LoginStorage.Delegate.html#onLoginUsed-org.mozilla.geckoview.LoginStorage.LoginEntry-int-
+[74.13]: {{javadoc_uri}}/WebExtensionController.html#setTabActive
+[74.14]: {{javadoc_uri}}/WebExtension.MetaData.html#optionsUrl
+[74.15]: {{javadoc_uri}}/WebExtension.MetaData.html#openOptionsPageInTab
+[74.16]: {{javadoc_uri}}/WebExtensionController.html#update-org.mozilla.geckoview.WebExtension-int-
+[74.17]: {{javadoc_uri}}/WebPushController.html#onSubscriptionChange-org.mozilla.geckoview.WebPushSubscription-byte:A-
+[74.18]: {{javadoc_uri}}/WebPushSubscription.html
+[74.19]: https://developer.android.com/reference/java/lang/String
+
 ## v73
 - Added [`WebExtensionController.install`][73.1] and [`uninstall`][73.2] to
   manage installed extensions
@@ -30,7 +103,14 @@ exclude: true
   instance.
 - Added [`GeckoResult.allOf`][73.10] for consuming a list of results.
 - Added [`WebExtensionController.list`][73.11] to list all installed extensions.
-
+- Added [`GeckoSession.PermissionDelegate#PERMISSION_AUTOPLAY_AUDIBLE`][73.12] and
+  [`GeckoSession.PermissionDelegate#PERMISSION_AUTOPLAY_INAUDIBLE`][73.13]. These control
+  autoplay permissions for audible and inaudible videos.
+  ([bug 1577596]({{bugzilla}}1577596))
+- Added [`LoginStorage.Delegate.onLoginSave`][73.14] for login storage save
+  requests and [`GeckoSession.PromptDelegate.onLoginStoragePrompt`][73.15] for
+  login storage prompts.
+  ([bug 1599873]({{bugzilla}}1599873))
 
 [73.1]: {{javadoc_uri}}/WebExtensionController.html#install-java.lang.String-
 [73.2]: {{javadoc_uri}}/WebExtensionController.html#uninstall-org.mozilla.geckoview.WebExtension-
@@ -43,6 +123,10 @@ exclude: true
 [73.9]: {{javadoc_uri}}/GeckoRuntime.html#setLoginStorageDelegate-org.mozilla.geckoview.LoginStorage.Delegate-
 [73.10]: {{javadoc_uri}}/GeckoResult.html#allOf-java.util.List-
 [73.11]: {{javadoc_uri}}/WebExtensionController.html#list--
+[73.12]: {{javadoc_uri}}/GeckoSession.PermissionDelegate.html#PERMISSION_AUTOPLAY_AUDIBLE
+[73.13]: {{javadoc_uri}}/GeckoSession.PermissionDelegate.html#PERMISSION_AUTOPLAY_INAUDIBLE
+[73.14]: {{javadoc_uri}}/LoginStorage.Delegate.html#onLoginSave-org.mozilla.geckoview.LoginStorage.LoginEntry-
+[73.15]: {{javadoc_uri}}/GeckoSession.PromptDelegate.html#onLoginStoragePrompt-org.mozilla.geckoview.GeckoSession-org.mozilla.geckoview.GeckoSession.PromptDelegate.LoginStoragePrompt-
 
 ## v72
 - Added [`GeckoSession.NavigationDelegate.LoadRequest#hasUserGesture`][72.1]. This indicates
@@ -111,9 +195,10 @@ exclude: true
 [72.20]: https://developer.android.com/reference/java/lang/String
 [72.21]: {{javadoc_uri}}/WebExtension.Icon.html
 [72.22]: {{javadoc_uri}}/GeckoWebExecutor.html#FETCH_FLAGS_STREAM_FAILURE_TEST
-[72.23]: {{javadoc_uri}}/CrashReporter#sendCrashReport-android.content.Context-java.io.File-org.json.JSONObject-
+[72.23]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-java.io.File-org.json.JSONObject-
 [72.24]: {{javadoc_uri}}/GeckoSession.PermissionDelegate.html#PERMISSION_PERSISTENT_XR
 
+=
 ## v71
 - Added a content blocking flag for blocked social cookies to [`ContentBlocking`][70.17].
   ([bug 1584479]({{bugzilla}}1584479))
@@ -510,4 +595,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 2d592afef93d47a268448aa5fd3289e03bb1f678
+[api-version]: 898e8783e858824b7af7e4e9763bf5aaa54c0b0c

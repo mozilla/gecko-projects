@@ -58,6 +58,8 @@
 #include "nsContentUtils.h"
 #include "nsExceptionHandler.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "nsNSSComponent.h"
+#include "ssl.h"
 
 #ifdef MOZ_WIDGET_GTK
 #  include "nsGIOProtocolHandler.h"
@@ -219,6 +221,29 @@ static const char* gCallbackPrefs[] = {
 static const char* gCallbackPrefsForSocketProcess[] = {
     WEBRTC_PREF_PREFIX,
     NETWORK_DNS_PREF,
+    "network.ssl_tokens_cache_enabled",
+    nullptr,
+};
+
+static const char* gCallbackSecurityPrefs[] = {
+    // Note the prefs listed below should be in sync with the code in
+    // HandleTLSPrefChange().
+    "security.tls.version.min",
+    "security.tls.version.max",
+    "security.tls.version.enable-deprecated",
+    "security.tls.hello_downgrade_check",
+    "security.ssl.require_safe_negotiation",
+    "security.ssl.enable_false_start",
+    "security.ssl.enable_alpn",
+    "security.tls.enable_0rtt_data",
+    "security.ssl.disable_session_identifiers",
+    "security.tls.enable_post_handshake_auth",
+    "security.tls.enable_delegated_credentials",
+    // Note the prefs listed below should be in sync with the code in
+    // SetValidationOptionsCommon().
+    "security.ssl.enable_ocsp_stapling",
+    "security.ssl.enable_ocsp_must_staple",
+    "security.pki.certificate_transparency.mode",
     nullptr,
 };
 
@@ -264,6 +289,11 @@ nsresult nsIOService::Init() {
   Preferences::AddBoolVarCache(&mOfflineMirrorsConnectivity,
                                OFFLINE_MIRRORS_CONNECTIVITY, true);
 
+  if (IsSocketProcessChild()) {
+    Preferences::RegisterCallbacks(nsIOService::OnTLSPrefChange,
+                                   gCallbackSecurityPrefs, this);
+  }
+
   gIOService = this;
 
   InitializeNetworkLinkService();
@@ -279,6 +309,28 @@ nsIOService::~nsIOService() {
     MOZ_ASSERT(gIOService == this);
     gIOService = nullptr;
   }
+}
+
+// static
+void nsIOService::OnTLSPrefChange(const char* aPref, void* aSelf) {
+  MOZ_ASSERT(IsSocketProcessChild());
+
+  if (!EnsureNSSInitializedChromeOrContent()) {
+    LOG(("NSS not initialized."));
+    return;
+  }
+
+  nsAutoCString pref(aPref);
+  // The preferences listed in gCallbackSecurityPrefs need to be in sync with
+  // the code in HandleTLSPrefChange() and SetValidationOptionsCommon().
+  if (HandleTLSPrefChange(pref)) {
+    LOG(("HandleTLSPrefChange done"));
+  } else if (pref.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
+             pref.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
+             pref.EqualsLiteral("security.pki.certificate_transparency.mode")) {
+    SetValidationOptionsCommon();
+  }
+  nsNSSComponent::ClearSSLExternalAndInternalSessionCacheNative();
 }
 
 nsresult nsIOService::InitializeCaptivePortalService() {
@@ -448,6 +500,7 @@ bool nsIOService::SocketProcessReady() {
 static bool sUseSocketProcess = false;
 static bool sUseSocketProcessChecked = false;
 
+// static
 bool nsIOService::UseSocketProcess() {
   if (sUseSocketProcessChecked) {
     return sUseSocketProcess;
@@ -904,13 +957,13 @@ nsresult nsIOService::NewChannelFromURIWithClientAndController(
     nsIPrincipal* aTriggeringPrincipal,
     const Maybe<ClientInfo>& aLoadingClientInfo,
     const Maybe<ServiceWorkerDescriptor>& aController, uint32_t aSecurityFlags,
-    uint32_t aContentPolicyType, nsIChannel** aResult) {
+    uint32_t aContentPolicyType, uint32_t aSandboxFlags, nsIChannel** aResult) {
   return NewChannelFromURIWithProxyFlagsInternal(
       aURI,
       nullptr,  // aProxyURI
       0,        // aProxyFlags
       aLoadingNode, aLoadingPrincipal, aTriggeringPrincipal, aLoadingClientInfo,
-      aController, aSecurityFlags, aContentPolicyType, aResult);
+      aController, aSecurityFlags, aContentPolicyType, aSandboxFlags, aResult);
 }
 
 NS_IMETHODIMP
@@ -928,7 +981,7 @@ nsresult nsIOService::NewChannelFromURIWithProxyFlagsInternal(
     nsIPrincipal* aTriggeringPrincipal,
     const Maybe<ClientInfo>& aLoadingClientInfo,
     const Maybe<ServiceWorkerDescriptor>& aController, uint32_t aSecurityFlags,
-    uint32_t aContentPolicyType, nsIChannel** result) {
+    uint32_t aContentPolicyType, uint32_t aSandboxFlags, nsIChannel** result) {
   // Ideally all callers of NewChannelFromURIWithProxyFlagsInternal provide
   // the necessary arguments to create a loadinfo.
   //
@@ -946,7 +999,7 @@ nsresult nsIOService::NewChannelFromURIWithProxyFlagsInternal(
       aContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT) {
     loadInfo = new LoadInfo(aLoadingPrincipal, aTriggeringPrincipal,
                             aLoadingNode, aSecurityFlags, aContentPolicyType,
-                            aLoadingClientInfo, aController);
+                            aLoadingClientInfo, aController, aSandboxFlags);
   }
   if (!loadInfo) {
     JSContext* cx = nsContentUtils::GetCurrentJSContext();
@@ -1050,7 +1103,7 @@ nsIOService::NewChannelFromURIWithProxyFlags(
   return NewChannelFromURIWithProxyFlagsInternal(
       aURI, aProxyURI, aProxyFlags, aLoadingNode, aLoadingPrincipal,
       aTriggeringPrincipal, Maybe<ClientInfo>(),
-      Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType,
+      Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType, 0,
       result);
 }
 
@@ -1488,6 +1541,12 @@ nsIOService::Observe(nsISupports* subject, const char* topic,
     SSLTokensCache::Shutdown();
 
     DestroySocketProcess();
+
+    if (IsSocketProcessChild()) {
+      Preferences::UnregisterCallbacks(nsIOService::OnTLSPrefChange,
+                                       gCallbackSecurityPrefs, this);
+      NSSShutdownForSocketProcess();
+    }
   } else if (!strcmp(topic, NS_NETWORK_LINK_TOPIC)) {
     OnNetworkLinkEvent(NS_ConvertUTF16toUTF8(data).get());
   } else if (!strcmp(topic, NS_NETWORK_ID_CHANGED_TOPIC)) {
@@ -1781,8 +1840,7 @@ nsresult nsIOService::SpeculativeConnectInternal(
   if (IsNeckoChild()) {
     ipc::URIParams params;
     SerializeURI(aURI, params);
-    gNeckoChild->SendSpeculativeConnect(params, IPC::Principal(aPrincipal),
-                                        aAnonymous);
+    gNeckoChild->SendSpeculativeConnect(params, aPrincipal, aAnonymous);
     return NS_OK;
   }
 

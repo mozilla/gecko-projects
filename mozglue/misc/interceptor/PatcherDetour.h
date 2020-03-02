@@ -10,17 +10,17 @@
 #if defined(_M_ARM64)
 #  include "mozilla/interceptor/Arm64.h"
 #endif  // defined(_M_ARM64)
-#include "mozilla/interceptor/PatcherBase.h"
-#include "mozilla/interceptor/Trampoline.h"
-#include "mozilla/interceptor/VMSharingPolicies.h"
+#include <utility>
 
 #include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
 #include "mozilla/NativeNt.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/TypedEnumBits.h"
 #include "mozilla/Types.h"
 #include "mozilla/Unused.h"
+#include "mozilla/interceptor/PatcherBase.h"
+#include "mozilla/interceptor/Trampoline.h"
+#include "mozilla/interceptor/VMSharingPolicies.h"
 
 #define COPY_CODES(NBYTES)                          \
   do {                                              \
@@ -715,6 +715,9 @@ class WindowsDllDetourPatcher final : public WindowsDllPatcherBase<VMPolicy> {
     *aOutTramp = nullptr;
 
     Trampoline<MMPolicyT>& tramp = aTramp;
+    if (!tramp) {
+      return;
+    }
 
     // The beginning of the trampoline contains two pointer-width slots:
     // [0]: |this|, so that we know whether the trampoline belongs to us;
@@ -805,11 +808,14 @@ class WindowsDllDetourPatcher final : public WindowsDllPatcherBase<VMPolicy> {
         // INC r32
         origBytes += 1;
       } else if (*origBytes == 0x83) {
-        // ADD|ODR|ADC|SBB|AND|SUB|XOR|CMP r/m, imm8
-        unsigned char b = origBytes[1];
-        if ((b & 0xc0) == 0xc0) {
-          // ADD|ODR|ADC|SBB|AND|SUB|XOR|CMP r, imm8
+        uint8_t mod = static_cast<uint8_t>(origBytes[1]) >> 6;
+        uint8_t rm = static_cast<uint8_t>(origBytes[1]) & 7;
+        if (mod == 3) {
+          // ADD|OR|ADC|SBB|AND|SUB|XOR|CMP r, imm8
           origBytes += 3;
+        } else if (mod == 1 && rm != 4) {
+          // ADD|OR|ADC|SBB|AND|SUB|XOR|CMP [r+disp8], imm8
+          origBytes += 4;
         } else {
           // bail
           MOZ_ASSERT_UNREACHABLE("Unrecognized bit opcode sequence");

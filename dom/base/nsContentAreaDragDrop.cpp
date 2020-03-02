@@ -28,6 +28,7 @@
 #include "nsFrameLoaderOwner.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
+#include "nsIContentPolicy.h"
 #include "nsIImageLoadingContent.h"
 #include "nsUnicharUtils.h"
 #include "nsIURL.h"
@@ -127,7 +128,8 @@ NS_IMPL_ISUPPORTS(nsContentAreaDragDropDataProvider, nsIFlavorDataProvider)
 // into the file system
 nsresult nsContentAreaDragDropDataProvider::SaveURIToFile(
     nsIURI* inSourceURI, nsIPrincipal* inTriggeringPrincipal,
-    nsIFile* inDestFile, bool isPrivate) {
+    nsIFile* inDestFile, nsContentPolicyType inContentPolicyType,
+    bool isPrivate) {
   nsCOMPtr<nsIURL> sourceURL = do_QueryInterface(inSourceURI);
   if (!sourceURL) {
     return NS_ERROR_NO_INTERFACE;
@@ -148,7 +150,7 @@ nsresult nsContentAreaDragDropDataProvider::SaveURIToFile(
   // referrer policy can be anything since the referrer is nullptr
   return persist->SavePrivacyAwareURI(inSourceURI, inTriggeringPrincipal, 0,
                                       nullptr, nullptr, nullptr, inDestFile,
-                                      isPrivate);
+                                      inContentPolicyType, isPrivate);
 }
 
 /*
@@ -179,8 +181,7 @@ nsresult CheckAndGetExtensionForMime(const nsCString& aExtension,
                                             getter_AddRefs(mimeInfo));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = mimeInfo->GetPrimaryExtension(*aPrimaryExtension);
-  NS_ENSURE_SUCCESS(rv, rv);
+  mimeInfo->GetPrimaryExtension(*aPrimaryExtension);
 
   if (aExtension.IsEmpty()) {
     *aIsValidExtension = false;
@@ -277,7 +278,7 @@ nsContentAreaDragDropDataProvider::GetFlavorData(nsITransferable* aTransferable,
                                          &isValidExtension, &primaryExtension);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        if (!isValidExtension) {
+        if (!isValidExtension && !primaryExtension.IsEmpty()) {
           // The filename extension is missing or incompatible
           // with the MIME type, replace it with the primary
           // extension.
@@ -313,7 +314,10 @@ nsContentAreaDragDropDataProvider::GetFlavorData(nsITransferable* aTransferable,
     bool isPrivate = aTransferable->GetIsPrivateData();
 
     nsCOMPtr<nsIPrincipal> principal = aTransferable->GetRequestingPrincipal();
-    rv = SaveURIToFile(sourceURI, principal, file, isPrivate);
+    nsContentPolicyType contentPolicyType =
+        aTransferable->GetContentPolicyType();
+    rv =
+        SaveURIToFile(sourceURI, principal, file, contentPolicyType, isPrivate);
     // send back an nsIFile
     if (NS_SUCCEEDED(rv)) {
       CallQueryInterface(file, aData);
@@ -458,12 +462,13 @@ nsresult DragDataProducer::GetImageData(imgIContainer* aImage,
         // Fix the file extension in the URL
         nsAutoCString primaryExtension;
         mimeInfo->GetPrimaryExtension(primaryExtension);
-
-        rv = NS_MutateURI(imgUrl)
-                 .Apply(NS_MutatorMethod(&nsIURLMutator::SetFileExtension,
-                                         primaryExtension, nullptr))
-                 .Finalize(imgUrl);
-        NS_ENSURE_SUCCESS(rv, rv);
+        if (!primaryExtension.IsEmpty()) {
+          rv = NS_MutateURI(imgUrl)
+                   .Apply(NS_MutatorMethod(&nsIURLMutator::SetFileExtension,
+                                           primaryExtension, nullptr))
+                   .Finalize(imgUrl);
+          NS_ENSURE_SUCCESS(rv, rv);
+        }
       }
     }
 #endif /* defined(XP_MACOSX) */
@@ -622,10 +627,10 @@ nsresult DragDataProducer::Produce(DataTransfer* aDataTransfer, bool* aCanDrag,
           HTMLAreaElement::FromNodeOrNull(draggedNode);
       if (areaElem) {
         // use the alt text (or, if missing, the href) as the title
-        areaElem->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);
+        areaElem->GetAttr(nsGkAtoms::alt, mTitleString);
         if (mTitleString.IsEmpty()) {
           // this can be a relative link
-          areaElem->GetAttribute(NS_LITERAL_STRING("href"), mTitleString);
+          areaElem->GetAttr(nsGkAtoms::href, mTitleString);
         }
 
         // we'll generate HTML like <a href="absurl">alt text</a>
@@ -662,7 +667,7 @@ nsresult DragDataProducer::Produce(DataTransfer* aDataTransfer, bool* aCanDrag,
         // XXXbz Also, what if this is an nsIImageLoadingContent
         // that's not an <html:img>?
         if (imageElement) {
-          imageElement->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);
+          imageElement->GetAttr(nsGkAtoms::alt, mTitleString);
         }
 
         if (mTitleString.IsEmpty()) {

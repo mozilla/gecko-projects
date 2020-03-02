@@ -175,8 +175,11 @@ enum {
 
   NODE_HAS_BEEN_IN_UA_WIDGET = NODE_FLAG_BIT(15),
 
+  // Set if the node has a nonce value and a header delivered CSP.
+  NODE_HAS_NONCE_AND_HEADER_CSP = NODE_FLAG_BIT(16),
+
   // Remaining bits are node type specific.
-  NODE_TYPE_SPECIFIC_BITS_OFFSET = 16
+  NODE_TYPE_SPECIFIC_BITS_OFFSET = 17
 };
 
 // Make sure we have space for our bits
@@ -268,6 +271,9 @@ class nsNodeWeakReference final : public nsIWeakReference {
  * of nsIContent children and provides access to them.
  */
 class nsINode : public mozilla::dom::EventTarget {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  void AssertInvariantsOnNodeInfoChange();
+#endif
  public:
   typedef mozilla::dom::BoxQuadOptions BoxQuadOptions;
   typedef mozilla::dom::ConvertCoordinateOptions ConvertCoordinateOptions;
@@ -680,6 +686,23 @@ class nsINode : public mozilla::dom::EventTarget {
    */
   inline mozilla::dom::NodeInfo* NodeInfo() const { return mNodeInfo; }
 
+  /**
+   * Called when we have been adopted, and the information of the
+   * node has been changed.
+   *
+   * The new document can be reached via OwnerDoc().
+   *
+   * If you override this method,
+   * please call up to the parent NodeInfoChanged.
+   *
+   * If you change this, change also the similar method in Link.
+   */
+  virtual void NodeInfoChanged(Document* aOldDoc) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    AssertInvariantsOnNodeInfoChange();
+#endif
+  }
+
   inline bool IsInNamespace(int32_t aNamespace) const {
     return mNodeInfo->NamespaceID() == aNamespace;
   }
@@ -864,17 +887,17 @@ class nsINode : public mozilla::dom::EventTarget {
   }
 
   /**
-   * Destroys a property associated with this node. The value is destroyed
-   * using the destruction function given when that value was set.
+   * Removes a property associated with this node. The value is destroyed using
+   * the destruction function given when that value was set.
    *
    * @param aPropertyName  name of property to destroy.
    */
-  void DeleteProperty(const nsAtom* aPropertyName);
+  void RemoveProperty(const nsAtom* aPropertyName);
 
   /**
-   * Unset a property associated with this node. The value will not be
-   * destroyed but rather returned. It is the caller's responsibility to
-   * destroy the value after that point.
+   * Take a property associated with this node. The value will not be destroyed
+   * but rather returned. It is the caller's responsibility to destroy the value
+   * after that point.
    *
    * @param aPropertyName  name of property to unset.
    * @param aStatus        out parameter for storing resulting status.
@@ -884,7 +907,7 @@ class nsINode : public mozilla::dom::EventTarget {
    *                       (though a null return value does not imply the
    *                       property was not set, i.e. it can be set to null).
    */
-  void* UnsetProperty(const nsAtom* aPropertyName, nsresult* aStatus = nullptr);
+  void* TakeProperty(const nsAtom* aPropertyName, nsresult* aStatus = nullptr);
 
   bool HasProperties() const { return HasFlag(NODE_HAS_PROPERTIES); }
 
@@ -958,6 +981,12 @@ class nsINode : public mozilla::dom::EventTarget {
    * to its host if necessary.
    */
   mozilla::dom::Element* GetParentElementCrossingShadowRoot() const;
+
+  /**
+   * Get closest element node for the node.  Meaning that if the node is an
+   * element node, returns itself.  Otherwise, returns parent element or null.
+   */
+  inline mozilla::dom::Element* GetAsElementOrParentElement() const;
 
   /**
    * Get the root of the subtree this node belongs to.  This never returns
@@ -1061,8 +1090,6 @@ class nsINode : public mozilla::dom::EventTarget {
    * If aClone is true the nodes will be cloned. If aNewNodeInfoManager is
    * not null, it is used to create new nodeinfos for the nodes. Also reparents
    * the XPConnect wrappers for the nodes into aReparentScope if non-null.
-   * aNodesWithProperties will be filled with all the nodes that have
-   * properties.
    *
    * @param aNode Node to adopt/clone.
    * @param aClone If true the node will be cloned and the cloned node will
@@ -1075,11 +1102,6 @@ class nsINode : public mozilla::dom::EventTarget {
    *                            shouldn't be changed.
    * @param aReparentScope Scope into which wrappers should be reparented, or
    *                             null if no reparenting should be done.
-   * @param aNodesWithProperties All nodes (from amongst aNode and its
-   *                             descendants) with properties. If aClone is
-   *                             true every node will be followed by its
-   *                             clone. Null can be passed to prevent this from
-   *                             being populated.
    * @param aParent If aClone is true the cloned node will be appended to
    *                aParent's children. May be null. If not null then aNode
    *                must be an nsIContent.
@@ -1092,8 +1114,7 @@ class nsINode : public mozilla::dom::EventTarget {
   static already_AddRefed<nsINode> CloneAndAdopt(
       nsINode* aNode, bool aClone, bool aDeep,
       nsNodeInfoManager* aNewNodeInfoManager,
-      JS::Handle<JSObject*> aReparentScope,
-      nsCOMArray<nsINode>* aNodesWithProperties, nsINode* aParent,
+      JS::Handle<JSObject*> aReparentScope, nsINode* aParent,
       mozilla::ErrorResult& aError);
 
  public:
@@ -1101,8 +1122,7 @@ class nsINode : public mozilla::dom::EventTarget {
    * Walks the node, its attributes and descendant nodes. If aNewNodeInfoManager
    * is not null, it is used to create new nodeinfos for the nodes. Also
    * reparents the XPConnect wrappers for the nodes into aReparentScope if
-   * non-null. aNodesWithProperties will be filled with all the nodes that have
-   * properties.
+   * non-null.
    *
    * @param aNewNodeInfoManager The nodeinfo manager to use to create new
    *                            nodeinfos for the node and its attributes and
@@ -1110,20 +1130,16 @@ class nsINode : public mozilla::dom::EventTarget {
    *                            shouldn't be changed.
    * @param aReparentScope New scope for the wrappers, or null if no reparenting
    *                       should be done.
-   * @param aNodesWithProperties All nodes (from amongst the node and its
-   *                             descendants) with properties.
    * @param aError The error, if any.
    */
   void Adopt(nsNodeInfoManager* aNewNodeInfoManager,
              JS::Handle<JSObject*> aReparentScope,
-             nsCOMArray<nsINode>& aNodesWithProperties,
              mozilla::ErrorResult& aError);
 
   /**
    * Clones the node, its attributes and, if aDeep is true, its descendant nodes
    * If aNewNodeInfoManager is not null, it is used to create new nodeinfos for
-   * the clones. aNodesWithProperties will be filled with all the nodes that
-   * have properties, and every node in it will be followed by its clone.
+   * the clones.
    *
    * @param aDeep If true the function will be called recursively on
    *              descendants of the node
@@ -1131,17 +1147,12 @@ class nsINode : public mozilla::dom::EventTarget {
    *                            nodeinfos for the node and its attributes and
    *                            descendants. May be null if the nodeinfos
    *                            shouldn't be changed.
-   * @param aNodesWithProperties All nodes (from amongst the node and its
-   *                             descendants) with properties. Every node will
-   *                             be followed by its clone. Null can be passed to
-   *                             prevent this from being used.
    * @param aError The error, if any.
    *
    * @return The newly created node.  Null in error conditions.
    */
   already_AddRefed<nsINode> Clone(bool aDeep,
                                   nsNodeInfoManager* aNewNodeInfoManager,
-                                  nsCOMArray<nsINode>* aNodesWithProperties,
                                   mozilla::ErrorResult& aError);
 
   /**
@@ -1188,11 +1199,14 @@ class nsINode : public mozilla::dom::EventTarget {
 
     /**
      * A set of ranges which are in the selection and which have this node as
-     * their endpoints' common ancestor.  This is a UniquePtr instead of just a
-     * LinkedList, because that prevents us from pushing DOMSlots up to the next
-     * allocation bucket size, at the cost of some complexity.
+     * their endpoints' closest common inclusive ancestor
+     * (https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor).  This is
+     * a UniquePtr instead of just a LinkedList, because that prevents us from
+     * pushing DOMSlots up to the next allocation bucket size, at the cost of
+     * some complexity.
      */
-    mozilla::UniquePtr<mozilla::LinkedList<nsRange>> mCommonAncestorRanges;
+    mozilla::UniquePtr<mozilla::LinkedList<nsRange>>
+        mClosestCommonInclusiveAncestorRanges;
   };
 
   /**
@@ -1350,15 +1364,29 @@ class nsINode : public mozilla::dom::EventTarget {
   inline bool IsRootOfChromeAccessOnlySubtree() const;
 
   /**
-   * Returns true if |this| node is the common ancestor of the start/end
-   * nodes of a Range in a Selection or a descendant of such a common ancestor.
-   * This node is definitely not selected when |false| is returned, but it may
-   * or may not be selected when |true| is returned.
+   * Returns true if |this| node is the closest common inclusive ancestor
+   * (https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor) of the
+   * start/end nodes of a Range in a Selection or a descendant of such a common
+   * ancestor. This node is definitely not selected when |false| is returned,
+   * but it may or may not be selected when |true| is returned.
    */
   bool IsSelectionDescendant() const {
-    return IsDescendantOfCommonAncestorForRangeInSelection() ||
-           IsCommonAncestorForRangeInSelection();
+    return IsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection() ||
+           IsClosestCommonInclusiveAncestorForRangeInSelection();
   }
+
+  /**
+   * Return true if any part of (this, aStartOffset) .. (this, aEndOffset)
+   * overlaps any nsRange in
+   * GetClosestCommonInclusiveAncestorForRangeInSelection ranges (i.e.
+   * where this is a descendant of a range's common inclusive ancestor node).
+   * If a nsRange starts in (this, aEndOffset) or if it ends in
+   * (this, aStartOffset) then it is non-overlapping and the result is false
+   * for that nsRange.  Collapsed ranges always counts as non-overlapping.
+   *
+   * @param aStartOffset has to be less or equal to aEndOffset.
+   */
+  bool IsSelected(uint32_t aStartOffset, uint32_t aEndOffset) const;
 
   /**
    * Get the root content of an editor. So, this node must be a descendant of
@@ -1595,11 +1623,11 @@ class nsINode : public mozilla::dom::EventTarget {
     ElementHasPart,
     // Set if the element might have a contenteditable attribute set.
     ElementMayHaveContentEditableAttr,
-    // Set if the node is the common ancestor of the start/end nodes of a Range
-    // that is in a Selection.
-    NodeIsCommonAncestorForRangeInSelection,
+    // Set if the node is the closest common inclusive ancestor of the start/end
+    // nodes of a Range that is in a Selection.
+    NodeIsClosestCommonInclusiveAncestorForRangeInSelection,
     // Set if the node is a descendant of a node with the above bit set.
-    NodeIsDescendantOfCommonAncestorForRangeInSelection,
+    NodeIsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection,
     // Set if CanSkipInCC check has been done for this subtree root.
     NodeIsCCMarkedRoot,
     // Maybe set if this node is in black subtree.
@@ -1693,23 +1721,44 @@ class nsINode : public mozilla::dom::EventTarget {
   bool MayHaveContentEditableAttr() const {
     return GetBoolFlag(ElementMayHaveContentEditableAttr);
   }
-  bool IsCommonAncestorForRangeInSelection() const {
-    return GetBoolFlag(NodeIsCommonAncestorForRangeInSelection);
+  /**
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor
+   */
+  bool IsClosestCommonInclusiveAncestorForRangeInSelection() const {
+    return GetBoolFlag(NodeIsClosestCommonInclusiveAncestorForRangeInSelection);
   }
-  void SetCommonAncestorForRangeInSelection() {
-    SetBoolFlag(NodeIsCommonAncestorForRangeInSelection);
+  /**
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor
+   */
+  void SetClosestCommonInclusiveAncestorForRangeInSelection() {
+    SetBoolFlag(NodeIsClosestCommonInclusiveAncestorForRangeInSelection);
   }
-  void ClearCommonAncestorForRangeInSelection() {
-    ClearBoolFlag(NodeIsCommonAncestorForRangeInSelection);
+  /**
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor
+   */
+  void ClearClosestCommonInclusiveAncestorForRangeInSelection() {
+    ClearBoolFlag(NodeIsClosestCommonInclusiveAncestorForRangeInSelection);
   }
-  bool IsDescendantOfCommonAncestorForRangeInSelection() const {
-    return GetBoolFlag(NodeIsDescendantOfCommonAncestorForRangeInSelection);
+  /**
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor
+   */
+  bool IsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection() const {
+    return GetBoolFlag(
+        NodeIsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection);
   }
-  void SetDescendantOfCommonAncestorForRangeInSelection() {
-    SetBoolFlag(NodeIsDescendantOfCommonAncestorForRangeInSelection);
+  /**
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor
+   */
+  void SetDescendantOfClosestCommonInclusiveAncestorForRangeInSelection() {
+    SetBoolFlag(
+        NodeIsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection);
   }
-  void ClearDescendantOfCommonAncestorForRangeInSelection() {
-    ClearBoolFlag(NodeIsDescendantOfCommonAncestorForRangeInSelection);
+  /**
+   * https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor
+   */
+  void ClearDescendantOfClosestCommonInclusiveAncestorForRangeInSelection() {
+    ClearBoolFlag(
+        NodeIsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection);
   }
 
   void SetCCMarkedRoot(bool aValue) { SetBoolFlag(NodeIsCCMarkedRoot, aValue); }
@@ -1968,23 +2017,34 @@ class nsINode : public mozilla::dom::EventTarget {
       const ConvertCoordinateOptions& aOptions, CallerType aCallerType,
       ErrorResult& aRv);
 
-  const mozilla::LinkedList<nsRange>* GetExistingCommonAncestorRanges() const {
+  /**
+   * See nsSlots::mClosestCommonInclusiveAncestorRanges.
+   */
+  const mozilla::LinkedList<nsRange>*
+  GetExistingClosestCommonInclusiveAncestorRanges() const {
     if (!HasSlots()) {
       return nullptr;
     }
-    return GetExistingSlots()->mCommonAncestorRanges.get();
+    return GetExistingSlots()->mClosestCommonInclusiveAncestorRanges.get();
   }
 
-  mozilla::LinkedList<nsRange>* GetExistingCommonAncestorRanges() {
+  /**
+   * See nsSlots::mClosestCommonInclusiveAncestorRanges.
+   */
+  mozilla::LinkedList<nsRange>*
+  GetExistingClosestCommonInclusiveAncestorRanges() {
     if (!HasSlots()) {
       return nullptr;
     }
-    return GetExistingSlots()->mCommonAncestorRanges.get();
+    return GetExistingSlots()->mClosestCommonInclusiveAncestorRanges.get();
   }
 
+  /**
+   * See nsSlots::mClosestCommonInclusiveAncestorRanges.
+   */
   mozilla::UniquePtr<mozilla::LinkedList<nsRange>>&
-  GetCommonAncestorRangesPtr() {
-    return Slots()->mCommonAncestorRanges;
+  GetClosestCommonInclusiveAncestorRangesPtr() {
+    return Slots()->mClosestCommonInclusiveAncestorRanges;
   }
 
   nsIWeakReference* GetExistingWeakReference() {

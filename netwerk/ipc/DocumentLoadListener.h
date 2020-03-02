@@ -14,7 +14,8 @@
 #include "mozilla/net/PDocumentChannelParent.h"
 #include "mozilla/net/ParentChannelListener.h"
 #include "mozilla/net/ADocumentChannelBridge.h"
-#include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "nsDOMNavigationTiming.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
 #include "nsIParentChannel.h"
@@ -32,6 +33,8 @@
 
 namespace mozilla {
 namespace net {
+
+class LoadInfo;
 
 /**
  * DocumentLoadListener represents a connecting document load for a
@@ -60,26 +63,29 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
                              public nsIProcessSwitchRequestor,
                              public nsIMultiPartChannelListener {
  public:
-  explicit DocumentLoadListener(dom::BrowserParent* aBrowser,
-                                nsILoadContext* aLoadContext,
-                                PBOverrideStatus aOverrideStatus,
-                                ADocumentChannelBridge* aBridge);
+  // aProcessTopBrowsingContext should be the top BrowsingContext in the same
+  // process as the load, which would be the owner of the BrowserParent (if
+  // has been created).
+  // This is weird legacy behaviour, that will be cleaned up with bug 1618057.
+  explicit DocumentLoadListener(
+      dom::CanonicalBrowsingContext* aProcessTopBrowsingContext,
+      nsILoadContext* aLoadContext, PBOverrideStatus aOverrideStatus,
+      ADocumentChannelBridge* aBridge);
 
   // Creates the channel, and then calls AsyncOpen on it.
-  // Must be the same BrowserParent as was passed to the constructor, we
+  // Must be the same BrowsingContext as was passed to the constructor, we
   // expect Necko to pass it again so that we don't need a member var for
   // it.
-  bool Open(dom::BrowserParent* aBrowser, nsDocShellLoadState* aLoadState,
-            class LoadInfo* aLoadInfo, const nsString* aInitiatorType,
+  bool Open(dom::CanonicalBrowsingContext* aBrowsingContext,
+            dom::CanonicalBrowsingContext* aProcessTopBrowsingContext,
+            nsDocShellLoadState* aLoadState, class LoadInfo* aLoadInfo,
             nsLoadFlags aLoadFlags, uint32_t aLoadType, uint32_t aCacheKey,
             bool aIsActive, bool aIsTopLevelDoc,
-            bool aHasNonEmptySandboxingFlags,
-            const Maybe<ipc::URIParams>& aTopWindowURI,
-            const Maybe<ipc::PrincipalInfo>& aContentBlockingAllowListPrincipal,
-            const nsString& aCustomUserAgent, const uint64_t& aChannelId,
+            bool aHasNonEmptySandboxingFlags, const uint64_t& aChannelId,
             const TimeStamp& aAsyncOpenTime,
             const Maybe<uint32_t>& aDocumentOpenFlags, bool aPluginsAllowed,
-            nsresult* aRv);
+            nsDOMNavigationTiming* aTiming, Maybe<dom::ClientInfo>&& aInfo,
+            uint64_t aOuterWindowId, nsresult* aRv);
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
@@ -101,8 +107,6 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   NS_DECLARE_STATIC_IID_ACCESSOR(DOCUMENT_LOAD_LISTENER_IID)
 
   void Cancel(const nsresult& status);
-  void Suspend();
-  void Resume();
 
   nsresult ReportSecurityMessage(const nsAString& aMessageTag,
                                  const nsAString& aMessageCategory) override {
@@ -141,12 +145,7 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   // our reference to it.
   void DocumentChannelBridgeDisconnected();
 
-  void DisconnectChildListeners(nsresult aStatus, nsresult aLoadGroupStatus) {
-    if (mDocumentChannelBridge) {
-      mDocumentChannelBridge->DisconnectChildListeners(aStatus,
-                                                       aLoadGroupStatus);
-    }
-  }
+  void DisconnectChildListeners(nsresult aStatus, nsresult aLoadGroupStatus);
 
   base::ProcessId OtherPid() const {
     if (mDocumentChannelBridge) {
@@ -201,6 +200,15 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   RedirectToRealChannel(uint32_t aRedirectFlags, uint32_t aLoadFlags,
                         const Maybe<uint64_t>& aDestinationProcess);
 
+  dom::CanonicalBrowsingContext* GetBrowsingContext();
+
+  // Construct a LoadInfo object to use for the internal channel.
+  // TODO: This currently only supports creating top window TYPE_DOCUMENT
+  // LoadInfos
+  already_AddRefed<LoadInfo> CreateLoadInfo(
+      dom::CanonicalBrowsingContext* aBrowsingContext,
+      nsDocShellLoadState* aLoadState, uint64_t aOuterWindowId);
+
   // This defines a variant that describes all the attribute setters (and their
   // parameters) from nsIParentChannel
   //
@@ -226,21 +234,9 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
     bool mIsThirdParty;
   };
 
-  struct NotifyChannelClassifierProtectionDisabledParams {
-    uint32_t mAcceptedReason;
-  };
-
-  struct NotifyCookieAllowedParams {};
-
-  struct NotifyCookieBlockedParams {
-    uint32_t mRejectedReason;
-  };
-
   typedef mozilla::Variant<
       nsIHttpChannel::FlashPluginState, ClassifierMatchedInfoParams,
-      ClassifierMatchedTrackingInfoParams, ClassificationFlagsParams,
-      NotifyChannelClassifierProtectionDisabledParams,
-      NotifyCookieAllowedParams, NotifyCookieBlockedParams>
+      ClassifierMatchedTrackingInfoParams, ClassificationFlagsParams>
       IParentChannelFunction;
 
   // Store a list of all the attribute setters that have been called on this
@@ -327,11 +323,21 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   // value we need here.
   nsCOMPtr<nsIURI> mChannelCreationURI;
 
+  // The original navigation timing information containing various timestamps
+  // such as when the original load started.
+  // This will be passed back to the new content process should a process
+  // switch occurs.
+  RefPtr<nsDOMNavigationTiming> mTiming;
+
   nsTArray<DocumentChannelRedirect> mRedirects;
 
-  // Flags from nsDocShellLoadState::LoadFlags that we want to make available
-  // to the new docshell if we switch processes.
+  nsString mSrcdocData;
+  nsCOMPtr<nsIURI> mBaseURI;
+
+  // Flags from nsDocShellLoadState::LoadFlags/Type that we want to make
+  // available to the new docshell if we switch processes.
   uint32_t mLoadStateLoadFlags = 0;
+  uint32_t mLoadStateLoadType = 0;
 
   // Corresponding redirect channel registrar Id for the final channel that
   // we want to use when redirecting the child, or doing a process switch.

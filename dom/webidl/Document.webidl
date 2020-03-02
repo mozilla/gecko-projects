@@ -197,7 +197,7 @@ partial interface Document {
    * True if this document is synthetic : stand alone image, video, audio file,
    * etc.
    */
-  [Func="IsChromeOrXBLOrUAWidget"] readonly attribute boolean mozSyntheticDocument;
+  [Func="IsChromeOrUAWidget"] readonly attribute boolean mozSyntheticDocument;
   /**
    * Returns the script element whose script is currently being processed.
    *
@@ -317,12 +317,14 @@ partial interface Document {
   attribute EventHandler onpointerlockerror;
 };
 
+// Mozilla-internal document extensions specific to error pages.
 partial interface Document {
+  [Func="Document::CallerIsTrustedAboutCertError"]
+  Promise<any> addCertException(boolean isTemporary);
+
   [Func="Document::CallerIsTrustedAboutCertError", Throws]
   FailedCertSecurityInfo getFailedCertSecurityInfo();
-};
 
-partial interface Document {
   [Func="Document::CallerIsTrustedAboutNetError", Throws]
   NetErrorInfo getNetErrorInfo();
 };
@@ -377,7 +379,7 @@ partial interface Document {
 //  Mozilla extensions of various sorts
 partial interface Document {
   // Creates a new XUL element regardless of the document's default type.
-  [CEReactions, NewObject, Throws, Func="IsChromeOrXBL"]
+  [ChromeOnly, CEReactions, NewObject, Throws]
   Element createXULElement(DOMString localName, optional (ElementCreationOptions or DOMString) options = {});
   // Wether the document was loaded using a nsXULPrototypeDocument.
   [ChromeOnly]
@@ -573,14 +575,6 @@ partial interface Document {
   void setSuppressedEventListener(EventListener? aListener);
 };
 
-// Extension to give chrome and XBL JS the ability to determine whether
-// the document is sandboxed without permission to run scripts
-// and whether inline scripts are blocked by the document's CSP.
-partial interface Document {
-  [Func="IsChromeOrXBL"] readonly attribute boolean hasScriptsBlockedBySandbox;
-  [Func="IsChromeOrXBL"] readonly attribute boolean inlineScriptAllowedByCSP;
-};
-
 // Allows frontend code to query a CSP which needs to be passed for a
 // new load into docshell. Further, allows to query the CSP in JSON
 // format for testing purposes.
@@ -678,6 +672,6 @@ partial interface Document {
 
 // Extension for permission delegation.
 partial interface Document {
-  [Pref="permissions.delegation.enabled", ChromeOnly, Pure]
+  [ChromeOnly, Pure]
   readonly attribute nsIPermissionDelegateHandler permDelegateHandler;
 };

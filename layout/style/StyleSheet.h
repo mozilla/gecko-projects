@@ -52,6 +52,7 @@ class DocumentOrShadowRoot;
 class MediaList;
 class ShadowRoot;
 class SRIMetadata;
+struct CSSStyleSheetInit;
 }  // namespace dom
 
 enum class StyleSheetState : uint8_t {
@@ -74,6 +75,10 @@ enum class StyleSheetState : uint8_t {
   // Used to control whether devtools shows the rule in its authored form or
   // not.
   ModifiedRulesForDevtools = 1 << 4,
+  // Whether modifications to the sheet are currently disallowed.
+  // This flag is set during the async Replace() function to ensure
+  // that the sheet is not modified until the promise is resolved.
+  ModificationDisallowed = 1 << 5,
 };
 
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(StyleSheetState)
@@ -92,6 +97,10 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   StyleSheet(css::SheetParsingMode aParsingMode, CORSMode aCORSMode,
              const dom::SRIMetadata& aIntegrity);
 
+  static already_AddRefed<StyleSheet> Constructor(const dom::GlobalObject&,
+                                                  const dom::CSSStyleSheetInit&,
+                                                  ErrorResult&);
+
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(StyleSheet)
 
@@ -102,6 +111,8 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
 
   // Parses a stylesheet. The load data argument corresponds to the
   // SheetLoadData for this stylesheet.
+  // NOTE: ParseSheet can run synchronously or asynchronously
+  //       based on the result of `AllowParallelParse`
   RefPtr<StyleSheetParsePromise> ParseSheet(css::Loader&,
                                             const nsACString& aBytes,
                                             css::SheetLoadData&);
@@ -111,8 +122,10 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   void FinishAsyncParse(
       already_AddRefed<RawServoStyleSheetContents> aSheetContents);
 
-  // Similar to the above, but guarantees that parsing will be performed
-  // synchronously.
+  // Similar to `ParseSheet`, but guarantees that
+  // parsing will be performed synchronously.
+  // NOTE: ParseSheet can still run synchronously.
+  //       This is not a strict alternative.
   //
   // The load data may be null sometimes.
   void ParseSheetSync(
@@ -120,7 +133,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
       css::SheetLoadData* aLoadData, uint32_t aLineNumber,
       css::LoaderReusableStyleSheets* aReusableSheets = nullptr);
 
-  nsresult ReparseSheet(const nsAString& aInput);
+  void ReparseSheet(const nsACString& aInput, ErrorResult& aRv);
 
   const RawServoStyleSheetContents* RawContents() const {
     return Inner().mContents;
@@ -233,9 +246,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
     // different lifetime than mDocument.
     NotOwnedByDocumentOrShadowRoot
   };
-  dom::DocumentOrShadowRoot* GetAssociatedDocumentOrShadowRoot() const {
-    return mDocumentOrShadowRoot;
-  }
+  dom::DocumentOrShadowRoot* GetAssociatedDocumentOrShadowRoot() const;
 
   // Whether this stylesheet is kept alive by the associated document or
   // associated shadow root's document somehow, and thus at least has the same
@@ -245,7 +256,9 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // Returns the document whose styles this sheet is affecting.
   dom::Document* GetComposedDoc() const;
 
-  // Returns the document we're associated to, via mDocumentOrShadowRoot.
+  // If this is a constructed style sheet, return mConstructorDocument.
+  // Otherwise return the document we're associated to,
+  // via mDocumentOrShadowRoot.
   //
   // Non-null iff GetAssociatedDocumentOrShadowRoot is non-null.
   dom::Document* GetAssociatedDocument() const;
@@ -303,7 +316,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   }
 
   void SetTitle(const nsAString& aTitle) { mTitle = aTitle; }
-  void SetMedia(dom::MediaList* aMedia);
+  void SetMedia(already_AddRefed<dom::MediaList> aMedia);
 
   // Get this style sheet's CORS mode
   CORSMode GetCORSMode() const { return Inner().mCORSMode; }
@@ -354,6 +367,50 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   int32_t AddRule(const nsAString& aSelector, const nsAString& aBlock,
                   const dom::Optional<uint32_t>& aIndex,
                   nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv);
+  already_AddRefed<dom::Promise> Replace(const nsACString& aText, ErrorResult&);
+  void ReplaceSync(const nsACString& aText, ErrorResult&);
+  bool ModificationDisallowed() const {
+    return bool(mState & State::ModificationDisallowed);
+  }
+
+  // Called before and after the asynchronous Replace() function
+  // to disable/re-enable modification while there is a pending promise.
+  void SetModificationDisallowed(bool aDisallowed) {
+    MOZ_ASSERT(IsConstructed());
+    MOZ_ASSERT(!IsReadOnly());
+    if (aDisallowed) {
+      mState |= State::ModificationDisallowed;
+      // Sheet will be re-set to complete when its rules are replaced
+      mState &= ~State::Complete;
+      if (!Disabled()) {
+        ApplicableStateChanged(false);
+      }
+    } else {
+      mState &= ~State::ModificationDisallowed;
+    }
+  }
+
+  // True if the sheet was created through the Constructable StyleSheets API
+  bool IsConstructed() const { return !!mConstructorDocument; }
+
+  // Ture if the sheet's constructor document matches the given document
+  bool ConstructorDocumentMatches(dom::Document& aDocument) const {
+    return mConstructorDocument == &aDocument;
+  }
+
+  // Add a document or shadow root to the list of adopters.
+  // Adopters will be notified when styles are changed.
+  void AddAdopter(dom::DocumentOrShadowRoot& aAdopter) {
+    MOZ_ASSERT(IsConstructed());
+    MOZ_ASSERT(!mAdopters.Contains(&aAdopter));
+    mAdopters.AppendElement(&aAdopter);
+  }
+
+  // Remove a document or shadow root from the list of adopters.
+  void RemoveAdopter(dom::DocumentOrShadowRoot& aAdopter) {
+    // Cannot assert IsConstructed() because this can run after unlink.
+    mAdopters.RemoveElement(&aAdopter);
+  }
 
   // WebIDL miscellaneous bits
   inline dom::ParentObject GetParentObject() const;
@@ -395,6 +452,12 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
 
   // Removes a stylesheet from its parent sheet child list, if any.
   void RemoveFromParent();
+
+  // Resolves mReplacePromise with this sheet.
+  void MaybeResolveReplacePromise();
+
+  // Rejects mReplacePromise with a NetworkError.
+  void MaybeRejectReplacePromise();
 
  private:
   void SetModifiedRules() {
@@ -452,6 +515,9 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // Called when a stylesheet is cloned.
   void StyleSheetCloned(StyleSheet&);
 
+  // Notifies that the applicable state changed.
+  // aApplicable is the value that we expect to get from IsApplicable().
+  // assertion will fail if the expectation does not match reality.
   void ApplicableStateChanged(bool aApplicable);
 
   void UnparentChildren();
@@ -459,9 +525,9 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   void LastRelease();
 
   // Return success if the subject principal subsumes the principal of our
-  // inner, error otherwise.  This will also succeed if the subject has
-  // UniversalXPConnect or if access is allowed by CORS.  In the latter case,
-  // it will set the principal of the inner to the subject principal.
+  // inner, error otherwise.  This will also succeed if access is allowed by
+  // CORS.  In that case, it will set the principal of the inner to the
+  // subject principal.
   void SubjectSubsumesInnerPrincipal(nsIPrincipal& aSubjectPrincipal,
                                      ErrorResult& aRv);
 
@@ -477,6 +543,12 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   static bool RuleHasPendingChildSheet(css::Rule* aRule);
 
   StyleSheet* mParent;  // weak ref
+
+  RefPtr<dom::Document> mConstructorDocument;
+
+  // Will be set in the Replace() function and resolved/rejected by the
+  // sheet once its rules have been replaced and the sheet is complete again.
+  RefPtr<dom::Promise> mReplacePromise;
 
   nsString mTitle;
 
@@ -514,6 +586,8 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   RefPtr<ServoCSSRuleList> mRuleList;
 
   MozPromiseHolder<StyleSheetParsePromise> mParsePromise;
+
+  nsTArray<dom::DocumentOrShadowRoot*> mAdopters;
 
   // Make StyleSheetInfo and subclasses into friends so they can use
   // ChildSheetListBuilder.

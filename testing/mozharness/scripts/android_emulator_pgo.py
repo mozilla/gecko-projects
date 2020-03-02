@@ -99,7 +99,7 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
         dirs = {}
 
         dirs['abs_test_install_dir'] = os.path.join(
-            abs_dirs['abs_work_dir'], 'src', 'testing')
+            os.environ['GECKO_PATH'], 'testing')
         dirs['abs_xre_dir'] = os.path.join(
             abs_dirs['abs_work_dir'], 'hostutils')
         dirs['abs_blob_upload_dir'] = '/builds/worker/artifacts/blobber_upload_dir'
@@ -195,12 +195,6 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
             if isinstance(v, string_types):
                 v = v.format(**interpolation)
             prefs[k] = Preferences.cast(v)
-
-        # Enforce 1proc. This isn't in one of the user.js files because those
-        # are shared with desktop, which wants e10s. We can't interpolate
-        # because the formatting code only works for strings, and this is a
-        # bool pref.
-        prefs["browser.tabs.remote.autostart"] = False
 
         outputdir = self.config.get('output_directory', '/sdcard/pgo_profile')
         jarlog = posixpath.join(outputdir, 'en-US.log')

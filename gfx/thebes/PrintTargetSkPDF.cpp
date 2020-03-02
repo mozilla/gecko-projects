@@ -9,8 +9,7 @@
 #include "nsString.h"
 #include <vector>
 
-namespace mozilla {
-namespace gfx {
+namespace mozilla::gfx {
 
 PrintTargetSkPDF::PrintTargetSkPDF(const IntSize& aSize,
                                    UniquePtr<SkWStream> aStream)
@@ -118,11 +117,10 @@ already_AddRefed<DrawTarget> PrintTargetSkPDF::GetReferenceDrawTarget() {
     if (!dt) {
       return nullptr;
     }
-    mRefDT = dt.forget();
+    mRefDT = std::move(dt);
   }
 
   return do_AddRef(mRefDT);
 }
 
-}  // namespace gfx
-}  // namespace mozilla
+}  // namespace mozilla::gfx

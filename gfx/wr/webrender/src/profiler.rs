@@ -805,6 +805,7 @@ impl BackendProfileCounters {
             //TODO: generate this by a macro
             intern: InternProfileCounters {
                 prim: ResourceProfileCounter::new("Interned primitives", None, None),
+                conic_grad: ResourceProfileCounter::new("Interned conic gradients", None, None),
                 image: ResourceProfileCounter::new("Interned images", None, None),
                 image_border: ResourceProfileCounter::new("Interned image borders", None, None),
                 line_decoration: ResourceProfileCounter::new("Interned line decorations", None, None),
@@ -958,12 +959,12 @@ impl ProfileGraph {
 
         for value in &self.values {
             stats.min_value = stats.min_value.min(*value);
-            stats.mean_value = stats.mean_value + *value;
+            stats.mean_value += *value;
             stats.max_value = stats.max_value.max(*value);
         }
 
         if !self.values.is_empty() {
-            stats.mean_value = stats.mean_value / self.values.len() as f32;
+            stats.mean_value /= self.values.len() as f32;
         }
 
         stats

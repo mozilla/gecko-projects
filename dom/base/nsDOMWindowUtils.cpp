@@ -49,6 +49,7 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/Span.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/TextEvents.h"
@@ -175,7 +176,7 @@ namespace {
 
 class NativeInputRunnable final : public PrioritizableRunnable {
   explicit NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent);
-  ~NativeInputRunnable() {}
+  ~NativeInputRunnable() = default;
 
  public:
   static already_AddRefed<nsIRunnable> Create(
@@ -184,7 +185,7 @@ class NativeInputRunnable final : public PrioritizableRunnable {
 
 NativeInputRunnable::NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent)
     : PrioritizableRunnable(std::move(aEvent),
-                            nsIRunnablePriority::PRIORITY_INPUT) {}
+                            nsIRunnablePriority::PRIORITY_INPUT_HIGH) {}
 
 /* static */
 already_AddRefed<nsIRunnable> NativeInputRunnable::Create(
@@ -401,6 +402,22 @@ nsDOMWindowUtils::GetViewportInfo(uint32_t aDisplayWidth,
   *aWidth = size.width;
   *aHeight = size.height;
   *aAutoSize = info.IsAutoSizeEnabled();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetViewportFitInfo(nsAString& aViewportFit) {
+  Document* doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  ViewportMetaData metaData = doc->GetViewportMetaData();
+  if (metaData.mViewportFit.EqualsLiteral("contain")) {
+    aViewportFit.AssignLiteral("contain");
+  } else if (metaData.mViewportFit.EqualsLiteral("cover")) {
+    aViewportFit.AssignLiteral("cover");
+  } else {
+    aViewportFit.AssignLiteral("auto");
+  }
   return NS_OK;
 }
 
@@ -1690,6 +1707,19 @@ nsDOMWindowUtils::GetScreenPixelsPerCSSPixel(float* aScreenPixels) {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetScreenPixelsPerCSSPixelNoOverride(float* aScreenPixels) {
+  nsPresContext* presContext = GetPresContext();
+  if (!presContext) {
+    *aScreenPixels = 1.0;
+    return NS_OK;
+  }
+
+  *aScreenPixels =
+      float(AppUnitsPerCSSPixel()) / float(presContext->AppUnitsPerDevPixel());
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetFullZoom(float* aFullZoom) {
   *aFullZoom = 1.0f;
 
@@ -1703,13 +1733,15 @@ nsDOMWindowUtils::GetFullZoom(float* aFullZoom) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMWindowUtils::DispatchDOMEventViaPresShell(nsINode* aTarget, Event* aEvent,
-                                               bool* aRetVal) {
+NS_IMETHODIMP nsDOMWindowUtils::DispatchDOMEventViaPresShellForTesting(
+    nsINode* aTarget, Event* aEvent, bool* aRetVal) {
   NS_ENSURE_STATE(aEvent);
   aEvent->SetTrusted(true);
   WidgetEvent* internalEvent = aEvent->WidgetEventPtr();
   NS_ENSURE_STATE(internalEvent);
+  // This API is currently used only by EventUtils.js.  Thus we should always
+  // set mIsSynthesizedForTests to true.
+  internalEvent->mFlags.mIsSynthesizedForTests = true;
   nsCOMPtr<nsIContent> content = do_QueryInterface(aTarget);
   NS_ENSURE_STATE(content);
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
@@ -2014,7 +2046,8 @@ nsDOMWindowUtils::GetVisitedDependentComputedStyle(
   }
 
   static_cast<nsComputedDOMStyle*>(decl.get())->SetExposeVisitedStyle(true);
-  nsresult rv = decl->GetPropertyValue(aPropertyName, aResult);
+  nsresult rv =
+      decl->GetPropertyValue(NS_ConvertUTF16toUTF8(aPropertyName), aResult);
   static_cast<nsComputedDOMStyle*>(decl.get())->SetExposeVisitedStyle(false);
 
   return rv;
@@ -2528,7 +2561,8 @@ nsDOMWindowUtils::ComputeAnimationDistance(Element* aElement,
                                            double* aResult) {
   NS_ENSURE_ARG_POINTER(aElement);
 
-  nsCSSPropertyID property = nsCSSProps::LookupProperty(aProperty);
+  nsCSSPropertyID property =
+      nsCSSProps::LookupProperty(NS_ConvertUTF16toUTF8(aProperty));
   if (property == eCSSProperty_UNKNOWN || nsCSSProps::IsShorthand(property)) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
@@ -2555,7 +2589,8 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(Element* aElement,
     return NS_ERROR_INVALID_ARG;
   }
 
-  nsCSSPropertyID propertyID = nsCSSProps::LookupProperty(aProperty);
+  nsCSSPropertyID propertyID =
+      nsCSSProps::LookupProperty(NS_ConvertUTF16toUTF8(aProperty));
   if (propertyID == eCSSProperty_UNKNOWN ||
       nsCSSProps::IsShorthand(propertyID)) {
     return NS_ERROR_INVALID_ARG;
@@ -2574,7 +2609,8 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(Element* aElement,
       return NS_ERROR_INVALID_ARG;
   }
 
-  if (!GetPresShell()) {
+  RefPtr<PresShell> presShell = GetPresShell();
+  if (!presShell) {
     return NS_ERROR_FAILURE;
   }
 
@@ -2591,7 +2627,11 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(Element* aElement,
   if (!value) {
     return NS_ERROR_FAILURE;
   }
-  Servo_AnimationValue_Serialize(value, propertyID, &aResult);
+  if (!aElement->GetComposedDoc()) {
+    return NS_ERROR_FAILURE;
+  }
+  Servo_AnimationValue_Serialize(value, propertyID,
+                                 presShell->StyleSet()->RawSet(), &aResult);
   return NS_OK;
 }
 
@@ -4084,14 +4124,12 @@ nsDOMWindowUtils::StartCompositionRecording(Promise** aOutPromise) {
               if (aSuccess) {
                 promise->MaybeResolve(true);
               } else {
-                promise->MaybeRejectWithDOMException(
-                    NS_ERROR_DOM_INVALID_STATE_ERR,
+                promise->MaybeRejectWithInvalidStateError(
                     "The composition recorder is already running.");
               }
             },
             [promise](const mozilla::ipc::ResponseRejectReason&) {
-              promise->MaybeRejectWithDOMException(
-                  NS_ERROR_DOM_INVALID_STATE_ERR,
+              promise->MaybeRejectWithInvalidStateError(
                   "Could not start the composition recorder.");
             });
   }
@@ -4127,14 +4165,12 @@ nsDOMWindowUtils::StopCompositionRecording(bool aWriteToDisk,
           if (aSuccess) {
             promise->MaybeResolveWithUndefined();
           } else {
-            promise->MaybeRejectWithDOMException(
-                NS_ERROR_DOM_INVALID_STATE_ERR,
+            promise->MaybeRejectWithInvalidStateError(
                 "The composition recorder is not running.");
           }
         },
         [promise](const mozilla::ipc::ResponseRejectReason&) {
-          promise->MaybeRejectWithDOMException(
-              NS_ERROR_DOM_UNKNOWN_ERR,
+          promise->MaybeRejectWithUnknownError(
               "Could not stop the composition recorder.");
         });
   } else {
@@ -4142,8 +4178,7 @@ nsDOMWindowUtils::StopCompositionRecording(bool aWriteToDisk,
         GetCurrentThreadSerialEventTarget(), __func__,
         [promise](Maybe<CollectedFramesParams>&& aFrames) {
           if (!aFrames) {
-            promise->MaybeRejectWithDOMException(
-                NS_ERROR_DOM_UNKNOWN_ERR,
+            promise->MaybeRejectWithUnknownError(
                 "Could not stop the composition recorder.");
             return;
           }
@@ -4164,8 +4199,7 @@ nsDOMWindowUtils::StopCompositionRecording(bool aWriteToDisk,
 
           if (totalSize.isValid() &&
               totalSize.value() > aFrames->buffer().Size<char>()) {
-            promise->MaybeRejectWithDOMException(
-                NS_ERROR_DOM_UNKNOWN_ERR,
+            promise->MaybeRejectWithUnknownError(
                 "Could not interpret returned frames.");
             return;
           }
@@ -4194,8 +4228,7 @@ nsDOMWindowUtils::StopCompositionRecording(bool aWriteToDisk,
           promise->MaybeResolve(domFrames);
         },
         [promise](const mozilla::ipc::ResponseRejectReason&) {
-          promise->MaybeRejectWithDOMException(
-              NS_ERROR_DOM_UNKNOWN_ERR,
+          promise->MaybeRejectWithUnknownError(
               "Could not stop the composition recorder.");
         });
   }

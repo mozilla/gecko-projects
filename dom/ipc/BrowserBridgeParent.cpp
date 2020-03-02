@@ -30,8 +30,12 @@ BrowserBridgeParent::~BrowserBridgeParent() { Destroy(); }
 nsresult BrowserBridgeParent::InitWithProcess(
     ContentParent* aContentParent, const nsString& aPresentationURL,
     const WindowGlobalInit& aWindowInit, uint32_t aChromeFlags, TabId aTabId) {
+  if (aWindowInit.browsingContext().IsNullOrDiscarded()) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   RefPtr<CanonicalBrowsingContext> browsingContext =
-      aWindowInit.browsingContext()->Canonical();
+      aWindowInit.browsingContext().get_canonical();
 
   // We can inherit most TabContext fields for the new BrowserParent actor from
   // our Manager BrowserParent. We also need to sync the first party domain if
@@ -92,7 +96,7 @@ nsresult BrowserBridgeParent::InitWithProcess(
   }
 
   // Set our BrowserParent object to the newly created browser.
-  mBrowserParent = browserParent.forget();
+  mBrowserParent = std::move(browserParent);
   mBrowserParent->SetOwnerElement(Manager()->GetOwnerElement());
   mBrowserParent->InitRendering();
 
@@ -101,23 +105,6 @@ nsresult BrowserBridgeParent::InitWithProcess(
   // Send the newly created layers ID back into content.
   Unused << SendSetLayersId(mBrowserParent->GetLayersId());
   return NS_OK;
-}
-
-nsresult BrowserBridgeParent::Init(const nsString& aPresentationURL,
-                                   const nsString& aRemoteType,
-                                   const WindowGlobalInit& aWindowInit,
-                                   uint32_t aChromeFlags, TabId aTabId) {
-  // Get our ConstructorSender object.
-  RefPtr<ContentParent> constructorSender =
-      ContentParent::GetNewOrUsedBrowserProcess(
-          nullptr, aRemoteType, PROCESS_PRIORITY_FOREGROUND, nullptr, false);
-  if (NS_WARN_IF(!constructorSender)) {
-    MOZ_ASSERT(false, "Unable to allocate content process!");
-    return NS_ERROR_FAILURE;
-  }
-
-  return InitWithProcess(constructorSender, aPresentationURL, aWindowInit,
-                         aChromeFlags, aTabId);
 }
 
 CanonicalBrowsingContext* BrowserBridgeParent::GetBrowsingContext() {
@@ -137,12 +124,15 @@ void BrowserBridgeParent::Destroy() {
   }
 }
 
-IPCResult BrowserBridgeParent::RecvShow(const ScreenIntSize& aSize,
-                                        const bool& aParentIsActive,
-                                        const nsSizeMode& aSizeMode) {
+IPCResult BrowserBridgeParent::RecvShow(const OwnerShowInfo& aOwnerInfo) {
   mBrowserParent->AttachLayerManager();
-  Unused << mBrowserParent->SendShow(aSize, mBrowserParent->GetShowInfo(),
-                                     aParentIsActive, aSizeMode);
+  Unused << mBrowserParent->SendShow(mBrowserParent->GetShowInfo(), aOwnerInfo);
+  return IPC_OK();
+}
+
+IPCResult BrowserBridgeParent::RecvScrollbarPreferenceChanged(
+    ScrollbarPreference aPref) {
+  Unused << mBrowserParent->SendScrollbarPreferenceChanged(aPref);
   return IPC_OK();
 }
 
@@ -157,8 +147,8 @@ IPCResult BrowserBridgeParent::RecvResumeLoad(uint64_t aPendingSwitchID) {
 }
 
 IPCResult BrowserBridgeParent::RecvUpdateDimensions(
-    const DimensionInfo& aDimensions) {
-  Unused << mBrowserParent->SendUpdateDimensions(aDimensions);
+    const nsIntRect& aRect, const ScreenIntSize& aSize) {
+  mBrowserParent->UpdateDimensions(aRect, aSize);
   return IPC_OK();
 }
 
@@ -203,8 +193,8 @@ IPCResult BrowserBridgeParent::RecvDispatchSynthesizedMouseEvent(
   return IPC_OK();
 }
 
-IPCResult BrowserBridgeParent::RecvSkipBrowsingContextDetach() {
-  Unused << mBrowserParent->SendSkipBrowsingContextDetach();
+IPCResult BrowserBridgeParent::RecvWillChangeProcess() {
+  Unused << mBrowserParent->SendWillChangeProcess();
   return IPC_OK();
 }
 

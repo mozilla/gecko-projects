@@ -55,32 +55,32 @@ enum class RoundingMode;
 typedef GCVector<JSFunction*, 0, SystemAllocPolicy> JSFunctionVector;
 
 class WasmMemoryObject;
-typedef GCPtr<WasmMemoryObject*> GCPtrWasmMemoryObject;
-typedef Rooted<WasmMemoryObject*> RootedWasmMemoryObject;
-typedef Handle<WasmMemoryObject*> HandleWasmMemoryObject;
-typedef MutableHandle<WasmMemoryObject*> MutableHandleWasmMemoryObject;
+using GCPtrWasmMemoryObject = GCPtr<WasmMemoryObject*>;
+using RootedWasmMemoryObject = Rooted<WasmMemoryObject*>;
+using HandleWasmMemoryObject = Handle<WasmMemoryObject*>;
+using MutableHandleWasmMemoryObject = MutableHandle<WasmMemoryObject*>;
 
 class WasmModuleObject;
-typedef Rooted<WasmModuleObject*> RootedWasmModuleObject;
-typedef Handle<WasmModuleObject*> HandleWasmModuleObject;
-typedef MutableHandle<WasmModuleObject*> MutableHandleWasmModuleObject;
+using RootedWasmModuleObject = Rooted<WasmModuleObject*>;
+using HandleWasmModuleObject = Handle<WasmModuleObject*>;
+using MutableHandleWasmModuleObject = MutableHandle<WasmModuleObject*>;
 
 class WasmInstanceObject;
-typedef GCVector<WasmInstanceObject*> WasmInstanceObjectVector;
-typedef Rooted<WasmInstanceObject*> RootedWasmInstanceObject;
-typedef Handle<WasmInstanceObject*> HandleWasmInstanceObject;
-typedef MutableHandle<WasmInstanceObject*> MutableHandleWasmInstanceObject;
+using WasmInstanceObjectVector = GCVector<WasmInstanceObject*>;
+using RootedWasmInstanceObject = Rooted<WasmInstanceObject*>;
+using HandleWasmInstanceObject = Handle<WasmInstanceObject*>;
+using MutableHandleWasmInstanceObject = MutableHandle<WasmInstanceObject*>;
 
 class WasmTableObject;
 typedef GCVector<WasmTableObject*, 0, SystemAllocPolicy> WasmTableObjectVector;
-typedef Rooted<WasmTableObject*> RootedWasmTableObject;
-typedef Handle<WasmTableObject*> HandleWasmTableObject;
-typedef MutableHandle<WasmTableObject*> MutableHandleWasmTableObject;
+using RootedWasmTableObject = Rooted<WasmTableObject*>;
+using HandleWasmTableObject = Handle<WasmTableObject*>;
+using MutableHandleWasmTableObject = MutableHandle<WasmTableObject*>;
 
 class WasmGlobalObject;
 typedef GCVector<WasmGlobalObject*, 0, SystemAllocPolicy>
     WasmGlobalObjectVector;
-typedef Rooted<WasmGlobalObject*> RootedWasmGlobalObject;
+using RootedWasmGlobalObject = Rooted<WasmGlobalObject*>;
 
 class StructTypeDescr;
 typedef GCVector<HeapPtr<StructTypeDescr*>, 0, SystemAllocPolicy>
@@ -114,13 +114,13 @@ class Table;
 typedef Vector<uint32_t, 8, SystemAllocPolicy> Uint32Vector;
 
 typedef Vector<uint8_t, 0, SystemAllocPolicy> Bytes;
-typedef UniquePtr<Bytes> UniqueBytes;
-typedef UniquePtr<const Bytes> UniqueConstBytes;
+using UniqueBytes = UniquePtr<Bytes>;
+using UniqueConstBytes = UniquePtr<const Bytes>;
 typedef Vector<char, 0, SystemAllocPolicy> UTF8Bytes;
 typedef Vector<Instance*, 0, SystemAllocPolicy> InstanceVector;
 typedef Vector<UniqueChars, 0, SystemAllocPolicy> UniqueCharsVector;
 
-// To call Vector::podResizeToFit, a type must specialize mozilla::IsPod
+// To call Vector::shrinkStorageToFit , a type must specialize mozilla::IsPod
 // which is pretty verbose to do within js::wasm, so factor that process out
 // into a macro.
 
@@ -199,8 +199,63 @@ struct ShareableBytes : ShareableBase<ShareableBytes> {
   }
 };
 
-typedef RefPtr<ShareableBytes> MutableBytes;
-typedef RefPtr<const ShareableBytes> SharedBytes;
+using MutableBytes = RefPtr<ShareableBytes>;
+using SharedBytes = RefPtr<const ShareableBytes>;
+
+// The Opcode compactly and safely represents the primary opcode plus any
+// extension, with convenient predicates and accessors.
+
+class Opcode {
+  uint32_t bits_;
+
+ public:
+  MOZ_IMPLICIT Opcode(Op op) : bits_(uint32_t(op)) {
+    static_assert(size_t(Op::Limit) == 256, "fits");
+    MOZ_ASSERT(size_t(op) < size_t(Op::Limit));
+  }
+  MOZ_IMPLICIT Opcode(MiscOp op)
+      : bits_((uint32_t(op) << 8) | uint32_t(Op::MiscPrefix)) {
+    static_assert(size_t(MiscOp::Limit) <= 0xFFFFFF, "fits");
+    MOZ_ASSERT(size_t(op) < size_t(MiscOp::Limit));
+  }
+  MOZ_IMPLICIT Opcode(ThreadOp op)
+      : bits_((uint32_t(op) << 8) | uint32_t(Op::ThreadPrefix)) {
+    static_assert(size_t(ThreadOp::Limit) <= 0xFFFFFF, "fits");
+    MOZ_ASSERT(size_t(op) < size_t(ThreadOp::Limit));
+  }
+  MOZ_IMPLICIT Opcode(MozOp op)
+      : bits_((uint32_t(op) << 8) | uint32_t(Op::MozPrefix)) {
+    static_assert(size_t(MozOp::Limit) <= 0xFFFFFF, "fits");
+    MOZ_ASSERT(size_t(op) < size_t(MozOp::Limit));
+  }
+
+  bool isOp() const { return bits_ < uint32_t(Op::FirstPrefix); }
+  bool isMisc() const { return (bits_ & 255) == uint32_t(Op::MiscPrefix); }
+  bool isThread() const { return (bits_ & 255) == uint32_t(Op::ThreadPrefix); }
+  bool isMoz() const { return (bits_ & 255) == uint32_t(Op::MozPrefix); }
+
+  Op asOp() const {
+    MOZ_ASSERT(isOp());
+    return Op(bits_);
+  }
+  MiscOp asMisc() const {
+    MOZ_ASSERT(isMisc());
+    return MiscOp(bits_ >> 8);
+  }
+  ThreadOp asThread() const {
+    MOZ_ASSERT(isThread());
+    return ThreadOp(bits_ >> 8);
+  }
+  MozOp asMoz() const {
+    MOZ_ASSERT(isMoz());
+    return MozOp(bits_ >> 8);
+  }
+
+  uint32_t bits() const { return bits_; }
+
+  bool operator==(const Opcode& that) const { return bits_ == that.bits_; }
+  bool operator!=(const Opcode& that) const { return bits_ != that.bits_; }
+};
 
 // A PackedTypeCode represents a TypeCode paired with a refTypeIndex (valid only
 // for TypeCode::Ref).  PackedTypeCode is guaranteed to be POD.  The TypeCode
@@ -685,9 +740,9 @@ class AnyRef {
   static constexpr uintptr_t AnyRefObjTag = 0;
 };
 
-typedef Rooted<AnyRef> RootedAnyRef;
-typedef Handle<AnyRef> HandleAnyRef;
-typedef MutableHandle<AnyRef> MutableHandleAnyRef;
+using RootedAnyRef = Rooted<AnyRef>;
+using HandleAnyRef = Handle<AnyRef>;
+using MutableHandleAnyRef = MutableHandle<AnyRef>;
 
 // TODO/AnyRef-boxing: With boxed immediates and strings, these will be defined
 // as MOZ_CRASH or similar so that we can find all locations that need to be
@@ -798,9 +853,9 @@ class FuncRef {
   bool isNull() { return value_ == nullptr; }
 };
 
-typedef Rooted<FuncRef> RootedFuncRef;
-typedef Handle<FuncRef> HandleFuncRef;
-typedef MutableHandle<FuncRef> MutableHandleFuncRef;
+using RootedFuncRef = Rooted<FuncRef>;
+using HandleFuncRef = Handle<FuncRef>;
+using MutableHandleFuncRef = MutableHandle<FuncRef>;
 
 // Given any FuncRef, unbox it as a JS Value -- always a JSFunction*.
 
@@ -954,14 +1009,14 @@ class MOZ_NON_PARAM Val : public LitVal {
   void trace(JSTracer* trc);
 };
 
-typedef Rooted<Val> RootedVal;
-typedef Handle<Val> HandleVal;
-typedef MutableHandle<Val> MutableHandleVal;
+using RootedVal = Rooted<Val>;
+using HandleVal = Handle<Val>;
+using MutableHandleVal = MutableHandle<Val>;
 
 typedef GCVector<Val, 0, SystemAllocPolicy> ValVector;
-typedef Rooted<ValVector> RootedValVector;
-typedef Handle<ValVector> HandleValVector;
-typedef MutableHandle<ValVector> MutableHandleValVector;
+using RootedValVector = Rooted<ValVector>;
+using HandleValVector = Handle<ValVector>;
+using MutableHandleValVector = MutableHandle<ValVector>;
 
 // The FuncType class represents a WebAssembly function signature which takes a
 // list of value types and returns an expression type. The engine uses two
@@ -1104,9 +1159,63 @@ class FuncType {
 };
 
 struct FuncTypeHashPolicy {
-  typedef const FuncType& Lookup;
+  using Lookup = const FuncType&;
   static HashNumber hash(Lookup ft) { return ft.hash(); }
   static bool match(const FuncType* lhs, Lookup rhs) { return *lhs == rhs; }
+};
+
+// ArgTypeVector type.
+//
+// Functions usually receive one ABI argument per WebAssembly argument.  However
+// if a function has multiple results and some of those results go to the stack,
+// then it additionally receives a synthetic ABI argument holding a pointer to
+// the stack result area.
+//
+// Given the presence of synthetic arguments, sometimes we need a name for
+// non-synthetic arguments.  We call those "natural" arguments.
+
+enum class StackResults { HasStackResults, NoStackResults };
+
+class ArgTypeVector {
+  const ValTypeVector& args_;
+  bool hasStackResults_;
+
+ public:
+  ArgTypeVector(const ValTypeVector& args, StackResults stackResults)
+      : args_(args),
+        hasStackResults_(stackResults == StackResults::HasStackResults) {}
+  explicit ArgTypeVector(const FuncType& funcType);
+
+  bool hasSyntheticStackResultPointerArg() const { return hasStackResults_; }
+  StackResults stackResults() const {
+    return hasSyntheticStackResultPointerArg() ? StackResults::HasStackResults
+                                               : StackResults::NoStackResults;
+  }
+  size_t lengthWithoutStackResults() const { return args_.length(); }
+  bool isSyntheticStackResultPointerArg(size_t idx) const {
+    // The pointer to stack results area, if present, is a synthetic argument
+    // tacked on at the end.
+    MOZ_ASSERT(idx < length());
+    return idx == args_.length();
+  }
+  bool isNaturalArg(size_t idx) const {
+    return !isSyntheticStackResultPointerArg(idx);
+  }
+  size_t naturalIndex(size_t idx) const {
+    MOZ_ASSERT(isNaturalArg(idx));
+    // Because the synthetic argument, if present, is tacked on the end, an
+    // argument index that isn't synthetic is natural.
+    return idx;
+  }
+
+  size_t length() const { return args_.length() + size_t(hasStackResults_); }
+  jit::MIRType operator[](size_t i) const {
+    MOZ_ASSERT(i < length());
+    if (isSyntheticStackResultPointerArg(i)) {
+      return jit::MIRType::StackResults;
+    }
+    return ToMIRType(args_[naturalIndex(i)]);
+  }
 };
 
 // Structure type.
@@ -1439,8 +1548,8 @@ struct ElemSegment : AtomicRefCounted<ElemSegment> {
 constexpr uint32_t NullFuncIndex = UINT32_MAX;
 static_assert(NullFuncIndex > MaxFuncs, "Invariant");
 
-typedef RefPtr<ElemSegment> MutableElemSegment;
-typedef SerializableRefPtr<const ElemSegment> SharedElemSegment;
+using MutableElemSegment = RefPtr<ElemSegment>;
+using SharedElemSegment = SerializableRefPtr<const ElemSegment>;
 typedef Vector<SharedElemSegment, 0, SystemAllocPolicy> ElemSegmentVector;
 
 // DataSegmentEnv holds the initial results of decoding a data segment from the
@@ -1477,8 +1586,8 @@ struct DataSegment : AtomicRefCounted<DataSegment> {
   WASM_DECLARE_SERIALIZABLE(DataSegment)
 };
 
-typedef RefPtr<DataSegment> MutableDataSegment;
-typedef SerializableRefPtr<const DataSegment> SharedDataSegment;
+using MutableDataSegment = RefPtr<DataSegment>;
+using SharedDataSegment = SerializableRefPtr<const DataSegment>;
 typedef Vector<SharedDataSegment, 0, SystemAllocPolicy> DataSegmentVector;
 
 // The CustomSection(Env) structs are like DataSegment(Env): CustomSectionEnv is
@@ -1733,7 +1842,7 @@ struct TrapSiteVectorArray
   bool empty() const;
   void clear();
   void swap(TrapSiteVectorArray& rhs);
-  void podResizeToFit();
+  void shrinkStorageToFit();
 
   WASM_DECLARE_SERIALIZABLE(TrapSiteVectorArray)
 };
@@ -2158,6 +2267,7 @@ enum class SymbolicAddress {
   TableSet,
   TableSize,
   FuncRef,
+  PreBarrierFiltering,
   PostBarrier,
   PostBarrierFiltering,
   StructNew,
@@ -2370,7 +2480,7 @@ struct ExportArg {
   uint64_t hi;
 };
 
-typedef int32_t (*ExportFuncPtr)(ExportArg* args, TlsData* tls);
+using ExportFuncPtr = int32_t (*)(ExportArg*, TlsData*);
 
 // FuncImportTls describes the region of wasm global memory allocated in the
 // instance's thread-local storage for a function import. This is accessed
@@ -2834,7 +2944,7 @@ bool IsCodegenDebugEnabled(DebugChannel channel);
 void DebugCodegen(DebugChannel channel, const char* fmt, ...)
     MOZ_FORMAT_PRINTF(2, 3);
 
-typedef void (*PrintCallback)(const char* text);
+using PrintCallback = void (*)(const char*);
 
 }  // namespace wasm
 }  // namespace js

@@ -1171,11 +1171,7 @@ class nsDisplayTableBorderCollapse final : public nsDisplayTableItem {
       : nsDisplayTableItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayTableBorderCollapse);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayTableBorderCollapse() {
-    MOZ_COUNT_DTOR(nsDisplayTableBorderCollapse);
-  }
-#endif
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayTableBorderCollapse)
 
   void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   bool CreateWebRenderCommands(
@@ -2754,46 +2750,6 @@ void nsTableFrame::OrderRowGroups(RowGroupArray& aChildren,
   if (aFoot) *aFoot = foot;
 }
 
-nsTableRowGroupFrame* nsTableFrame::GetTHead() const {
-  nsIFrame* kidFrame = mFrames.FirstChild();
-  while (kidFrame) {
-    if (kidFrame->StyleDisplay()->mDisplay ==
-        mozilla::StyleDisplay::TableHeaderGroup) {
-      return static_cast<nsTableRowGroupFrame*>(kidFrame);
-    }
-
-    // Get the next sibling but skip it if it's also the next-in-flow, since
-    // a next-in-flow will not be part of the current table.
-    while (kidFrame) {
-      nsIFrame* nif = kidFrame->GetNextInFlow();
-      kidFrame = kidFrame->GetNextSibling();
-      if (kidFrame != nif) break;
-    }
-  }
-
-  return nullptr;
-}
-
-nsTableRowGroupFrame* nsTableFrame::GetTFoot() const {
-  nsIFrame* kidFrame = mFrames.FirstChild();
-  while (kidFrame) {
-    if (kidFrame->StyleDisplay()->mDisplay ==
-        mozilla::StyleDisplay::TableFooterGroup) {
-      return static_cast<nsTableRowGroupFrame*>(kidFrame);
-    }
-
-    // Get the next sibling but skip it if it's also the next-in-flow, since
-    // a next-in-flow will not be part of the current table.
-    while (kidFrame) {
-      nsIFrame* nif = kidFrame->GetNextInFlow();
-      kidFrame = kidFrame->GetNextSibling();
-      if (kidFrame != nif) break;
-    }
-  }
-
-  return nullptr;
-}
-
 static bool IsRepeatable(nscoord aFrameHeight, nscoord aPageHeight) {
   return aFrameHeight < (aPageHeight / 4);
 }
@@ -3743,7 +3699,7 @@ nscoord nsTableFrame::CalcBorderBoxBSize(const ReflowInput& aReflowInput) {
 }
 
 bool nsTableFrame::IsAutoLayout() {
-  if (StyleTable()->mLayoutStrategy == NS_STYLE_TABLE_LAYOUT_AUTO) return true;
+  if (StyleTable()->mLayoutStrategy == StyleTableLayout::Auto) return true;
   // a fixed-layout inline-table must have a inline size
   // and tables with inline size set to 'max-content' must be
   // auto-layout (at least as long as
@@ -6711,7 +6667,7 @@ Maybe<BCBorderParameters> BCBlockDirSeg::BuildBorderParameters(
       if (!aIter.IsTableIEndMost() && (relColIndex > 0)) {
         col = aIter.mBlockDirInfo[relColIndex - 1].mCol;
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eColGroupOwner:
       if (col) {
         owner = col->GetParent();
@@ -6722,13 +6678,13 @@ Maybe<BCBorderParameters> BCBlockDirSeg::BuildBorderParameters(
       if (!aIter.IsTableIEndMost() && (relColIndex > 0)) {
         col = aIter.mBlockDirInfo[relColIndex - 1].mCol;
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eColOwner:
       owner = col;
       break;
     case eAjaRowGroupOwner:
       NS_ERROR("a neighboring rowgroup can never own a vertical border");
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eRowGroupOwner:
       NS_ASSERTION(aIter.IsTableIStartMost() || aIter.IsTableIEndMost(),
                    "row group can own border only at table edge");
@@ -6736,7 +6692,7 @@ Maybe<BCBorderParameters> BCBlockDirSeg::BuildBorderParameters(
       break;
     case eAjaRowOwner:
       NS_ERROR("program error");
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eRowOwner:
       NS_ASSERTION(aIter.IsTableIStartMost() || aIter.IsTableIEndMost(),
                    "row can own border only at table edge");
@@ -6745,7 +6701,7 @@ Maybe<BCBorderParameters> BCBlockDirSeg::BuildBorderParameters(
     case eAjaCellOwner:
       side = eLogicalSideIEnd;
       cell = mAjaCell;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eCellOwner:
       owner = cell;
       break;
@@ -6790,8 +6746,8 @@ Maybe<BCBorderParameters> BCBlockDirSeg::BuildBorderParameters(
   // end of the border-segment. We've got them reversed, since our block dir
   // is RTL, so we have to swap them here.)
   if (aIter.mTableWM.IsVerticalRL()) {
-    Swap(result.mStartBevelSide, result.mEndBevelSide);
-    Swap(result.mStartBevelOffset, result.mEndBevelOffset);
+    std::swap(result.mStartBevelSide, result.mEndBevelSide);
+    std::swap(result.mStartBevelOffset, result.mEndBevelOffset);
   }
 
   return Some(result);
@@ -6837,7 +6793,7 @@ static void AdjustAndPushBevel(wr::DisplayListBuilder& aBuilder,
   Float offset = NSAppUnitsToFloatPixels(aBevel.mOffset, aAppUnitsPerDevPixel);
   wr::LayoutRect bevelRect = aRect;
   wr::BorderSide bevelBorder[4];
-  NS_FOR_CSS_SIDES(i) {
+  for (const auto i : mozilla::AllPhysicalSides()) {
     bevelBorder[i] =
         wr::ToBorderSide(ToDeviceColor(aColor), StyleBorderStyle::Solid);
   }
@@ -6950,7 +6906,7 @@ static void CreateWRCommandsForBorderSegment(
 
   wr::LayoutRect r = wr::ToLayoutRect(borderRect);
   wr::BorderSide wrSide[4];
-  NS_FOR_CSS_SIDES(i) {
+  for (const auto i : mozilla::AllPhysicalSides()) {
     wrSide[i] = wr::ToBorderSide(ToDeviceColor(aBorderParams.mBorderColor),
                                  StyleBorderStyle::None);
   }
@@ -7110,7 +7066,7 @@ Maybe<BCBorderParameters> BCInlineDirSeg::BuildBorderParameters(
       break;
     case eAjaColGroupOwner:
       NS_ERROR("neighboring colgroups can never own an inline-dir border");
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eColGroupOwner:
       NS_ASSERTION(aIter.IsTableBStartMost() || aIter.IsTableBEndMost(),
                    "col group can own border only at the table edge");
@@ -7120,7 +7076,7 @@ Maybe<BCBorderParameters> BCInlineDirSeg::BuildBorderParameters(
       break;
     case eAjaColOwner:
       NS_ERROR("neighboring column can never own an inline-dir border");
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eColOwner:
       NS_ASSERTION(aIter.IsTableBStartMost() || aIter.IsTableBEndMost(),
                    "col can own border only at the table edge");
@@ -7129,14 +7085,14 @@ Maybe<BCBorderParameters> BCInlineDirSeg::BuildBorderParameters(
     case eAjaRowGroupOwner:
       side = eLogicalSideBEnd;
       rg = (aIter.IsTableBEndMost()) ? aIter.mRg : aIter.mPrevRg;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eRowGroupOwner:
       owner = rg;
       break;
     case eAjaRowOwner:
       side = eLogicalSideBEnd;
       row = (aIter.IsTableBEndMost()) ? aIter.mRow : aIter.mPrevRow;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eRowOwner:
       owner = row;
       break;
@@ -7145,7 +7101,7 @@ Maybe<BCBorderParameters> BCInlineDirSeg::BuildBorderParameters(
       // if this is null due to the damage area origin-y > 0, then the border
       // won't show up anyway
       cell = mAjaCell;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case eCellOwner:
       owner = cell;
       break;
@@ -7182,8 +7138,8 @@ Maybe<BCBorderParameters> BCInlineDirSeg::BuildBorderParameters(
   // "end" will be reversed from this physical-coord view, so we have to swap
   // them here.
   if (aIter.mTableWM.IsBidiRTL()) {
-    Swap(result.mStartBevelSide, result.mEndBevelSide);
-    Swap(result.mStartBevelOffset, result.mEndBevelOffset);
+    std::swap(result.mStartBevelSide, result.mEndBevelSide);
+    std::swap(result.mStartBevelOffset, result.mEndBevelOffset);
   }
 
   return Some(result);

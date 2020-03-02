@@ -30,30 +30,31 @@ class AccessibilityStartup {
   }
 
   get walker() {
-    return this._walker;
+    return this._accessibility.accessibleWalkerFront;
+  }
+
+  get simulator() {
+    return this._accessibility.simulatorFront;
   }
 
   /**
-   * Determine which features are supported based on the version of the server. Also, sync
-   * the state of the accessibility front/actor.
+   * Determine which features are supported based on the version of the server.
    * @return {Promise}
-   *         A promise that returns true when accessibility front is fully in sync with
-   *         the actor.
+   *         A promise that returns true when accessibility front is ready.
    */
   async prepareAccessibility() {
-    // We must call a method on an accessibility front here (such as getWalker), in
-    // oreder to be able to check actor's backward compatibility via actorHasMethod.
-    // See targe.js@getActorDescription for more information.
     try {
-      this._walker = await this._accessibility.getWalker();
-      this._supports = {};
-      [this._supports.simulation] = await Promise.all([
-        // Added in Firefox 70.
-        this.target.actorHasMethod("accessibility", "getSimulator"),
-      ]);
-
+      // Finalize accessibility front initialization. See accessibility front
+      // bootstrap method description.
       await this._accessibility.bootstrap();
-
+      this._supports = {};
+      // To add a check for backward compatibility add something similar to the
+      // example below:
+      //
+      // [this._supports.simulation] = await Promise.all([
+      //   // Please specify the version of Firefox when the feature was added.
+      //   this.target.actorHasMethod("accessibility", "getSimulator"),
+      // ]);
       return true;
     } catch (e) {
       // toolbox may be destroyed during this step.
@@ -121,9 +122,7 @@ class AccessibilityStartup {
       this._accessibility.off("init", this._updateToolHighlight);
       this._accessibility.off("shutdown", this._updateToolHighlight);
 
-      await this._walker.destroy();
       this._accessibility = null;
-      this._walker = null;
     }.bind(this)();
     return this._destroyingAccessibility;
   }

@@ -14,11 +14,12 @@
 #include "nsIOService.h"
 #include "nsISSLSocketControl.h"
 #include "ScopedNSSTypes.h"
+#include "nsQueryObject.h"
 #include "nsSocketTransportService2.h"
 #include "nsThreadUtils.h"
 #include "QuicSocketControl.h"
 #include "SSLServerCertVerification.h"
-//#include "cert.h"
+#include "HttpConnectionUDP.h"
 #include "sslerr.h"
 
 namespace mozilla {
@@ -59,6 +60,7 @@ Http3Session::Http3Session()
       mCleanShutdown(false),
       mGoawayReceived(false),
       mShouldClose(false),
+      mIsClosedByNeqo(false),
       mError(NS_OK),
       mBeforeConnectedError(false) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
@@ -70,7 +72,7 @@ Http3Session::Http3Session()
 
 nsresult Http3Session::Init(const nsACString& aOrigin,
                             nsISocketTransport* aSocketTransport,
-                            nsHttpConnection* readerWriter) {
+                            HttpConnectionUDP* readerWriter) {
   LOG3(("Http3Session::Init %p", this));
 
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
@@ -331,8 +333,9 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
         if (NS_SUCCEEDED(mError) && !IsClosing()) {
           mError = NS_ERROR_NET_HTTP3_PROTOCOL_ERROR;
         }
-        CloseInternal(false);
-        mState = CLOSED;
+        mIsClosedByNeqo = true;
+        // We need to return here and let HttpConnectionUDP close the session.
+        return mError;
         break;
       default:
         break;
@@ -430,6 +433,7 @@ nsresult Http3Session::ProcessOutput() {
 // This is only called when timer expires.
 nsresult Http3Session::ProcessOutputAndEvents() {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+  mHttp3Connection->ProcessTimer();
   nsresult rv = ProcessOutput();
   if (NS_FAILED(rv)) {
     return rv;
@@ -437,8 +441,8 @@ nsresult Http3Session::ProcessOutputAndEvents() {
   mHttp3Connection->ProcessHttp3();
   bool notUsed;
   uint32_t n = 0;
-  Unused << ProcessEvents(nsIOService::gDefaultSegmentSize, &n, &notUsed);
-  if (mState == CLOSED) {
+  rv = ProcessEvents(nsIOService::gDefaultSegmentSize, &n, &notUsed);
+  if (NS_FAILED(rv)) {
     // Now we can remove all references and Http3Session will be destroyed.
     if (mTimer) {
       mTimer->Cancel();
@@ -446,6 +450,7 @@ nsresult Http3Session::ProcessOutputAndEvents() {
     mConnection = nullptr;
     mSocketTransport = nullptr;
     mSegmentReaderWriter = nullptr;
+    mState = CLOSED;
   }
   return NS_OK;
 }
@@ -453,8 +458,7 @@ nsresult Http3Session::ProcessOutputAndEvents() {
 void Http3Session::SetupTimer(uint64_t aTimeout) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
-  LOG(("Http3Session::SetupTimer to 0x%" PRIu64 "ms [this=%p].", aTimeout,
-       this));
+  LOG(("Http3Session::SetupTimer to %" PRIu64 "ms [this=%p].", aTimeout, this));
   if (!mTimer) {
     mTimer = NS_NewTimer();
   }
@@ -509,7 +513,7 @@ bool Http3Session::AddStream(nsAHttpTransaction* aHttpTransaction,
 
   LOG3(("Http3Session::AddStream %p atrans=%p.\n", this, aHttpTransaction));
   Http3Stream* stream = new Http3Stream(aHttpTransaction, this);
-  mStreamTransactionHash.Put(aHttpTransaction, stream);
+  mStreamTransactionHash.Put(aHttpTransaction, RefPtr{stream});
 
   mReadyForWrite.Push(stream);
 
@@ -548,7 +552,9 @@ void Http3Session::ProcessPending() {
     MOZ_ASSERT(stream->Queued());
     stream->SetQueued(false);
     mReadyForWrite.Push(stream);
-    Unused << mConnection->ResumeSend();
+    if (mConnection) {
+      Unused << mConnection->ResumeSend();
+    }
   }
 }
 
@@ -614,7 +620,7 @@ nsresult Http3Session::TryActivating(
        *aStreamId, aStream, this));
 
   MOZ_ASSERT(*aStreamId != UINT64_MAX);
-  mStreamIdHash.Put(*aStreamId, aStream);
+  mStreamIdHash.Put(*aStreamId, RefPtr{aStream});
   mHttp3Connection->ProcessHttp3();
   return NS_OK;
 }
@@ -760,10 +766,12 @@ nsresult Http3Session::ReadSegmentsAgain(nsAHttpSegmentReader* reader,
   // Call neqo-transaction.
   ProcessOutput();
 
-  Unused << mConnection->ResumeRecv();
+  if (mConnection) {
+    Unused << mConnection->ResumeRecv();
+  }
   // TODO block on max_stream_data
 
-  if (mReadyForWrite.GetSize() > 0) {
+  if ((mReadyForWrite.GetSize() > 0) && mConnection) {
     Unused << mConnection->ResumeSend();
   }
   return rv;
@@ -792,9 +800,17 @@ nsresult Http3Session::WriteSegmentsAgain(nsAHttpSegmentWriter* writer,
     return rv;
   }
   rv = ProcessEvents(count, countWritten, again);
-  if (NS_SUCCEEDED(rv)) {
+  if (NS_SUCCEEDED(rv) && mConnection) {
     Unused << mConnection->ResumeRecv();
   }
+
+  uint64_t timeout = mHttp3Connection->ProcessOutput();
+
+  // Check if we have datagrams to send. If we have let's poll for writing.
+  if (mConnection && mHttp3Connection->HasDataToSend()) {
+    Unused << mConnection->ResumeSend();
+  }
+  SetupTimer(timeout);
   return rv;
 }
 
@@ -803,8 +819,10 @@ void Http3Session::Close(nsresult aReason) {
   mError = aReason;
   CloseInternal(true);
 
-  if (mCleanShutdown) {
-    // It is network-tear-down. We need to remove all references, so that
+  if (mCleanShutdown || mIsClosedByNeqo) {
+    // It is network-tear-down or neqo is state CLOSED(it does not need to send
+    // any more packets or wait for new packets).
+    // We need to remove all references, so that
     // Http3Session will be destroyed.
     if (mTimer) {
       mTimer->Cancel();
@@ -812,6 +830,7 @@ void Http3Session::Close(nsresult aReason) {
     mConnection = nullptr;
     mSocketTransport = nullptr;
     mSegmentReaderWriter = nullptr;
+    mState = CLOSED;
   }
 }
 
@@ -864,10 +883,6 @@ nsresult Http3Session::TakeSubTransactions(
   return NS_OK;
 }
 
-PRIntervalTime Http3Session::ResponseTimeout() {
-  return gHttpHandler->ResponseTimeout();
-}
-
 //-----------------------------------------------------------------------------
 // Pass through methods of nsAHttpConnection
 //-----------------------------------------------------------------------------
@@ -881,22 +896,31 @@ nsresult Http3Session::OnHeadersAvailable(nsAHttpTransaction* transaction,
                                           nsHttpRequestHead* requestHead,
                                           nsHttpResponseHead* responseHead,
                                           bool* reset) {
-  return mConnection->OnHeadersAvailable(transaction, requestHead, responseHead,
-                                         reset);
+  MOZ_ASSERT(mConnection);
+  if (mConnection) {
+    return mConnection->OnHeadersAvailable(transaction, requestHead,
+                                           responseHead, reset);
+  }
+  return NS_OK;
 }
 
-bool Http3Session::IsReused() { return mConnection->IsReused(); }
+bool Http3Session::IsReused() {
+  if (mConnection) {
+    return mConnection->IsReused();
+  }
+  return true;
+}
 
 nsresult Http3Session::PushBack(const char* buf, uint32_t len) {
-  return mConnection->PushBack(buf, len);
+  return NS_ERROR_UNEXPECTED;
 }
 
-already_AddRefed<nsHttpConnection> Http3Session::TakeHttpConnection() {
+already_AddRefed<HttpConnectionBase> Http3Session::TakeHttpConnection() {
   MOZ_ASSERT(false, "TakeHttpConnection of Http3Session");
   return nullptr;
 }
 
-already_AddRefed<nsHttpConnection> Http3Session::HttpConnection() {
+already_AddRefed<HttpConnectionBase> Http3Session::HttpConnection() {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   if (mConnection) {
     return mConnection->HttpConnection();
@@ -925,7 +949,9 @@ void Http3Session::CloseTransaction(nsAHttpTransaction* aTransaction,
        this, aTransaction, static_cast<uint32_t>(aResult), stream->StreamId(),
        stream.get()));
   CloseStream(stream, aResult);
-  Unused << mConnection->ResumeSend();
+  if (mConnection) {
+    Unused << mConnection->ResumeSend();
+  }
 }
 
 void Http3Session::CloseStream(Http3Stream* aStream, nsresult aResult) {
@@ -1157,7 +1183,7 @@ void Http3Session::CallCertVerification() {
   Unused << mSocketControl->GetProviderFlags(&providerFlags);
 
   SECStatus rv = AuthCertificateHookWithInfo(
-      mSocketControl, static_cast<const void*>(this), certInfo.certs,
+      mSocketControl, static_cast<const void*>(this), std::move(certInfo.certs),
       stapledOCSPResponse, sctsFromTLSExtension, providerFlags);
   if ((rv != SECSuccess) && (rv != SECWouldBlock)) {
     LOG(("Http3Session::CallCertVerification [this=%p] AuthCertificate failed",

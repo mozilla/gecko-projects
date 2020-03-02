@@ -127,7 +127,7 @@ policy-OverridePostUpdatePage = Override the post-update “What’s New” page
 
 policy-PasswordManagerEnabled = Enable saving passwords to the password manager.
 
-policy-Permissions = Configure permissions for camera, microphone, location and notifications.
+policy-Permissions2 = Configure permissions for camera, microphone, location, notifications, and autoplay.
 
 policy-PopupBlocking = Allow certain websites to display popups by default.
 
@@ -155,6 +155,8 @@ policy-SSLVersionMax = Set the maximum SSL version.
 policy-SSLVersionMin = Set the minimum SSL version.
 
 policy-SupportMenu = Add a custom support menu item to the help menu.
+
+policy-UserMessaging = Don’t show certain messages to the user.
 
 # “format” refers to the format used for the value of this policy.
 policy-WebsiteFilter = Block websites from being visited. See documentation for more details on the format.

@@ -16,6 +16,7 @@ contain, you've come to the right place.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import operator
 import os
 
 from collections import (
@@ -27,7 +28,6 @@ from mozbuild.util import (
     ImmutableStrictOrderingOnAppendList,
     KeyedDefaultDict,
     List,
-    ListWithAction,
     memoize,
     memoized_property,
     ReadOnlyKeyedDefaultDict,
@@ -486,7 +486,7 @@ class TargetCompileFlags(BaseCompileFlags):
                 '`%s` may not be set in COMPILE_FLAGS from moz.build, this '
                 'value is resolved from the emitter.' % key)
         if (not (isinstance(value, list) and
-                 all(isinstance(v, basestring) for v in value))):
+                 all(isinstance(v, six.string_types) for v in value))):
             raise ValueError(
                 'A list of strings must be provided as a value for a compile '
                 'flags category.')
@@ -591,13 +591,8 @@ class WasmFlags(TargetCompileFlags):
              ('WASM_CFLAGS', 'WASM_CXXFLAGS', 'WASM_LDFLAGS')),
             ('WARNINGS_AS_ERRORS', self._warnings_as_errors(),
              ('WASM_CXXFLAGS', 'WASM_CFLAGS', 'WASM_LDFLAGS')),
-            ('WARNINGS_CFLAGS',
-             context.config.substs.get('WARNINGS_CFLAGS'),
-             ('WASM_CFLAGS', 'WASM_LDFLAGS')),
             ('MOZBUILD_CFLAGS', None, ('WASM_CFLAGS',)),
             ('MOZBUILD_CXXFLAGS', None, ('WASM_CXXFLAGS',)),
-            ('COVERAGE', context.config.substs.get('COVERAGE_CFLAGS'),
-             ('WASM_CXXFLAGS', 'WASM_CFLAGS')),
             ('WASM_CFLAGS', context.config.substs.get('WASM_CFLAGS'),
              ('WASM_CFLAGS',)),
             ('WASM_CXXFLAGS', context.config.substs.get('WASM_CXXFLAGS'),
@@ -610,6 +605,16 @@ class WasmFlags(TargetCompileFlags):
         )
 
         TargetCompileFlags.__init__(self, context)
+
+    def _optimize_flags(self):
+        if not self._context.config.substs.get('MOZ_OPTIMIZE'):
+            return []
+
+        # We don't want `MOZ_{PGO_,}OPTIMIZE_FLAGS here because they may contain
+        # optimization flags that aren't suitable for wasm (e.g. -freorder-blocks).
+        # Just optimize for size in all cases; we may want to make this
+        # configurable.
+        return ['-Os']
 
 
 class FinalTargetValue(ContextDerivedValue, six.text_type):
@@ -643,9 +648,9 @@ def Enum(*values):
 class PathMeta(type):
     """Meta class for the Path family of classes.
 
-    It handles calling __new__ and __init__ with the right arguments
-    in cases where a Path is instantiated with another instance of
-    Path instead of having received a context.
+    It handles calling __new__ with the right arguments in cases where a Path
+    is instantiated with another instance of Path instead of having received a
+    context.
 
     It also makes Path(context, value) instantiate one of the
     subclasses depending on the value, allowing callers to do
@@ -671,7 +676,7 @@ class PathMeta(type):
         return super(PathMeta, cls).__call__(context, value)
 
 
-class Path(ContextDerivedValue, six.text_type):
+class Path(six.with_metaclass(PathMeta, ContextDerivedValue, six.text_type)):
     """Stores and resolves a source path relative to a given context
 
     This class is used as a backing type for some of the sandbox variables.
@@ -682,16 +687,11 @@ class Path(ContextDerivedValue, six.text_type):
       - '!objdir/relative/paths'
       - '%/filesystem/absolute/paths'
     """
-    __metaclass__ = PathMeta
-
     def __new__(cls, context, value=None):
-        return super(Path, cls).__new__(cls, value)
-
-    def __init__(self, context, value=None):
-        # Only subclasses should be instantiated.
-        assert self.__class__ != Path
+        self = super(Path, cls).__new__(cls, value)
         self.context = context
         self.srcdir = context.srcdir
+        return self
 
     def join(self, *p):
         """ContextDerived equivalent of mozpath.join(self, *p), returning a
@@ -700,29 +700,32 @@ class Path(ContextDerivedValue, six.text_type):
         return Path(self.context, mozpath.join(self, *p))
 
     def __cmp__(self, other):
-        if isinstance(other, Path) and self.srcdir != other.srcdir:
-            return cmp(self.full_path, other.full_path)
-        return cmp(six.text_type(self), other)
+        # We expect this function to never be called to avoid issues in the
+        # switch from Python 2 to 3.
+        raise AssertionError()
 
-    # __cmp__ is not enough because unicode has __eq__, __ne__, etc. defined
-    # and __cmp__ is only used for those when they don't exist.
+    def _cmp(self, other, op):
+        if isinstance(other, Path) and self.srcdir != other.srcdir:
+            return op(self.full_path, other.full_path)
+        return op(six.text_type(self), other)
+
     def __eq__(self, other):
-        return self.__cmp__(other) == 0
+        return self._cmp(other, operator.eq)
 
     def __ne__(self, other):
-        return self.__cmp__(other) != 0
+        return self._cmp(other, operator.ne)
 
     def __lt__(self, other):
-        return self.__cmp__(other) < 0
+        return self._cmp(other, operator.lt)
 
     def __gt__(self, other):
-        return self.__cmp__(other) > 0
+        return self._cmp(other, operator.gt)
 
     def __le__(self, other):
-        return self.__cmp__(other) <= 0
+        return self._cmp(other, operator.le)
 
     def __ge__(self, other):
-        return self.__cmp__(other) >= 0
+        return self._cmp(other, operator.ge)
 
     def __repr__(self):
         return '<%s (%s)%s>' % (self.__class__.__name__, self.srcdir, self)
@@ -738,12 +741,12 @@ class Path(ContextDerivedValue, six.text_type):
 class SourcePath(Path):
     """Like Path, but limited to paths in the source directory."""
 
-    def __init__(self, context, value):
+    def __new__(cls, context, value=None):
         if value.startswith('!'):
             raise ValueError('Object directory paths are not allowed')
         if value.startswith('%'):
             raise ValueError('Filesystem absolute paths are not allowed')
-        super(SourcePath, self).__init__(context, value)
+        self = super(SourcePath, cls).__new__(cls, context, value)
 
         if value.startswith('/'):
             path = None
@@ -758,6 +761,7 @@ class SourcePath(Path):
         else:
             path = mozpath.join(self.srcdir, value)
         self.full_path = mozpath.normpath(path)
+        return self
 
     @memoized_property
     def translated(self):
@@ -779,10 +783,12 @@ class RenamedSourcePath(SourcePath):
     and is not supported by the RecursiveMake backend.
     """
 
-    def __init__(self, context, value):
+    def __new__(cls, context, value):
         assert isinstance(value, tuple)
-        source, self._target_basename = value
-        super(RenamedSourcePath, self).__init__(context, source)
+        source, target_basename = value
+        self = super(RenamedSourcePath, cls).__new__(cls, context, source)
+        self._target_basename = target_basename
+        return self
 
     @property
     def target_basename(self):
@@ -792,29 +798,30 @@ class RenamedSourcePath(SourcePath):
 class ObjDirPath(Path):
     """Like Path, but limited to paths in the object directory."""
 
-    def __init__(self, context, value=None):
+    def __new__(cls, context, value=None):
         if not value.startswith('!'):
             raise ValueError('Object directory paths must start with ! prefix')
-        super(ObjDirPath, self).__init__(context, value)
+        self = super(ObjDirPath, cls).__new__(cls, context, value)
 
         if value.startswith('!/'):
             path = mozpath.join(context.config.topobjdir, value[2:])
         else:
             path = mozpath.join(context.objdir, value[1:])
         self.full_path = mozpath.normpath(path)
+        return self
 
 
 class AbsolutePath(Path):
     """Like Path, but allows arbitrary paths outside the source and object directories."""
 
-    def __init__(self, context, value=None):
+    def __new__(cls, context, value=None):
         if not value.startswith('%'):
             raise ValueError('Absolute paths must start with % prefix')
         if not os.path.isabs(value[1:]):
             raise ValueError('Path \'%s\' is not absolute' % value[1:])
-        super(AbsolutePath, self).__init__(context, value)
-
+        self = super(AbsolutePath, cls).__new__(cls, context, value)
         self.full_path = mozpath.normpath(value[1:])
+        return self
 
 
 @memoize
@@ -993,22 +1000,6 @@ def OrderedPathListWithAction(action):
     return _OrderedListWithAction
 
 
-def TypedListWithAction(typ, action):
-    """Returns a class which behaves as a TypedList with the provided type, but
-    invokes the given given callable with each input and a context as it is
-    read, storing a tuple including the result and the original item.
-
-    This used to extend moz.build reading to make more data available in
-    filesystem-reading mode.
-    """
-    class _TypedListWithAction(ContextDerivedValue, TypedList(typ), ListWithAction):
-        def __init__(self, context, *args):
-            def _action(item):
-                return item, action(context, item)
-            super(_TypedListWithAction, self).__init__(action=_action, *args)
-    return _TypedListWithAction
-
-
 ManifestparserManifestList = OrderedPathListWithAction(read_manifestparser_manifest)
 ReftestManifestList = OrderedPathListWithAction(read_reftest_manifest)
 
@@ -1029,6 +1020,7 @@ GeneratedFilesList = StrictOrderingOnAppendListWithFlagsFactory({
     'script': six.text_type,
     'inputs': list,
     'force': bool,
+    'py2': bool,
     'flags': list, })
 
 
@@ -1337,6 +1329,15 @@ VARIABLES = {
         """
         ),
 
+    'IS_GKRUST': (
+        bool,
+        bool,
+        """Whether the current library defined by this moz.build is gkrust.
+
+        Indicates whether the current library contains rust for libxul.
+        """
+        ),
+
     'RUST_LIBRARY_FEATURES': (
         List,
         list,
@@ -1506,25 +1507,6 @@ VARIABLES = {
         Values are relative paths. They can be multiple directory levels
         above or below. Use ``..`` for parent directories and ``/`` for path
         delimiters.
-        """
-        ),
-
-    'HAS_MISC_RULE': (
-        bool,
-        bool,
-        """Whether this directory should be traversed in the ``misc`` tier.
-
-        Many ``libs`` rules still exist in Makefile.in files. We highly prefer
-        that these rules exist in the ``misc`` tier/target so that they can be
-        executed concurrently during tier traversal (the ``misc`` tier is
-        fully concurrent).
-
-        Presence of this variable indicates that this directory should be
-        traversed by the ``misc`` tier.
-
-        Please note that converting ``libs`` rules to the ``misc`` tier must
-        be done with care, as there are many implicit dependencies that can
-        break the build in subtle ways.
         """
         ),
 
@@ -2029,10 +2011,6 @@ VARIABLES = {
                                         """List of manifest files defining firefox-ui-functional tests.
         """),
 
-    'PUPPETEER_FIREFOX_MANIFESTS': (ManifestparserManifestList, list,
-                                    """List of manifest files defining puppeteer unit tests for Firefox.
-        """),
-
     'MARIONETTE_LAYOUT_MANIFESTS': (ManifestparserManifestList, list,
                                     """List of manifest files defining marionette-layout tests.
         """),
@@ -2420,6 +2398,7 @@ TEMPLATE_VARIABLES = {
     'HOST_LIBRARY_NAME',
     'HOST_SIMPLE_PROGRAMS',
     'IS_FRAMEWORK',
+    'IS_GKRUST',
     'LIBRARY_NAME',
     'PROGRAM',
     'SIMPLE_PROGRAMS',
@@ -2850,6 +2829,18 @@ DEPRECATION_HINTS = {
 
             Library('foo') [ or LIBRARY_NAME = 'foo' ]
             IS_FRAMEWORK = True
+        ''',
+
+
+    'IS_GKRUST': '''
+        Please use
+
+            RustLibrary('gkrust', ... is_gkrust=True)
+
+        instead of
+
+            RustLibrary('gkrust') [ or LIBRARY_NAME = 'gkrust' ]
+            IS_GKRUST = True
         ''',
 
     'TOOL_DIRS': 'Please use the DIRS variable instead.',

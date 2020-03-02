@@ -55,7 +55,10 @@ def ancestors(path):
 
 
 def samepath(path1, path2):
-    if hasattr(os.path, 'samefile'):
+    # Under Python 3 (but NOT Python 2), MozillaBuild exposes the
+    # os.path.samefile function despite it not working, so only use it if we're
+    # not running under Windows.
+    if hasattr(os.path, 'samefile') and os.name != 'nt':
         return os.path.samefile(path1, path2)
     return os.path.normcase(os.path.realpath(path1)) == \
         os.path.normcase(os.path.realpath(path2))
@@ -277,7 +280,7 @@ class MozbuildObject(ProcessExecutionMixin):
         # the environment variable, which has an impact on autodetection (when
         # path is MozconfigLoader.AUTODETECT), and memoization wouldn't account
         # for it without the explicit (unused) argument.
-        out = six.BytesIO()
+        out = six.StringIO()
         env = os.environ
         if path and path != MozconfigLoader.AUTODETECT:
             env = dict(env)
@@ -695,6 +698,12 @@ class MozbuildObject(ProcessExecutionMixin):
                 args.append('-j%d' % multiprocessing.cpu_count())
         elif num_jobs > 0:
             args.append('MOZ_PARALLEL_BUILD=%d' % num_jobs)
+        elif os.environ.get('MOZ_LOW_PARALLELISM_BUILD'):
+            cpus = multiprocessing.cpu_count()
+            jobs = max(1, int(0.75 * cpus))
+            print("  Low parallelism requested: using %d jobs for %d cores" %
+                  (jobs, cpus))
+            args.append('MOZ_PARALLEL_BUILD=%d' % jobs)
 
         if ignore_errors:
             args.append('-k')
@@ -914,7 +923,7 @@ class MachCommandBase(MozbuildObject):
             self._ensure_state_subdir_exists('.')
             logfile = self._get_state_filename('last_log.json')
             try:
-                fd = open(logfile, "wb")
+                fd = open(logfile, 'wt')
                 self.log_manager.add_json_handler(fd)
             except Exception as e:
                 self.log(logging.WARNING, 'mach', {'error': str(e)},

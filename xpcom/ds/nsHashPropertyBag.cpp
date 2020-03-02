@@ -6,8 +6,9 @@
 
 #include "nsHashPropertyBag.h"
 
+#include <utility>
+
 #include "mozilla/Attributes.h"
-#include "mozilla/Move.h"
 #include "mozilla/SimpleEnumerator.h"
 #include "nsArray.h"
 #include "nsArrayEnumerator.h"
@@ -77,7 +78,7 @@ nsHashPropertyBagBase::DeleteProperty(const nsAString& aName) {
 //
 
 class nsSimpleProperty final : public nsIProperty {
-  ~nsSimpleProperty() {}
+  ~nsSimpleProperty() = default;
 
  public:
   nsSimpleProperty(const nsAString& aName, nsIVariant* aValue)

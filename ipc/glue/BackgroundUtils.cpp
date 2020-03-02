@@ -27,11 +27,13 @@
 #include "URIUtils.h"
 #include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/nsCSPContext.h"
+#include "mozilla/dom/BrowsingContext.h"
 
 namespace mozilla {
 
 using mozilla::BasePrincipal;
 using mozilla::Maybe;
+using mozilla::dom::BrowsingContext;
 using mozilla::dom::ServiceWorkerDescriptor;
 using namespace mozilla::net;
 
@@ -277,18 +279,8 @@ nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
 
   nsresult rv;
   if (aPrincipal->GetIsNullPrincipal()) {
-    nsCOMPtr<nsIURI> uri;
-    rv = aPrincipal->GetURI(getter_AddRefs(uri));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    if (NS_WARN_IF(!uri)) {
-      return NS_ERROR_FAILURE;
-    }
-
     nsAutoCString spec;
-    rv = uri->GetSpec(spec);
+    rv = aPrincipal->GetAsciiSpec(spec);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -325,20 +317,8 @@ nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     return NS_OK;
   }
 
-  // must be a content principal
-
-  nsCOMPtr<nsIURI> uri;
-  rv = aPrincipal->GetURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (NS_WARN_IF(!uri)) {
-    return NS_ERROR_FAILURE;
-  }
-
   nsAutoCString spec;
-  rv = uri->GetSpec(spec);
+  rv = aPrincipal->GetAsciiSpec(spec);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -571,7 +551,8 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
       loadingPrincipalInfo, triggeringPrincipalInfo, principalToInheritInfo,
       sandboxedLoadingPrincipalInfo, topLevelPrincipalInfo,
       topLevelStorageAreaPrincipalInfo, optionalResultPrincipalURI,
-      aLoadInfo->GetSecurityFlags(), aLoadInfo->InternalContentPolicyType(),
+      aLoadInfo->GetSecurityFlags(), aLoadInfo->GetSandboxFlags(),
+      aLoadInfo->InternalContentPolicyType(),
       static_cast<uint32_t>(aLoadInfo->GetTainting()),
       aLoadInfo->GetBlockAllMixedContent(),
       aLoadInfo->GetUpgradeInsecureRequests(),
@@ -587,17 +568,18 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
       aLoadInfo->GetFrameOuterWindowID(), aLoadInfo->GetBrowsingContextID(),
       aLoadInfo->GetFrameBrowsingContextID(),
       aLoadInfo->GetInitialSecurityCheckDone(),
-      aLoadInfo->GetIsInThirdPartyContext(), aLoadInfo->GetIsDocshellReload(),
-      aLoadInfo->GetIsFormSubmission(), aLoadInfo->GetSendCSPViolationEvents(),
-      aLoadInfo->GetOriginAttributes(), redirectChainIncludingInternalRedirects,
-      redirectChain, ancestorPrincipals, aLoadInfo->AncestorOuterWindowIDs(),
-      ipcClientInfo, ipcReservedClientInfo, ipcInitialClientInfo, ipcController,
+      aLoadInfo->GetIsInThirdPartyContext(), aLoadInfo->GetIsFormSubmission(),
+      aLoadInfo->GetSendCSPViolationEvents(), aLoadInfo->GetOriginAttributes(),
+      redirectChainIncludingInternalRedirects, redirectChain,
+      ancestorPrincipals, aLoadInfo->AncestorOuterWindowIDs(), ipcClientInfo,
+      ipcReservedClientInfo, ipcInitialClientInfo, ipcController,
       aLoadInfo->CorsUnsafeHeaders(), aLoadInfo->GetForcePreflight(),
       aLoadInfo->GetIsPreflight(), aLoadInfo->GetLoadTriggeredFromExternal(),
       aLoadInfo->GetServiceWorkerTaintingSynthesized(),
       aLoadInfo->GetDocumentHasUserInteracted(),
-      aLoadInfo->GetDocumentHasLoaded(), cspNonce,
-      aLoadInfo->GetSkipContentSniffing(),
+      aLoadInfo->GetDocumentHasLoaded(),
+      aLoadInfo->GetAllowListFutureDocumentsCreatedFromThisRedirectChain(),
+      cspNonce, aLoadInfo->GetSkipContentSniffing(),
       aLoadInfo->GetIsFromProcessingFrameAttributes(), cookieSettingsArgs,
       aLoadInfo->GetRequestBlockingReason(), maybeCspToInheritInfo));
 
@@ -607,16 +589,15 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
 nsresult LoadInfoArgsToLoadInfo(
     const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsILoadInfo** outLoadInfo) {
-  return LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, nullptr, nullptr,
-                                outLoadInfo);
+  return LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, nullptr, outLoadInfo);
 }
 nsresult LoadInfoArgsToLoadInfo(
-    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs, nsINode* aLoadingContext,
+    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsINode* aCspToInheritLoadingContext, nsILoadInfo** outLoadInfo) {
   RefPtr<LoadInfo> loadInfo;
-  nsresult rv = LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, aLoadingContext,
-                                       aCspToInheritLoadingContext,
-                                       getter_AddRefs(loadInfo));
+  nsresult rv =
+      LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, aCspToInheritLoadingContext,
+                             getter_AddRefs(loadInfo));
   NS_ENSURE_SUCCESS(rv, rv);
 
   loadInfo.forget(outLoadInfo);
@@ -625,11 +606,10 @@ nsresult LoadInfoArgsToLoadInfo(
 
 nsresult LoadInfoArgsToLoadInfo(
     const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs, LoadInfo** outLoadInfo) {
-  return LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, nullptr, nullptr,
-                                outLoadInfo);
+  return LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, nullptr, outLoadInfo);
 }
 nsresult LoadInfoArgsToLoadInfo(
-    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs, nsINode* aLoadingContext,
+    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsINode* aCspToInheritLoadingContext, LoadInfo** outLoadInfo) {
   if (aOptionalLoadInfoArgs.isNothing()) {
     *outLoadInfo = nullptr;
@@ -755,12 +735,22 @@ nsresult LoadInfoArgsToLoadInfo(
     cspToInherit = CSPInfoToCSP(cspToInheritInfo.ref(), doc);
   }
 
+  // Restore the loadingContext for frames using the BrowsingContext's
+  // embedder element. Note that this only works if the embedder is
+  // same-process, so won't be fission compatible.
+  nsCOMPtr<nsINode> loadingContext;
+  RefPtr<BrowsingContext> frameBrowsingContext =
+      BrowsingContext::Get(loadInfoArgs.frameBrowsingContextID());
+  if (frameBrowsingContext) {
+    loadingContext = frameBrowsingContext->GetEmbedderElement();
+  }
+
   RefPtr<mozilla::LoadInfo> loadInfo = new mozilla::LoadInfo(
       loadingPrincipal, triggeringPrincipal, principalToInherit,
       sandboxedLoadingPrincipal, topLevelPrincipal,
       topLevelStorageAreaPrincipal, resultPrincipalURI, cookieSettings,
       cspToInherit, clientInfo, reservedClientInfo, initialClientInfo,
-      controller, loadInfoArgs.securityFlags(),
+      controller, loadInfoArgs.securityFlags(), loadInfoArgs.sandboxFlags(),
       loadInfoArgs.contentPolicyType(),
       static_cast<LoadTainting>(loadInfoArgs.tainting()),
       loadInfoArgs.blockAllMixedContent(),
@@ -776,18 +766,18 @@ nsresult LoadInfoArgsToLoadInfo(
       loadInfoArgs.topOuterWindowID(), loadInfoArgs.frameOuterWindowID(),
       loadInfoArgs.browsingContextID(), loadInfoArgs.frameBrowsingContextID(),
       loadInfoArgs.initialSecurityCheckDone(),
-      loadInfoArgs.isInThirdPartyContext(), loadInfoArgs.isDocshellReload(),
-      loadInfoArgs.isFormSubmission(), loadInfoArgs.sendCSPViolationEvents(),
-      loadInfoArgs.originAttributes(), redirectChainIncludingInternalRedirects,
-      redirectChain, std::move(ancestorPrincipals),
-      loadInfoArgs.ancestorOuterWindowIDs(), loadInfoArgs.corsUnsafeHeaders(),
-      loadInfoArgs.forcePreflight(), loadInfoArgs.isPreflight(),
-      loadInfoArgs.loadTriggeredFromExternal(),
+      loadInfoArgs.isInThirdPartyContext(), loadInfoArgs.isFormSubmission(),
+      loadInfoArgs.sendCSPViolationEvents(), loadInfoArgs.originAttributes(),
+      redirectChainIncludingInternalRedirects, redirectChain,
+      std::move(ancestorPrincipals), loadInfoArgs.ancestorOuterWindowIDs(),
+      loadInfoArgs.corsUnsafeHeaders(), loadInfoArgs.forcePreflight(),
+      loadInfoArgs.isPreflight(), loadInfoArgs.loadTriggeredFromExternal(),
       loadInfoArgs.serviceWorkerTaintingSynthesized(),
       loadInfoArgs.documentHasUserInteracted(),
-      loadInfoArgs.documentHasLoaded(), loadInfoArgs.cspNonce(),
-      loadInfoArgs.skipContentSniffing(), loadInfoArgs.requestBlockingReason(),
-      aLoadingContext);
+      loadInfoArgs.documentHasLoaded(),
+      loadInfoArgs.allowListFutureDocumentsCreatedFromThisRedirectChain(),
+      loadInfoArgs.cspNonce(), loadInfoArgs.skipContentSniffing(),
+      loadInfoArgs.requestBlockingReason(), loadingContext);
 
   if (loadInfoArgs.isFromProcessingFrameAttributes()) {
     loadInfo->SetIsFromProcessingFrameAttributes();
@@ -806,6 +796,7 @@ void LoadInfoToParentLoadInfoForwarder(
         false,  // serviceWorkerTaintingSynthesized
         false,  // documentHasUserInteracted
         false,  // documentHasLoaded
+        false,  // allowListFutureDocumentsCreatedFromThisRedirectChain
         Maybe<CookieSettingsArgs>(),
         nsILoadInfo::BLOCKING_REASON_NONE);  // requestBlockingReason
     return;
@@ -837,8 +828,9 @@ void LoadInfoToParentLoadInfoForwarder(
       aLoadInfo->GetSkipContentSniffing(),
       aLoadInfo->GetServiceWorkerTaintingSynthesized(),
       aLoadInfo->GetDocumentHasUserInteracted(),
-      aLoadInfo->GetDocumentHasLoaded(), cookieSettingsArgs,
-      aLoadInfo->GetRequestBlockingReason());
+      aLoadInfo->GetDocumentHasLoaded(),
+      aLoadInfo->GetAllowListFutureDocumentsCreatedFromThisRedirectChain(),
+      cookieSettingsArgs, aLoadInfo->GetRequestBlockingReason());
 }
 
 nsresult MergeParentLoadInfoForwarder(
@@ -876,6 +868,10 @@ nsresult MergeParentLoadInfoForwarder(
       aForwarderArgs.documentHasUserInteracted()));
   MOZ_ALWAYS_SUCCEEDS(
       aLoadInfo->SetDocumentHasLoaded(aForwarderArgs.documentHasLoaded()));
+  MOZ_ALWAYS_SUCCEEDS(
+      aLoadInfo->SetAllowListFutureDocumentsCreatedFromThisRedirectChain(
+          aForwarderArgs
+              .allowListFutureDocumentsCreatedFromThisRedirectChain()));
   MOZ_ALWAYS_SUCCEEDS(aLoadInfo->SetRequestBlockingReason(
       aForwarderArgs.requestBlockingReason()));
 

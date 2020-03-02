@@ -15,6 +15,7 @@ loader.lazyRequireGetter(
   "AutocompletePopup",
   "devtools/client/shared/autocomplete-popup"
 );
+
 loader.lazyRequireGetter(
   this,
   "PropTypes",
@@ -46,7 +47,10 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(this, "saveAs", "devtools/shared/DevToolsUtils", true);
 
 // React & Redux
-const { Component } = require("devtools/client/shared/vendor/react");
+const {
+  Component,
+  createFactory,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
@@ -59,6 +63,10 @@ const {
   getAutocompleteState,
 } = require("devtools/client/webconsole/selectors/autocomplete");
 const actions = require("devtools/client/webconsole/actions/index");
+
+const EvaluationSelector = createFactory(
+  require("devtools/client/webconsole/components/Input/EvaluationSelector")
+);
 
 // Constants used for defining the direction of JSTerm input history navigation.
 const {
@@ -107,6 +115,7 @@ class JSTerm extends Component {
       editorWidth: PropTypes.number,
       showEditorOnboarding: PropTypes.bool,
       autocomplete: PropTypes.bool,
+      showEvaluationSelector: PropTypes.bool,
     };
   }
 
@@ -238,10 +247,12 @@ class JSTerm extends Component {
       this.editor = new Editor({
         autofocus: true,
         enableCodeFolding: false,
-        autoCloseBrackets: false,
         lineNumbers: this.props.editorMode,
         lineWrapping: true,
-        mode: Editor.modes.js,
+        mode: {
+          name: "javascript",
+          globalVars: true,
+        },
         styleActiveLine: false,
         tabIndex: "0",
         viewportMargin: Infinity,
@@ -464,7 +475,11 @@ class JSTerm extends Component {
 
           "Ctrl-Space": () => {
             if (!this.autocompletePopup.isOpen) {
-              this.props.autocompleteUpdate(true);
+              this.props.autocompleteUpdate(
+                true,
+                null,
+                this._getExpressionVariables()
+              );
               return null;
             }
 
@@ -648,7 +663,7 @@ class JSTerm extends Component {
       });
     }
 
-    this.emit("set-input-value");
+    this.emitForTests("set-input-value");
   }
 
   /**
@@ -732,6 +747,18 @@ class JSTerm extends Component {
       this.autocompletePopup.items.some(({ preLabel, label }) =>
         label.startsWith(preLabel + addedText)
       );
+    const nextSelectedAutocompleteItemIndex =
+      addedCharacterMatchPopupItem &&
+      this.autocompletePopup.items.findIndex(({ preLabel, label }) =>
+        label.startsWith(preLabel + addedText)
+      );
+
+    if (addedCharacterMatchPopupItem) {
+      this.autocompletePopup.selectItemAtIndex(
+        nextSelectedAutocompleteItemIndex,
+        { preventSelectCallback: true }
+      );
+    }
 
     if (!completionText || change.canceled || !addedCharacterMatchCompletion) {
       this.setAutoCompletionText("");
@@ -759,6 +786,35 @@ class JSTerm extends Component {
   }
 
   /**
+   * Retrieve variable declared in the expression from the CodeMirror state, in order
+   * to display them in the autocomplete popup.
+   */
+  _getExpressionVariables() {
+    const cm = this.editor.codeMirror;
+    const { state } = cm.getTokenAt(cm.getCursor());
+    const variables = [];
+
+    if (state.context) {
+      for (let c = state.context; c; c = c.prev) {
+        for (let v = c.vars; v; v = v.next) {
+          variables.push(v.name);
+        }
+      }
+    }
+
+    const keys = ["localVars", "globalVars"];
+    for (const key of keys) {
+      if (state[key]) {
+        for (let v = state[key]; v; v = v.next) {
+          variables.push(v.name);
+        }
+      }
+    }
+
+    return variables;
+  }
+
+  /**
    * The editor "changes" event handler.
    */
   _onEditorChanges(cm, changes) {
@@ -775,7 +831,7 @@ class JSTerm extends Component {
         !isJsTermChangeOnly &&
         (this.props.autocomplete || this.hasAutocompletionSuggestion())
       ) {
-        this.autocompleteUpdate();
+        this.autocompleteUpdate(false, null, this._getExpressionVariables());
       }
       this.lastInputValue = value;
       this.terminalInputChanged(value);
@@ -953,6 +1009,15 @@ class JSTerm extends Component {
     } else if (items.length < minimumAutoCompleteLength && popup.isOpen) {
       popup.hidePopup();
     }
+
+    // Eager evaluation results incorporate the current autocomplete item. We need to
+    // trigger it here as well as in onAutocompleteSelect as we set the items with
+    // preventSelectCallback (which means we won't trigger onAutocompleteSelect when the
+    // popup is open).
+    this.terminalInputChanged(
+      this.getInputValueWithCompletionText().expression
+    );
+
     this.emit("autocomplete-updated");
   }
 
@@ -982,6 +1047,10 @@ class JSTerm extends Component {
     } else {
       this.setAutoCompletionText("");
     }
+    // Eager evaluation results incorporate the current autocomplete item.
+    this.terminalInputChanged(
+      this.getInputValueWithCompletionText().expression
+    );
   }
 
   /**
@@ -990,6 +1059,8 @@ class JSTerm extends Component {
    */
   clearCompletion() {
     this.autocompleteUpdate.cancel();
+    // Update Eager evaluation result as the completion text was removed.
+    this.terminalInputChanged(this._getValue());
 
     this.setAutoCompletionText("");
     if (this.autocompletePopup) {
@@ -1009,6 +1080,41 @@ class JSTerm extends Component {
    * Accept the proposed input completion.
    */
   acceptProposedCompletion() {
+    const {
+      completionText,
+      numberOfCharsToReplaceCharsBeforeCursor,
+    } = this.getInputValueWithCompletionText();
+
+    this.autocompleteUpdate.cancel();
+    this.props.autocompleteClear();
+
+    if (completionText) {
+      this.insertStringAtCursor(
+        completionText,
+        numberOfCharsToReplaceCharsBeforeCursor
+      );
+    }
+  }
+
+  /**
+   * Returns an object containing the expression we would get if the user accepted the
+   * current completion text. This is more than the current input + the completion text,
+   * as there are special cases for element access and case-insensitive matches.
+   *
+   * @return {Object}: An object of the following shape:
+   *         - {String} expression: The complete expression
+   *         - {String} completionText: the completion text only, which should be used
+   *                    with the next property
+   *         - {Integer} numberOfCharsToReplaceCharsBeforeCursor: The number of chars that
+   *                     should be removed from the current input before the cursor to
+   *                     cleanly apply the completionText. This is handy when we only want
+   *                     to insert the completionText.
+   */
+  getInputValueWithCompletionText() {
+    const inputBeforeCursor = this.getInputValueBeforeCursor();
+    const inputAfterCursor = this._getValue().substring(
+      inputBeforeCursor.length
+    );
     let completionText = this.getAutoCompletionText();
     let numberOfCharsToReplaceCharsBeforeCursor;
 
@@ -1025,7 +1131,6 @@ class JSTerm extends Component {
       // If the user is performing an element access, we need to check if we should add
       // starting and ending quotes, as well as a closing bracket.
       if (isElementAccess) {
-        const inputBeforeCursor = this.getInputValueBeforeCursor();
         const lastOpeningBracketIndex = inputBeforeCursor.lastIndexOf("[");
         if (lastOpeningBracketIndex > -1) {
           numberOfCharsToReplaceCharsBeforeCursor = inputBeforeCursor.substring(
@@ -1033,9 +1138,6 @@ class JSTerm extends Component {
           ).length;
         }
 
-        const inputAfterCursor = this._getValue().substring(
-          inputBeforeCursor.length
-        );
         // If there's not a bracket after the cursor, add it.
         if (!inputAfterCursor.trimLeft().startsWith("]")) {
           completionText = completionText + "]";
@@ -1043,15 +1145,20 @@ class JSTerm extends Component {
       }
     }
 
-    this.autocompleteUpdate.cancel();
-    this.props.autocompleteClear();
+    const expression =
+      inputBeforeCursor.substring(
+        0,
+        inputBeforeCursor.length -
+          (numberOfCharsToReplaceCharsBeforeCursor || 0)
+      ) +
+      completionText +
+      inputAfterCursor;
 
-    if (completionText) {
-      this.insertStringAtCursor(
-        completionText,
-        numberOfCharsToReplaceCharsBeforeCursor
-      );
-    }
+    return {
+      completionText,
+      numberOfCharsToReplaceCharsBeforeCursor,
+      expression,
+    };
   }
 
   getInputValueBeforeCursor() {
@@ -1160,6 +1267,7 @@ class JSTerm extends Component {
 
   destroy() {
     this.autocompleteUpdate.cancel();
+    this.terminalInputChanged.cancel();
 
     if (this.autocompletePopup) {
       this.autocompletePopup.destroy();
@@ -1188,6 +1296,18 @@ class JSTerm extends Component {
       ]),
       onClick: this.props.editorToggle,
     });
+  }
+
+  renderEvaluationSelector() {
+    if (
+      !this.props.webConsoleUI.wrapper.toolbox ||
+      this.props.editorMode ||
+      !this.props.showEvaluationSelector
+    ) {
+      return null;
+    }
+
+    return EvaluationSelector(this.props);
   }
 
   renderEditorOnboarding() {
@@ -1239,7 +1359,7 @@ class JSTerm extends Component {
 
     return dom.div(
       {
-        className: "jsterm-input-container devtools-input devtools-monospace",
+        className: "jsterm-input-container devtools-input",
         key: "jsterm-container",
         "aria-live": "off",
         tabIndex: -1,
@@ -1248,7 +1368,11 @@ class JSTerm extends Component {
           this.node = node;
         },
       },
-      this.renderOpenEditorButton(),
+      dom.div(
+        { className: "webconsole-input-buttons" },
+        this.renderEvaluationSelector(),
+        this.renderOpenEditorButton()
+      ),
       this.renderEditorOnboarding()
     );
   }
@@ -1262,6 +1386,7 @@ function mapStateToProps(state) {
     getValueFromHistory: direction => getHistoryValue(state, direction),
     autocompleteData: getAutocompleteState(state),
     showEditorOnboarding: state.ui.showEditorOnboarding,
+    showEvaluationSelector: state.ui.showEvaluationSelector,
   };
 }
 
@@ -1269,8 +1394,8 @@ function mapDispatchToProps(dispatch) {
   return {
     updateHistoryPosition: (direction, expression) =>
       dispatch(actions.updateHistoryPosition(direction, expression)),
-    autocompleteUpdate: (force, getterPath) =>
-      dispatch(actions.autocompleteUpdate(force, getterPath)),
+    autocompleteUpdate: (force, getterPath, expressionVars) =>
+      dispatch(actions.autocompleteUpdate(force, getterPath, expressionVars)),
     autocompleteClear: () => dispatch(actions.autocompleteClear()),
     evaluateExpression: expression =>
       dispatch(actions.evaluateExpression(expression)),

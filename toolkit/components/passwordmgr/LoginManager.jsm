@@ -370,16 +370,30 @@ LoginManager.prototype = {
    * Remove the specified login from the stored logins.
    */
   removeLogin(login) {
-    log.debug("Removing login");
+    log.debug("Removing login", login.QueryInterface(Ci.nsILoginMetaInfo).guid);
     return this._storage.removeLogin(login);
   },
 
   /**
-   * Change the specified login to match the new login.
+   * Change the specified login to match the new login or new properties.
    */
   modifyLogin(oldLogin, newLogin) {
-    log.debug("Modifying login");
+    log.debug(
+      "Modifying login",
+      oldLogin.QueryInterface(Ci.nsILoginMetaInfo).guid
+    );
     return this._storage.modifyLogin(oldLogin, newLogin);
+  },
+
+  /**
+   * Record that the password of a saved login was used (e.g. submitted or copied).
+   */
+  recordPasswordUse(login) {
+    log.debug(
+      "Recording password use",
+      login.QueryInterface(Ci.nsILoginMetaInfo).guid
+    );
+    this._storage.recordPasswordUse(login);
   },
 
   /**
@@ -457,6 +471,11 @@ LoginManager.prototype = {
 
   async searchLoginsAsync(matchData) {
     log.debug("searchLoginsAsync:", matchData);
+
+    if (!matchData.origin) {
+      throw new Error("searchLoginsAsync: An `origin` is required");
+    }
+
     return this._storage.searchLoginsAsync(matchData);
   },
 

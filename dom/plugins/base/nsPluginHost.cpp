@@ -154,8 +154,7 @@ static bool IsTypeInList(const nsCString& aMimeType, nsCString aTypeList) {
   return FindInReadable(commaSeparated, start, end);
 }
 
-namespace mozilla {
-namespace plugins {
+namespace mozilla::plugins {
 class BlocklistPromiseHandler final
     : public mozilla::dom::PromiseNativeHandler {
  public:
@@ -260,13 +259,13 @@ NS_IMPL_ISUPPORTS0(BlocklistPromiseHandler)
 bool BlocklistPromiseHandler::sPluginBlocklistStatesChangedSinceLastWrite =
     false;
 uint32_t BlocklistPromiseHandler::sPendingBlocklistStateRequests = 0;
-}  // namespace plugins
-}  // namespace mozilla
+}  // namespace mozilla::plugins
 
 nsPluginHost::nsPluginHost()
     : mPluginsLoaded(false),
       mOverrideInternalTypes(false),
       mPluginsDisabled(false),
+      mFlashOnly(true),
       mDoReloadOnceFindingFinished(false),
       mAddedFinderShutdownBlocker(false),
       mPluginEpoch(0) {
@@ -274,7 +273,9 @@ nsPluginHost::nsPluginHost()
   // full page mode for certain image mime types that we handle internally
   mOverrideInternalTypes =
       Preferences::GetBool("plugin.override_internal_types", false);
-  mFlashOnly = Preferences::GetBool("plugin.load_flash_only", true);
+  if (xpc::IsInAutomation()) {
+    mFlashOnly = Preferences::GetBool("plugin.load_flash_only", true);
+  }
 
   bool waylandBackend = false;
 #if MOZ_WIDGET_GTK
@@ -686,12 +687,6 @@ nsresult nsPluginHost::InstantiatePluginInstance(
 
   if (aMimeType.IsEmpty()) {
     MOZ_ASSERT_UNREACHABLE("Attempting to spawn a plugin with no mime type");
-    return NS_ERROR_FAILURE;
-  }
-
-  // Plugins are not supported when recording or replaying executions.
-  // See bug 1483232.
-  if (recordreplay::IsRecordingOrReplaying()) {
     return NS_ERROR_FAILURE;
   }
 

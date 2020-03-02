@@ -3,7 +3,8 @@ Search Engine Configuration
 ===========================
 
 .. note::
-    This configuration is currently being implemented in `Bug 1542235`_.
+    This configuration is currently under testing for nightly builds only, see
+    `Bug 1542235`_ for more status information.
 
 The search engine configuration is a mapping that is used to determine the
 list of search engines for each user. The mapping is primarily based on the
@@ -18,6 +19,8 @@ static dump, or they may be served via remote servers.
 
 The mechanism of delivering the settings dumps to the Search Service is
 `Remote Settings`_
+
+Search Engine WebExtension updates will be delivered by Normandy.
 
 Remote settings
 ---------------

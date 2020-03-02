@@ -143,7 +143,7 @@ const gDefaultFilters = Services.prefs.getCharPref(
 // Reveal many columns for test
 Services.prefs.setCharPref(
   "devtools.netmonitor.visibleColumns",
-  '["cause","contentSize","cookies","domain","duration",' +
+  '["cause","initiator","contentSize","cookies","domain","duration",' +
     '"endTime","file","url","latency","method","protocol",' +
     '"remoteip","responseTime","scheme","setCookies",' +
     '"startTime","status","transferred","type","waterfall"]'
@@ -157,10 +157,11 @@ Services.prefs.setCharPref(
     '{"name":"file","minWidth":30,"width":25},' +
     '{"name":"url","minWidth":30,"width":25},' +
     '{"name":"cause","minWidth":30,"width":10},' +
+    '{"name":"initiator","minWidth":30,"width":10},' +
     '{"name":"type","minWidth":30,"width":5},' +
     '{"name":"transferred","minWidth":30,"width":10},' +
     '{"name":"contentSize","minWidth":30,"width":5},' +
-    '{"name":"waterfall","minWidth":150,"width":25}]'
+    '{"name":"waterfall","minWidth":150,"width":15}]'
 );
 
 // Increase UI limit for responses rendered using CodeMirror in tests.
@@ -487,8 +488,11 @@ function verifyRequestItemTarget(
 ) {
   info("> Verifying: " + method + " " + url + " " + data.toSource());
 
-  const visibleIndex = requestList.indexOf(requestItem);
+  const visibleIndex = requestList.findIndex(
+    needle => needle.id === requestItem.id
+  );
 
+  isnot(visibleIndex, -1, "The requestItem exists");
   info("Visible index of item: " + visibleIndex);
 
   const {
@@ -505,6 +509,7 @@ function verifyRequestItemTarget(
   } = data;
 
   const target = document.querySelectorAll(".request-list-item")[visibleIndex];
+
   // Bug 1414981 - Request URL should not show #hash
   const unicodeUrl = getUnicodeUrl(url.split("#")[0]);
   const ORIGINAL_FILE_URL = L10N.getFormatStr(
@@ -1016,7 +1021,7 @@ function waitForRequestData(store, fields, id) {
     if (id) {
       item = getRequestById(store.getState(), id);
     } else {
-      item = getSortedRequests(store.getState()).get(0);
+      item = getSortedRequests(store.getState())[0];
     }
     if (!item) {
       return false;
@@ -1082,7 +1087,7 @@ function validateRequests(requests, monitor) {
   requests.forEach((spec, i) => {
     const { method, url, causeType, causeUri, stack } = spec;
 
-    const requestItem = getSortedRequests(store.getState()).get(i);
+    const requestItem = getSortedRequests(store.getState())[i];
     verifyRequestItemTarget(
       document,
       getDisplayedRequests(store.getState()),

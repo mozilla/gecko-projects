@@ -33,6 +33,11 @@ job-defaults:
                     - talos/linux64_config_taskcluster.py
                 default:
                     - talos/linux_config.py
+    fission-run-on-projects:
+        by-test-platform:
+            linux64-shippable-qr/opt: ['mozilla-central']
+            windows10-64-shippable-qr/opt: ['mozilla-central']
+            default: []
 
 talos-bcv:
     description: "Talos basic compositor video"
@@ -305,7 +310,7 @@ talos-g4-profiling:
         by-test-platform:
             linux64-ccov/.*: ['try']
             windows10-64-ccov/.*: ['try']
-            windows10-64-ref-hw-2017/opt: ['try', 'mozilla-central']
+            windows10-64-ref-hw-2017/opt: []
             (?:windows10-64|windows7-32|linux64)(?:-qr)?/opt: ['mozilla-central', 'try']
             windows10-aarch64/opt: ['try']
             default: ['mozilla-central', 'try']
@@ -658,6 +663,35 @@ talos-tabswitch-profiling:
     mozharness:
         extra-options:
             - --suite=tabswitch
+            - --gecko-profile
+
+talos-webgl:
+    description: "Talos WebGL"
+    try-name: webgl
+    treeherder-symbol: T(webgl)
+    run-on-projects:
+        by-test-platform:
+            linux64-ccov/.*: ['try']
+            windows10-64-ccov/.*: ['try']
+            (?:windows10-64|windows7-32|linux64)(?:-qr)?/opt: ['mozilla-central', 'try']
+            windows10-aarch64/opt: ['try']
+            windows10-64-ref-hw-2017/opt: ['mozilla-central', 'try']
+            default: ['mozilla-beta', 'trunk', 'try']
+    max-run-time: 1800
+    mozharness:
+        extra-options:
+            - --suite=webgl
+
+talos-webgl-profiling:
+    description: "Talos WebGL with gecko profiling"
+    try-name: webgl
+    treeherder-symbol: T-Prof(webgl)
+    tier: 2
+    run-on-projects: ['try']
+    max-run-time: 1800
+    mozharness:
+        extra-options:
+            - --suite=webgl
             - --gecko-profile
 
 talos-xperf:

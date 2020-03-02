@@ -114,7 +114,8 @@ class DebugState {
 
   MOZ_MUST_USE bool debugGetLocalTypes(uint32_t funcIndex,
                                        ValTypeVector* locals,
-                                       size_t* argsLength);
+                                       size_t* argsLength,
+                                       StackResults* stackResults);
   MOZ_MUST_USE bool debugGetResultTypes(uint32_t funcIndex,
                                         ValTypeVector* results);
   MOZ_MUST_USE bool getGlobal(Instance& instance, uint32_t globalIndex,
@@ -146,7 +147,7 @@ class DebugState {
                      Code::SeenSet* seenCode, size_t* code, size_t* data) const;
 };
 
-typedef UniquePtr<DebugState> UniqueDebugState;
+using UniqueDebugState = UniquePtr<DebugState>;
 
 }  // namespace wasm
 }  // namespace js

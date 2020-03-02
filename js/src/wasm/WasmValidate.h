@@ -41,7 +41,7 @@ struct SectionRange {
   }
 };
 
-typedef Maybe<SectionRange> MaybeSectionRange;
+using MaybeSectionRange = Maybe<SectionRange>;
 
 // CompilerEnvironment holds any values that will be needed to compute
 // compilation parameters once the module's feature opt-in sections have been
@@ -244,7 +244,6 @@ struct ModuleEnvironment {
     if (one == two) {
       return true;
     }
-#if defined(ENABLE_WASM_REFTYPES)
     // Anything's a subtype of AnyRef.
     if (two.isAnyRef()) {
       return true;
@@ -253,12 +252,11 @@ struct ModuleEnvironment {
     if (one.isNullRef()) {
       return two.isNullable();
     }
-#  if defined(ENABLE_WASM_GC)
+#if defined(ENABLE_WASM_GC)
     // Struct One is a subtype of struct Two if Two is a prefix of One.
     if (gcTypesEnabled() && isStructType(one) && isStructType(two)) {
       return isStructPrefixOf(two, one);
     }
-#  endif
 #endif
     return false;
   }
@@ -426,22 +424,17 @@ class Encoder {
     MOZ_ASSERT(size_t(tc) < size_t(TypeCode::Limit));
     return writeFixedU8(uint8_t(tc));
   }
-  MOZ_MUST_USE bool writeOp(Op op) {
-    static_assert(size_t(Op::Limit) == 256, "fits");
-    MOZ_ASSERT(size_t(op) < size_t(Op::Limit));
-    return writeFixedU8(uint8_t(op));
-  }
-  MOZ_MUST_USE bool writeOp(MiscOp op) {
-    MOZ_ASSERT(size_t(op) < size_t(MiscOp::Limit));
-    return writeFixedU8(uint8_t(Op::MiscPrefix)) && writeVarU32(uint32_t(op));
-  }
-  MOZ_MUST_USE bool writeOp(ThreadOp op) {
-    MOZ_ASSERT(size_t(op) < size_t(ThreadOp::Limit));
-    return writeFixedU8(uint8_t(Op::ThreadPrefix)) && writeVarU32(uint32_t(op));
-  }
-  MOZ_MUST_USE bool writeOp(MozOp op) {
-    MOZ_ASSERT(size_t(op) < size_t(MozOp::Limit));
-    return writeFixedU8(uint8_t(Op::MozPrefix)) && writeVarU32(uint32_t(op));
+  MOZ_MUST_USE bool writeOp(Opcode opcode) {
+    // The Opcode constructor has asserted that `opcode` is meaningful, so no
+    // further correctness checking is necessary here.
+    uint32_t bits = opcode.bits();
+    if (!writeFixedU8(bits & 255)) {
+      return false;
+    }
+    if (opcode.isOp()) {
+      return true;
+    }
+    return writeVarU32(bits >> 8);
   }
 
   // Fixed-length encodings that allow back-patching.

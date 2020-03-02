@@ -485,7 +485,7 @@ void MediaPipeline::IncrementRtcpPacketsReceived() {
   }
 }
 
-void MediaPipeline::RtpPacketReceived(MediaPacket& packet) {
+void MediaPipeline::RtpPacketReceived(const MediaPacket& packet) {
   if (mDirection == DirectionType::TRANSMIT) {
     return;
   }
@@ -572,7 +572,7 @@ void MediaPipeline::RtpPacketReceived(MediaPacket& packet) {
                                     header.ssrc);  // Ignore error codes
 }
 
-void MediaPipeline::RtcpPacketReceived(MediaPacket& packet) {
+void MediaPipeline::RtcpPacketReceived(const MediaPacket& packet) {
   if (!mTransport->Pipeline()) {
     MOZ_LOG(gMediaPipelineLog, LogLevel::Debug,
             ("Discarding incoming packet; transport disconnected"));
@@ -620,7 +620,7 @@ void MediaPipeline::RtcpPacketReceived(MediaPacket& packet) {
 }
 
 void MediaPipeline::PacketReceived(const std::string& aTransportId,
-                                   MediaPacket& packet) {
+                                   const MediaPacket& packet) {
   if (mTransportId != aTransportId) {
     return;
   }
@@ -650,7 +650,7 @@ void MediaPipeline::AlpnNegotiated(const std::string& aAlpn,
 }
 
 void MediaPipeline::EncryptedPacketSending(const std::string& aTransportId,
-                                           MediaPacket& aPacket) {
+                                           const MediaPacket& aPacket) {
   if (mTransportId == aTransportId) {
     dom::mozPacketDumpType type;
     if (aPacket.type() == MediaPacket::SRTP) {
@@ -793,7 +793,7 @@ class MediaPipelineTransmit::VideoFrameFeeder : public VideoConverterListener {
   }
 
  protected:
-  virtual ~VideoFrameFeeder() { MOZ_COUNT_DTOR(VideoFrameFeeder); }
+  MOZ_COUNTED_DTOR_OVERRIDE(VideoFrameFeeder)
 
   Mutex mMutex;  // Protects the member below.
   RefPtr<PipelineListener> mListener;
@@ -867,15 +867,18 @@ void MediaPipelineTransmit::SetDescription() {
       NS_DISPATCH_NORMAL);
 }
 
-void MediaPipelineTransmit::Stop() {
+RefPtr<GenericPromise> MediaPipelineTransmit::Stop() {
   ASSERT_ON_THREAD(mMainThread);
 
+  // Since we are stopping Start is not needed.
+  mAsyncStartRequested = false;
+
   if (!mTransmitting) {
-    return;
+    return GenericPromise::CreateAndResolve(true, __func__);
   }
 
   if (!mSendTrack) {
-    return;
+    return GenericPromise::CreateAndResolve(true, __func__);
   }
 
   mTransmitting = false;
@@ -885,7 +888,7 @@ void MediaPipelineTransmit::Stop() {
   if (mSendTrack->mType == MediaSegment::VIDEO) {
     mSendTrack->RemoveDirectListener(mListener);
   }
-  mSendTrack->RemoveListener(mListener);
+  return mSendTrack->RemoveListener(mListener);
 }
 
 bool MediaPipelineTransmit::Transmitting() const {
@@ -896,6 +899,9 @@ bool MediaPipelineTransmit::Transmitting() const {
 
 void MediaPipelineTransmit::Start() {
   ASSERT_ON_THREAD(mMainThread);
+
+  // Since start arrived reset the flag.
+  mAsyncStartRequested = false;
 
   if (mTransmitting) {
     return;
@@ -981,6 +987,28 @@ void MediaPipelineTransmit::TransportReady_s() {
   mListener->SetActive(true);
 }
 
+void MediaPipelineTransmit::AsyncStart(const RefPtr<GenericPromise>& aPromise) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Start has already been scheduled.
+  if (mAsyncStartRequested) {
+    return;
+  }
+
+  mAsyncStartRequested = true;
+  RefPtr<MediaPipelineTransmit> self = this;
+  aPromise->Then(
+      GetMainThreadSerialEventTarget(), __func__,
+      [self](bool) {
+        // In the meantime start or stop took place, do nothing.
+        if (!self->mAsyncStartRequested) {
+          return;
+        }
+        self->Start();
+      },
+      [](nsresult aRv) { MOZ_CRASH("Never get here!"); });
+}
+
 nsresult MediaPipelineTransmit::SetTrack(RefPtr<MediaStreamTrack> aDomTrack) {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1003,13 +1031,33 @@ nsresult MediaPipelineTransmit::SetTrack(RefPtr<MediaStreamTrack> aDomTrack) {
     mSendPort = nullptr;
   }
 
+  if (aDomTrack && mDomTrack && !aDomTrack->Ended() && !mDomTrack->Ended() &&
+      aDomTrack->Graph() != mDomTrack->Graph() && mSendTrack) {
+    // Recreate the send track if the new stream resides in different MTG.
+    // Stopping and re-starting will result in removing and re-adding the
+    // listener BUT in different threads, since tracks belong to different MTGs.
+    // This can create thread races so we wait here for the stop to happen
+    // before re-starting. Please note that start should happen at the end of
+    // the method after the mSendTrack replace bellow. However, since the
+    // result of the promise is dispatched in another event in the same thread,
+    // it is guaranteed that the start will be executed after the end of that
+    // method.
+    if (mTransmitting) {
+      RefPtr<GenericPromise> p = Stop();
+      AsyncStart(p);
+    }
+    mSendTrack->Destroy();
+    mSendTrack = nullptr;
+  }
+
   mDomTrack = std::move(aDomTrack);
   SetDescription();
 
   if (mDomTrack) {
     if (!mDomTrack->Ended()) {
       if (!mSendTrack) {
-        // Create the send track only once; when the first live track is set.
+        // Create the send track when the first live track is set or when the
+        // new track resides in different MTG.
         SetSendTrack(mDomTrack->Graph()->CreateForwardedInputTrack(
             mDomTrack->GetTrack()->mType));
       }
@@ -1436,8 +1484,9 @@ class MediaPipelineReceiveAudio::PipelineListener
       MOZ_LOG(gMediaPipelineLog, LogLevel::Debug,
               ("Audio conduit returned buffer of length %zu", samplesLength));
 
-      RefPtr<SharedBuffer> samples =
-          SharedBuffer::Create(samplesLength * sizeof(uint16_t));
+      CheckedInt<size_t> bufferSize(sizeof(uint16_t));
+      bufferSize *= samplesLength;
+      RefPtr<SharedBuffer> samples = SharedBuffer::Create(bufferSize);
       int16_t* samplesData = static_cast<int16_t*>(samples->Data());
       AudioSegment segment;
       size_t frames = samplesLength / channelCount;
@@ -1529,11 +1578,12 @@ void MediaPipelineReceiveAudio::Start() {
   }
 }
 
-void MediaPipelineReceiveAudio::Stop() {
+RefPtr<GenericPromise> MediaPipelineReceiveAudio::Stop() {
   if (mListener) {
     mListener->RemoveSelf();
   }
   mConduit->StopReceiving();
+  return GenericPromise::CreateAndResolve(true, __func__);
 }
 
 void MediaPipelineReceiveAudio::OnRtpPacketReceived() {
@@ -1624,7 +1674,7 @@ class MediaPipelineReceiveVideo::PipelineListener
         return;
       }
 
-      image = yuvImage.forget();
+      image = std::move(yuvImage);
     }
 
     VideoSegment segment;
@@ -1704,11 +1754,12 @@ void MediaPipelineReceiveVideo::Start() {
   }
 }
 
-void MediaPipelineReceiveVideo::Stop() {
+RefPtr<GenericPromise> MediaPipelineReceiveVideo::Stop() {
   if (mListener) {
     mListener->RemoveSelf();
   }
   mConduit->StopReceiving();
+  return GenericPromise::CreateAndResolve(true, __func__);
 }
 
 void MediaPipelineReceiveVideo::OnRtpPacketReceived() {

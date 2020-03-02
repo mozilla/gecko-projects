@@ -40,12 +40,10 @@ import Frames from "./Frames";
 import Threads from "./Threads";
 import Accordion from "../shared/Accordion";
 import CommandBar from "./CommandBar";
-import UtilsBar from "./UtilsBar";
 import XHRBreakpoints from "./XHRBreakpoints";
 import EventListeners from "./EventListeners";
 import DOMMutationBreakpoints from "./DOMMutationBreakpoints";
 import WhyPaused from "./WhyPaused";
-import FrameTimeline from "./FrameTimeline";
 
 import Scopes from "./Scopes";
 
@@ -88,7 +86,6 @@ type State = {
 
 type OwnProps = {|
   horizontal: boolean,
-  toggleShortcutsModal: () => void,
 |};
 type Props = {
   cx: ThreadContext,
@@ -107,7 +104,6 @@ type Props = {
   skipPausing: boolean,
   logEventBreakpoints: boolean,
   source: ?Source,
-  toggleShortcutsModal: () => void,
   toggleAllBreakpoints: typeof actions.toggleAllBreakpoints,
   toggleMapScopes: typeof actions.toggleMapScopes,
   evaluateExpressions: typeof actions.evaluateExpressions,
@@ -183,7 +179,7 @@ class SecondaryPanes extends Component<Props, State> {
 
     const buttons = [];
 
-    if (expressions.size) {
+    if (expressions.length) {
       buttons.push(
         debugBtn(
           evt => {
@@ -298,6 +294,7 @@ class SecondaryPanes extends Component<Props, State> {
             type="checkbox"
             checked={logEventBreakpoints ? "checked" : ""}
             onChange={e => this.props.toggleEventLogging()}
+            onKeyDown={e => e.stopPropagation()}
           />
           {L10N.getStr("eventlisteners.log")}
         </label>
@@ -345,7 +342,7 @@ class SecondaryPanes extends Component<Props, State> {
     return {
       header: L10N.getStr("callStack.header"),
       className: "call-stack-pane",
-      component: <Frames />,
+      component: <Frames panel="debugger" />,
       opened: prefs.callStackVisible,
       onToggle: opened => {
         prefs.callStackVisible = opened;
@@ -504,25 +501,11 @@ class SecondaryPanes extends Component<Props, State> {
     );
   }
 
-  renderUtilsBar() {
-    if (!features.shortcuts) {
-      return;
-    }
-
-    return (
-      <UtilsBar
-        horizontal={this.props.horizontal}
-        toggleShortcutsModal={this.props.toggleShortcutsModal}
-      />
-    );
-  }
-
   render() {
     const { skipPausing } = this.props;
     return (
       <div className="secondary-panes-wrapper">
         <CommandBar horizontal={this.props.horizontal} />
-        <FrameTimeline />
         <div
           className={classnames(
             "secondary-panes",
@@ -533,7 +516,6 @@ class SecondaryPanes extends Component<Props, State> {
             ? this.renderHorizontalLayout()
             : this.renderVerticalLayout()}
         </div>
-        {this.renderUtilsBar()}
       </div>
     );
   }

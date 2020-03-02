@@ -113,32 +113,19 @@ void CookieServiceParent::TrackCookieLoad(nsIChannel* aChannel) {
   // Send matching cookies to Child.
   nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil;
   thirdPartyUtil = do_GetService(THIRDPARTYUTIL_CONTRACTID);
-  bool isForeign = true;
-  thirdPartyUtil->IsThirdPartyChannel(aChannel, uri, &isForeign);
 
-  bool isTrackingResource = false;
-  bool isSocialTrackingResource = false;
-  bool storageAccessGranted = false;
   uint32_t rejectedReason = 0;
-  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
-      do_QueryInterface(aChannel);
-  if (classifiedChannel) {
-    isTrackingResource = classifiedChannel->IsTrackingResource();
-    isSocialTrackingResource = classifiedChannel->IsSocialTrackingResource();
-    // Check first-party storage access even for non-tracking resources, since
-    // we will need the result when computing the access rights for the reject
-    // foreign cookie behavior mode.
-    if (AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
-            aChannel, uri, &rejectedReason)) {
-      storageAccessGranted = true;
-    }
-  }
+  ThirdPartyAnalysisResult result = thirdPartyUtil->AnalyzeChannel(
+      aChannel, false, nullptr, nullptr, &rejectedReason);
 
   nsTArray<nsCookie*> foundCookieList;
   mCookieService->GetCookiesForURI(
-      uri, aChannel, isForeign, isTrackingResource, isSocialTrackingResource,
-      storageAccessGranted, rejectedReason, isSafeTopLevelNav,
-      aIsSameSiteForeign, false, attrs, foundCookieList);
+      uri, aChannel, result.contains(ThirdPartyAnalysis::IsForeign),
+      result.contains(ThirdPartyAnalysis::IsThirdPartyTrackingResource),
+      result.contains(ThirdPartyAnalysis::IsThirdPartySocialTrackingResource),
+      result.contains(ThirdPartyAnalysis::IsFirstPartyStorageAccessGranted),
+      rejectedReason, isSafeTopLevelNav, aIsSameSiteForeign, false, attrs,
+      foundCookieList);
   nsTArray<CookieStruct> matchingCookiesList;
   SerialializeCookieList(foundCookieList, matchingCookiesList, uri);
   Unused << SendTrackCookiesLoad(matchingCookiesList, attrs);
@@ -160,7 +147,8 @@ void CookieServiceParent::SerialializeCookieList(
 
 mozilla::ipc::IPCResult CookieServiceParent::RecvPrepareCookieList(
     const URIParams& aHost, const bool& aIsForeign,
-    const bool& aIsTrackingResource, const bool& aIsSocialTrackingResource,
+    const bool& aIsThirdPartyTrackingResource,
+    const bool& aIsThirdPartySocialTrackingResource,
     const bool& aFirstPartyStorageAccessGranted,
     const uint32_t& aRejectedReason, const bool& aIsSafeTopLevelNav,
     const bool& aIsSameSiteForeign, const OriginAttributes& aAttrs) {
@@ -172,8 +160,8 @@ mozilla::ipc::IPCResult CookieServiceParent::RecvPrepareCookieList(
   // this argument is only used for proper reporting of cookie loads, but the
   // child process already does the necessary reporting in this case for us.
   mCookieService->GetCookiesForURI(
-      hostURI, nullptr, aIsForeign, aIsTrackingResource,
-      aIsSocialTrackingResource, aFirstPartyStorageAccessGranted,
+      hostURI, nullptr, aIsForeign, aIsThirdPartyTrackingResource,
+      aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
       aRejectedReason, aIsSafeTopLevelNav, aIsSameSiteForeign, false, aAttrs,
       foundCookieList);
   nsTArray<CookieStruct> matchingCookiesList;
@@ -190,7 +178,8 @@ void CookieServiceParent::ActorDestroy(ActorDestroyReason aWhy) {
 mozilla::ipc::IPCResult CookieServiceParent::RecvSetCookieString(
     const URIParams& aHost, const Maybe<URIParams>& aChannelURI,
     const Maybe<LoadInfoArgs>& aLoadInfoArgs, const bool& aIsForeign,
-    const bool& aIsTrackingResource, const bool& aIsSocialTrackingResource,
+    const bool& aIsThirdPartyTrackingResource,
+    const bool& aIsThirdPartySocialTrackingResource,
     const bool& aFirstPartyStorageAccessGranted,
     const uint32_t& aRejectedReason, const OriginAttributes& aAttrs,
     const nsCString& aCookieString, const nsCString& aServerTime,
@@ -230,9 +219,10 @@ mozilla::ipc::IPCResult CookieServiceParent::RecvSetCookieString(
   // we don't send it back to the same content process.
   mProcessingCookie = true;
   mCookieService->SetCookieStringInternal(
-      hostURI, aIsForeign, aIsTrackingResource, aIsSocialTrackingResource,
-      aFirstPartyStorageAccessGranted, aRejectedReason, cookieString,
-      aServerTime, aFromHttp, aAttrs, dummyChannel);
+      hostURI, aIsForeign, aIsThirdPartyTrackingResource,
+      aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
+      aRejectedReason, cookieString, aServerTime, aFromHttp, aAttrs,
+      dummyChannel);
   mProcessingCookie = false;
   return IPC_OK();
 }

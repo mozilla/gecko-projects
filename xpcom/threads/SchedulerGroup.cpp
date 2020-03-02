@@ -6,18 +6,18 @@
 
 #include "mozilla/SchedulerGroup.h"
 
+#include <utility>
+
 #include "jsfriendapi.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/Move.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "mozilla/dom/DocGroup.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "nsINamed.h"
 #include "nsQueryObject.h"
-#include "mozilla/dom/ScriptSettings.h"
 #include "nsThreadUtils.h"
-
-#include "mozilla/Telemetry.h"
 
 using namespace mozilla;
 
@@ -48,7 +48,7 @@ class SchedulerEventTarget final : public nsISerialEventTarget {
   SchedulerGroup* Dispatcher() const { return mDispatcher; }
 
  private:
-  ~SchedulerEventTarget() {}
+  ~SchedulerEventTarget() = default;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(SchedulerEventTarget,
@@ -278,7 +278,7 @@ SchedulerGroup::Runnable::Run() {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   // The runnable's destructor can have side effects, so try to execute it in
   // the scope of the TabGroup.
-  nsCOMPtr<nsIRunnable> runnable(mRunnable.forget());
+  nsCOMPtr<nsIRunnable> runnable(std::move(mRunnable));
   return runnable->Run();
 }
 

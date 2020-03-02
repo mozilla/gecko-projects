@@ -3,6 +3,7 @@ import unittest
 import tempfile
 import shutil
 import re
+import asyncio
 
 import responses
 
@@ -26,6 +27,16 @@ FTP_ARCHIVE = re.compile(
 )
 
 ADDON = re.compile("https://addons.mozilla.org/.*/.*xpi")
+
+
+async def fakesleep(duration):
+    if duration > 1:
+        duration = 1
+    await asyncio.realsleep(duration)
+
+
+asyncio.realsleep = asyncio.sleep
+asyncio.sleep = fakesleep
 
 
 class TestRunner(unittest.TestCase):
@@ -75,7 +86,23 @@ class TestRunner(unittest.TestCase):
 
     @responses.activate
     def test_runner(self):
-        args = ["--geckodriver", GECKODRIVER, "--firefox", FIREFOX, self.archive_dir]
-        main(args)
-        # XXX we want a bunch of assertions here to check
-        # that the archives dir gets filled correctly
+        if "FXA_USERNAME" not in os.environ:
+            os.environ["FXA_USERNAME"] = "me"
+        if "FXA_PASSWORD" not in os.environ:
+            os.environ["FXA_PASSWORD"] = "password"
+        try:
+            args = [
+                "--geckodriver",
+                GECKODRIVER,
+                "--firefox",
+                FIREFOX,
+                self.archive_dir,
+            ]
+            main(args)
+            # XXX we want a bunch of assertions here to check
+            # that the archives dir gets filled correctly
+        finally:
+            if os.environ["FXA_USERNAME"] == "me":
+                del os.environ["FXA_USERNAME"]
+            if os.environ["FXA_PASSWORD"] == "password":
+                del os.environ["FXA_PASSWORD"]

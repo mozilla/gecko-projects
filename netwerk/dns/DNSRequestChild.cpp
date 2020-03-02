@@ -81,6 +81,18 @@ ChildDNSRecord::IsTRR(bool* retval) {
 }
 
 NS_IMETHODIMP
+ChildDNSRecord::GetTrrFetchDuration(double* aTime) {
+  *aTime = 0;
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+ChildDNSRecord::GetTrrFetchDurationNetworkOnly(double* aTime) {
+  *aTime = 0;
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 ChildDNSRecord::GetNextAddr(uint16_t port, NetAddr* addr) {
   if (mCurrent >= mLength) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -197,9 +209,10 @@ class CancelDNSRequestEvent : public Runnable {
   NS_IMETHOD Run() override {
     if (mDnsRequest->CanSend()) {
       // Send request to Parent process.
-      mDnsRequest->SendCancelDNSRequest(mDnsRequest->mHost, mDnsRequest->mType,
-                                        mDnsRequest->mOriginAttributes,
-                                        mDnsRequest->mFlags, mReasonForCancel);
+      mDnsRequest->SendCancelDNSRequest(
+          mDnsRequest->mHost, mDnsRequest->mTrrServer, mDnsRequest->mType,
+          mDnsRequest->mOriginAttributes, mDnsRequest->mFlags,
+          mReasonForCancel);
     }
     return NS_OK;
   }
@@ -213,15 +226,15 @@ class CancelDNSRequestEvent : public Runnable {
 // DNSRequestChild
 //-----------------------------------------------------------------------------
 
-DNSRequestChild::DNSRequestChild(const nsACString& aHost, const uint16_t& aType,
-                                 const OriginAttributes& aOriginAttributes,
-                                 const uint32_t& aFlags,
-                                 nsIDNSListener* aListener,
-                                 nsIEventTarget* target)
+DNSRequestChild::DNSRequestChild(
+    const nsACString& aHost, const nsACString& aTrrServer,
+    const uint16_t& aType, const OriginAttributes& aOriginAttributes,
+    const uint32_t& aFlags, nsIDNSListener* aListener, nsIEventTarget* target)
     : mListener(aListener),
       mTarget(target),
       mResultStatus(NS_OK),
       mHost(aHost),
+      mTrrServer(aTrrServer),
       mType(aType),
       mOriginAttributes(aOriginAttributes),
       mFlags(aFlags) {}
@@ -248,15 +261,16 @@ void DNSRequestChild::StartRequest() {
     }
 
     // Send request to Parent process.
-    gNeckoChild->SendPDNSRequestConstructor(this, mHost, mOriginAttributes,
-                                            mFlags);
+    gNeckoChild->SendPDNSRequestConstructor(this, mHost, mTrrServer, mType,
+                                            mOriginAttributes, mFlags);
   } else if (XRE_IsSocketProcess()) {
     SocketProcessChild* child = SocketProcessChild::GetSingleton();
     if (!child->CanSend()) {
       return;
     }
 
-    child->SendPDNSRequestConstructor(this, mHost, mOriginAttributes, mFlags);
+    child->SendPDNSRequestConstructor(this, mHost, mTrrServer, mType,
+                                      mOriginAttributes, mFlags);
   } else {
     MOZ_ASSERT(false, "Wrong process");
     return;

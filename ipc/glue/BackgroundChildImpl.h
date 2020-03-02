@@ -10,8 +10,8 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/UniquePtr.h"
 #include "nsRefPtrHashtable.h"
-#include "nsAutoPtr.h"
 
 namespace mozilla {
 namespace dom {
@@ -73,6 +73,7 @@ class BackgroundChildImpl : public PBackgroundChild,
       PBackgroundIndexedDBUtilsChild* aActor) override;
 
   virtual PBackgroundSDBConnectionChild* AllocPBackgroundSDBConnectionChild(
+      const PersistenceType& aPersistenceType,
       const PrincipalInfo& aPrincipalInfo) override;
 
   virtual bool DeallocPBackgroundSDBConnectionChild(
@@ -116,12 +117,6 @@ class BackgroundChildImpl : public PBackgroundChild,
 
   virtual bool DeallocPBackgroundStorageChild(
       PBackgroundStorageChild* aActor) override;
-
-  virtual PPendingIPCBlobChild* AllocPPendingIPCBlobChild(
-      const IPCBlob& aBlob) override;
-
-  virtual bool DeallocPPendingIPCBlobChild(
-      PPendingIPCBlobChild* aActor) override;
 
   virtual already_AddRefed<PIPCBlobInputStreamChild>
   AllocPIPCBlobInputStreamChild(const nsID& aID,
@@ -298,17 +293,18 @@ class BackgroundChildImpl : public PBackgroundChild,
 };
 
 class BackgroundChildImpl::ThreadLocal final {
-  friend class nsAutoPtr<ThreadLocal>;
+  friend class mozilla::DefaultDelete<ThreadLocal>;
 
  public:
-  nsAutoPtr<mozilla::dom::indexedDB::ThreadLocal> mIndexedDBThreadLocal;
+  mozilla::UniquePtr<mozilla::dom::indexedDB::ThreadLocal>
+      mIndexedDBThreadLocal;
   mozilla::dom::IDBFileHandle* mCurrentFileHandle;
 
  public:
   ThreadLocal();
 
  private:
-  // Only destroyed by nsAutoPtr<ThreadLocal>.
+  // Only destroyed by UniquePtr<ThreadLocal>.
   ~ThreadLocal();
 };
 

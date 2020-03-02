@@ -32,7 +32,6 @@ class Protocol(object):
         """:returns: Current logger"""
         return self.executor.logger
 
-    @property
     def is_alive(self):
         """Is the browser connection still active
 
@@ -145,6 +144,13 @@ class BaseProtocolPart(ProtocolPart):
 
         :param handle: A protocol-specific handle identifying a top level browsing
                        context."""
+        pass
+
+    @abstractmethod
+    def load(self, url):
+        """Load a url in the current browsing context
+
+        :param url: The url to load"""
         pass
 
 

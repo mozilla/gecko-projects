@@ -22,8 +22,10 @@
 #include "nsXULPopupManager.h"
 #include "nsIWidgetListener.h"
 #include "nsContentUtils.h"  // for nsAutoScriptBlocker
+#include "nsDocShell.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/CompositeTimelineMarker.h"
+#include "mozilla/StartupTimeline.h"
 
 using namespace mozilla;
 
@@ -968,13 +970,6 @@ bool nsView::WindowResized(nsIWidget* aWidget, int32_t aWidth,
 }
 
 #if defined(MOZ_WIDGET_ANDROID)
-static bool NotifyDynamicToolbarMaxHeightChanged(
-    dom::BrowserParent* aBrowserParent, void* aArg) {
-  ScreenIntCoord* height = static_cast<ScreenIntCoord*>(aArg);
-  aBrowserParent->DynamicToolbarMaxHeightChanged(*height);
-  return false;
-}
-
 void nsView::DynamicToolbarMaxHeightChanged(ScreenIntCoord aHeight) {
   MOZ_ASSERT(XRE_IsParentProcess(),
              "Should be only called for the browser parent process");
@@ -997,19 +992,10 @@ void nsView::DynamicToolbarMaxHeightChanged(ScreenIntCoord aHeight) {
   }
 
   nsContentUtils::CallOnAllRemoteChildren(
-      window, NotifyDynamicToolbarMaxHeightChanged, &aHeight);
-}
-
-static bool NotifyDynamicToolbarOffsetChanged(
-    dom::BrowserParent* aBrowserParent, void* aArg) {
-  // Skip background tabs.
-  if (!aBrowserParent->GetDocShellIsActive()) {
-    return false;
-  }
-
-  ScreenIntCoord* offset = static_cast<ScreenIntCoord*>(aArg);
-  aBrowserParent->DynamicToolbarOffsetChanged(*offset);
-  return true;
+      window, [&aHeight](dom::BrowserParent* aBrowserParent) -> CallState {
+        aBrowserParent->DynamicToolbarMaxHeightChanged(aHeight);
+        return CallState::Continue;
+      });
 }
 
 void nsView::DynamicToolbarOffsetChanged(ScreenIntCoord aOffset) {
@@ -1034,7 +1020,15 @@ void nsView::DynamicToolbarOffsetChanged(ScreenIntCoord aOffset) {
   }
 
   nsContentUtils::CallOnAllRemoteChildren(
-      window, NotifyDynamicToolbarOffsetChanged, &aOffset);
+      window, [&aOffset](dom::BrowserParent* aBrowserParent) -> CallState {
+        // Skip background tabs.
+        if (!aBrowserParent->GetDocShellIsActive()) {
+          return CallState::Continue;
+        }
+
+        aBrowserParent->DynamicToolbarOffsetChanged(aOffset);
+        return CallState::Stop;
+      });
 }
 #endif
 
@@ -1083,6 +1077,9 @@ void nsView::DidCompositeWindow(mozilla::layers::TransactionId aTransactionId,
   if (rootContext) {
     rootContext->NotifyDidPaintForSubtree(aTransactionId, aCompositeEnd);
   }
+
+  mozilla::StartupTimeline::RecordOnce(mozilla::StartupTimeline::FIRST_PAINT2,
+                                       aCompositeEnd);
 
   // If the two timestamps are identical, this was likely a fake composite
   // event which wouldn't be terribly useful to display.

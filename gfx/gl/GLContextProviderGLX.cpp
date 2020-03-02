@@ -46,8 +46,7 @@
 #  include "gfxPlatformGtk.h"
 #endif
 
-namespace mozilla {
-namespace gl {
+namespace mozilla::gl {
 
 using namespace mozilla::gfx;
 using namespace mozilla::widget;
@@ -642,9 +641,7 @@ void GLContextGLX::GetWSIInfo(nsCString* const out) const {
 }
 
 bool GLContextGLX::OverrideDrawable(GLXDrawable drawable) {
-  if (Screen()) Screen()->AssureBlitted();
-  Bool result = mGLX->fMakeCurrent(mDisplay, drawable, mContext);
-  return result;
+  return mGLX->fMakeCurrent(mDisplay, drawable, mContext);
 }
 
 bool GLContextGLX::RestoreDrawable() {
@@ -1052,5 +1049,4 @@ GLContext* GLContextProviderGLX::GetGlobalContext() {
 /*static*/
 void GLContextProviderGLX::Shutdown() {}
 
-} /* namespace gl */
-} /* namespace mozilla */
+}  // namespace mozilla::gl

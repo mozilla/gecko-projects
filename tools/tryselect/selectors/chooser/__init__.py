@@ -29,7 +29,7 @@ class ChooserParser(BaseTryParser):
         'path',
         'pernosco',
         'rebuild',
-        'visual-metrics-jobs',
+        'worker-overrides',
     ]
 
 

@@ -6,10 +6,11 @@
 
 #include "mozilla/css/StreamLoader.h"
 
-#include "mozilla/IntegerTypeTraits.h"
 #include "mozilla/Encoding.h"
 #include "nsIChannel.h"
 #include "nsIInputStream.h"
+
+#include <limits>
 
 using namespace mozilla;
 
@@ -19,7 +20,9 @@ namespace css {
 StreamLoader::StreamLoader(SheetLoadData& aSheetLoadData)
     : mSheetLoadData(&aSheetLoadData), mStatus(NS_OK) {}
 
-StreamLoader::~StreamLoader() {}
+StreamLoader::~StreamLoader() {
+  MOZ_DIAGNOSTIC_ASSERT(mOnStopRequestCalled || mChannelOpenFailed);
+}
 
 NS_IMPL_ISUPPORTS(StreamLoader, nsIStreamListener)
 
@@ -30,12 +33,11 @@ StreamLoader::OnStartRequest(nsIRequest* aRequest) {
   // in a potentially large allocation directly, but efficiency of
   // compression bombs is so great that it doesn't make much sense
   // to require a site to send one before going ahead and allocating.
-  nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
-  if (channel) {
+  if (nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest)) {
     int64_t length;
     nsresult rv = channel->GetContentLength(&length);
     if (NS_SUCCEEDED(rv) && length > 0) {
-      if (length > MaxValue<nsACString::size_type>::value) {
+      if (length > std::numeric_limits<nsACString::size_type>::max()) {
         return (mStatus = NS_ERROR_OUT_OF_MEMORY);
       }
       if (!mBytes.SetCapacity(length, fallible)) {
@@ -48,6 +50,11 @@ StreamLoader::OnStartRequest(nsIRequest* aRequest) {
 
 NS_IMETHODIMP
 StreamLoader::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
+  MOZ_DIAGNOSTIC_ASSERT(!mOnStopRequestCalled);
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  mOnStopRequestCalled = true;
+#endif
+
   // Decoded data
   nsCString utf8String;
   {

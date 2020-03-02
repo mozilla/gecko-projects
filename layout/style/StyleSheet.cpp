@@ -13,6 +13,7 @@
 #include "mozilla/dom/CSSRuleList.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/MediaList.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/ShadowRootBinding.h"
 #include "mozilla/NullPrincipal.h"
@@ -21,6 +22,7 @@
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StyleSheetInlines.h"
+#include "mozilla/css/SheetLoadData.h"
 
 #include "mozAutoDocUpdate.h"
 #include "SheetLoadData.h"
@@ -32,6 +34,7 @@ using namespace dom;
 StyleSheet::StyleSheet(css::SheetParsingMode aParsingMode, CORSMode aCORSMode,
                        const dom::SRIMetadata& aIntegrity)
     : mParent(nullptr),
+      mConstructorDocument(nullptr),
       mDocumentOrShadowRoot(nullptr),
       mOwningNode(nullptr),
       mOwnerRule(nullptr),
@@ -47,6 +50,7 @@ StyleSheet::StyleSheet(const StyleSheet& aCopy, StyleSheet* aParentToUse,
                        dom::DocumentOrShadowRoot* aDocumentOrShadowRoot,
                        nsINode* aOwningNodeToUse)
     : mParent(aParentToUse),
+      mConstructorDocument(aCopy.mConstructorDocument),
       mTitle(aCopy.mTitle),
       mDocumentOrShadowRoot(aDocumentOrShadowRoot),
       mOwningNode(aOwningNodeToUse),
@@ -78,6 +82,54 @@ StyleSheet::StyleSheet(const StyleSheet& aCopy, StyleSheet* aParentToUse,
   }
 }
 
+/* static */
+// https://wicg.github.io/construct-stylesheets/#dom-cssstylesheet-cssstylesheet
+already_AddRefed<StyleSheet> StyleSheet::Constructor(
+    const dom::GlobalObject& aGlobal, const dom::CSSStyleSheetInit& aOptions,
+    ErrorResult& aRv) {
+  nsCOMPtr<nsPIDOMWindowInner> window =
+      do_QueryInterface(aGlobal.GetAsSupports());
+
+  if (!window) {
+    aRv.ThrowNotSupportedError("Not supported when there is no document");
+    return nullptr;
+  }
+
+  Document* constructorDocument = window->GetExtantDoc();
+  if (!constructorDocument) {
+    aRv.ThrowNotSupportedError("Not supported when there is no document");
+    return nullptr;
+  }
+
+  // 1. Construct a sheet and set its properties (see spec).
+  auto sheet =
+      MakeRefPtr<StyleSheet>(css::SheetParsingMode::eAuthorSheetFeatures,
+                             CORSMode::CORS_NONE, dom::SRIMetadata());
+
+  nsIURI* baseURI = constructorDocument->GetBaseURI();
+  nsIURI* sheetURI = constructorDocument->GetDocumentURI();
+  nsIURI* originalURI = nullptr;
+  sheet->SetURIs(sheetURI, originalURI, baseURI);
+
+  sheet->SetPrincipal(constructorDocument->NodePrincipal());
+  sheet->SetReferrerInfo(constructorDocument->GetReferrerInfo());
+  sheet->mConstructorDocument = constructorDocument;
+
+  // 2. Set the sheet's media according to aOptions.
+  if (aOptions.mMedia.IsString()) {
+    sheet->SetMedia(MediaList::Create(aOptions.mMedia.GetAsString()));
+  } else {
+    sheet->SetMedia(aOptions.mMedia.GetAsMediaList()->Clone());
+  }
+
+  // 3. Set the sheet's disabled flag according to aOptions.
+  sheet->SetDisabled(aOptions.mDisabled);
+  sheet->SetComplete();
+
+  // 4. Return sheet.
+  return sheet.forget();
+}
+
 StyleSheet::~StyleSheet() {
   MOZ_ASSERT(!mInner, "Inner should have been dropped in LastRelease");
 }
@@ -87,8 +139,15 @@ bool StyleSheet::HasRules() const {
 }
 
 Document* StyleSheet::GetAssociatedDocument() const {
-  return mDocumentOrShadowRoot ? mDocumentOrShadowRoot->AsNode().OwnerDoc()
-                               : nullptr;
+  auto* associated = GetAssociatedDocumentOrShadowRoot();
+  return associated ? associated->AsNode().OwnerDoc() : nullptr;
+}
+
+dom::DocumentOrShadowRoot* StyleSheet::GetAssociatedDocumentOrShadowRoot()
+    const {
+  // FIXME(nordzilla) This will not work for children of adtoped sheets.
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=1613748
+  return IsConstructed() ? mConstructorDocument : mDocumentOrShadowRoot;
 }
 
 Document* StyleSheet::GetComposedDoc() const {
@@ -108,6 +167,8 @@ bool StyleSheet::IsKeptAliveByDocument() const {
 void StyleSheet::LastRelease() {
   MOZ_ASSERT(mInner, "Should have an mInner at time of destruction.");
   MOZ_ASSERT(mInner->mSheets.Contains(this), "Our mInner should include us.");
+  MOZ_DIAGNOSTIC_ASSERT(mAdopters.IsEmpty(),
+                        "Should have no adopters at time of destruction.");
 
   UnparentChildren();
 
@@ -171,6 +232,8 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(StyleSheet)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(StyleSheet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMedia)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRuleList)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConstructorDocument)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mReplacePromise)
   tmp->TraverseInner(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -178,6 +241,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(StyleSheet)
   tmp->DropMedia();
   tmp->UnlinkInner();
   tmp->DropRuleList();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mConstructorDocument)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mReplacePromise)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -200,25 +265,37 @@ dom::CSSStyleSheetParsingMode StyleSheet::ParsingModeDOM() {
 }
 
 void StyleSheet::SetComplete() {
-  MOZ_ASSERT(!HasForcedUniqueInner(),
+  // HasForcedUniqueInner() is okay if the sheet is constructed, because
+  // constructed sheets are always unique and they may be set to complete
+  // multiple times if their rules are replaced via Replace()
+  MOZ_ASSERT(IsConstructed() || !HasForcedUniqueInner(),
              "Can't complete a sheet that's already been forced unique.");
   MOZ_ASSERT(!IsComplete(), "Already complete?");
   mState |= State::Complete;
   if (!Disabled()) {
     ApplicableStateChanged(true);
   }
+  MaybeResolveReplacePromise();
 }
 
 void StyleSheet::ApplicableStateChanged(bool aApplicable) {
-  if (!mDocumentOrShadowRoot) {
-    return;
+  MOZ_ASSERT(aApplicable == IsApplicable());
+  auto Notify = [this](DocumentOrShadowRoot& target) {
+    nsINode& node = target.AsNode();
+    if (ShadowRoot* shadow = ShadowRoot::FromNode(node)) {
+      shadow->StyleSheetApplicableStateChanged(*this);
+    } else {
+      node.AsDocument()->StyleSheetApplicableStateChanged(*this);
+    }
+  };
+
+  if (mDocumentOrShadowRoot) {
+    Notify(*mDocumentOrShadowRoot);
   }
 
-  nsINode& node = mDocumentOrShadowRoot->AsNode();
-  if (auto* shadow = ShadowRoot::FromNode(node)) {
-    shadow->StyleSheetApplicableStateChanged(*this, aApplicable);
-  } else {
-    node.AsDocument()->SetStyleSheetApplicableState(*this, aApplicable);
+  for (DocumentOrShadowRoot* adopter : mAdopters) {
+    MOZ_ASSERT(adopter, "adopters should never be null");
+    Notify(*adopter);
   }
 }
 
@@ -389,21 +466,28 @@ void StyleSheet::DropStyleSet(ServoStyleSet* aStyleSet) {
 
 // NOTE(emilio): Composed doc and containing shadow root are set in child sheets
 // too, so no need to do it for each ancestor.
-#define NOTIFY(function_, args_)                        \
-  do {                                                  \
-    if (auto* shadow = GetContainingShadow()) {         \
-      shadow->function_ args_;                          \
-    }                                                   \
-    if (auto* doc = GetComposedDoc()) {                 \
-      doc->function_ args_;                             \
-    }                                                   \
-    StyleSheet* current = this;                         \
-    do {                                                \
-      for (ServoStyleSet * set : current->mStyleSets) { \
-        set->function_ args_;                           \
-      }                                                 \
-      current = current->mParent;                       \
-    } while (current);                                  \
+#define NOTIFY(function_, args_)                                      \
+  do {                                                                \
+    if (auto* shadow = GetContainingShadow()) {                       \
+      shadow->function_ args_;                                        \
+    }                                                                 \
+    if (auto* doc = GetComposedDoc()) {                               \
+      doc->function_ args_;                                           \
+    }                                                                 \
+    StyleSheet* current = this;                                       \
+    do {                                                              \
+      for (ServoStyleSet * set : current->mStyleSets) {               \
+        set->function_ args_;                                         \
+      }                                                               \
+      for (auto* adopter : mAdopters) {                               \
+        if (auto* shadow = ShadowRoot::FromNode(adopter->AsNode())) { \
+          shadow->function_ args_;                                    \
+        } else {                                                      \
+          adopter->AsNode().AsDocument()->function_ args_;            \
+        }                                                             \
+      }                                                               \
+      current = current->mParent;                                     \
+    } while (current);                                                \
   } while (0)
 
 void StyleSheet::EnsureUniqueInner() {
@@ -513,6 +597,137 @@ int32_t StyleSheet::AddRule(const nsAString& aSelector, const nsAString& aBlock,
   InsertRuleInternal(rule, index, aRv);
   // Always return -1.
   return -1;
+}
+
+void StyleSheet::MaybeResolveReplacePromise() {
+  MOZ_ASSERT(!!mReplacePromise == ModificationDisallowed());
+  if (!mReplacePromise) {
+    return;
+  }
+
+  SetModificationDisallowed(false);
+  mReplacePromise->MaybeResolve(this);
+  mReplacePromise = nullptr;
+}
+
+void StyleSheet::MaybeRejectReplacePromise() {
+  MOZ_ASSERT(!!mReplacePromise == ModificationDisallowed());
+  if (!mReplacePromise) {
+    return;
+  }
+
+  SetModificationDisallowed(false);
+  mReplacePromise->MaybeRejectWithNetworkError(
+      "@import style sheet load failed");
+  mReplacePromise = nullptr;
+}
+
+// https://wicg.github.io/construct-stylesheets/#dom-cssstylesheet-replace
+already_AddRefed<dom::Promise> StyleSheet::Replace(const nsACString& aText,
+                                                   ErrorResult& aRv) {
+  nsIGlobalObject* globalObject = mConstructorDocument->GetScopeObject();
+  RefPtr<dom::Promise> promise = dom::Promise::Create(globalObject, aRv);
+  if (!promise) {
+    return nullptr;
+  }
+
+  // Step 1 and 4 are variable declarations
+
+  // 2.1 Check if sheet is constructed, else reject promise.
+  if (!mConstructorDocument) {
+    promise->MaybeRejectWithNotAllowedError(
+        "This method can only be called on "
+        "constructed style sheets");
+    return promise.forget();
+  }
+
+  // 2.2 Check if sheet is modifiable, else throw.
+  if (ModificationDisallowed()) {
+    promise->MaybeRejectWithNotAllowedError(
+        "This method can only be called on "
+        "modifiable style sheets");
+    return promise.forget();
+  }
+
+  // 3. Disallow modifications until finished.
+  SetModificationDisallowed(true);
+
+  auto* loader = mConstructorDocument->CSSLoader();
+  auto loadData = MakeRefPtr<css::SheetLoadData>(
+      loader, GetBaseURI(), this, /* aSyncLoad */ false,
+      /* aUseSystemPrincipal */ false, /* aPreloadEncoding */ nullptr,
+      /* aObserver */ nullptr, /* aLoaderPrincipal */ nullptr,
+      GetReferrerInfo(),
+      /* aRequestingNode */ nullptr);
+
+  // In parallel
+  // 5.1 Parse aText into rules.
+  // 5.2 Load import rules, throw NetworkError if failed.
+  // 5.3 Set sheet's rules to new rules.
+  nsCOMPtr<nsISerialEventTarget> target =
+      mConstructorDocument->EventTargetFor(TaskCategory::Other);
+  loadData->mIsBeingParsed = true;
+  MOZ_ASSERT(!mReplacePromise);
+  mReplacePromise = promise;
+  ParseSheet(*loader, aText, *loadData)
+      ->Then(
+          target, __func__,
+          [loadData] { loadData->SheetFinishedParsingAsync(); },
+          [] { MOZ_CRASH("This MozPromise should never be rejected."); });
+
+  // 6. Return the promise
+  return promise.forget();
+}
+
+// https://wicg.github.io/construct-stylesheets/#dom-cssstylesheet-replacesync
+void StyleSheet::ReplaceSync(const nsACString& aText, ErrorResult& aRv) {
+  // Step 1 is a variable declaration
+
+  // 2.1 Check if sheet is constructed, else throw.
+  if (!mConstructorDocument) {
+    return aRv.ThrowNotAllowedError(
+        "Can only be called on constructed style sheets");
+  }
+
+  // 2.2 Check if sheet is modifiable, else throw.
+  if (ModificationDisallowed()) {
+    return aRv.ThrowNotAllowedError(
+        "Can only be called on modifiable style sheets");
+  }
+
+  // 3. Parse aText into rules.
+  // We need to create a disabled loader so that the parser will
+  // accept @import rules, but we do not want to trigger any loads.
+  auto disabledLoader = MakeRefPtr<css::Loader>();
+  disabledLoader->SetEnabled(false);
+  SetURLExtraData();
+  RefPtr<const RawServoStyleSheetContents> rawContent =
+      Servo_StyleSheet_FromUTF8Bytes(
+          disabledLoader, this,
+          /* load_data = */ nullptr, &aText, mParsingMode, Inner().mURLData,
+          /* line_number_offset = */ 0,
+          mConstructorDocument->GetCompatibilityMode(),
+          /* reusable_sheets = */ nullptr,
+          mConstructorDocument->GetStyleUseCounters(),
+          StyleSanitizationKind::None,
+          /* sanitized_output = */ nullptr)
+          .Consume();
+
+  // 4. If rules contain @imports, make no changes and throw NotAllowedError.
+  // FIXME(nordzilla): Checking for @import rules after parse time means that
+  // the document's use counters will be affected even if this function throws.
+  // Consider changing this to detect @import rules during parse time.
+  if (Servo_StyleSheet_HasImportRules(rawContent)) {
+    return aRv.ThrowNotAllowedError(
+        "@import rules are not allowed. Use the async replace() method "
+        "instead.");
+  }
+
+  // 5. Set sheet's rules to the new rules.
+  DropRuleList();
+  Inner().mContents = std::move(rawContent);
+  FinishParse();
+  RuleChanged(nullptr);
 }
 
 nsresult StyleSheet::DeleteRuleFromGroup(css::GroupRule* aGroup,
@@ -668,7 +883,7 @@ void StyleSheet::SubjectSubsumesInnerPrincipal(nsIPrincipal& aSubjectPrincipal,
   // Allow access only if CORS mode is not NONE and the security flag
   // is not turned off.
   if (GetCORSMode() == CORS_NONE && !nsContentUtils::BypassCSSOMOriginCheck()) {
-    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    aRv.ThrowSecurityError("Not allowed to access cross-origin stylesheet");
     return;
   }
 
@@ -684,7 +899,8 @@ void StyleSheet::SubjectSubsumesInnerPrincipal(nsIPrincipal& aSubjectPrincipal,
   // if we're not complete yet.  Luckily, all the callers of this method throw
   // anyway if not complete, so we can just do that here too.
   if (!IsComplete()) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    aRv.ThrowInvalidAccessError(
+        "Not allowed to access still-loading stylesheet");
     return;
   }
 
@@ -697,7 +913,8 @@ bool StyleSheet::AreRulesAvailable(nsIPrincipal& aSubjectPrincipal,
                                    ErrorResult& aRv) {
   // Rules are not available on incomplete sheets.
   if (!IsComplete()) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    aRv.ThrowInvalidAccessError(
+        "Can't access rules of still-loading stylsheet");
     return false;
   }
   //-- Security check: Only scripts whose principal subsumes that of the
@@ -798,11 +1015,11 @@ void StyleSheet::List(FILE* out, int32_t aIndent) const {
 }
 #endif
 
-void StyleSheet::SetMedia(dom::MediaList* aMedia) {
-  if (aMedia) {
-    aMedia->SetStyleSheet(this);
-  }
+void StyleSheet::SetMedia(already_AddRefed<dom::MediaList> aMedia) {
   mMedia = aMedia;
+  if (mMedia) {
+    mMedia->SetStyleSheet(this);
+  }
 }
 
 void StyleSheet::DropMedia() {
@@ -873,11 +1090,6 @@ already_AddRefed<StyleSheet> StyleSheet::CreateEmptyChildSheet(
 //     -moz-bool-pref, which needs to access the pref service, which is not
 //     threadsafe.
 static bool AllowParallelParse(css::Loader& aLoader, nsIURI* aSheetURI) {
-  // Check the pref.
-  if (!StaticPrefs::layout_css_parsing_parallel()) {
-    return false;
-  }
-
   // If the browser is recording CSS errors, we need to use the sequential path
   // because the parallel path doesn't support that.
   Document* doc = aLoader.GetDocument();
@@ -974,16 +1186,16 @@ void StyleSheet::FinishParse() {
   SetSourceURL(sourceURL);
 }
 
-nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
+void StyleSheet::ReparseSheet(const nsACString& aInput, ErrorResult& aRv) {
   if (!IsComplete()) {
-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+    return aRv.ThrowInvalidAccessError("Cannot reparse still-loading sheet");
   }
 
   // Allowing to modify UA sheets is dangerous (in the sense that C++ code
   // relies on rules in those sheets), plus they're probably going to be shared
   // across processes in which case this is directly a no-go.
   if (IsReadOnly()) {
-    return NS_OK;
+    return;
   }
 
   // Hold strong ref to the CSSLoader in case the document update
@@ -1036,8 +1248,8 @@ nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
 
   DropRuleList();
 
-  ParseSheetSync(loader, NS_ConvertUTF16toUTF8(aInput),
-                 /* aLoadData = */ nullptr, lineNumber, &reusableSheets);
+  ParseSheetSync(loader, aInput, /* aLoadData = */ nullptr, lineNumber,
+                 &reusableSheets);
 
   // Notify the stylesets about the new rules.
   {
@@ -1055,8 +1267,6 @@ nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
 
   // Our rules are no longer considered modified for devtools.
   mState &= ~State::ModifiedRulesForDevtools;
-
-  return NS_OK;
 }
 
 void StyleSheet::DropRuleList() {
@@ -1114,8 +1324,7 @@ void StyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv) {
   // Ensure mRuleList is constructed.
   GetCssRulesInternal();
   if (aIndex >= mRuleList->Length()) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_INDEX_SIZE_ERR,
+    aRv.ThrowIndexSizeError(
         nsPrintfCString("Cannot delete rule at index %u"
                         " because the number of rules is only %u",
                         aIndex, mRuleList->Length()));
@@ -1127,8 +1336,6 @@ void StyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv) {
   // event is not enabled.
   RefPtr<css::Rule> rule = mRuleList->GetRule(aIndex);
   aRv = mRuleList->DeleteRule(aIndex);
-  MOZ_ASSERT(!aRv.ErrorCodeIs(NS_ERROR_DOM_INDEX_SIZE_ERR),
-             "IndexSizeError should have been handled earlier");
   if (!aRv.Failed()) {
     RuleRemoved(*rule);
   }

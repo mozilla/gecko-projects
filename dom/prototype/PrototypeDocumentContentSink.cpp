@@ -77,8 +77,7 @@ nsresult NS_NewPrototypeDocumentContentSink(nsIContentSink** aResult,
   return NS_OK;
 }
 
-namespace mozilla {
-namespace dom {
+namespace mozilla::dom {
 
 PrototypeDocumentContentSink::PrototypeDocumentContentSink()
     : mNextSrcLoadWaiter(nullptr),
@@ -1054,7 +1053,7 @@ nsresult PrototypeDocumentContentSink::CreateElementFromPrototype(
   }
 
   if (result->HasAttr(kNameSpaceID_None, nsGkAtoms::datal10nid)) {
-    mDocument->mL10nProtoElements.Put(result, aPrototype);
+    mDocument->mL10nProtoElements.Put(result, RefPtr{aPrototype});
     result->SetElementCreatedFromPrototypeAndHasUnmodifiedL10n();
   }
   result.forget(aResult);
@@ -1080,5 +1079,4 @@ nsresult PrototypeDocumentContentSink::AddAttributes(
   return NS_OK;
 }
 
-}  // namespace dom
-}  // namespace mozilla
+}  // namespace mozilla::dom

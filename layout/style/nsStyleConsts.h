@@ -39,9 +39,9 @@ enum class StyleDisplay : uint16_t {
   Contents =
       StyleDisplayFrom(StyleDisplayOutside::None, StyleDisplayInside::Contents),
   Inline =
-      StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Inline),
+      StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Flow),
   Block =
-      StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Block),
+      StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Flow),
   FlowRoot = StyleDisplayFrom(StyleDisplayOutside::Block,
                               StyleDisplayInside::FlowRoot),
   Flex = StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Flex),
@@ -51,7 +51,7 @@ enum class StyleDisplay : uint16_t {
   InlineTable =
       StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Table),
   TableCaption = StyleDisplayFrom(StyleDisplayOutside::TableCaption,
-                                  StyleDisplayInside::Block),
+                                  StyleDisplayInside::Flow),
   Ruby =
       StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Ruby),
   WebkitBox = StyleDisplayFrom(StyleDisplayOutside::Block,
@@ -88,19 +88,19 @@ enum class StyleDisplay : uint16_t {
 
   /// XUL boxes.
   MozBox =
-      StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozBox),
-  MozInlineBox = StyleDisplayFrom(StyleDisplayOutside::XUL,
-                                  StyleDisplayInside::MozInlineBox),
+      StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::MozBox),
+  MozInlineBox =
+      StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::MozBox),
   MozGrid =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozGrid),
   MozGridGroup = StyleDisplayFrom(StyleDisplayOutside::XUL,
                                   StyleDisplayInside::MozGridGroup),
   MozGridLine = StyleDisplayFrom(StyleDisplayOutside::XUL,
                                  StyleDisplayInside::MozGridLine),
+  MozStack =
+      StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozStack),
   MozDeck =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozDeck),
-  MozGroupbox = StyleDisplayFrom(StyleDisplayOutside::XUL,
-                                 StyleDisplayInside::MozGroupbox),
   MozPopup =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozPopup),
 };
@@ -184,21 +184,6 @@ enum class StyleColumnFill : uint8_t {
 enum class StyleColumnSpan : uint8_t {
   None,
   All,
-};
-
-// Counters and generated content.
-enum class StyleContentType : uint8_t {
-  String = 1,
-  Image = 10,
-  Attr = 20,
-  Counter = 30,
-  Counters = 31,
-  OpenQuote = 40,
-  CloseQuote = 41,
-  NoOpenQuote = 42,
-  NoCloseQuote = 43,
-  AltContent = 50,
-  Uninitialized,
 };
 
 // Define geometry box for clip-path's reference-box, background-clip,
@@ -348,18 +333,8 @@ enum class StyleBorderCollapse : uint8_t { Collapse, Separate };
 // border-image-repeat
 enum class StyleBorderImageRepeat : uint8_t { Stretch, Repeat, Round, Space };
 
-// See nsStyleContent
-enum class StyleContent : uint8_t {
-  OpenQuote,
-  CloseQuote,
-  NoOpenQuote,
-  NoCloseQuote,
-  AltContent
-};
-
 // See nsStyleVisibility
-#define NS_STYLE_DIRECTION_LTR 0
-#define NS_STYLE_DIRECTION_RTL 1
+enum class StyleDirection : uint8_t { Ltr, Rtl };
 
 // See nsStyleVisibility
 // NOTE: WritingModes.h depends on the particular values used here.
@@ -378,55 +353,6 @@ enum class StyleContent : uint8_t {
   (NS_STYLE_WRITING_MODE_VERTICAL_RL | NS_STYLE_WRITING_MODE_SIDEWAYS_MASK)
 #define NS_STYLE_WRITING_MODE_SIDEWAYS_LR \
   (NS_STYLE_WRITING_MODE_VERTICAL_LR | NS_STYLE_WRITING_MODE_SIDEWAYS_MASK)
-
-// Shared constants for all align/justify properties (nsStylePosition):
-#define NS_STYLE_ALIGN_AUTO 0
-#define NS_STYLE_ALIGN_NORMAL 1
-#define NS_STYLE_ALIGN_START 2
-#define NS_STYLE_ALIGN_END 3
-#define NS_STYLE_ALIGN_FLEX_START 4
-#define NS_STYLE_ALIGN_FLEX_END 5
-#define NS_STYLE_ALIGN_CENTER 6
-#define NS_STYLE_ALIGN_LEFT 7
-#define NS_STYLE_ALIGN_RIGHT 8
-#define NS_STYLE_ALIGN_BASELINE 9
-#define NS_STYLE_ALIGN_LAST_BASELINE 10
-#define NS_STYLE_ALIGN_STRETCH 11
-#define NS_STYLE_ALIGN_SELF_START 12
-#define NS_STYLE_ALIGN_SELF_END 13
-#define NS_STYLE_ALIGN_SPACE_BETWEEN 14
-#define NS_STYLE_ALIGN_SPACE_AROUND 15
-#define NS_STYLE_ALIGN_SPACE_EVENLY 16
-#define NS_STYLE_ALIGN_LEGACY 0x20  // mutually exclusive w. SAFE & UNSAFE
-#define NS_STYLE_ALIGN_SAFE 0x40
-#define NS_STYLE_ALIGN_UNSAFE 0x80  // mutually exclusive w. SAFE
-#define NS_STYLE_ALIGN_FLAG_BITS 0xE0
-#define NS_STYLE_ALIGN_ALL_BITS 0xFF
-#define NS_STYLE_ALIGN_ALL_SHIFT 8
-
-#define NS_STYLE_JUSTIFY_AUTO NS_STYLE_ALIGN_AUTO
-#define NS_STYLE_JUSTIFY_NORMAL NS_STYLE_ALIGN_NORMAL
-#define NS_STYLE_JUSTIFY_START NS_STYLE_ALIGN_START
-#define NS_STYLE_JUSTIFY_END NS_STYLE_ALIGN_END
-#define NS_STYLE_JUSTIFY_FLEX_START NS_STYLE_ALIGN_FLEX_START
-#define NS_STYLE_JUSTIFY_FLEX_END NS_STYLE_ALIGN_FLEX_END
-#define NS_STYLE_JUSTIFY_CENTER NS_STYLE_ALIGN_CENTER
-#define NS_STYLE_JUSTIFY_LEFT NS_STYLE_ALIGN_LEFT
-#define NS_STYLE_JUSTIFY_RIGHT NS_STYLE_ALIGN_RIGHT
-#define NS_STYLE_JUSTIFY_BASELINE NS_STYLE_ALIGN_BASELINE
-#define NS_STYLE_JUSTIFY_LAST_BASELINE NS_STYLE_ALIGN_LAST_BASELINE
-#define NS_STYLE_JUSTIFY_STRETCH NS_STYLE_ALIGN_STRETCH
-#define NS_STYLE_JUSTIFY_SELF_START NS_STYLE_ALIGN_SELF_START
-#define NS_STYLE_JUSTIFY_SELF_END NS_STYLE_ALIGN_SELF_END
-#define NS_STYLE_JUSTIFY_SPACE_BETWEEN NS_STYLE_ALIGN_SPACE_BETWEEN
-#define NS_STYLE_JUSTIFY_SPACE_AROUND NS_STYLE_ALIGN_SPACE_AROUND
-#define NS_STYLE_JUSTIFY_SPACE_EVENLY NS_STYLE_ALIGN_SPACE_EVENLY
-#define NS_STYLE_JUSTIFY_LEGACY NS_STYLE_ALIGN_LEGACY
-#define NS_STYLE_JUSTIFY_SAFE NS_STYLE_ALIGN_SAFE
-#define NS_STYLE_JUSTIFY_UNSAFE NS_STYLE_ALIGN_UNSAFE
-#define NS_STYLE_JUSTIFY_FLAG_BITS NS_STYLE_ALIGN_FLAG_BITS
-#define NS_STYLE_JUSTIFY_ALL_BITS NS_STYLE_ALIGN_ALL_BITS
-#define NS_STYLE_JUSTIFY_ALL_SHIFT NS_STYLE_ALIGN_ALL_SHIFT
 
 // See nsStylePosition
 enum class StyleFlexDirection : uint8_t {
@@ -462,11 +388,6 @@ enum class StyleFlexWrap : uint8_t {
 #define NS_STYLE_FONT_SIZE_SMALLER 9
 #define NS_STYLE_FONT_SIZE_NO_KEYWORD \
   10  // Used by Servo to track the "no keyword" case
-
-// grid-auto-flow keywords
-#define NS_STYLE_GRID_AUTO_FLOW_ROW (1 << 0)
-#define NS_STYLE_GRID_AUTO_FLOW_COLUMN (1 << 1)
-#define NS_STYLE_GRID_AUTO_FLOW_DENSE (1 << 2)
 
 // 'subgrid' keyword in grid-template-{columns,rows}
 #define NS_STYLE_GRID_TEMPLATE_SUBGRID 0
@@ -508,11 +429,13 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_MATHML_DISPLAYSTYLE_BLOCK 1
 
 // See nsStyleDisplay.mPosition
-#define NS_STYLE_POSITION_STATIC 0
-#define NS_STYLE_POSITION_RELATIVE 1
-#define NS_STYLE_POSITION_ABSOLUTE 2
-#define NS_STYLE_POSITION_FIXED 3
-#define NS_STYLE_POSITION_STICKY 4
+enum class StylePositionProperty : uint8_t {
+  Static,
+  Relative,
+  Absolute,
+  Fixed,
+  Sticky,
+};
 
 // See nsStyleEffects.mClip, mClipFlags
 #define NS_STYLE_CLIP_AUTO 0x00
@@ -594,20 +517,6 @@ enum class StyleObjectFit : uint8_t {
   None,
   ScaleDown,
 };
-
-// See nsStyleText
-#define NS_STYLE_TEXT_ALIGN_START 0
-#define NS_STYLE_TEXT_ALIGN_LEFT 1
-#define NS_STYLE_TEXT_ALIGN_RIGHT 2
-#define NS_STYLE_TEXT_ALIGN_CENTER 3
-#define NS_STYLE_TEXT_ALIGN_JUSTIFY 4
-#define NS_STYLE_TEXT_ALIGN_CHAR \
-  5  // align based on a certain character, for table cell
-#define NS_STYLE_TEXT_ALIGN_END 6
-#define NS_STYLE_TEXT_ALIGN_AUTO 7
-#define NS_STYLE_TEXT_ALIGN_MOZ_CENTER 8
-#define NS_STYLE_TEXT_ALIGN_MOZ_RIGHT 9
-#define NS_STYLE_TEXT_ALIGN_MOZ_LEFT 10
 
 // See nsStyleText
 #define NS_STYLE_TEXT_DECORATION_STYLE_NONE \
@@ -693,11 +602,15 @@ enum class StyleTextOrientation : uint8_t {
 #define NS_STYLE_UNICODE_BIDI_ISOLATE_OVERRIDE 0x6
 #define NS_STYLE_UNICODE_BIDI_PLAINTEXT 0x8
 
-#define NS_STYLE_TABLE_LAYOUT_AUTO 0
-#define NS_STYLE_TABLE_LAYOUT_FIXED 1
+enum class StyleTableLayout : uint8_t {
+  Auto,
+  Fixed,
+};
 
-#define NS_STYLE_TABLE_EMPTY_CELLS_HIDE 0
-#define NS_STYLE_TABLE_EMPTY_CELLS_SHOW 1
+enum class StyleEmptyCells : uint8_t {
+  Hide,
+  Show,
+};
 
 // Constants for the caption-side property. Note that despite having "physical"
 // names, these are actually interpreted according to the table's writing-mode:
@@ -757,25 +670,31 @@ enum class StyleWindowShadow : uint8_t {
 };
 
 // dominant-baseline
-#define NS_STYLE_DOMINANT_BASELINE_AUTO 0
-#define NS_STYLE_DOMINANT_BASELINE_IDEOGRAPHIC 1
-#define NS_STYLE_DOMINANT_BASELINE_ALPHABETIC 2
-#define NS_STYLE_DOMINANT_BASELINE_HANGING 3
-#define NS_STYLE_DOMINANT_BASELINE_MATHEMATICAL 4
-#define NS_STYLE_DOMINANT_BASELINE_CENTRAL 5
-#define NS_STYLE_DOMINANT_BASELINE_MIDDLE 6
-#define NS_STYLE_DOMINANT_BASELINE_TEXT_AFTER_EDGE 7
-#define NS_STYLE_DOMINANT_BASELINE_TEXT_BEFORE_EDGE 8
+enum class StyleDominantBaseline : uint8_t {
+  Auto,
+  Ideographic,
+  Alphabetic,
+  Hanging,
+  Mathematical,
+  Central,
+  Middle,
+  TextAfterEdge,
+  TextBeforeEdge,
+};
 
 // image-rendering
-#define NS_STYLE_IMAGE_RENDERING_AUTO 0
-#define NS_STYLE_IMAGE_RENDERING_OPTIMIZESPEED 1
-#define NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY 2
-#define NS_STYLE_IMAGE_RENDERING_CRISP_EDGES 3
+enum class StyleImageRendering : uint8_t {
+  Auto,
+  Optimizespeed,
+  Optimizequality,
+  CrispEdges,
+};
 
 // mask-type
-#define NS_STYLE_MASK_TYPE_LUMINANCE 0
-#define NS_STYLE_MASK_TYPE_ALPHA 1
+enum class StyleMaskType : uint8_t {
+  Luminance,
+  Alpha,
+};
 
 // shape-rendering
 enum class StyleShapeRendering : uint8_t {
@@ -793,9 +712,11 @@ enum class StyleStrokeLinecap : uint8_t {
 };
 
 // stroke-linejoin
-#define NS_STYLE_STROKE_LINEJOIN_MITER 0
-#define NS_STYLE_STROKE_LINEJOIN_ROUND 1
-#define NS_STYLE_STROKE_LINEJOIN_BEVEL 2
+enum class StyleStrokeLinejoin : uint8_t {
+  Miter,
+  Round,
+  Bevel,
+};
 
 // text-anchor
 enum class StyleTextAnchor : uint8_t {
@@ -830,9 +751,11 @@ enum class StyleColorAdjust : uint8_t {
 };
 
 // color-interpolation and color-interpolation-filters
-#define NS_STYLE_COLOR_INTERPOLATION_AUTO 0
-#define NS_STYLE_COLOR_INTERPOLATION_SRGB 1
-#define NS_STYLE_COLOR_INTERPOLATION_LINEARRGB 2
+enum class StyleColorInterpolation : uint8_t {
+  Auto = 0,
+  Srgb = 1,
+  Linearrgb = 2,
+};
 
 // vector-effect
 #define NS_STYLE_VECTOR_EFFECT_NONE 0
@@ -841,9 +764,6 @@ enum class StyleColorAdjust : uint8_t {
 // 3d Transforms - Backface visibility
 #define NS_STYLE_BACKFACE_VISIBILITY_VISIBLE 1
 #define NS_STYLE_BACKFACE_VISIBILITY_HIDDEN 0
-
-#define NS_STYLE_TRANSFORM_STYLE_FLAT 0
-#define NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D 1
 
 // blending
 #define NS_STYLE_BLEND_NORMAL 0
@@ -890,9 +810,11 @@ enum class StyleColorAdjust : uint8_t {
 #define NS_STYLE_COUNTER_SPEAKAS_SPELL_OUT 3
 #define NS_STYLE_COUNTER_SPEAKAS_OTHER 255  // refer to another style
 
-// See nsStyleDisplay::mScrollBehavior
-#define NS_STYLE_SCROLL_BEHAVIOR_AUTO 0
-#define NS_STYLE_SCROLL_BEHAVIOR_SMOOTH 1
+// scroll-behavior
+enum class StyleScrollBehavior : uint8_t {
+  Auto,
+  Smooth,
+};
 
 }  // namespace mozilla
 

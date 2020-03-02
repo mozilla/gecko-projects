@@ -50,6 +50,8 @@ using namespace mozilla;
 using namespace mozilla::net;
 
 #define PREFLIGHT_CACHE_SIZE 100
+// 5 seconds is chosen to be compatible with Chromium.
+#define PREFLIGHT_DEFAULT_EXPIRY_SECONDS 5
 
 static void LogBlockedRequest(nsIRequest* aRequest, const char* aProperty,
                               const char16_t* aParam, uint32_t aBlockingReason,
@@ -154,7 +156,7 @@ class nsPreflightCache {
     nsTArray<TokenTime> mHeaders;
   };
 
-  nsPreflightCache() { MOZ_COUNT_CTOR(nsPreflightCache); }
+  MOZ_COUNTED_DEFAULT_CTOR(nsPreflightCache)
 
   ~nsPreflightCache() {
     Clear();
@@ -170,9 +172,6 @@ class nsPreflightCache {
   void Clear();
 
  private:
-  static bool GetCacheKey(nsIURI* aURI, nsIPrincipal* aPrincipal,
-                          bool aWithCredentials, nsACString& _retval);
-
   nsClassHashtable<nsCStringHashKey, CacheEntry> mTable;
   LinkedList<CacheEntry> mList;
 };
@@ -183,10 +182,10 @@ static nsPreflightCache* sPreflightCache = nullptr;
 static bool EnsurePreflightCache() {
   if (sPreflightCache) return true;
 
-  nsAutoPtr<nsPreflightCache> newCache(new nsPreflightCache());
+  UniquePtr<nsPreflightCache> newCache(new nsPreflightCache());
 
   if (newCache->Initialize()) {
-    sPreflightCache = newCache.forget();
+    sPreflightCache = newCache.release();
     return true;
   }
 
@@ -246,7 +245,8 @@ nsPreflightCache::CacheEntry* nsPreflightCache::GetEntry(
     nsIURI* aURI, nsIPrincipal* aPrincipal, bool aWithCredentials,
     bool aCreate) {
   nsCString key;
-  if (!GetCacheKey(aURI, aPrincipal, aWithCredentials, key)) {
+  if (NS_FAILED(
+          aPrincipal->GetPrefLightCacheKey(aURI, aWithCredentials, key))) {
     NS_WARNING("Invalid cache key!");
     return nullptr;
   }
@@ -283,7 +283,7 @@ nsPreflightCache::CacheEntry* nsPreflightCache::GetEntry(
     // Try to kick out all the expired entries.
     TimeStamp now = TimeStamp::NowLoRes();
     for (auto iter = mTable.Iter(); !iter.Done(); iter.Next()) {
-      nsAutoPtr<CacheEntry>& entry = iter.Data();
+      auto entry = iter.UserData();
       entry->PurgeExpired(now);
 
       if (entry->mHeaders.IsEmpty() && entry->mMethods.IsEmpty()) {
@@ -316,12 +316,14 @@ nsPreflightCache::CacheEntry* nsPreflightCache::GetEntry(
 void nsPreflightCache::RemoveEntries(nsIURI* aURI, nsIPrincipal* aPrincipal) {
   CacheEntry* entry;
   nsCString key;
-  if (GetCacheKey(aURI, aPrincipal, true, key) && mTable.Get(key, &entry)) {
+  if (NS_SUCCEEDED(aPrincipal->GetPrefLightCacheKey(aURI, true, key)) &&
+      mTable.Get(key, &entry)) {
     entry->removeFrom(mList);
     mTable.Remove(key);
   }
 
-  if (GetCacheKey(aURI, aPrincipal, false, key) && mTable.Get(key, &entry)) {
+  if (NS_SUCCEEDED(aPrincipal->GetPrefLightCacheKey(aURI, false, key)) &&
+      mTable.Get(key, &entry)) {
     entry->removeFrom(mList);
     mTable.Remove(key);
   }
@@ -330,40 +332,6 @@ void nsPreflightCache::RemoveEntries(nsIURI* aURI, nsIPrincipal* aPrincipal) {
 void nsPreflightCache::Clear() {
   mList.clear();
   mTable.Clear();
-}
-
-/* static */
-bool nsPreflightCache::GetCacheKey(nsIURI* aURI, nsIPrincipal* aPrincipal,
-                                   bool aWithCredentials, nsACString& _retval) {
-  NS_ASSERTION(aURI, "Null uri!");
-  NS_ASSERTION(aPrincipal, "Null principal!");
-
-  NS_NAMED_LITERAL_CSTRING(space, " ");
-
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  nsAutoCString scheme, host, port;
-  if (uri) {
-    uri->GetScheme(scheme);
-    uri->GetHost(host);
-    port.AppendInt(NS_GetRealPort(uri));
-  }
-
-  if (aWithCredentials) {
-    _retval.AssignLiteral("cred");
-  } else {
-    _retval.AssignLiteral("nocred");
-  }
-
-  nsAutoCString spec;
-  rv = aURI->GetSpec(spec);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  _retval.Append(space + scheme + space + host + space + port + space + spec);
-
-  return true;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -631,7 +599,7 @@ nsCORSListenerProxy::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   nsCOMPtr<nsIStreamListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    listener = mOuterListener.forget();
+    listener = std::move(mOuterListener);
   }
   nsresult rv = listener->OnStopRequest(aRequest, aStatusCode);
   mOuterNotificationCallbacks = nullptr;
@@ -826,15 +794,6 @@ bool CheckUpgradeInsecureRequestsPreventsCORS(
     return false;
   }
 
-  nsCOMPtr<nsIURI> principalURI;
-  rv = aRequestingPrincipal->GetURI(getter_AddRefs(principalURI));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  // if the requestingPrincipal does not have a uri, there is nothing to do
-  if (!principalURI) {
-    return false;
-  }
-
   nsCOMPtr<nsIURI> originalURI;
   rv = aChannel->GetOriginalURI(getter_AddRefs(originalURI));
   NS_ENSURE_SUCCESS(rv, false);
@@ -842,7 +801,7 @@ bool CheckUpgradeInsecureRequestsPreventsCORS(
   nsAutoCString principalHost, channelHost, origChannelHost;
 
   // if we can not query a host from the uri, there is nothing to do
-  if (NS_FAILED(principalURI->GetAsciiHost(principalHost)) ||
+  if (NS_FAILED(aRequestingPrincipal->GetAsciiHost(principalHost)) ||
       NS_FAILED(channelURI->GetAsciiHost(channelHost)) ||
       NS_FAILED(originalURI->GetAsciiHost(origChannelHost))) {
     return false;
@@ -1112,27 +1071,27 @@ void nsCORSPreflightListener::AddResultToCache(nsIRequest* aRequest) {
 
   // The "Access-Control-Max-Age" header should return an age in seconds.
   nsAutoCString headerVal;
+  uint32_t age = 0;
   Unused << http->GetResponseHeader(
       NS_LITERAL_CSTRING("Access-Control-Max-Age"), headerVal);
   if (headerVal.IsEmpty()) {
-    return;
-  }
-
-  // Sanitize the string. We only allow 'delta-seconds' as specified by
-  // http://dev.w3.org/2006/waf/access-control (digits 0-9 with no leading or
-  // trailing non-whitespace characters).
-  uint32_t age = 0;
-  nsACString::const_char_iterator iter, end;
-  headerVal.BeginReading(iter);
-  headerVal.EndReading(end);
-  while (iter != end) {
-    if (*iter < '0' || *iter > '9') {
-      return;
+    age = PREFLIGHT_DEFAULT_EXPIRY_SECONDS;
+  } else {
+    // Sanitize the string. We only allow 'delta-seconds' as specified by
+    // http://dev.w3.org/2006/waf/access-control (digits 0-9 with no leading or
+    // trailing non-whitespace characters).
+    nsACString::const_char_iterator iter, end;
+    headerVal.BeginReading(iter);
+    headerVal.EndReading(end);
+    while (iter != end) {
+      if (*iter < '0' || *iter > '9') {
+        return;
+      }
+      age = age * 10 + (*iter - '0');
+      // Cap at 24 hours. This also avoids overflow
+      age = std::min(age, 86400U);
+      ++iter;
     }
-    age = age * 10 + (*iter - '0');
-    // Cap at 24 hours. This also avoids overflow
-    age = std::min(age, 86400U);
-    ++iter;
   }
 
   if (!age || !EnsurePreflightCache()) {
@@ -1290,7 +1249,7 @@ nsresult nsCORSPreflightListener::CheckPreflightRequestApproved(
   bool succeedded;
   rv = http->GetRequestSucceeded(&succeedded);
   if (NS_FAILED(rv) || !succeedded) {
-    LogBlockedRequest(aRequest, "CORSPreflightDidNotSucceed", nullptr,
+    LogBlockedRequest(aRequest, "CORSPreflightDidNotSucceed2", nullptr,
                       nsILoadInfo::BLOCKING_REASON_CORSPREFLIGHTDIDNOTSUCCEED,
                       parentHttpChannel);
     return NS_ERROR_DOM_BAD_URI;
@@ -1362,7 +1321,7 @@ nsresult nsCORSPreflightListener::CheckPreflightRequestApproved(
       const auto& comparator = nsCaseInsensitiveCStringArrayComparator();
       if (!headers.Contains(mPreflightHeaders[i], comparator)) {
         LogBlockedRequest(
-            aRequest, "CORSMissingAllowHeaderFromPreflight",
+            aRequest, "CORSMissingAllowHeaderFromPreflight2",
             NS_ConvertUTF8toUTF16(mPreflightHeaders[i]).get(),
             nsILoadInfo::BLOCKING_REASON_CORSMISSINGALLOWHEADERFROMPREFLIGHT,
             parentHttpChannel);

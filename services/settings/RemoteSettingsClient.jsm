@@ -6,51 +6,22 @@
 
 var EXPORTED_SYMBOLS = ["RemoteSettingsClient"];
 
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
 );
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "Kinto",
-  "resource://services-common/kinto-offline-client.js"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "KintoHttpClient",
-  "resource://services-common/kinto-http-client.js"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "UptakeTelemetry",
-  "resource://services-common/uptake-telemetry.js"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "ClientEnvironmentBase",
-  "resource://gre/modules/components-utils/ClientEnvironment.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "RemoteSettingsWorker",
-  "resource://services-settings/RemoteSettingsWorker.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "Utils",
-  "resource://services-settings/Utils.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "Downloader",
-  "resource://services-settings/Attachments.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "ObjectUtils",
-  "resource://gre/modules/ObjectUtils.jsm"
-);
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ClientEnvironmentBase:
+    "resource://gre/modules/components-utils/ClientEnvironment.jsm",
+  Downloader: "resource://services-settings/Attachments.jsm",
+  Kinto: "resource://services-common/kinto-offline-client.js",
+  KintoHttpClient: "resource://services-common/kinto-http-client.js",
+  ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
+  PerformanceCounters: "resource://gre/modules/PerformanceCounters.jsm",
+  RemoteSettingsWorker: "resource://services-settings/RemoteSettingsWorker.jsm",
+  UptakeTelemetry: "resource://services-common/uptake-telemetry.js",
+  Utils: "resource://services-settings/Utils.jsm",
+});
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
@@ -60,6 +31,13 @@ const DB_NAME = "remote-settings";
 const TELEMETRY_COMPONENT = "remotesettings";
 
 XPCOMUtils.defineLazyGetter(this, "console", () => Utils.log);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gTimingEnabled",
+  "services.settings.enablePerformanceCounters",
+  false
+);
 
 /**
  * cacheProxy returns an object Proxy that will memoize properties of the target.
@@ -76,19 +54,6 @@ function cacheProxy(target) {
       return cache.get(prop);
     },
   });
-}
-
-class ClientEnvironment extends ClientEnvironmentBase {
-  static get appID() {
-    // eg. Firefox is "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}".
-    Services.appinfo.QueryInterface(Ci.nsIXULAppInfo);
-    return Services.appinfo.ID;
-  }
-
-  static get toolkitVersion() {
-    Services.appinfo.QueryInterface(Ci.nsIPlatformInfo);
-    return Services.appinfo.platformVersion;
-  }
 }
 
 /**
@@ -148,6 +113,13 @@ class EventEmitter {
   }
 }
 
+class NetworkOfflineError extends Error {
+  constructor(cid) {
+    super("Network is offline");
+    this.name = "NetworkOfflineError";
+  }
+}
+
 class InvalidSignatureError extends Error {
   constructor(cid) {
     super(`Invalid content signature (${cid})`);
@@ -186,9 +158,12 @@ class AttachmentDownloader extends Downloader {
       return await super.download(record, options);
     } catch (err) {
       // Report download error.
-      const status = /NetworkError/.test(err.message)
-        ? UptakeTelemetry.STATUS.NETWORK_ERROR
-        : UptakeTelemetry.STATUS.DOWNLOAD_ERROR;
+      let status = UptakeTelemetry.STATUS.DOWNLOAD_ERROR;
+      if (Utils.isOffline) {
+        status = UptakeTelemetry.STATUS.NETWORK_OFFLINE_ERROR;
+      } else if (/NetworkError/.test(err.message)) {
+        status = UptakeTelemetry.STATUS.NETWORK_ERROR;
+      }
       // If the file failed to be downloaded, report it as such in Telemetry.
       await UptakeTelemetry.report(TELEMETRY_COMPONENT, status, {
         source: this._client.identifier,
@@ -196,9 +171,27 @@ class AttachmentDownloader extends Downloader {
       throw err;
     }
   }
+
+  /**
+   * Delete all downloaded records attachments.
+   *
+   * Note: the list of attachments to be deleted is based on the
+   * current list of records.
+   */
+  async deleteAll() {
+    const kintoCol = await this._client.openCollection();
+    const { data: allRecords } = await kintoCol.list();
+    await kintoCol.db.close();
+    return Promise.all(
+      allRecords.filter(r => !!r.attachment).map(r => this.delete(r))
+    );
+  }
 }
 
 class RemoteSettingsClient extends EventEmitter {
+  static get NetworkOfflineError() {
+    return NetworkOfflineError;
+  }
   static get InvalidSignatureError() {
     return InvalidSignatureError;
   }
@@ -285,7 +278,6 @@ class RemoteSettingsClient extends EventEmitter {
    */
   async getLastModified() {
     let timestamp = -1;
-
     try {
       const collection = await this.openCollection();
       timestamp = await collection.db.getLastModified();
@@ -337,10 +329,7 @@ class RemoteSettingsClient extends EventEmitter {
         if (await Utils.hasLocalDump(this.bucketName, this.collectionName)) {
           // Since there is a JSON dump, load it as default data.
           console.debug(`${this.identifier} Local DB is empty, load JSON dump`);
-          await RemoteSettingsWorker.importJSONDump(
-            this.bucketName,
-            this.collectionName
-          );
+          await this._importJSONDump();
         } else {
           // There is no JSON dump, force a synchronization from the server.
           console.debug(
@@ -434,6 +423,11 @@ class RemoteSettingsClient extends EventEmitter {
     const startedAt = new Date();
     let reportStatus = null;
     try {
+      // If network is offline, we can't synchronize.
+      if (Utils.isOffline) {
+        throw new RemoteSettingsClient.NetworkOfflineError();
+      }
+
       // Synchronize remote data into a local DB using Kinto.
       const kintoCollection = await this.openCollection();
       let collectionLastModified = await kintoCollection.db.getLastModified();
@@ -444,10 +438,7 @@ class RemoteSettingsClient extends EventEmitter {
       // cold start.
       if (!collectionLastModified && loadDump) {
         try {
-          const imported = await RemoteSettingsWorker.importJSONDump(
-            this.bucketName,
-            this.collectionName
-          );
+          const imported = await this._importJSONDump();
           // The worker only returns an integer. List the imported records to build the sync event.
           if (imported > 0) {
             console.debug(
@@ -541,11 +532,21 @@ class RemoteSettingsClient extends EventEmitter {
           // Local data is outdated.
           // Fetch changes from server, and make sure we overwrite local data.
           const strategy = Kinto.syncStrategy.PULL_ONLY;
+          const startSyncDB = Cu.now() * 1000;
           syncResult = await kintoCollection.sync({
             remote: Utils.SERVER_URL,
             strategy,
             expectedTimestamp,
           });
+          if (gTimingEnabled) {
+            const endSyncDB = Cu.now() * 1000;
+            PerformanceCounters.storeExecutionTime(
+              `remotesettings/${this.identifier}`,
+              "syncDB",
+              endSyncDB - startSyncDB,
+              "duration"
+            );
+          }
           if (!syncResult.ok) {
             // With PULL_ONLY, there cannot be any conflicts, but don't silent it anyway.
             throw new Error("Sync failed");
@@ -638,6 +639,9 @@ class RemoteSettingsClient extends EventEmitter {
       ) {
         reportStatus = UptakeTelemetry.STATUS.CUSTOM_1_ERROR;
       }
+      if (e instanceof RemoteSettingsClient.NetworkOfflineError) {
+        reportStatus = UptakeTelemetry.STATUS.NETWORK_OFFLINE_ERROR;
+      }
       // No specific error was tracked, mark it as unknown.
       if (reportStatus === null) {
         reportStatus = UptakeTelemetry.STATUS.UNKNOWN_ERROR;
@@ -661,6 +665,27 @@ class RemoteSettingsClient extends EventEmitter {
   }
 
   /**
+   * Import the JSON files from services/settings/dump into the local DB.
+   */
+  async _importJSONDump() {
+    const start = Cu.now() * 1000;
+    const result = await RemoteSettingsWorker.importJSONDump(
+      this.bucketName,
+      this.collectionName
+    );
+    if (gTimingEnabled) {
+      const end = Cu.now() * 1000;
+      PerformanceCounters.storeExecutionTime(
+        `remotesettings/${this.identifier}`,
+        "importJSONDump",
+        end - start,
+        "duration"
+      );
+    }
+    return result;
+  }
+
+  /**
    * Fetch the signature info from the collection metadata and verifies that the
    * local set of records has the same.
    *
@@ -678,6 +703,7 @@ class RemoteSettingsClient extends EventEmitter {
     options = {}
   ) {
     const { localRecords = [] } = options;
+    const start = Cu.now() * 1000;
 
     if (!metadata || !metadata.signature) {
       throw new RemoteSettingsClient.MissingSignatureError(this.identifier);
@@ -709,6 +735,15 @@ class RemoteSettingsClient extends EventEmitter {
       ))
     ) {
       throw new RemoteSettingsClient.InvalidSignatureError(this.identifier);
+    }
+    if (gTimingEnabled) {
+      const end = Cu.now() * 1000;
+      PerformanceCounters.storeExecutionTime(
+        `remotesettings/${this.identifier}`,
+        "validateCollectionSignature",
+        end - start,
+        "duration"
+      );
     }
   }
 
@@ -752,10 +787,20 @@ class RemoteSettingsClient extends EventEmitter {
     const localLastModified = await kintoCollection.db.getLastModified();
     if (timestamp >= localLastModified) {
       console.debug(`Import raw data from server for ${this.identifier}`);
+      const start = Cu.now() * 1000;
       await kintoCollection.clear();
       await kintoCollection.loadDump(remoteRecords);
       await kintoCollection.db.saveLastModified(timestamp);
       await kintoCollection.db.saveMetadata(metadata);
+      if (gTimingEnabled) {
+        const end = Cu.now() * 1000;
+        PerformanceCounters.storeExecutionTime(
+          `remotesettings/${this.identifier}`,
+          "loadRawData",
+          end - start,
+          "duration"
+        );
+      }
 
       // Compare local and remote to populate the sync result
       const oldById = new Map(oldData.map(e => [e.id, e]));
@@ -827,9 +872,19 @@ class RemoteSettingsClient extends EventEmitter {
     if (!this.filterFunc) {
       return data;
     }
-    const environment = cacheProxy(ClientEnvironment);
+    const start = Cu.now() * 1000;
+    const environment = cacheProxy(ClientEnvironmentBase);
     const dataPromises = data.map(e => this.filterFunc(e, environment));
     const results = await Promise.all(dataPromises);
+    if (gTimingEnabled) {
+      const end = Cu.now() * 1000;
+      PerformanceCounters.storeExecutionTime(
+        `remotesettings/${this.identifier}`,
+        "filterEntries",
+        end - start,
+        "duration"
+      );
+    }
     return results.filter(Boolean);
   }
 }

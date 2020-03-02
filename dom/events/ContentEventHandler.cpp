@@ -50,7 +50,7 @@ using namespace widget;
 /******************************************************************/
 
 void ContentEventHandler::RawRange::AssertStartIsBeforeOrEqualToEnd() {
-  MOZ_ASSERT(nsContentUtils::ComparePoints(
+  MOZ_ASSERT(*nsContentUtils::ComparePoints(
                  mStart.Container(),
                  static_cast<int32_t>(*mStart.Offset(
                      NodePosition::OffsetFilter::kValidOrInvalidOffsets)),
@@ -961,12 +961,11 @@ nsresult ContentEventHandler::ExpandToClusterBoundary(nsIContent* aContent,
   NS_ASSERTION(*aXPOffset <= aContent->TextLength(), "offset is out of range.");
 
   MOZ_DIAGNOSTIC_ASSERT(mDocument->GetPresShell());
-  RefPtr<nsFrameSelection> fs = mDocument->GetPresShell()->FrameSelection();
   int32_t offsetInFrame;
   CaretAssociationHint hint =
       aForward ? CARET_ASSOCIATE_BEFORE : CARET_ASSOCIATE_AFTER;
-  nsIFrame* frame = fs->GetFrameForNodeOffset(aContent, int32_t(*aXPOffset),
-                                              hint, &offsetInFrame);
+  nsIFrame* frame = nsFrameSelection::GetFrameForNodeOffset(
+      aContent, int32_t(*aXPOffset), hint, &offsetInFrame);
   if (frame) {
     int32_t startOffset, endOffset;
     nsresult rv = frame->GetOffsets(startOffset, endOffset);
@@ -1353,8 +1352,11 @@ nsresult ContentEventHandler::OnQuerySelectedText(
         return NS_ERROR_FAILURE;
       }
 
-      int16_t compare = nsContentUtils::ComparePoints(anchorNode, anchorOffset,
-                                                      focusNode, focusOffset);
+      // The selection's points should always be comparable, independent of the
+      // selection (see nsISelectionController.idl).
+      int16_t compare = *nsContentUtils::ComparePoints(anchorNode, anchorOffset,
+                                                       focusNode, focusOffset);
+
       aEvent->mReply.mReversed = compare > 0;
     }
     // However, if there are 2 or more selection ranges, we have no information

@@ -38,6 +38,7 @@
 #include "vm/JSObject.h"
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
+#include "vm/ToSource.h"  // js::ValueToSource
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
@@ -1169,6 +1170,72 @@ static bool ArraySpeciesCreate(JSContext* cx, HandleObject origArray,
   return true;
 }
 
+JSString* js::ArrayToSource(JSContext* cx, HandleObject obj) {
+  AutoCycleDetector detector(cx, obj);
+  if (!detector.init()) {
+    return nullptr;
+  }
+
+  JSStringBuilder sb(cx);
+
+  if (detector.foundCycle()) {
+    if (!sb.append("[]")) {
+      return nullptr;
+    }
+    return sb.finishString();
+  }
+
+  if (!sb.append('[')) {
+    return nullptr;
+  }
+
+  uint64_t length;
+  if (!GetLengthProperty(cx, obj, &length)) {
+    return nullptr;
+  }
+
+  RootedValue elt(cx);
+  for (uint64_t index = 0; index < length; index++) {
+    bool hole;
+    if (!CheckForInterrupt(cx) ||
+        !HasAndGetElement(cx, obj, index, &hole, &elt)) {
+      return nullptr;
+    }
+
+    /* Get element's character string. */
+    JSString* str;
+    if (hole) {
+      str = cx->runtime()->emptyString;
+    } else {
+      str = ValueToSource(cx, elt);
+      if (!str) {
+        return nullptr;
+      }
+    }
+
+    /* Append element to buffer. */
+    if (!sb.append(str)) {
+      return nullptr;
+    }
+    if (index + 1 != length) {
+      if (!sb.append(", ")) {
+        return nullptr;
+      }
+    } else if (hole) {
+      if (!sb.append(',')) {
+        return nullptr;
+      }
+    }
+  }
+
+  /* Finalize the buffer. */
+  if (!sb.append(']')) {
+    return nullptr;
+  }
+
+  return sb.finishString();
+}
+
 static bool array_toSource(JSContext* cx, unsigned argc, Value* vp) {
   if (!CheckRecursionLimit(cx)) {
     return false;
@@ -1182,71 +1249,8 @@ static bool array_toSource(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   Rooted<JSObject*> obj(cx, &args.thisv().toObject());
-  RootedValue elt(cx);
 
-  AutoCycleDetector detector(cx, obj);
-  if (!detector.init()) {
-    return false;
-  }
-
-  JSStringBuilder sb(cx);
-
-  if (detector.foundCycle()) {
-    if (!sb.append("[]")) {
-      return false;
-    }
-    goto make_string;
-  }
-
-  if (!sb.append('[')) {
-    return false;
-  }
-
-  uint64_t length;
-  if (!GetLengthProperty(cx, obj, &length)) {
-    return false;
-  }
-
-  for (uint64_t index = 0; index < length; index++) {
-    bool hole;
-    if (!CheckForInterrupt(cx) ||
-        !HasAndGetElement(cx, obj, index, &hole, &elt)) {
-      return false;
-    }
-
-    /* Get element's character string. */
-    JSString* str;
-    if (hole) {
-      str = cx->runtime()->emptyString;
-    } else {
-      str = ValueToSource(cx, elt);
-      if (!str) {
-        return false;
-      }
-    }
-
-    /* Append element to buffer. */
-    if (!sb.append(str)) {
-      return false;
-    }
-    if (index + 1 != length) {
-      if (!sb.append(", ")) {
-        return false;
-      }
-    } else if (hole) {
-      if (!sb.append(',')) {
-        return false;
-      }
-    }
-  }
-
-  /* Finalize the buffer. */
-  if (!sb.append(']')) {
-    return false;
-  }
-
-make_string:
-  JSString* str = sb.finishString();
+  JSString* str = ArrayToSource(cx, obj);
   if (!str) {
     return false;
   }
@@ -1661,7 +1665,7 @@ static DenseElementResult ArrayReverseDenseKernel(JSContext* cx,
 
 // ES2017 draft rev 1b0184bc17fc09a8ddcf4aeec9b6d9fcac4eafce
 // 22.1.3.21 Array.prototype.reverse ( )
-bool js::array_reverse(JSContext* cx, unsigned argc, Value* vp) {
+static bool array_reverse(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
       cx, "Array.prototype.reverse", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
@@ -1902,8 +1906,8 @@ static bool ComparatorNumericRightMinusLeft(const NumericElement& a,
   return true;
 }
 
-typedef bool (*ComparatorNumeric)(const NumericElement& a,
-                                  const NumericElement& b, bool* lessOrEqualp);
+using ComparatorNumeric = bool (*)(const NumericElement&, const NumericElement&,
+                                   bool*);
 
 static const ComparatorNumeric SortComparatorNumerics[] = {
     nullptr, nullptr, ComparatorNumericLeftMinusRight,
@@ -1921,8 +1925,7 @@ static bool ComparatorInt32RightMinusLeft(const Value& a, const Value& b,
   return true;
 }
 
-typedef bool (*ComparatorInt32)(const Value& a, const Value& b,
-                                bool* lessOrEqualp);
+using ComparatorInt32 = bool (*)(const Value&, const Value&, bool*);
 
 static const ComparatorInt32 SortComparatorInt32s[] = {
     nullptr, nullptr, ComparatorInt32LeftMinusRight,
@@ -1962,24 +1965,24 @@ static ComparatorMatchResult MatchNumericComparator(JSContext* cx,
   jsbytecode* pc = script->code();
 
   uint16_t arg0, arg1;
-  if (JSOp(*pc) != JSOP_GETARG) {
+  if (JSOp(*pc) != JSOp::GetArg) {
     return Match_None;
   }
   arg0 = GET_ARGNO(pc);
-  pc += JSOP_GETARG_LENGTH;
+  pc += JSOpLength_GetArg;
 
-  if (JSOp(*pc) != JSOP_GETARG) {
+  if (JSOp(*pc) != JSOp::GetArg) {
     return Match_None;
   }
   arg1 = GET_ARGNO(pc);
-  pc += JSOP_GETARG_LENGTH;
+  pc += JSOpLength_GetArg;
 
-  if (JSOp(*pc) != JSOP_SUB) {
+  if (JSOp(*pc) != JSOp::Sub) {
     return Match_None;
   }
-  pc += JSOP_SUB_LENGTH;
+  pc += JSOpLength_Sub;
 
-  if (JSOp(*pc) != JSOP_RETURN) {
+  if (JSOp(*pc) != JSOp::Return) {
     return Match_None;
   }
 
@@ -2652,7 +2655,7 @@ bool js::array_shift(JSContext* cx, unsigned argc, Value* vp) {
 
 // ES2017 draft rev 1b0184bc17fc09a8ddcf4aeec9b6d9fcac4eafce
 // 22.1.3.29 Array.prototype.unshift ( ...items )
-bool js::array_unshift(JSContext* cx, unsigned argc, Value* vp) {
+static bool array_unshift(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
       cx, "Array.prototype.unshift", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
@@ -3239,7 +3242,7 @@ static bool array_splice_impl(JSContext* cx, unsigned argc, Value* vp,
 }
 
 /* ES 2016 draft Mar 25, 2016 22.1.3.26. */
-bool js::array_splice(JSContext* cx, unsigned argc, Value* vp) {
+static bool array_splice(JSContext* cx, unsigned argc, Value* vp) {
   return array_splice_impl(cx, argc, vp, true);
 }
 
@@ -3722,7 +3725,7 @@ static bool array_of(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-const JSJitInfo js::array_splice_info = {
+static const JSJitInfo array_splice_info = {
     {(JSJitGetterOp)array_splice_noRetVal},
     {0}, /* unused */
     {0}, /* unused */
@@ -3952,15 +3955,17 @@ static bool array_proto_finish(JSContext* cx, JS::HandleObject ctor,
 }
 
 static const JSClassOps ArrayObjectClassOps = {
-    array_addProperty, nullptr, /* delProperty */
-    nullptr,                    /* enumerate */
-    nullptr,                    /* resolve */
-    nullptr,                    /* mayResolve */
-    nullptr,                    /* finalize */
-    nullptr,                    /* call */
-    nullptr,                    /* hasInstance */
-    nullptr,                    /* construct */
-    nullptr,                    /* trace */
+    array_addProperty,  // addProperty
+    nullptr,            // delProperty
+    nullptr,            // enumerate
+    nullptr,            // newEnumerate
+    nullptr,            // resolve
+    nullptr,            // mayResolve
+    nullptr,            // finalize
+    nullptr,            // call
+    nullptr,            // hasInstance
+    nullptr,            // construct
+    nullptr,            // trace
 };
 
 static const ClassSpec ArrayObjectClassSpec = {
@@ -4229,6 +4234,19 @@ ArrayObject* js::NewPartlyAllocatedArrayTryUseGroup(JSContext* cx,
                                                                     length);
 }
 
+static bool CanReuseGroupForNewArray(JSObject* obj, JSContext* cx) {
+  if (!obj->is<ArrayObject>()) {
+    return false;
+  }
+  if (obj->as<ArrayObject>().realm() != cx->realm()) {
+    return false;
+  }
+  if (obj->staticPrototype() != cx->global()->maybeGetArrayPrototype()) {
+    return false;
+  }
+  return true;
+}
+
 // Return a new array with the default prototype and specified allocated
 // capacity and length. If possible, try to reuse the group of the input
 // object. The resulting array will either reuse the input object's group or
@@ -4237,11 +4255,7 @@ template <uint32_t maxLength>
 static inline ArrayObject* NewArrayTryReuseGroup(
     JSContext* cx, HandleObject obj, size_t length,
     NewObjectKind newKind = GenericObject) {
-  if (!obj->is<ArrayObject>()) {
-    return NewArray<maxLength>(cx, length, nullptr, newKind);
-  }
-
-  if (obj->staticPrototype() != cx->global()->maybeGetArrayPrototype()) {
+  if (!CanReuseGroupForNewArray(obj, cx)) {
     return NewArray<maxLength>(cx, length, nullptr, newKind);
   }
 

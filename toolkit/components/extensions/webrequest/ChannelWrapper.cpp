@@ -200,15 +200,23 @@ void ChannelWrapper::ClearCachedAttributes() {
   if (!mFiredErrorEvent) {
     ChannelWrapper_Binding::ClearCachedErrorStringValue(this);
   }
+
+  ChannelWrapper_Binding::ClearCachedRequestSizeValue(this);
+  ChannelWrapper_Binding::ClearCachedResponseSizeValue(this);
 }
 
 /*****************************************************************************
  * ...
  *****************************************************************************/
 
-void ChannelWrapper::Cancel(uint32_t aResult, ErrorResult& aRv) {
+void ChannelWrapper::Cancel(uint32_t aResult, uint32_t aReason,
+                            ErrorResult& aRv) {
   nsresult rv = NS_ERROR_UNEXPECTED;
   if (nsCOMPtr<nsIChannel> chan = MaybeChannel()) {
+    nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo();
+    if (aReason > 0 && loadInfo) {
+      loadInfo->SetRequestBlockingReason(aReason);
+    }
     rv = chan->Cancel(nsresult(aResult));
     ErrorCheck();
   }
@@ -1128,6 +1136,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ChannelWrapper,
                                                 DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStub)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ChannelWrapper,

@@ -141,7 +141,7 @@ with only_when(host_is_osx | target_is_osx):
     @imports(_from='biplist', _import='readPlist')
     def macos_sdk(sdk, host):
         sdk_min_version = Version('10.11')
-        sdk_max_version = Version('10.14')
+        sdk_max_version = Version('10.15')
 
         if sdk:
             sdk = sdk[0]
@@ -259,7 +259,7 @@ js_option(env='RUSTC_WRAPPER', nargs=1,
 @imports(_from='textwrap', _import='dedent')
 @imports('os')
 def check_sccache_version(ccache, ccache_is_sccache, rustc_wrapper):
-    sccache_min_version = Version('0.2.12')
+    sccache_min_version = Version('0.2.13')
 
     def check_version(path):
         out = check_cmd_output(path, '--version')
@@ -381,6 +381,7 @@ def try_preprocess(compiler, language, source):
          _import='kernel_preprocessor_checks')
 @imports(_from='mozbuild.configure.constants',
          _import='OS_preprocessor_checks')
+@imports(_from='six', _import='iteritems')
 @imports(_from='textwrap', _import='dedent')
 @imports(_from='__builtin__', _import='Exception')
 def get_compiler_info(compiler, language):
@@ -430,7 +431,7 @@ def get_compiler_info(compiler, language):
         ('KERNEL', kernel_preprocessor_checks),
         ('OS', OS_preprocessor_checks),
     ):
-        for n, (value, condition) in enumerate(preprocessor_checks.iteritems()):
+        for n, (value, condition) in enumerate(iteritems(preprocessor_checks)):
             check += dedent('''\
                 #%(if)s %(condition)s
                 %%%(name)s "%(value)s"
@@ -463,7 +464,7 @@ def get_compiler_info(compiler, language):
     # have non-ASCII characters. Treat the output as bytearray.
     data = {}
     for line in result.splitlines():
-        if line.startswith(b'%'):
+        if line.startswith('%'):
             k, _, v = line.partition(' ')
             k = k.lstrip('%')
             data[k] = v.replace(' ', '').lstrip('"').rstrip('"')
@@ -714,6 +715,7 @@ def toolchain_search_path_for(host_or_target):
             os.path.join(mozbuild_state_path, *rest) for rest in (
                 ['clang', 'bin'],
                 ['cbindgen'],
+                ['dump_syms'],
                 ['nasm'],
                 ['lucetc'],
             )]
@@ -884,6 +886,10 @@ def prepare_flags(host_or_target, macos_sdk):
     return []
 
 
+def minimum_gcc_version():
+    return Version('7.1.0')
+
+
 @template
 def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
              other_c_compiler=None):
@@ -1010,10 +1016,11 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
             if host_or_target.os == 'Android':
                 raise FatalCheckError('GCC is not supported on Android.\n'
                                       'Please use clang from the Android NDK instead.')
-            if info.version < '7.1.0':
+            gcc_version = minimum_gcc_version()
+            if info.version < gcc_version:
                 raise FatalCheckError(
-                    'Only GCC 7.1 or newer is supported (found version %s).'
-                    % info.version)
+                    'Only GCC %d.%d or newer is supported (found version %s).'
+                    % (gcc_version.major, gcc_version.minor, info.version))
 
         if info.type == 'clang-cl':
             if info.version < '8.0.0':
@@ -1180,13 +1187,21 @@ include('compile-checks.configure')
 include('arm.configure', when=depends(target.cpu)(lambda cpu: cpu == 'arm'))
 
 
-@depends(host,
-         host_os_kernel_major_version,
-         target,
-         cxx_compiler.try_run(header='#include_next <inttypes.h>'))
-def check_have_mac_10_14_sdk(host, version, target, value):
+@depends(host, host_os_kernel_major_version, target)
+def needs_macos_sdk_headers_check(host, version, target):
     # Only an issue on Mac OS X 10.14 (and probably above).
-    if host.kernel != 'Darwin' or target.kernel !='Darwin' or version < '18' or value:
+    if host.kernel != 'Darwin' or target.kernel !='Darwin' or version < '18':
+        return
+
+    return True
+
+
+@depends(cxx_compiler.try_run(header='#include_next <inttypes.h>',
+                              check_msg='for macOS SDK headers',
+                              when=needs_macos_sdk_headers_check),
+         when=needs_macos_sdk_headers_check)
+def check_have_mac_10_14_sdk(value):
+    if value:
         return
 
     die('System inttypes.h not found. Please try running '
@@ -1201,6 +1216,45 @@ def check_have_64_bit(have_64_bit, compiler_have_64_bit):
     if have_64_bit != compiler_have_64_bit:
         configure_error('The target compiler does not agree with configure '
                         'about the target bitness.')
+
+
+@depends(cxx_compiler, target)
+def needs_libstdcxx_newness_check(cxx_compiler, target):
+    # We only have to care about this on Linux and MinGW.
+    if cxx_compiler.type == 'clang-cl':
+        return
+
+    if target.kernel not in ('Linux', 'WINNT'):
+        return
+
+    if target.os == 'Android':
+        return
+
+    return True
+
+
+def die_on_old_libstdcxx():
+    die('The libstdc++ in use is not new enough.  Please run '
+        './mach bootstrap to update your compiler, or update your system '
+        'libstdc++ installation.')
+
+try_compile(includes=['cstddef'],
+            body='\n'.join([
+                # _GLIBCXX_RELEASE showed up in libstdc++ 7.
+                '#if defined(__GLIBCXX__) && !defined(_GLIBCXX_RELEASE)',
+                '#  error libstdc++ not new enough',
+                '#endif',
+                '#if defined(_GLIBCXX_RELEASE)',
+                '#  if _GLIBCXX_RELEASE < %d' % minimum_gcc_version().major,
+                '#    error libstdc++ not new enough',
+                '#  else',
+                '     (void) 0',
+                '#  endif',
+                '#endif',
+            ]),
+            check_msg='for new enough STL headers from libstdc++',
+            when=needs_libstdcxx_newness_check,
+            onerror=die_on_old_libstdcxx)
 
 
 @depends(c_compiler, target)
@@ -2092,8 +2146,8 @@ js_option(env='AS', nargs=1, help='Path to the assembler')
 def as_info(target, c_compiler):
     if c_compiler.type == 'clang-cl':
         ml = {
-            'x86': 'ml',
-            'x86_64': 'ml64',
+            'x86': 'ml.exe',
+            'x86_64': 'ml64.exe',
             'aarch64': 'armasm64.exe',
         }.get(target.cpu)
         return namespace(
@@ -2121,7 +2175,7 @@ assembler = check_prog('_AS', input=provided_assembler.program,
 def as_with_flags(as_info, assembler, provided_assembler, c_compiler):
     if provided_assembler:
         return provided_assembler.wrapper + \
-            [provided_assembler.program] + \
+            [assembler] + \
             provided_assembler.flags
 
     if as_info.type == 'masm':

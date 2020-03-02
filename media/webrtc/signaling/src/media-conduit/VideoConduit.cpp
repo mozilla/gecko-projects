@@ -13,6 +13,7 @@
 #include "mozilla/TemplateLib.h"
 #include "mozilla/media/MediaUtils.h"
 #include "mozilla/StaticPrefs_media.h"
+#include "mozilla/UniquePtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIPrefBranch.h"
 #include "nsIGfxInfo.h"
@@ -451,7 +452,7 @@ RefPtr<VideoSessionConduit> VideoSessionConduit::Create(
     return nullptr;
   }
 
-  nsAutoPtr<WebrtcVideoConduit> obj(new WebrtcVideoConduit(aCall, aStsThread));
+  auto obj = MakeRefPtr<WebrtcVideoConduit>(aCall, aStsThread);
   if (obj->Init() != kMediaConduitNoError) {
     CSFLogError(LOGTAG, "%s VideoConduit Init Failed ", __FUNCTION__);
     return nullptr;
@@ -486,6 +487,7 @@ WebrtcVideoConduit::WebrtcVideoConduit(
       mVideoStatsTimer(NS_NewTimer()) {
   mCall->RegisterConduit(this);
   mRecvStreamConfig.renderer = this;
+  mRecvStreamConfig.rtcp_event_observer = this;
 }
 
 WebrtcVideoConduit::~WebrtcVideoConduit() {
@@ -940,7 +942,7 @@ MediaConduitErrorCode WebrtcVideoConduit::ConfigureSendMediaCodec(
       codecConfig->RtcpFbNackIsSet("") ? 1000 : 0;
 
   // Copy the applied config for future reference.
-  mCurSendCodecConfig = new VideoCodecConfig(*codecConfig);
+  mCurSendCodecConfig = MakeUnique<VideoCodecConfig>(*codecConfig);
 
   mSendStreamConfig.rtp.rids.clear();
   bool has_rid = false;
@@ -1786,14 +1788,17 @@ void WebrtcVideoConduit::SelectSendResolution(unsigned short width,
     // Limit resolution to max-fs
     if (mCurSendCodecConfig->mEncodingConstraints.maxFs) {
       // max-fs is in macroblocks, convert to pixels
-      max_fs = std::min(max_fs, static_cast<int>(mCurSendCodecConfig->mEncodingConstraints.maxFs * (16 * 16)));
+      max_fs = std::min(
+          max_fs,
+          static_cast<int>(mCurSendCodecConfig->mEncodingConstraints.maxFs *
+                           (16 * 16)));
     }
     mVideoAdapter->OnResolutionFramerateRequest(
         rtc::Optional<int>(), max_fs, std::numeric_limits<int>::max());
   }
 
   unsigned int framerate = SelectSendFrameRate(
-      mCurSendCodecConfig, mSendingFramerate, width, height);
+      mCurSendCodecConfig.get(), mSendingFramerate, width, height);
   if (mSendingFramerate != framerate) {
     CSFLogDebug(LOGTAG, "%s: framerate changing to %u (from %u)", __FUNCTION__,
                 framerate, mSendingFramerate);
@@ -1885,7 +1890,8 @@ MediaConduitErrorCode WebrtcVideoConduit::SendVideoFrame(
                   this, __FUNCTION__, mSendStreamConfig.rtp.ssrcs.front(),
                   mSendStreamConfig.rtp.ssrcs.front());
 
-    if (mUpdateResolution || frame.width() != mLastWidth || frame.height() != mLastHeight) {
+    if (mUpdateResolution || frame.width() != mLastWidth ||
+        frame.height() != mLastHeight) {
       // See if we need to recalculate what we're sending.
       CSFLogVerbose(LOGTAG, "%s: call SelectSendResolution with %ux%u",
                     __FUNCTION__, frame.width(), frame.height());
@@ -2286,6 +2292,34 @@ uint64_t WebrtcVideoConduit::MozVideoLatencyAvg() {
   mTransportMonitor.AssertCurrentThreadIn();
 
   return mVideoLatencyAvg / sRoundingPadding;
+}
+
+void WebrtcVideoConduit::OnRtcpBye() {
+  RefPtr<WebrtcVideoConduit> self = this;
+  NS_DispatchToMainThread(media::NewRunnableFrom([self]() mutable {
+    MOZ_ASSERT(NS_IsMainThread());
+    if (self->mRtcpEventObserver) {
+      self->mRtcpEventObserver->OnRtcpBye();
+    }
+    return NS_OK;
+  }));
+}
+
+void WebrtcVideoConduit::OnRtcpTimeout() {
+  RefPtr<WebrtcVideoConduit> self = this;
+  NS_DispatchToMainThread(media::NewRunnableFrom([self]() mutable {
+    MOZ_ASSERT(NS_IsMainThread());
+    if (self->mRtcpEventObserver) {
+      self->mRtcpEventObserver->OnRtcpTimeout();
+    }
+    return NS_OK;
+  }));
+}
+
+void WebrtcVideoConduit::SetRtcpEventObserver(
+    mozilla::RtcpEventObserver* observer) {
+  MOZ_ASSERT(NS_IsMainThread());
+  mRtcpEventObserver = observer;
 }
 
 uint64_t WebrtcVideoConduit::CodecPluginID() {

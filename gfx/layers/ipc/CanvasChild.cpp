@@ -12,6 +12,7 @@
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/layers/CanvasDrawEventRecorder.h"
+#include "nsIObserverService.h"
 #include "RecordedCanvasEventImpl.h"
 
 namespace mozilla {
@@ -26,7 +27,7 @@ class RingBufferWriterServices final
   ~RingBufferWriterServices() final = default;
 
   bool ReaderClosed() final {
-    return mCanvasChild->GetIPCChannel()->Unsound_IsClosed();
+    return !mCanvasChild->GetIPCChannel()->CanSend();
   }
 
   void ResumeReader() final { mCanvasChild->ResumeTranslation(); }
@@ -111,6 +112,16 @@ CanvasChild::CanvasChild(Endpoint<PCanvasChild>&& aEndpoint) {
 }
 
 CanvasChild::~CanvasChild() {}
+
+ipc::IPCResult CanvasChild::RecvNotifyDeviceChanged() {
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->NotifyObservers(nullptr, "canvas-device-reset", nullptr);
+  }
+
+  mRecorder->RecordEvent(RecordedDeviceChangeAcknowledged());
+  return IPC_OK();
+}
 
 void CanvasChild::EnsureRecorder(TextureType aTextureType) {
   if (!mRecorder) {

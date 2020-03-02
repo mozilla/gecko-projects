@@ -48,6 +48,7 @@ ExternalHelperAppParent::ExternalHelperAppParent(
       mIPCClosed(false),
       mLoadFlags(0),
       mStatus(NS_OK),
+      mCanceled(false),
       mContentLength(aContentLength),
       mWasFileChannel(aWasFileChannel) {
   mContentDispositionHeader = aContentDispositionHeader;
@@ -79,14 +80,17 @@ void ExternalHelperAppParent::Init(
     SetPropertyAsInterface(NS_LITERAL_STRING("docshell.internalReferrer"),
                            referrer);
 
-  WindowGlobalParent* parent = aContext->Canonical()->GetCurrentWindowGlobal();
-  if (parent) {
-    RefPtr<BrowserParent> browser = parent->GetBrowserParent();
-    if (browser) {
-      bool isPrivate = false;
-      nsCOMPtr<nsILoadContext> loadContext = browser->GetLoadContext();
-      loadContext->GetUsePrivateBrowsing(&isPrivate);
-      SetPrivate(isPrivate);
+  if (aContext) {
+    WindowGlobalParent* parent =
+        aContext->Canonical()->GetCurrentWindowGlobal();
+    if (parent) {
+      RefPtr<BrowserParent> browser = parent->GetBrowserParent();
+      if (browser) {
+        bool isPrivate = false;
+        nsCOMPtr<nsILoadContext> loadContext = browser->GetLoadContext();
+        loadContext->GetUsePrivateBrowsing(&isPrivate);
+        SetPrivate(isPrivate);
+      }
     }
   }
 
@@ -217,8 +221,15 @@ ExternalHelperAppParent::GetStatus(nsresult* aResult) {
 
 NS_IMETHODIMP
 ExternalHelperAppParent::Cancel(nsresult aStatus) {
+  mCanceled = true;
   mStatus = aStatus;
   Unused << SendCancel(aStatus);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ExternalHelperAppParent::GetCanceled(bool* aCanceled) {
+  *aCanceled = mCanceled;
   return NS_OK;
 }
 
@@ -269,6 +280,16 @@ NS_IMETHODIMP
 ExternalHelperAppParent::SetLoadFlags(nsLoadFlags aLoadFlags) {
   mLoadFlags = aLoadFlags;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+ExternalHelperAppParent::GetTRRMode(nsIRequest::TRRMode* aTRRMode) {
+  return GetTRRModeImpl(aTRRMode);
+}
+
+NS_IMETHODIMP
+ExternalHelperAppParent::SetTRRMode(nsIRequest::TRRMode aTRRMode) {
+  return SetTRRModeImpl(aTRRMode);
 }
 
 NS_IMETHODIMP

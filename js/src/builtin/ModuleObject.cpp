@@ -23,6 +23,7 @@
 #include "vm/AsyncIteration.h"
 #include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/ModuleBuilder.h"       // js::ModuleBuilder
+#include "vm/PromiseObject.h"       // js::PromiseObject
 #include "vm/SelfHosting.h"
 
 #include "vm/JSObject-inl.h"
@@ -702,17 +703,18 @@ void FunctionDeclaration::trace(JSTracer* trc) {
 // ModuleObject
 
 /* static */ const JSClassOps ModuleObject::classOps_ = {
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* enumerate   */
-    nullptr, /* newEnumerate */
-    nullptr, /* resolve     */
-    nullptr, /* mayResolve  */
-    ModuleObject::finalize,
-    nullptr, /* call        */
-    nullptr, /* hasInstance */
-    nullptr, /* construct   */
-    ModuleObject::trace};
+    nullptr,                 // addProperty
+    nullptr,                 // delProperty
+    nullptr,                 // enumerate
+    nullptr,                 // newEnumerate
+    nullptr,                 // resolve
+    nullptr,                 // mayResolve
+    ModuleObject::finalize,  // finalize
+    nullptr,                 // call
+    nullptr,                 // hasInstance
+    nullptr,                 // construct
+    ModuleObject::trace,     // trace
+};
 
 /* static */ const JSClass ModuleObject::class_ = {
     "Module",
@@ -833,10 +835,9 @@ FunctionDeclarationVector* ModuleObject::functionDeclarations() {
   return static_cast<FunctionDeclarationVector*>(value.toPrivate());
 }
 
-void ModuleObject::init(HandleScript script) {
+void ModuleObject::initScriptSlots(HandleScript script) {
   MOZ_ASSERT(script);
   initReservedSlot(ScriptSlot, PrivateGCThingValue(script));
-  initReservedSlot(StatusSlot, Int32Value(MODULE_STATUS_UNINSTANTIATED));
   initReservedSlot(ScriptSourceObjectSlot,
                    ObjectValue(*script->sourceObject()));
 }
@@ -844,6 +845,10 @@ void ModuleObject::init(HandleScript script) {
 void ModuleObject::setInitialEnvironment(
     HandleModuleEnvironmentObject initialEnvironment) {
   initReservedSlot(EnvironmentSlot, ObjectValue(*initialEnvironment));
+}
+
+void ModuleObject::initStatusSlot() {
+  initReservedSlot(StatusSlot, Int32Value(MODULE_STATUS_UNINSTANTIATED));
 }
 
 void ModuleObject::initImportExportData(HandleArrayObject requestedModules,
@@ -857,7 +862,6 @@ void ModuleObject::initImportExportData(HandleArrayObject requestedModules,
   initReservedSlot(IndirectExportEntriesSlot,
                    ObjectValue(*indirectExportEntries));
   initReservedSlot(StarExportEntriesSlot, ObjectValue(*starExportEntries));
-  setReservedSlot(StatusSlot, Int32Value(MODULE_STATUS_UNINSTANTIATED));
 }
 
 static bool FreezeObjectProperty(JSContext* cx, HandleNativeObject obj,
@@ -929,9 +933,13 @@ void ModuleObject::fixEnvironmentsAfterRealmMerge() {
 
 JSScript* ModuleObject::maybeScript() const {
   Value value = getReservedSlot(ScriptSlot);
-  if (value.isUndefined()) return nullptr;
-
-  return value.toGCThing()->as<JSScript>();
+  if (value.isUndefined()) {
+    return nullptr;
+  }
+  BaseScript* script = value.toGCThing()->as<BaseScript>();
+  MOZ_ASSERT(script->hasBytecode(),
+             "Module scripts should always have bytecode");
+  return static_cast<JSScript*>(script);
 }
 
 JSScript* ModuleObject::script() const {
@@ -1201,10 +1209,9 @@ bool GlobalObject::initModuleProto(JSContext* cx,
 ///////////////////////////////////////////////////////////////////////////
 // ModuleBuilder
 
-ModuleBuilder::ModuleBuilder(JSContext* cx, HandleModuleObject module,
+ModuleBuilder::ModuleBuilder(JSContext* cx,
                              const frontend::EitherParser& eitherParser)
     : cx_(cx),
-      module_(cx, module),
       eitherParser_(eitherParser),
       requestedModuleSpecifiers_(cx, AtomSet(cx)),
       requestedModules_(cx, RequestedModuleVector(cx)),
@@ -1257,7 +1264,7 @@ bool ModuleBuilder::buildTables() {
   return true;
 }
 
-bool ModuleBuilder::initModule() {
+bool ModuleBuilder::initModule(JS::Handle<ModuleObject*> module) {
   RootedArrayObject requestedModules(cx_,
                                      js::CreateArray(cx_, requestedModules_));
   if (!requestedModules) {
@@ -1287,9 +1294,9 @@ bool ModuleBuilder::initModule() {
     return false;
   }
 
-  module_->initImportExportData(requestedModules, importEntries,
-                                localExportEntries, indirectExportEntries,
-                                starExportEntries);
+  module->initImportExportData(requestedModules, importEntries,
+                               localExportEntries, indirectExportEntries,
+                               starExportEntries);
 
   return true;
 }
@@ -1995,7 +2002,8 @@ XDRResult js::XDRModuleObject(XDRState<mode>* xdr,
   MOZ_TRY(XDRScript(xdr, enclosingScope, nullptr, module, &script));
 
   if (mode == XDR_DECODE) {
-    module->init(script);
+    module->initScriptSlots(script);
+    module->initStatusSlot();
   }
 
   /* Environment Slot */

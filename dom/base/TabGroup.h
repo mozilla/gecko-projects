@@ -95,32 +95,11 @@ class TabGroup final : public SchedulerGroup,
 
   Iterator Iter() { return mDocGroups.Iter(); }
 
-  // Returns the size of the set of "similar-origin" DocGroups. To
-  // only consider DocGroups with at least one active document, call
-  // Count with 'aActiveOnly' = true
-  uint32_t Count(bool aActiveOnly = false) const;
-
   const nsTArray<nsPIDOMWindowOuter*>& GetWindows() { return mWindows; }
 
   // This method is always safe to call off the main thread. The nsIEventTarget
   // can always be used off the main thread.
   nsISerialEventTarget* EventTargetFor(TaskCategory aCategory) const override;
-
-  void WindowChangedBackgroundStatus(bool aIsNowBackground);
-
-  // Returns true if all of the TabGroup's top-level windows are in
-  // the background.
-  bool IsBackground() const override;
-
-  // Increase/Decrease the number of IndexedDB transactions/databases for the
-  // decision making of the preemption in the scheduler.
-  Atomic<uint32_t>& IndexedDBTransactionCounter() {
-    return mNumOfIndexedDBTransactions;
-  }
-
-  Atomic<uint32_t>& IndexedDBDatabaseCounter() {
-    return mNumOfIndexedDBDatabases;
-  }
 
   static LinkedList<TabGroup>* GetTabGroupList() { return sTabGroups; }
 
@@ -137,14 +116,11 @@ class TabGroup final : public SchedulerGroup,
   // Thread-safe members
   Atomic<bool> mLastWindowLeft;
   Atomic<bool> mThrottledQueuesInitialized;
-  Atomic<uint32_t> mNumOfIndexedDBTransactions;
-  Atomic<uint32_t> mNumOfIndexedDBDatabases;
   const bool mIsChrome;
 
   // Main thread only
   DocGroupMap mDocGroups;
   nsTArray<nsPIDOMWindowOuter*> mWindows;
-  uint32_t mForegroundCount;
 
   static LinkedList<TabGroup>* sTabGroups;
 };

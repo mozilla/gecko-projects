@@ -169,10 +169,9 @@ class FreeSpan {
  * <-------------------------> = first thing offset
  */
 class Arena {
-  static JS_FRIEND_DATA const uint32_t ThingSizes[];
-  static JS_FRIEND_DATA const uint32_t FirstThingOffsets[];
-  static JS_FRIEND_DATA const uint32_t ThingsPerArena[];
-
+  static JS_FRIEND_DATA const uint8_t ThingSizes[];
+  static JS_FRIEND_DATA const uint8_t FirstThingOffsets[];
+  static JS_FRIEND_DATA const uint8_t ThingsPerArena[];
   /*
    * The first span of free things in the arena. Most of these spans are
    * stored as offsets in free regions of the data array, and most operations
@@ -436,6 +435,7 @@ class Arena {
   size_t finalize(JSFreeOp* fop, AllocKind thingKind, size_t thingSize);
 
   static void staticAsserts();
+  static void checkLookupTables();
 
   void unmarkAll();
   void unmarkPreMarkedFreeCells();
@@ -720,7 +720,7 @@ static_assert(ArenaBitmapBytes * ArenasPerChunk == sizeof(ChunkBitmap),
 static_assert(js::gc::ChunkMarkBitmapBits == ArenaBitmapBits * ArenasPerChunk,
               "Ensure that the mark bitmap has the right number of bits.");
 
-typedef BitArray<ArenasPerChunk> PerArenaBitmap;
+using PerArenaBitmap = BitArray<ArenasPerChunk>;
 
 const size_t ChunkPadSize = ChunkSize - (sizeof(Arena) * ArenasPerChunk) -
                             sizeof(ChunkBitmap) - sizeof(PerArenaBitmap) -

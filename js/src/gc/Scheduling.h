@@ -653,6 +653,12 @@ class GCSchedulingState {
   MainThreadOrGCTaskData<bool> inHighFrequencyGCMode_;
 
  public:
+  /*
+   * Influences the GC thresholds for the atoms zone to discourage collection of
+   * this zone during page load.
+   */
+  MainThreadOrGCTaskData<bool> inPageLoad;
+
   GCSchedulingState() : inHighFrequencyGCMode_(false) {}
 
   bool inHighFrequencyGCMode() const { return inHighFrequencyGCMode_; }
@@ -674,9 +680,7 @@ struct TriggerResult {
   size_t thresholdBytes;
 };
 
-using AtomicByteCount =
-    mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
-                    mozilla::recordreplay::Behavior::DontPreserve>;
+using AtomicByteCount = mozilla::Atomic<size_t, mozilla::ReleaseAcquire>;
 
 /*
  * Tracks the size of allocated data. This is used for both GC and malloc data.
@@ -773,7 +777,8 @@ class GCHeapThreshold : public HeapThreshold {
  public:
   void updateAfterGC(size_t lastBytes, JSGCInvocationKind gckind,
                      const GCSchedulingTunables& tunables,
-                     const GCSchedulingState& state, const AutoLockGC& lock);
+                     const GCSchedulingState& state, bool isAtomsZone,
+                     const AutoLockGC& lock);
 
  private:
   static float computeZoneHeapGrowthFactorForHeapSize(

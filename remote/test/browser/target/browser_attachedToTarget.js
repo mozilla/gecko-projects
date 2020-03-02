@@ -4,9 +4,8 @@
 "use strict";
 
 add_task(
-  async function attachedPageTarget({ Target }) {
-    await getDiscoveredTargets(Target);
-
+  async function attachedPageTarget({ client }) {
+    const { Target } = client;
     const { targetInfo } = await openTab(Target);
 
     info("Attach new page target");

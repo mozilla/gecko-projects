@@ -6,6 +6,8 @@
 
 #include "mozilla/dom/JSWindowActor.h"
 #include "mozilla/dom/JSWindowActorBinding.h"
+
+#include "mozilla/Telemetry.h"
 #include "mozilla/dom/ClonedErrorHolder.h"
 #include "mozilla/dom/ClonedErrorHolderBinding.h"
 #include "mozilla/dom/DOMException.h"
@@ -15,6 +17,7 @@
 #include "mozilla/dom/Promise.h"
 #include "js/Promise.h"
 #include "xpcprivate.h"
+#include "nsASCIIMask.h"
 
 namespace mozilla {
 namespace dom {
@@ -55,6 +58,8 @@ void JSWindowActor::AfterDestroy() {
 }
 
 void JSWindowActor::InvokeCallback(CallbackFunction callback) {
+  MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
+
   AutoEntryScript aes(GetParentObject(), "JSWindowActor destroy callback");
   JSContext* cx = aes.cx();
   MozJSWindowActorCallbacks callbacksHolder;
@@ -81,6 +86,8 @@ void JSWindowActor::InvokeCallback(CallbackFunction callback) {
 }
 
 nsresult JSWindowActor::QueryInterfaceActor(const nsIID& aIID, void** aPtr) {
+  MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
+
   if (!mWrappedJS) {
     AutoEntryScript aes(GetParentObject(), "JSWindowActor query interface");
     JSContext* cx = aes.cx();
@@ -101,6 +108,8 @@ nsresult JSWindowActor::QueryInterfaceActor(const nsIID& aIID, void** aPtr) {
 }
 
 void JSWindowActor::RejectPendingQueries() {
+  MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
+
   // Take our queries out, in case somehow rejecting promises can trigger
   // additions or removals.
   nsRefPtrHashtable<nsUint64HashKey, Promise> pendingQueries;
@@ -108,6 +117,33 @@ void JSWindowActor::RejectPendingQueries() {
   for (auto iter = pendingQueries.Iter(); !iter.Done(); iter.Next()) {
     iter.Data()->MaybeReject(NS_ERROR_NOT_AVAILABLE);
   }
+}
+
+/* static */
+bool JSWindowActor::AllowMessage(const JSWindowActorMessageMeta& aMetadata,
+                                 size_t aDataLength) {
+  // A message includes more than structured clone data, so subtract
+  // 20KB to make it more likely that a message within this bound won't
+  // result in an overly large IPC message.
+  static const size_t kMaxMessageSize =
+      IPC::Channel::kMaximumMessageSize - 20 * 1024;
+  if (aDataLength < kMaxMessageSize) {
+    return true;
+  }
+
+  nsAutoString messageName(aMetadata.actorName());
+  messageName.AppendLiteral("::");
+  messageName.Append(aMetadata.messageName());
+
+  // Remove digits to avoid spamming telemetry if anybody is dynamically
+  // generating message names with numbers in them.
+  messageName.StripTaggedASCII(ASCIIMask::Mask0to9());
+
+  Telemetry::ScalarAdd(
+      Telemetry::ScalarID::DOM_IPC_REJECTED_WINDOW_ACTOR_MESSAGE, messageName,
+      1);
+
+  return false;
 }
 
 void JSWindowActor::SetName(const nsAString& aName) {
@@ -189,7 +225,7 @@ already_AddRefed<Promise> JSWindowActor::SendQuery(
   meta.queryId() = mNextQueryId++;
   meta.kind() = JSWindowActorMessageKind::Query;
 
-  mPendingQueries.Put(meta.queryId(), promise);
+  mPendingQueries.Put(meta.queryId(), RefPtr{promise});
 
   SendRawMessage(meta, std::move(data), CaptureJSStack(aCx), aRv);
   return promise.forget();
@@ -207,6 +243,8 @@ already_AddRefed<Promise> JSWindowActor::SendQuery(
 void JSWindowActor::ReceiveRawMessage(const JSWindowActorMessageMeta& aMetadata,
                                       ipc::StructuredCloneData&& aData,
                                       ipc::StructuredCloneData&& aStack) {
+  MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
+
   AutoEntryScript aes(GetParentObject(), "JSWindowActor message handler");
   JSContext* cx = aes.cx();
 
@@ -250,9 +288,7 @@ void JSWindowActor::ReceiveRawMessage(const JSWindowActorMessageMeta& aMetadata,
       MOZ_ASSERT_UNREACHABLE();
   }
 
-  if (NS_WARN_IF(error.Failed())) {
-    MOZ_ALWAYS_TRUE(error.MaybeSetPendingException(cx));
-  }
+  Unused << error.MaybeSetPendingException(cx);
 }
 
 void JSWindowActor::ReceiveMessageOrQuery(
@@ -289,17 +325,18 @@ void JSWindowActor::ReceiveMessageOrQuery(
   RefPtr<MessageListener> messageListener =
       new MessageListener(self, global, nullptr, nullptr);
   messageListener->ReceiveMessage(argument, &retval, aRv,
-                                  "JSWindowActor receive message");
+                                  "JSWindowActor receive message",
+                                  MessageListener::eRethrowExceptions);
 
   // If we have a promise, resolve or reject it respectively.
   if (promise) {
     if (aRv.Failed()) {
       if (aRv.IsUncatchableException()) {
         aRv.SuppressException();
-        promise->MaybeRejectWithDOMException(
-            NS_ERROR_FAILURE, "Message handler threw uncatchable exception");
+        promise->MaybeRejectWithTimeoutError(
+            "Message handler threw uncatchable exception");
       } else {
-        promise->MaybeReject(aRv);
+        promise->MaybeReject(std::move(aRv));
       }
     } else {
       promise->MaybeResolve(retval);

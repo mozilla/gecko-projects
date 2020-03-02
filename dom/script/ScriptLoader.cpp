@@ -323,11 +323,13 @@ nsresult ScriptLoader::CheckContentPolicy(Document* aDocument,
   // snapshot the nonce at load start time for performing CSP checks
   if (contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_SCRIPT ||
       contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_MODULE) {
-    nsCOMPtr<Element> element = do_QueryInterface(aContext);
-    if (element && element->IsHTMLElement()) {
-      nsAutoString cspNonce;
-      element->GetAttribute(NS_LITERAL_STRING("nonce"), cspNonce);
-      secCheckLoadInfo->SetCspNonce(cspNonce);
+    nsCOMPtr<nsINode> node = do_QueryInterface(aContext);
+    if (node) {
+      nsString* cspNonce =
+          static_cast<nsString*>(node->GetProperty(nsGkAtoms::nonce));
+      if (cspNonce) {
+        secCheckLoadInfo->SetCspNonce(*cspNonce);
+      }
     }
   }
 
@@ -393,7 +395,8 @@ void ScriptLoader::SetModuleFetchStarted(ModuleLoadRequest* aRequest) {
 
   MOZ_ASSERT(aRequest->IsLoading());
   MOZ_ASSERT(!ModuleMapContainsURL(aRequest->mURI));
-  mFetchingModules.Put(aRequest->mURI, nullptr);
+  mFetchingModules.Put(aRequest->mURI,
+                       RefPtr<GenericNonExclusivePromise::Private>{});
 }
 
 void ScriptLoader::SetModuleFetchFinishedAndResumeWaitingRequests(
@@ -416,7 +419,7 @@ void ScriptLoader::SetModuleFetchFinishedAndResumeWaitingRequests(
   RefPtr<ModuleScript> moduleScript(aRequest->mModuleScript);
   MOZ_ASSERT(NS_FAILED(aResult) == !moduleScript);
 
-  mFetchedModules.Put(aRequest->mURI, moduleScript);
+  mFetchedModules.Put(aRequest->mURI, RefPtr{moduleScript});
 
   if (promise) {
     if (moduleScript) {
@@ -1321,12 +1324,13 @@ nsresult ScriptLoader::StartLoad(ScriptLoadRequest* aRequest) {
   // snapshot the nonce at load start time for performing CSP checks
   if (contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_SCRIPT ||
       contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_MODULE) {
-    nsCOMPtr<Element> element = do_QueryInterface(context);
-    if (element && element->IsHTMLElement()) {
-      nsAutoString cspNonce;
-      element->GetAttribute(NS_LITERAL_STRING("nonce"), cspNonce);
-      nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
-      loadInfo->SetCspNonce(cspNonce);
+    if (context) {
+      nsString* cspNonce =
+          static_cast<nsString*>(context->GetProperty(nsGkAtoms::nonce));
+      if (cspNonce) {
+        nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+        loadInfo->SetCspNonce(*cspNonce);
+      }
     }
   }
 
@@ -1496,7 +1500,14 @@ static bool CSPAllowsInlineScript(nsIScriptElement* aElement,
   // query the nonce
   nsCOMPtr<Element> scriptContent = do_QueryInterface(aElement);
   nsAutoString nonce;
-  scriptContent->GetAttr(kNameSpaceID_None, nsGkAtoms::nonce, nonce);
+  if (scriptContent) {
+    nsString* cspNonce =
+        static_cast<nsString*>(scriptContent->GetProperty(nsGkAtoms::nonce));
+    if (cspNonce) {
+      nonce = *cspNonce;
+    }
+  }
+
   bool parserCreated =
       aElement->GetParserCreated() != mozilla::dom::NOT_FROM_PARSER;
 
@@ -2028,8 +2039,8 @@ NotifyOffThreadScriptLoadCompletedRunnable::Run() {
 
   // We want these to be dropped on the main thread, once we return from this
   // function.
-  RefPtr<ScriptLoadRequest> request = mRequest.forget();
-  RefPtr<ScriptLoader> loader = mLoader.forget();
+  RefPtr<ScriptLoadRequest> request = std::move(mRequest);
+  RefPtr<ScriptLoader> loader = std::move(mLoader);
 
   request->mOffThreadToken = mToken;
   nsresult rv = loader->ProcessOffThreadRequest(request);
@@ -2573,29 +2584,6 @@ class MOZ_RAII AutoSetProcessingScriptTag {
   ~AutoSetProcessingScriptTag() { mContext->SetProcessingScriptTag(mOldTag); }
 };
 
-static void ReportStreamAndParseTelemetry(JS::Handle<JSScript*> aScript,
-                                          TimeDuration aStreamingTime) {
-  using namespace mozilla::Telemetry;
-  if (!aStreamingTime) {
-    Accumulate(DOM_SCRIPT_IS_STREAMED, false);
-    return;
-  }
-  Accumulate(DOM_SCRIPT_IS_STREAMED, true);
-  TimeDuration parseTime;
-  TimeDuration emitTime;
-  JS_ReportFirstCompileTime(aScript, parseTime, emitTime);
-
-  double st = aStreamingTime.ToMilliseconds();
-  double pt = parseTime.ToMilliseconds();
-  double et = emitTime.ToMilliseconds();
-  double total = st + pt + et;
-  double spt = st + std::max(pt - st, double(0)) + et;
-  Accumulate(DOM_SCRIPT_LOAD_STREAM_TIME_PERCENT, 100 * st / total);
-  Accumulate(DOM_SCRIPT_LOAD_PARSE_TIME_PERCENT, 100 * pt / total);
-  Accumulate(DOM_SCRIPT_LOAD_EMIT_TIME_PERCENT, 100 * et / total);
-  Accumulate(DOM_SCRIPT_LOAD_STREAMPARSE_ESTIMATE_PERCENT, 100 * spt / total);
-}
-
 static nsresult ExecuteCompiledScript(JSContext* aCx,
                                       ScriptLoadRequest* aRequest,
                                       nsJSUtils::ExecutionContext& aExec) {
@@ -2605,11 +2593,6 @@ static nsresult ExecuteCompiledScript(JSContext* aCx,
     // disabled for the global.
     return NS_OK;
   }
-
-  // Report telemetry about streaming, parsing and emitting code for the given
-  // script. These telemetry are used to analyze whether it would be beneficial
-  // to use a streaming parser.
-  ReportStreamAndParseTelemetry(script, aRequest->mStreamingTime);
 
   // Create a ClassicScript object and associate it with the JSScript.
   RefPtr<ClassicScript> classicScript =
@@ -2702,8 +2685,8 @@ nsresult ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest) {
 #endif
   nsAutoCString profilerLabelString;
   GetProfilerLabelForRequest(aRequest, profilerLabelString);
-  AUTO_PROFILER_TEXT_MARKER_DOCSHELL("Script", profilerLabelString, JS,
-                                     docShell);
+  AUTO_PROFILER_TEXT_MARKER_DOCSHELL("ScriptEvaluation", profilerLabelString,
+                                     JS, docShell);
 
   // New script entry point required, due to the "Create a script" sub-step of
   // http://www.whatwg.org/specs/web-apps/current-work/#execute-the-script-block
@@ -3512,6 +3495,9 @@ void ScriptLoader::HandleLoadError(ScriptLoadRequest* aRequest,
       if (aRequest->isInList()) {
         RefPtr<ScriptLoadRequest> req = mDynamicImportRequests.Steal(aRequest);
         modReq->Cancel();
+        // FinishDynamicImport must happen exactly once for each dynamic import
+        // request. If the load is aborted we do it when we remove the request
+        // from mDynamicImportRequests.
         FinishDynamicImport(modReq, aResult);
       }
     } else {
@@ -3714,8 +3700,12 @@ void ScriptLoader::ParsingComplete(bool aTerminated) {
     for (ScriptLoadRequest* req = mDynamicImportRequests.getFirst(); req;
          req = req->getNext()) {
       req->Cancel();
+      // FinishDynamicImport must happen exactly once for each dynamic import
+      // request. If the load is aborted we do it when we remove the request
+      // from mDynamicImportRequests.
       FinishDynamicImport(req->AsModuleRequest(), NS_ERROR_ABORT);
     }
+    mDynamicImportRequests.Clear();
 
     if (mParserBlockingRequest) {
       mParserBlockingRequest->Cancel();

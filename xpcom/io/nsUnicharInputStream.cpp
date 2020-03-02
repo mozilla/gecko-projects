@@ -8,7 +8,6 @@
 #include "nsIInputStream.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 #include "nsCRT.h"
 #include "nsStreamUtils.h"
 #include "nsConverterInputStream.h"
@@ -35,7 +34,7 @@ class StringUnicharInputStream final : public nsIUnicharInputStream {
   uint32_t mLen;
 
  private:
-  ~StringUnicharInputStream() {}
+  ~StringUnicharInputStream() = default;
 };
 
 NS_IMETHODIMP

@@ -10,7 +10,7 @@
 
 var { Ci, Cc, Cu, components } = require("chrome");
 var Services = require("Services");
-var flags = require("./flags");
+var flags = require("devtools/shared/flags");
 var {
   getStack,
   callFunctionWithAsyncStack,
@@ -28,7 +28,7 @@ loader.lazyRequireGetter(
 var DevToolsUtils = exports;
 
 // Re-export the thread-safe utils.
-const ThreadSafeDevToolsUtils = require("./ThreadSafeDevToolsUtils.js");
+const ThreadSafeDevToolsUtils = require("devtools/shared/ThreadSafeDevToolsUtils.js");
 for (const key of Object.keys(ThreadSafeDevToolsUtils)) {
   exports[key] = ThreadSafeDevToolsUtils[key];
 }
@@ -913,12 +913,6 @@ errorOnFlag(exports, "wantVerbose");
 // where unsafeDereference will return an opaque security wrapper to the
 // referent.
 function callPropertyOnObject(object, name, ...args) {
-  // When replaying, the result of the call may already be known, which avoids
-  // having to communicate with the replaying process.
-  if (isReplaying && args.length == 0 && object.replayHasCallResult(name)) {
-    return object.replayCallResult(name);
-  }
-
   // Find the property.
   let descriptor;
   let proto = object;

@@ -15,8 +15,12 @@ const { findDOMNode } = require("devtools/client/shared/vendor/react-dom");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
 const TreeRow = require("devtools/client/shared/components/tree/TreeRow");
-const AuditFilter = createFactory(require("./AuditFilter"));
-const AuditController = createFactory(require("./AuditController"));
+const AuditFilter = createFactory(
+  require("devtools/client/accessibility/components/AuditFilter")
+);
+const AuditController = createFactory(
+  require("devtools/client/accessibility/components/AuditController")
+);
 
 // Utils
 const {
@@ -28,15 +32,19 @@ const {
   PREFS,
   VALUE_FLASHING_DURATION,
   VALUE_HIGHLIGHT_DURATION,
-} = require("../constants");
+} = require("devtools/client/accessibility/constants");
 
 const nodeConstants = require("devtools/shared/dom-node-constants");
 
 // Actions
-const { updateDetails } = require("../actions/details");
-const { unhighlight } = require("../actions/accessibles");
+const {
+  updateDetails,
+} = require("devtools/client/accessibility/actions/details");
+const {
+  unhighlight,
+} = require("devtools/client/accessibility/actions/accessibles");
 
-const { L10N } = require("../utils/l10n");
+const { L10N } = require("devtools/client/accessibility/utils/l10n");
 
 loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
 loader.lazyRequireGetter(
@@ -146,7 +154,7 @@ class AccessibilityRow extends Component {
     scrollIntoView(row);
   }
 
-  async update() {
+  update() {
     const {
       dispatch,
       member: { object },
@@ -155,8 +163,7 @@ class AccessibilityRow extends Component {
       return;
     }
 
-    const domWalker = (await object.targetFront.getFront("inspector")).walker;
-    dispatch(updateDetails(domWalker, object));
+    dispatch(updateDetails(object));
     window.emit(EVENTS.NEW_ACCESSIBLE_FRONT_SELECTED, object);
   }
 
@@ -220,8 +227,8 @@ class AccessibilityRow extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
+    const accessibleWalkerFront = accessibleFront.parent();
+    if (!accessibleWalkerFront) {
       return;
     }
 
@@ -231,7 +238,7 @@ class AccessibilityRow extends Component {
       await this.scrollNodeIntoViewIfNeeded(accessibleFront);
     }
 
-    accessibilityWalkerFront
+    accessibleWalkerFront
       .highlightAccessible(accessibleFront, options)
       .catch(error => console.warn(error));
   }
@@ -242,12 +249,12 @@ class AccessibilityRow extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
+    const accessibleWalkerFront = accessibleFront.parent();
+    if (!accessibleWalkerFront) {
       return;
     }
 
-    accessibilityWalkerFront.unhighlight().catch(error => console.warn(error));
+    accessibleWalkerFront.unhighlight().catch(error => console.warn(error));
   }
 
   async printToJSON() {

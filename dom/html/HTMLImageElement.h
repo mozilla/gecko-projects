@@ -183,6 +183,18 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   }
   void GetDecoding(nsAString& aValue);
 
+  enum class Loading : uint8_t {
+    Eager,
+    Lazy,
+  };
+
+  void SetLoading(const nsAString& aLoading, ErrorResult& aError) {
+    SetHTMLAttr(nsGkAtoms::loading, aLoading, aError);
+  }
+  void GetLoading(nsAString&) const;
+
+  Loading LoadingState() const;
+
   already_AddRefed<Promise> Decode(ErrorResult& aRv);
 
   ReferrerPolicy GetImageReferrerPolicy() override {
@@ -246,6 +258,8 @@ class HTMLImageElement final : public nsGenericHTMLElement,
       const nsAString& aSrcsetAttr, const nsAString& aSizesAttr,
       const nsAString& aTypeAttr, const nsAString& aMediaAttr,
       nsAString& aResult);
+
+  void StopLazyLoadingAndStartLoadIfNeeded();
 
  protected:
   virtual ~HTMLImageElement();
@@ -367,7 +381,15 @@ class HTMLImageElement final : public nsGenericHTMLElement,
                             nsIPrincipal* aMaybeScriptedPrincipal,
                             bool aValueMaybeChanged, bool aNotify);
 
+  bool ShouldLoadImage() const;
+
+  // Set this image as a lazy load image due to loading="lazy".
+  void SetLazyLoading();
+
+  void StartLoadingIfNeeded();
+
   bool mInDocResponsiveContent;
+
   RefPtr<ImageLoadTask> mPendingImageLoadTask;
   nsCOMPtr<nsIPrincipal> mSrcTriggeringPrincipal;
   nsCOMPtr<nsIPrincipal> mSrcsetTriggeringPrincipal;

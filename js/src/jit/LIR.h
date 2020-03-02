@@ -401,7 +401,6 @@ class LDefinition {
     MUST_REUSE_INPUT
   };
 
-  // This should be kept in sync with LIR.cpp's TypeChars.
   enum Type {
     GENERAL,     // Generic, integer or pointer-width data (GPR).
     INT32,       // int32 data (GPR).
@@ -411,6 +410,7 @@ class LDefinition {
     DOUBLE,      // 64-bit floating-point value (FPU).
     SIMD128INT,  // 128-bit SIMD integer vector (FPU).
     SIMD128FLOAT,  // 128-bit SIMD floating point vector (FPU).
+    STACKRESULTS,  // A variable-size stack allocation that may contain objects.
 #ifdef JS_NUNBOX32
     // A type virtual register must be followed by a payload virtual
     // register, as both will be tracked as a single gcthing.
@@ -422,7 +422,7 @@ class LDefinition {
   };
 
   void set(uint32_t index, Type type, Policy policy) {
-    JS_STATIC_ASSERT(MAX_VIRTUAL_REGISTERS <= VREG_MASK);
+    static_assert(MAX_VIRTUAL_REGISTERS <= VREG_MASK);
     bits_ =
         (index << VREG_SHIFT) | (policy << POLICY_SHIFT) | (type << TYPE_SHIFT);
     MOZ_ASSERT_IF(!SupportsSimd, !isSimdType());
@@ -547,6 +547,8 @@ class LDefinition {
       case MIRType::Int64:
         return LDefinition::GENERAL;
 #endif
+      case MIRType::StackResults:
+        return LDefinition::STACKRESULTS;
       case MIRType::Int8x16:
       case MIRType::Int16x8:
       case MIRType::Int32x4:
@@ -819,8 +821,8 @@ class LElementVisitor {
       : ins_(nullptr), lastPC_(nullptr), lastNotInlinedPC_(nullptr) {}
 };
 
-typedef InlineList<LInstruction>::iterator LInstructionIterator;
-typedef InlineList<LInstruction>::reverse_iterator LInstructionReverseIterator;
+using LInstructionIterator = InlineList<LInstruction>::iterator;
+using LInstructionReverseIterator = InlineList<LInstruction>::reverse_iterator;
 
 class MPhi;
 
@@ -1291,8 +1293,8 @@ struct SafepointNunboxEntry {
 };
 
 class LSafepoint : public TempObject {
-  typedef SafepointSlotEntry SlotEntry;
-  typedef SafepointNunboxEntry NunboxEntry;
+  using SlotEntry = SafepointSlotEntry;
+  using NunboxEntry = SafepointNunboxEntry;
 
  public:
   typedef Vector<SlotEntry, 0, JitAllocPolicy> SlotList;
@@ -1707,7 +1709,7 @@ class LInstruction::InputIterator {
 
 class LIRGraph {
   struct ValueHasher {
-    typedef Value Lookup;
+    using Lookup = Value;
     static HashNumber hash(const Value& v) { return HashNumber(v.asRawBits()); }
     static bool match(const Value& lhs, const Value& rhs) { return lhs == rhs; }
   };

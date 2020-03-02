@@ -43,7 +43,7 @@ class Exception;
 }  // namespace dom
 }  // namespace mozilla
 
-typedef void (*xpcGCCallback)(JSGCStatus status);
+using xpcGCCallback = void (*)(JSGCStatus);
 
 namespace xpc {
 
@@ -601,11 +601,9 @@ class ErrorReport : public ErrorBase {
   // the sort that JS::CaptureCurrentStack produces).  aStack is allowed to be
   // null. If aStack is non-null, aStackGlobal must be a non-null global
   // object that's same-compartment with aStack. Note that aStack might be a
-  // CCW. When recording/replaying, aTimeWarpTarget optionally indicates
-  // where the error occurred in the process' execution.
+  // CCW.
   void LogToConsoleWithStack(JS::HandleObject aStack,
-                             JS::HandleObject aStackGlobal,
-                             uint64_t aTimeWarpTarget = 0);
+                             JS::HandleObject aStackGlobal);
 
   // Produce an error event message string from the given JSErrorReport.  Note
   // that this may produce an empty string if aReport doesn't have a
@@ -658,29 +656,40 @@ extern void GetCurrentRealmName(JSContext*, nsCString& name);
 void AddGCCallback(xpcGCCallback cb);
 void RemoveGCCallback(xpcGCCallback cb);
 
+// We need an exact page size only if we run the binary in automation.
+const size_t kAutomationPageSize = 4096;
+
+struct alignas(kAutomationPageSize) ReadOnlyPage final {
+  bool mNonLocalConnectionsDisabled = false;
+  bool mTurnOffAllSecurityPref = false;
+
+  static void Init();
+
+#ifdef MOZ_TSAN
+  // TSan is confused by write access to read-only section.
+  static ReadOnlyPage sInstance;
+#else
+  static const volatile ReadOnlyPage sInstance;
+#endif
+
+ private:
+  constexpr ReadOnlyPage() = default;
+  ReadOnlyPage(const ReadOnlyPage&) = delete;
+  void operator=(const ReadOnlyPage&) = delete;
+
+  static void Write(const volatile bool* aPtr, bool aValue);
+};
+
 inline bool AreNonLocalConnectionsDisabled() {
-  static int disabledForTest = -1;
-  if (disabledForTest == -1) {
-    char* s = getenv("MOZ_DISABLE_NONLOCAL_CONNECTIONS");
-    if (s) {
-      disabledForTest = *s != '0';
-    } else {
-      disabledForTest = 0;
-    }
-  }
-  return disabledForTest;
+  return ReadOnlyPage::sInstance.mNonLocalConnectionsDisabled;
 }
 
-void CacheAutomationPref(bool* aPref);
-
 inline bool IsInAutomation() {
-  static bool sAutomationPrefIsSet = false;
-  static bool sPrefCacheAdded = false;
-  if (!sPrefCacheAdded) {
-    CacheAutomationPref(&sAutomationPrefIsSet);
-    sPrefCacheAdded = true;
+  if (!ReadOnlyPage::sInstance.mTurnOffAllSecurityPref) {
+    return false;
   }
-  return sAutomationPrefIsSet && AreNonLocalConnectionsDisabled();
+  MOZ_RELEASE_ASSERT(AreNonLocalConnectionsDisabled());
+  return true;
 }
 
 void InitializeJSContext();
@@ -744,12 +753,6 @@ namespace mozilla {
 namespace dom {
 
 /**
- * A test for whether WebIDL methods that should only be visible to
- * chrome or XBL scopes should be exposed.
- */
-bool IsChromeOrXBL(JSContext* cx, JSObject* /* unused */);
-
-/**
  * This is used to prevent UA widget code from directly creating and adopting
  * nodes via the content document, since they should use the special
  * create-and-insert apis instead.
@@ -760,12 +763,12 @@ bool IsNotUAWidget(JSContext* cx, JSObject* /* unused */);
  * A test for whether WebIDL methods that should only be visible to
  * chrome, XBL scopes, or UA Widget scopes.
  */
-bool IsChromeOrXBLOrUAWidget(JSContext* cx, JSObject* /* unused */);
+bool IsChromeOrUAWidget(JSContext* cx, JSObject* /* unused */);
 
 /**
- * Same as IsChromeOrXBLOrUAWidget but can be used in worker threads as well.
+ * Same as IsChromeOrUAWidget but can be used in worker threads as well.
  */
-bool ThreadSafeIsChromeOrXBLOrUAWidget(JSContext* cx, JSObject* obj);
+bool ThreadSafeIsChromeOrUAWidget(JSContext* cx, JSObject* obj);
 
 }  // namespace dom
 

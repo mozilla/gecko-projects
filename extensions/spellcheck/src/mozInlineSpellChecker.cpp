@@ -134,7 +134,7 @@ nsresult mozInlineSpellStatus::InitForEditorChange(
   mOp = eOpChange;
 
   // range to check
-  mRange = new nsRange(aPreviousNode);
+  mRange = nsRange::Create(aPreviousNode);
 
   // ...we need to put the start and end in the correct order
   ErrorResult errorResult;
@@ -419,18 +419,14 @@ Document* mozInlineSpellStatus::GetDocument() const {
 
 already_AddRefed<nsRange> mozInlineSpellStatus::PositionToCollapsedRange(
     nsINode* aNode, uint32_t aOffset) {
-  RefPtr<Document> document = GetDocument();
-  if (NS_WARN_IF(!document)) {
+  if (NS_WARN_IF(!aNode) || NS_WARN_IF(!GetDocument())) {
     return nullptr;
   }
-
-  RefPtr<nsRange> range = new nsRange(document);
-
-  nsresult rv = range->CollapseTo(aNode, aOffset);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
+  IgnoredErrorResult ignoredError;
+  RefPtr<nsRange> range =
+      nsRange::Create(aNode, aOffset, aNode, aOffset, ignoredError);
+  NS_WARNING_ASSERTION(!ignoredError.Failed(),
+                       "Creating collapsed range failed");
   return range.forget();
 }
 
@@ -496,8 +492,8 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozInlineSpellChecker)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozInlineSpellChecker)
 
-NS_IMPL_CYCLE_COLLECTION(mozInlineSpellChecker, mTextEditor, mSpellCheck,
-                         mCurrentSelectionAnchorNode)
+NS_IMPL_CYCLE_COLLECTION_WEAK(mozInlineSpellChecker, mTextEditor, mSpellCheck,
+                              mCurrentSelectionAnchorNode)
 
 mozInlineSpellChecker::SpellCheckingState
     mozInlineSpellChecker::gCanEnableSpellChecking =
@@ -571,7 +567,7 @@ nsresult mozInlineSpellChecker::Cleanup(bool aDestroyingFrames) {
   // observers.  They may receive two consecutive STARTED notifications for
   // example, which we guarantee will not happen.
 
-  RefPtr<TextEditor> textEditor = mTextEditor.forget();
+  RefPtr<TextEditor> textEditor = std::move(mTextEditor);
   if (mPendingSpellCheck) {
     // Cancel the pending editor spell checker initialization.
     mPendingSpellCheck = nullptr;
@@ -979,7 +975,7 @@ nsresult mozInlineSpellChecker::MakeSpellCheckRange(nsINode* aStartNode,
     return NS_ERROR_FAILURE;
   }
 
-  RefPtr<nsRange> range = new nsRange(doc);
+  RefPtr<nsRange> range = nsRange::Create(doc);
 
   // possibly use full range of the editor
   if (!aStartNode || !aEndNode) {
@@ -1522,7 +1518,7 @@ nsresult mozInlineSpellChecker::ResumeCheck(
     // no active dictionary
     int32_t count = spellCheckSelection->RangeCount();
     for (int32_t index = count - 1; index >= 0; index--) {
-      nsRange* checkRange = spellCheckSelection->GetRangeAt(index);
+      RefPtr<nsRange> checkRange = spellCheckSelection->GetRangeAt(index);
       if (checkRange) {
         RemoveRange(spellCheckSelection, checkRange);
       }

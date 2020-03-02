@@ -4,10 +4,7 @@
 
 "use strict";
 
-const {
-  prepareMessage,
-  getArrayTypeNames,
-} = require("devtools/client/webconsole/utils/messages");
+const { prepareMessage } = require("devtools/client/webconsole/utils/messages");
 const {
   IdGenerator,
 } = require("devtools/client/webconsole/utils/id-generator");
@@ -27,7 +24,7 @@ const {
   MESSAGE_UPDATE_PAYLOAD,
   PAUSED_EXECUTION_POINT,
   PRIVATE_MESSAGES_CLEAR,
-} = require("../constants");
+} = require("devtools/client/webconsole/constants");
 
 const defaultIdGenerator = new IdGenerator();
 
@@ -119,22 +116,6 @@ function messageGetMatchingElements(id, cssSelectors) {
   };
 }
 
-function messageGetTableData(id, front, dataType) {
-  return async ({ dispatch }) => {
-    const needEntries = ["Map", "WeakMap", "Set", "WeakSet"].includes(dataType);
-    const ignoreNonIndexedProperties = getArrayTypeNames().includes(dataType);
-
-    const iteratorFront = await (needEntries
-      ? front.enumEntries()
-      : front.enumProperties({
-          ignoreNonIndexedProperties,
-        }));
-
-    const { ownProperties } = await iteratorFront.all();
-    dispatch(messageUpdatePayload(id, ownProperties));
-  };
-}
-
 /**
  * Associate additional data with a message without mutating the original message object.
  *
@@ -186,7 +167,6 @@ module.exports = {
   messageOpen,
   messageClose,
   messageGetMatchingElements,
-  messageGetTableData,
   messageUpdatePayload,
   networkMessageUpdate,
   networkUpdateRequest,

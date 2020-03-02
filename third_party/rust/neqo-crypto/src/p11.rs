@@ -31,6 +31,7 @@ macro_rules! scoped_ptr {
         }
 
         impl $scoped {
+            #[must_use]
             pub fn new(ptr: NonNull<$target>) -> Self {
                 Self { ptr: ptr.as_ptr() }
             }
@@ -38,6 +39,7 @@ macro_rules! scoped_ptr {
 
         impl Deref for $scoped {
             type Target = *mut $target;
+            #[must_use]
             fn deref(&self) -> &*mut $target {
                 &self.ptr
             }
@@ -65,6 +67,9 @@ scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl SymKey {
     /// You really don't want to use this.
+    ///
+    /// # Errors
+    /// Internal errors in case of failures in NSS.
     pub fn as_bytes<'a>(&'a self) -> Res<&'a [u8]> {
         secstatus_to_res(unsafe { PK11_ExtractKeyValue(self.ptr) })?;
 
@@ -74,6 +79,15 @@ impl SymKey {
             None => Err(Error::InternalError),
             Some(key) => Ok(unsafe { std::slice::from_raw_parts(key.data, key.len as usize) }),
         }
+    }
+}
+
+impl Clone for SymKey {
+    #[must_use]
+    fn clone(&self) -> Self {
+        let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
+        assert!(!ptr.is_null());
+        Self { ptr }
     }
 }
 
@@ -88,10 +102,14 @@ impl std::fmt::Debug for SymKey {
 }
 
 /// Generate a randomized buffer.
-pub fn random(size: usize) -> Res<Vec<u8>> {
+#[must_use]
+pub fn random(size: usize) -> Vec<u8> {
     let mut buf = vec![0; size];
-    secstatus_to_res(unsafe { PK11_GenerateRandom(buf.as_mut_ptr(), buf.len().try_into()?) })?;
-    Ok(buf)
+    secstatus_to_res(unsafe {
+        PK11_GenerateRandom(buf.as_mut_ptr(), buf.len().try_into().unwrap())
+    })
+    .unwrap();
+    buf
 }
 
 #[cfg(test)]

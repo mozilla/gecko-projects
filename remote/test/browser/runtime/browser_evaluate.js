@@ -7,7 +7,7 @@
 
 const TEST_DOC = toDataURL("default-test-page");
 
-add_task(async function(client) {
+add_task(async function({ client }) {
   await loadURL(TEST_DOC);
 
   const firstContext = await testRuntimeEnable(client);
@@ -181,7 +181,7 @@ async function testPrimitiveTypes(testFunction) {
 }
 
 async function testUnserializable(testFunction) {
-  const expressions = ["NaN", "-0", "Infinity", "-Infinity"];
+  const expressions = ["-0", "NaN", "Infinity", "-Infinity"];
   for (const expression of expressions) {
     const { result } = await testFunction(expression);
     is(

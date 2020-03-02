@@ -154,7 +154,7 @@ nsresult GMPParent::LoadProcess() {
     mChildPid = base::GetProcId(mProcess->GetChildProcessHandle());
     GMP_PARENT_LOG_DEBUG("%s: Launched new child process", __FUNCTION__);
 
-    bool opened = Open(mProcess->GetChannel(),
+    bool opened = Open(mProcess->TakeChannel(),
                        base::GetProcId(mProcess->GetChildProcessHandle()));
     if (!opened) {
       GMP_PARENT_LOG_DEBUG("%s: Failed to open channel to new child process",
@@ -433,10 +433,9 @@ void GMPParent::AddCrashAnnotations() {
   }
 }
 
-bool GMPParent::GetCrashID(nsString& aResult) {
+void GMPParent::GetCrashID(nsString& aResult) {
   AddCrashAnnotations();
-
-  return GenerateCrashReport(OtherPid(), &aResult);
+  GenerateCrashReport(OtherPid(), &aResult);
 }
 
 static void GMPNotifyObservers(const uint32_t aPluginID,
@@ -468,7 +467,8 @@ void GMPParent::ActorDestroy(ActorDestroyReason aWhy) {
     Telemetry::Accumulate(Telemetry::SUBPROCESS_ABNORMAL_ABORT,
                           NS_LITERAL_CSTRING("gmplugin"), 1);
     nsString dumpID;
-    if (!GetCrashID(dumpID)) {
+    GetCrashID(dumpID);
+    if (dumpID.IsEmpty()) {
       NS_WARNING("GMP crash without crash report");
       dumpID = mName;
       dumpID += '-';

@@ -106,9 +106,6 @@ class GeckoInstance(object):
 
         # Do not prompt for temporary redirects
         "network.http.prompt-temp-redirect": False,
-        # Disable speculative connections so they aren"t reported as leaking when they"re
-        # hanging around
-        "network.http.speculative-parallel-limit": 0,
         # Do not automatically switch between offline and online
         "network.manage-offline-status": False,
         # Make sure SNTP requests don't hit the network
@@ -560,9 +557,6 @@ class DesktopInstance(GeckoInstance):
 
         # Don't check for the default web browser during startup
         "browser.shell.checkDefaultBrowser": False,
-
-        # Disable e10s by default
-        "browser.tabs.remote.autostart": False,
 
         # Needed for branded builds to prevent opening a second tab on startup
         "browser.startup.homepage_override.mstone": "ignore",

@@ -320,13 +320,10 @@ void Gecko_CopyImageOrientationFrom(nsStyleVisibility* aDst,
                                     const nsStyleVisibility* aSrc);
 
 // Counter style.
-// This function takes an already addrefed nsAtom
-void Gecko_SetCounterStyleToName(mozilla::CounterStylePtr* ptr, nsAtom* name);
+void Gecko_CounterStyle_ToPtr(const mozilla::StyleCounterStyle*,
+                              mozilla::CounterStylePtr*);
 
-void Gecko_SetCounterStyleToSymbols(mozilla::CounterStylePtr* ptr,
-                                    uint8_t symbols_type,
-                                    nsACString const* const* symbols,
-                                    uint32_t symbols_count);
+void Gecko_SetCounterStyleToNone(mozilla::CounterStylePtr*);
 
 void Gecko_SetCounterStyleToString(mozilla::CounterStylePtr* ptr,
                                    const nsACString* symbol);
@@ -339,22 +336,6 @@ nsAtom* Gecko_CounterStyle_GetName(const mozilla::CounterStylePtr* ptr);
 const mozilla::AnonymousCounterStyle* Gecko_CounterStyle_GetAnonymous(
     const mozilla::CounterStylePtr* ptr);
 
-// background-image style.
-void Gecko_SetNullImageValue(nsStyleImage* image);
-
-// NOTE: Takes ownership of the gradient.
-void Gecko_SetGradientImageValue(nsStyleImage*, mozilla::StyleGradient*);
-
-void Gecko_SetLayerImageImageValue(nsStyleImage* image,
-                                   const mozilla::StyleComputedImageUrl* url);
-
-void Gecko_SetImageElement(nsStyleImage* image, nsAtom* atom);
-void Gecko_CopyImageValueFrom(nsStyleImage* image, const nsStyleImage* other);
-void Gecko_InitializeImageCropRect(nsStyleImage* image);
-
-const nsStyleImageRequest* Gecko_GetImageRequest(const nsStyleImage* image);
-nsAtom* Gecko_GetImageElement(const nsStyleImage* image);
-
 // list-style-image style.
 void Gecko_SetListStyleImageNone(nsStyleList* style_struct);
 
@@ -362,20 +343,6 @@ void Gecko_SetListStyleImageImageValue(
     nsStyleList* style_struct, const mozilla::StyleComputedImageUrl* url);
 
 void Gecko_CopyListStyleImageFrom(nsStyleList* dest, const nsStyleList* src);
-
-// cursor style.
-void Gecko_SetCursorArrayLength(nsStyleUI* ui, size_t len);
-
-void Gecko_SetCursorImageValue(nsCursorImage* aCursor,
-                               const mozilla::StyleComputedImageUrl* url);
-
-void Gecko_CopyCursorArrayFrom(nsStyleUI* dest, const nsStyleUI* src);
-
-void Gecko_SetContentDataImageValue(nsStyleContentData* aList,
-                                    const mozilla::StyleComputedImageUrl* url);
-
-nsStyleContentData::CounterFunction* Gecko_SetCounterFunction(
-    nsStyleContentData* content_data, mozilla::StyleContentType);
 
 // Dirtiness tracking.
 void Gecko_SetNodeFlags(const nsINode* node, uint32_t flags);
@@ -420,14 +387,6 @@ void Gecko_ClearPODTArray(void* array, size_t elem_size, size_t elem_align);
 
 void Gecko_ResizeTArrayForStrings(nsTArray<nsString>* array, uint32_t length);
 void Gecko_ResizeAtomArray(nsTArray<RefPtr<nsAtom>>* array, uint32_t length);
-
-// Clear the mContents, mCounterIncrements, mCounterResets, or mCounterSets
-// field in nsStyleContent. This is needed to run the destructors, otherwise
-// we'd leak the images, strings, and whatnot.
-void Gecko_ClearAndResizeStyleContents(nsStyleContent* content,
-                                       uint32_t how_many);
-void Gecko_CopyStyleContentsFrom(nsStyleContent* content,
-                                 const nsStyleContent* other);
 
 void Gecko_EnsureImageLayersLength(nsStyleImageLayers* layers, size_t len,
                                    nsStyleImageLayers::LayerType layer_type);
@@ -477,18 +436,6 @@ mozilla::Keyframe* Gecko_GetOrCreateFinalKeyframe(
 mozilla::PropertyValuePair* Gecko_AppendPropertyValuePair(
     nsTArray<mozilla::PropertyValuePair>*, nsCSSPropertyID aProperty);
 
-void Gecko_CopyShapeSourceFrom(mozilla::StyleShapeSource* dst,
-                               const mozilla::StyleShapeSource* src);
-
-void Gecko_DestroyShapeSource(mozilla::StyleShapeSource* shape);
-
-void Gecko_NewShapeImage(mozilla::StyleShapeSource* shape);
-
-void Gecko_SetToSVGPath(
-    mozilla::StyleShapeSource* shape,
-    mozilla::StyleForgottenArcSlicePtr<mozilla::StylePathCommand>,
-    mozilla::StyleFillRule);
-
 void Gecko_ResetFilters(nsStyleEffects* effects, size_t new_len);
 
 void Gecko_CopyFiltersFrom(nsStyleEffects* aSrc, nsStyleEffects* aDest);
@@ -523,7 +470,7 @@ float Gecko_FontStretch_ToFloat(mozilla::FontStretch aStretch);
 void Gecko_FontStretch_SetFloat(mozilla::FontStretch* aStretch,
                                 float aFloatValue);
 
-void Gecko_LoadData_DeregisterLoad(const mozilla::StyleLoadData*);
+void Gecko_LoadData_Drop(mozilla::StyleLoadData*);
 
 float Gecko_FontSlantStyle_ToFloat(mozilla::FontSlantStyle aStyle);
 void Gecko_FontSlantStyle_SetNormal(mozilla::FontSlantStyle*);
@@ -578,8 +525,6 @@ mozilla::StyleSheet* Gecko_StyleSheet_Clone(
 
 void Gecko_StyleSheet_AddRef(const mozilla::StyleSheet* aSheet);
 void Gecko_StyleSheet_Release(const mozilla::StyleSheet* aSheet);
-nsCSSKeyword Gecko_LookupCSSKeyword(const uint8_t* string, uint32_t len);
-const char* Gecko_CSSKeywordString(nsCSSKeyword keyword, uint32_t* len);
 bool Gecko_IsDocumentBody(const mozilla::dom::Element* element);
 
 // We use an int32_t here instead of a LookAndFeel::ColorID

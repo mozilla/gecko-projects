@@ -62,7 +62,6 @@ class Promise;
 class BrowserParent;
 class MutableTabContext;
 class BrowserBridgeChild;
-class RemoteFrameChild;
 struct RemotenessOptions;
 
 namespace ipc {
@@ -121,7 +120,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
   nsresult CheckForRecursiveLoad(nsIURI* aURI);
   nsresult ReallyStartLoading();
-  void StartDestroy();
+  void StartDestroy(bool aForProcessSwitch);
   void DestroyDocShell();
   void DestroyComplete();
   nsIDocShell* GetExistingDocShell() const { return mDocShell; }
@@ -152,7 +151,8 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   already_AddRefed<nsILoadContext> LoadContext();
 
-  already_AddRefed<mozilla::dom::BrowsingContext> GetBrowsingContext();
+  mozilla::dom::BrowsingContext* GetBrowsingContext();
+  mozilla::dom::BrowsingContext* GetExtantBrowsingContext();
 
   /**
    * Start loading the frame. This method figures out what to load
@@ -188,7 +188,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
    * Destroy the frame loader and everything inside it. This will
    * clear the weak owner content reference.
    */
-  void Destroy();
+  void Destroy(bool aForProcessSwitch = false);
 
   void ActivateRemoteFrame(mozilla::ErrorResult& aRv);
 
@@ -259,17 +259,14 @@ class nsFrameLoader final : public nsStubMutationObserver,
    * Called from the layout frame associated with this frame loader;
    * this notifies us to hook up with the widget and view.
    */
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY bool Show(int32_t marginWidth,
-                                        int32_t marginHeight,
-                                        mozilla::ScrollbarPreference,
-                                        nsSubDocumentFrame*);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY bool Show(nsSubDocumentFrame*);
 
   void MaybeShowFrame();
 
   /**
    * Called when the margin properties of the containing frame are changed.
    */
-  void MarginsChanged(uint32_t aMarginWidth, uint32_t aMarginHeight);
+  void MarginsChanged();
 
   /**
    * Called from the layout frame associated with this frame loader, when
@@ -398,7 +395,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
   virtual JSObject* WrapObject(JSContext* cx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
-  void SkipBrowsingContextDetach();
+  void SetWillChangeProcess();
 
   void MaybeNotifyCrashed(mozilla::dom::BrowsingContext* aBrowsingContext,
                           mozilla::ipc::MessageChannel* aChannel);
@@ -425,6 +422,8 @@ class nsFrameLoader final : public nsStubMutationObserver,
   nsresult EnsureMessageManager();
   nsresult ReallyLoadFrameScripts();
   nsDocShell* GetDocShell() const { return mDocShell; }
+
+  void AssertSafeToInit();
 
   // Updates the subdocument position and size. This gets called only
   // when we have our own in-process DocShell.
@@ -468,7 +467,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   nsresult PopulateUserContextIdFromAttribute(mozilla::OriginAttributes& aAttr);
 
-  RefPtr<mozilla::dom::BrowsingContext> mBrowsingContext;
+  RefPtr<mozilla::dom::BrowsingContext> mPendingBrowsingContext;
   nsCOMPtr<nsIURI> mURIToLoad;
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
   nsCOMPtr<nsIContentSecurityPolicy> mCsp;
@@ -527,6 +526,9 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   bool mRemoteBrowserShown : 1;
   bool mIsRemoteFrame : 1;
+  // If true, the FrameLoader will be re-created with the same BrowsingContext,
+  // but for a different process, after it is destroyed.
+  bool mWillChangeProcess : 1;
   bool mObservingOwnerContent : 1;
 
   // When an out-of-process nsFrameLoader crashes, an event is fired on the

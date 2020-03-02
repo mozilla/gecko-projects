@@ -35,6 +35,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SpeechSynthesis,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCurrentTask)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSpeechQueue)
   tmp->mVoiceCache.Clear();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SpeechSynthesis,
@@ -248,7 +249,7 @@ void SpeechSynthesis::GetVoices(
 
   for (uint32_t i = 0; i < aResult.Length(); i++) {
     SpeechSynthesisVoice* voice = aResult[i];
-    mVoiceCache.Put(voice->mUri, voice);
+    mVoiceCache.Put(voice->mUri, RefPtr{voice});
   }
 }
 

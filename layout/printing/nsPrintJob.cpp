@@ -16,6 +16,7 @@
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/CustomEvent.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "nsIBrowserChild.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -86,7 +87,6 @@ static const char kPrintingPromptService[] =
 #include "nsPageSequenceFrame.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIDocShellTreeOwner.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsFrameManager.h"
 #include "mozilla/ReflowInput.h"
@@ -521,10 +521,10 @@ static nsresult EnsureSettingsHasPrinterNameSet(
 #endif
 }
 
-static bool DocHasPrintCallbackCanvas(Document& aDoc, void* aData) {
+static CallState DocHasPrintCallbackCanvas(Document& aDoc, void* aData) {
   Element* root = aDoc.GetRootElement();
   if (!root) {
-    return true;
+    return CallState::Continue;
   }
   RefPtr<nsContentList> canvases =
       NS_GetContentList(root, kNameSpaceID_XHTML, NS_LITERAL_STRING("canvas"));
@@ -536,10 +536,10 @@ static bool DocHasPrintCallbackCanvas(Document& aDoc, void* aData) {
       // This subdocument has a print callback. Set result and return false to
       // stop iteration.
       *static_cast<bool*>(aData) = true;
-      return false;
+      return CallState::Stop;
     }
   }
-  return true;
+  return CallState::Continue;
 }
 
 static bool AnySubdocHasPrintCallbackCanvas(Document& aDoc) {
@@ -609,11 +609,13 @@ nsresult nsPrintJob::Initialize(nsIDocumentViewerPrint* aDocViewerPrint,
       root &&
       root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint);
 
-  nsCOMPtr<nsIDocShellTreeOwner> owner;
-  aDocShell->GetTreeOwner(getter_AddRefs(owner));
-  nsCOMPtr<nsIWebBrowserChrome> browserChrome = do_GetInterface(owner);
-  if (browserChrome) {
-    browserChrome->IsWindowModal(&mIsForModalWindow);
+  if (nsPIDOMWindowOuter* window = aOriginalDoc->GetWindow()) {
+    if (nsCOMPtr<nsIWebBrowserChrome> wbc = window->GetWebBrowserChrome()) {
+      // We only get this in order to skip opening the progress dialog when
+      // the window is modal.  Once the platform code stops opening the
+      // progress dialog (bug 1558907), we can get rid of this.
+      wbc->IsWindowModal(&mIsForModalWindow);
+    }
   }
 
   bool hasMozPrintCallback = false;
@@ -2808,7 +2810,7 @@ nsresult nsPrintJob::EnablePOsForPrinting() {
         NS_ASSERTION(po, "nsPrintObject can't be null!");
         nsCOMPtr<nsPIDOMWindowOuter> domWin = po->mDocShell->GetWindow();
         if (IsThereARangeSelection(domWin)) {
-          printData->mCurrentFocusWin = domWin.forget();
+          printData->mCurrentFocusWin = std::move(domWin);
           SetPrintPO(po, true);
           break;
         }
@@ -2906,7 +2908,7 @@ void nsPrintJob::TurnScriptingOn(bool aDoTurnOn) {
                        &propThere);
       if (aDoTurnOn) {
         if (propThere != NS_PROPTABLE_PROP_NOT_THERE) {
-          doc->DeleteProperty(nsGkAtoms::scriptEnabledBeforePrintOrPreview);
+          doc->RemoveProperty(nsGkAtoms::scriptEnabledBeforePrintOrPreview);
           if (go->HasJSGlobal()) {
             xpc::Scriptability::Get(go->GetGlobalJSObjectPreserveColor())
                 .Unblock();
@@ -3227,12 +3229,9 @@ static void DumpViews(nsIDocShell* aDocShell, FILE* out) {
 
     // dump the views of the sub documents
     int32_t i, n;
-    aDocShell->GetChildCount(&n);
-    for (i = 0; i < n; i++) {
-      nsCOMPtr<nsIDocShellTreeItem> child;
-      aDocShell->GetChildAt(i, getter_AddRefs(child));
-      nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
-      if (childAsShell) {
+    BrowsingContext* bc = nsDocShell::Cast(aDocShell)->GetBrowsingContext();
+    for (auto& child : bc->GetChildren()) {
+      if (auto childDS = child->GetDocShell()) {
         DumpViews(childAsShell, out);
       }
     }

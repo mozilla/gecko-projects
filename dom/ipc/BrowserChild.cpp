@@ -11,17 +11,51 @@
 #ifdef ACCESSIBILITY
 #  include "mozilla/a11y/DocAccessibleChild.h"
 #endif
-#include "Layers.h"
-#include "ContentChild.h"
+#include <algorithm>
+#include <utility>
+
 #include "BrowserParent.h"
+#include "ClientLayerManager.h"
+#include "ContentChild.h"
+#include "DocumentInlines.h"
+#include "EventStateManager.h"
+#include "FrameLayerBuilder.h"
+#include "Layers.h"
+#include "LayersLogging.h"
+#include "MMPrinter.h"
+#include "PermissionMessageUtils.h"
+#include "PuppetWidget.h"
+#include "StructuredCloneData.h"
+#include "UnitTransforms.h"
+#include "Units.h"
+#include "VRManagerChild.h"
+#include "ipc/nsGUIEventIPC.h"
 #include "js/JSON.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/IMEStateManager.h"
+#include "mozilla/LookAndFeel.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/ResultExtensions.h"
+#include "mozilla/ScopeExit.h"
+#include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/TextEvents.h"
+#include "mozilla/TouchEvents.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/BrowserBridgeChild.h"
 #include "mozilla/dom/DataTransfer.h"
+#include "mozilla/dom/DocGroup.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/JSWindowActorChild.h"
 #include "mozilla/dom/LoadURIOptionsBinding.h"
@@ -31,19 +65,19 @@
 #include "mozilla/dom/PBrowser.h"
 #include "mozilla/dom/PaymentRequestChild.h"
 #include "mozilla/dom/SessionStoreListener.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
+#include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/IMEStateManager.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
-#include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZCTreeManagerChild.h"
+#include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/APZEventState.h"
-#include "mozilla/layers/ContentProcessController.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
+#include "mozilla/layers/ContentProcessController.h"
 #include "mozilla/layers/DoubleTapToZoom.h"
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/ImageBridgeChild.h"
@@ -52,88 +86,51 @@
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/plugins/PPluginWidgetChild.h"
-#include "mozilla/recordreplay/ParentIPC.h"
-#include "mozilla/LookAndFeel.h"
-#include "mozilla/MouseEvents.h"
-#include "mozilla/Move.h"
-#include "mozilla/PresShell.h"
-#include "mozilla/ProcessHangMonitor.h"
-#include "mozilla/ResultExtensions.h"
-#include "mozilla/ScopeExit.h"
-#include "mozilla/Services.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/StaticPrefs_layout.h"
-#include "mozilla/TextEvents.h"
-#include "mozilla/TouchEvents.h"
-#include "mozilla/Unused.h"
-#include "Units.h"
 #include "nsBrowserStatusFilter.h"
+#include "nsColorPickerProxy.h"
+#include "nsCommandParams.h"
+#include "nsContentPermissionHelper.h"
 #include "nsContentUtils.h"
-#include "nsQueryActor.h"
+#include "nsDeviceContext.h"
 #include "nsDocShell.h"
+#include "nsDocShellLoadState.h"
 #include "nsEmbedCID.h"
-#include "nsGlobalWindow.h"
-#include <algorithm>
 #include "nsExceptionHandler.h"
 #include "nsFilePickerProxy.h"
-#include "mozilla/dom/Element.h"
+#include "nsFocusManager.h"
 #include "nsGlobalWindow.h"
 #include "nsIBaseWindow.h"
 #include "nsIBrowserDOMWindow.h"
 #include "nsIClassifiedChannel.h"
-#include "DocumentInlines.h"
-#include "nsFocusManager.h"
-#include "EventStateManager.h"
 #include "nsIDocShell.h"
 #include "nsIFrame.h"
+#include "nsILoadContext.h"
+#include "nsISHEntry.h"
+#include "nsISHistory.h"
+#include "nsIScriptError.h"
 #include "nsISecureBrowserUI.h"
 #include "nsIURI.h"
 #include "nsIURIMutator.h"
+#include "nsIWeakReferenceUtils.h"
 #include "nsIWebBrowser.h"
 #include "nsIWebProgress.h"
+#include "nsLayoutUtils.h"
+#include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
 #include "nsPointerHashKeys.h"
-#include "nsLayoutUtils.h"
 #include "nsPrintfCString.h"
+#include "nsQueryActor.h"
+#include "nsQueryObject.h"
+#include "nsSandboxFlags.h"
+#include "nsString.h"
 #include "nsTHashtable.h"
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 #include "nsViewManager.h"
-#include "nsIWeakReferenceUtils.h"
-#include "nsWindowWatcher.h"
-#include "PermissionMessageUtils.h"
-#include "PuppetWidget.h"
-#include "StructuredCloneData.h"
 #include "nsViewportInfo.h"
-#include "nsILoadContext.h"
-#include "ipc/nsGUIEventIPC.h"
-#include "mozilla/gfx/Matrix.h"
-#include "UnitTransforms.h"
-#include "ClientLayerManager.h"
-#include "nsColorPickerProxy.h"
-#include "nsContentPermissionHelper.h"
-#include "nsNetUtil.h"
-#include "nsIScriptError.h"
-#include "mozilla/EventForwards.h"
-#include "nsDeviceContext.h"
-#include "nsSandboxFlags.h"
-#include "FrameLayerBuilder.h"
-#include "VRManagerChild.h"
-#include "nsCommandParams.h"
-#include "nsISHEntry.h"
-#include "nsISHistory.h"
-#include "nsQueryObject.h"
-#include "mozilla/dom/DocGroup.h"
-#include "nsString.h"
-#include "nsStringStream.h"
-#include "mozilla/Telemetry.h"
-#include "nsDocShellLoadState.h"
 #include "nsWebBrowser.h"
-#include "mozilla/dom/WindowGlobalChild.h"
-#include "MMPrinter.h"
-#include "mozilla/ResultExtensions.h"
+#include "nsWindowWatcher.h"
 
 #ifdef XP_WIN
 #  include "mozilla/plugins/PluginWidgetChild.h"
@@ -149,8 +146,7 @@
 #define BROWSER_ELEMENT_CHILD_SCRIPT \
   NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js")
 
-#define TABC_LOG(...)
-// #define TABC_LOG(...) printf_stderr("TABC: " __VA_ARGS__)
+static mozilla::LazyLogModule sApzChildLog("apz.child");
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -276,7 +272,7 @@ class BrowserChild::DelayedDeleteRunnable final : public Runnable,
   }
 
   NS_IMETHOD GetPriority(uint32_t* aPriority) override {
-    *aPriority = mReadyToDelete ? nsIRunnablePriority::PRIORITY_INPUT
+    *aPriority = mReadyToDelete ? nsIRunnablePriority::PRIORITY_INPUT_HIGH
                                 : nsIRunnablePriority::PRIORITY_NORMAL;
     return NS_OK;
   }
@@ -294,11 +290,7 @@ class BrowserChild::DelayedDeleteRunnable final : public Runnable,
     }
 
     // Check in case ActorDestroy was called after RecvDestroy message.
-    // Middleman processes with their own recording child process avoid
-    // sending a delete message, so that the parent process does not
-    // receive two deletes for the same actor.
-    if (mBrowserChild->IPCOpen() &&
-        !recordreplay::parent::IsMiddlemanWithRecordingChild()) {
+    if (mBrowserChild->IPCOpen()) {
       Unused << PBrowserChild::Send__delete__(mBrowserChild);
     }
 
@@ -592,11 +584,6 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
 
   mIPCOpen = true;
 
-  // Recording/replaying processes use their own compositor.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    mPuppetWidget->CreateCompositor();
-  }
-
 #if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_THUNDERBIRD) && \
     !defined(MOZ_SUITE)
   mSessionStoreListener = new TabListener(docShell, nullptr);
@@ -645,6 +632,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BrowserChild)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowsingContext)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BrowserChild)
@@ -1046,25 +1034,25 @@ BrowserChild::~BrowserChild() {
   mozilla::DropJSObjects(this);
 }
 
-mozilla::ipc::IPCResult BrowserChild::RecvSkipBrowsingContextDetach(
-    SkipBrowsingContextDetachResolver&& aResolve) {
+mozilla::ipc::IPCResult BrowserChild::RecvWillChangeProcess(
+    WillChangeProcessResolver&& aResolve) {
   if (nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation())) {
     RefPtr<nsDocShell> docshell = nsDocShell::Cast(docShell);
-    docshell->SkipBrowsingContextDetach();
+    docshell->SetWillChangeProcess();
   }
   aResolve(true);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvLoadURL(const nsCString& aURI,
-                                                  const ShowInfo& aInfo) {
+                                                  const ParentShowInfo& aInfo) {
   if (!mDidLoadURLInit) {
     mDidLoadURLInit = true;
     if (!InitBrowserChildMessageManager()) {
       return IPC_FAIL_NO_REASON(this);
     }
 
-    ApplyShowInfo(aInfo);
+    ApplyParentShowInfo(aInfo);
   }
 
   LoadURIOptions loadURIOptions;
@@ -1092,14 +1080,14 @@ mozilla::ipc::IPCResult BrowserChild::RecvLoadURL(const nsCString& aURI,
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvResumeLoad(
-    const uint64_t& aPendingSwitchID, const ShowInfo& aInfo) {
+    const uint64_t& aPendingSwitchID, const ParentShowInfo& aInfo) {
   if (!mDidLoadURLInit) {
     mDidLoadURLInit = true;
     if (!InitBrowserChildMessageManager()) {
       return IPC_FAIL_NO_REASON(this);
     }
 
-    ApplyShowInfo(aInfo);
+    ApplyParentShowInfo(aInfo);
   }
 
   nsresult rv = WebNavigation()->ResumeRedirectedLoad(aPendingSwitchID, -1);
@@ -1110,12 +1098,14 @@ mozilla::ipc::IPCResult BrowserChild::RecvResumeLoad(
   return IPC_OK();
 }
 
-void BrowserChild::DoFakeShow(const ShowInfo& aShowInfo) {
-  RecvShow(ScreenIntSize(0, 0), aShowInfo, mParentIsActive, nsSizeMode_Normal);
+void BrowserChild::DoFakeShow(const ParentShowInfo& aParentShowInfo) {
+  OwnerShowInfo ownerInfo{ScreenIntSize(), ScrollbarPreference::Auto,
+                          mParentIsActive, nsSizeMode_Normal};
+  RecvShow(aParentShowInfo, ownerInfo);
   mDidFakeShow = true;
 }
 
-void BrowserChild::ApplyShowInfo(const ShowInfo& aInfo) {
+void BrowserChild::ApplyParentShowInfo(const ParentShowInfo& aInfo) {
   // Even if we already set real show info, the dpi / rounding & scale may still
   // be invalid (if BrowserParent wasn't able to get widget it would just send
   // 0). So better to always set up-to-date values here.
@@ -1136,15 +1126,6 @@ void BrowserChild::ApplyShowInfo(const ShowInfo& aInfo) {
 
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
   if (docShell) {
-    nsCOMPtr<nsIDocShellTreeItem> item = do_GetInterface(docShell);
-    if (IsMozBrowser()) {
-      // B2G allows window.name to be set by changing the name attribute on the
-      // <iframe mozbrowser> element. window.open calls cause this attribute to
-      // be set to the correct value. A normal <xul:browser> element has no such
-      // attribute. The data we get here comes from reading the attribute, so we
-      // shouldn't trust it for <xul:browser> elements.
-      item->SetName(aInfo.name());
-    }
     docShell->SetFullscreenAllowed(aInfo.fullscreenAllowed());
     if (aInfo.isPrivate()) {
       nsCOMPtr<nsILoadContext> context = do_GetInterface(docShell);
@@ -1168,13 +1149,11 @@ void BrowserChild::ApplyShowInfo(const ShowInfo& aInfo) {
   mIsTransparent = aInfo.isTransparent();
 }
 
-mozilla::ipc::IPCResult BrowserChild::RecvShow(const ScreenIntSize& aSize,
-                                               const ShowInfo& aInfo,
-                                               const bool& aParentIsActive,
-                                               const nsSizeMode& aSizeMode) {
+mozilla::ipc::IPCResult BrowserChild::RecvShow(
+    const ParentShowInfo& aParentInfo, const OwnerShowInfo& aOwnerInfo) {
   bool res = true;
 
-  mPuppetWidget->SetSizeMode(aSizeMode);
+  mPuppetWidget->SetSizeMode(aOwnerInfo.sizeMode());
   if (!mDidFakeShow) {
     nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(WebNavigation());
     if (!baseWindow) {
@@ -1186,18 +1165,14 @@ mozilla::ipc::IPCResult BrowserChild::RecvShow(const ScreenIntSize& aSize,
     res = InitBrowserChildMessageManager();
   }
 
-  ApplyShowInfo(aInfo);
-  RecvParentActivated(aParentIsActive);
+  ApplyParentShowInfo(aParentInfo);
+  RecvParentActivated(aOwnerInfo.parentWindowIsActive());
+  if (!mIsTopLevel) {
+    RecvScrollbarPreferenceChanged(aOwnerInfo.scrollbarPreference());
+  }
 
   if (!res) {
     return IPC_FAIL_NO_REASON(this);
-  }
-
-  // We have now done enough initialization for the record/replay system to
-  // create checkpoints. Create a checkpoint now, in case this process never
-  // paints later on (the usual place where checkpoints occur).
-  if (recordreplay::IsRecordingOrReplaying()) {
-    recordreplay::child::CreateCheckpoint();
   }
 
   UpdateVisibility();
@@ -1211,6 +1186,16 @@ mozilla::ipc::IPCResult BrowserChild::RecvInitRendering(
     const CompositorOptions& aCompositorOptions, const bool& aLayersConnected) {
   mLayersConnected = Some(aLayersConnected);
   InitRenderingState(aTextureFactoryIdentifier, aLayersId, aCompositorOptions);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserChild::RecvScrollbarPreferenceChanged(
+    ScrollbarPreference aPreference) {
+  MOZ_ASSERT(!mIsTopLevel,
+             "Scrollbar visibility should be derived from chrome flags for "
+             "top-level windows");
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  nsDocShell::Cast(docShell)->SetScrollbarPreference(aPreference);
   return IPC_OK();
 }
 
@@ -1237,9 +1222,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvCompositorOptionsChanged(
 
 mozilla::ipc::IPCResult BrowserChild::RecvUpdateDimensions(
     const DimensionInfo& aDimensionInfo) {
-  // When recording/replaying we need to make sure the dimensions are up to
-  // date on the compositor used in this process.
-  if (mLayersConnected.isNothing() && !recordreplay::IsRecordingOrReplaying()) {
+  if (mLayersConnected.isNothing()) {
     return IPC_OK();
   }
 
@@ -1291,6 +1274,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvSizeModeChanged(
     return IPC_OK();
   }
   nsCOMPtr<Document> document(GetTopLevelDocument());
+  if (!document) {
+    return IPC_OK();
+  }
   nsPresContext* presContext = document->GetPresContext();
   if (presContext) {
     presContext->SizeModeChanged(aSizeMode);
@@ -1299,11 +1285,21 @@ mozilla::ipc::IPCResult BrowserChild::RecvSizeModeChanged(
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvChildToParentMatrix(
-    const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix,
-    const mozilla::ScreenRect& aRemoteDocumentRect) {
+    const Maybe<gfx::Matrix4x4>& aMatrix,
+    const ScreenRect& aTopLevelViewportVisibleRectInBrowserCoords) {
   mChildToParentConversionMatrix =
       LayoutDeviceToLayoutDeviceMatrix4x4::FromUnknownMatrix(aMatrix);
-  mRemoteDocumentRect = aRemoteDocumentRect;
+  mTopLevelViewportVisibleRectInBrowserCoords =
+      aTopLevelViewportVisibleRectInBrowserCoords;
+
+  // Trigger an intersection observation update since ancestor viewports
+  // changed.
+  if (RefPtr<Document> toplevelDoc = GetTopLevelDocument()) {
+    if (nsPresContext* pc = toplevelDoc->GetPresContext()) {
+      pc->RefreshDriver()->EnsureIntersectionObservationsUpdateHappens();
+    }
+  }
+
   return IPC_OK();
 }
 
@@ -1358,11 +1354,12 @@ mozilla::ipc::IPCResult BrowserChild::RecvSuppressDisplayport(
 void BrowserChild::HandleDoubleTap(const CSSPoint& aPoint,
                                    const Modifiers& aModifiers,
                                    const ScrollableLayerGuid& aGuid) {
-  TABC_LOG("Handling double tap at %s with %p %p\n", Stringify(aPoint).c_str(),
-           mBrowserChildMessageManager
-               ? mBrowserChildMessageManager->GetWrapper()
-               : nullptr,
-           mBrowserChildMessageManager.get());
+  MOZ_LOG(
+      sApzChildLog, LogLevel::Debug,
+      ("Handling double tap at %s with %p %p\n", Stringify(aPoint).c_str(),
+       mBrowserChildMessageManager ? mBrowserChildMessageManager->GetWrapper()
+                                   : nullptr,
+       mBrowserChildMessageManager.get()));
 
   if (!mBrowserChildMessageManager) {
     return;
@@ -1595,8 +1592,8 @@ BrowserChild::GetChildToParentConversionMatrix() const {
   return LayoutDeviceToLayoutDeviceMatrix4x4::Translation(offset);
 }
 
-ScreenRect BrowserChild::GetRemoteDocumentRect() const {
-  return mRemoteDocumentRect;
+ScreenRect BrowserChild::GetTopLevelViewportVisibleRectInBrowserCoords() const {
+  return mTopLevelViewportVisibleRectInBrowserCoords;
 }
 
 void BrowserChild::FlushAllCoalescedMouseData() {
@@ -1862,7 +1859,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityMouseWheelEvent(
 mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
     const WidgetTouchEvent& aEvent, const ScrollableLayerGuid& aGuid,
     const uint64_t& aInputBlockId, const nsEventStatus& aApzResponse) {
-  TABC_LOG("Receiving touch event of type %d\n", aEvent.mMessage);
+  MOZ_LOG(sApzChildLog, LogLevel::Debug,
+          ("Receiving touch event of type %d\n", aEvent.mMessage));
 
   WidgetTouchEvent localEvent(aEvent);
   localEvent.mWidget = mPuppetWidget;
@@ -2219,20 +2217,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvActivateFrameEvent(
   return IPC_OK();
 }
 
-// Return whether a remote script should be loaded in middleman processes in
-// addition to any child recording process they have.
-static bool LoadScriptInMiddleman(const nsString& aURL) {
-  return  // Middleman processes run devtools server side scripts.
-      (StringBeginsWith(aURL, NS_LITERAL_STRING("resource://devtools/")) &&
-       recordreplay::parent::DebuggerRunsInMiddleman())
-      // This script includes event listeners needed to propagate document
-      // title changes.
-      || aURL.EqualsLiteral("chrome://global/content/browser-child.js")
-      // This script is needed to respond to session store requests from the
-      // UI process.
-      || aURL.EqualsLiteral("chrome://browser/content/content-sessionStore.js");
-}
-
 mozilla::ipc::IPCResult BrowserChild::RecvLoadRemoteScript(
     const nsString& aURL, const bool& aRunInGlobalScope) {
   if (!InitBrowserChildMessageManager())
@@ -2244,11 +2228,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvLoadRemoteScript(
                            mBrowserChildMessageManager->GetOrCreateWrapper());
   if (!mm) {
     // This can happen if we're half-destroyed.  It's not a fatal error.
-    return IPC_OK();
-  }
-
-  // Make sure we only load whitelisted scripts in middleman processes.
-  if (recordreplay::IsMiddleman() && !LoadScriptInMiddleman(aURL)) {
     return IPC_OK();
   }
 
@@ -2335,7 +2314,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvSwappedWithOtherRemoteLoader(
   // Ignore previous value of mTriedBrowserInit since owner content has changed.
   mTriedBrowserInit = true;
   // Initialize the child side of the browser element machinery, if appropriate.
-  if (IsMozBrowser()) {
+  if (IsMozBrowserElement()) {
     RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
   }
 
@@ -2641,7 +2620,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvNavigateByKey(
                     nsIFocusManager::FLAG_BYKEY, getter_AddRefs(result));
     }
 
-    SendRequestFocus(false);
+    SendRequestFocus(false, CallerType::System);
   }
 
   return IPC_OK();
@@ -2680,7 +2659,7 @@ bool BrowserChild::InitBrowserChildMessageManager() {
     mTriedBrowserInit = true;
     // Initialize the child side of the browser element machinery,
     // if appropriate.
-    if (IsMozBrowser()) {
+    if (IsMozBrowserElement()) {
       RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
     }
   }
@@ -2827,10 +2806,7 @@ void BrowserChild::InitAPZState() {
 
 void BrowserChild::NotifyPainted() {
   if (!mNotified) {
-    // Recording/replaying processes have a compositor but not a remote frame.
-    if (!recordreplay::IsRecordingOrReplaying()) {
-      SendNotifyCompositorTransaction();
-    }
+    SendNotifyCompositorTransaction();
     mNotified = true;
   }
 }
@@ -2970,8 +2946,8 @@ BrowserChild::SetWebBrowserChrome(nsIWebBrowserChrome3* aWebBrowserChrome) {
   return NS_OK;
 }
 
-void BrowserChild::SendRequestFocus(bool aCanFocus) {
-  PBrowserChild::SendRequestFocus(aCanFocus);
+void BrowserChild::SendRequestFocus(bool aCanFocus, CallerType aCallerType) {
+  PBrowserChild::SendRequestFocus(aCanFocus, aCallerType);
 }
 
 void BrowserChild::EnableDisableCommands(
@@ -3235,11 +3211,15 @@ mozilla::ipc::IPCResult BrowserChild::RecvRequestNotifyAfterRemotePaint() {
 
 mozilla::ipc::IPCResult BrowserChild::RecvUIResolutionChanged(
     const float& aDpi, const int32_t& aRounding, const double& aScale) {
+  nsCOMPtr<Document> document(GetTopLevelDocument());
+  if (!document) {
+    return IPC_OK();
+  }
+
   ScreenIntSize oldScreenSize = GetInnerSize();
   if (aDpi > 0) {
     mPuppetWidget->UpdateBackingScaleCache(aDpi, aRounding, aScale);
   }
-  nsCOMPtr<Document> document(GetTopLevelDocument());
   RefPtr<nsPresContext> presContext = document->GetPresContext();
   if (presContext) {
     presContext->UIResolutionChangedSync();
@@ -3262,8 +3242,12 @@ mozilla::ipc::IPCResult BrowserChild::RecvUIResolutionChanged(
 
 mozilla::ipc::IPCResult BrowserChild::RecvThemeChanged(
     nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache) {
-  LookAndFeel::SetIntCache(aLookAndFeelIntCache);
   nsCOMPtr<Document> document(GetTopLevelDocument());
+  if (!document) {
+    return IPC_OK();
+  }
+
+  LookAndFeel::SetIntCache(aLookAndFeelIntCache);
   RefPtr<nsPresContext> presContext = document->GetPresContext();
   if (presContext) {
     presContext->ThemeChanged();
@@ -3282,14 +3266,6 @@ bool BrowserChild::StopAwaitingLargeAlloc() {
   bool awaiting = mAwaitingLA;
   mAwaitingLA = false;
   return awaiting;
-}
-
-mozilla::ipc::IPCResult BrowserChild::RecvSetWindowName(const nsString& aName) {
-  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(WebNavigation());
-  if (item) {
-    item->SetName(aName);
-  }
-  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvAllowScriptsToClose() {
@@ -3311,35 +3287,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvSetOriginAttributes(
 mozilla::ipc::IPCResult BrowserChild::RecvSetWidgetNativeData(
     const WindowsHandle& aWidgetNativeData) {
   mWidgetNativeData = aWidgetNativeData;
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult BrowserChild::RecvGetContentBlockingLog(
-    GetContentBlockingLogResolver&& aResolve) {
-  dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
-  if (NS_WARN_IF(!contentChild)) {
-    return IPC_OK();
-  }
-
-  bool success = false;
-  nsAutoCString result;
-
-  if (nsCOMPtr<Document> doc = GetTopLevelDocument()) {
-    result = doc->GetContentBlockingLog()->Stringify();
-    success = true;
-  }
-
-  nsCOMPtr<nsIInputStream> stream;
-  nsresult rv = NS_NewCStringInputStream(getter_AddRefs(stream), result);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    success = false;
-  }
-
-  AutoIPCStream ipcStream;
-  ipcStream.Serialize(stream, contentChild);
-
-  aResolve(
-      Tuple<const IPCStream&, const bool&>(ipcStream.TakeValue(), success));
   return IPC_OK();
 }
 
@@ -3421,6 +3368,38 @@ Maybe<LayoutDeviceIntRect> BrowserChild::GetVisibleRect() const {
   return Some(visibleRectLD);
 }
 
+Maybe<LayoutDeviceRect>
+BrowserChild::GetTopLevelViewportVisibleRectInSelfCoords() const {
+  if (mIsTopLevel) {
+    return Nothing();
+  }
+
+  if (!mChildToParentConversionMatrix) {
+    // We have no way to tell this remote document visible rect right now.
+    return Nothing();
+  }
+
+  Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> inverse =
+      mChildToParentConversionMatrix->MaybeInverse();
+  if (!inverse) {
+    return Nothing();
+  }
+
+  // Convert the remote document visible rect to the coordinate system of the
+  // iframe document.
+  Maybe<LayoutDeviceRect> rect = UntransformBy(
+      *inverse,
+      ViewAs<LayoutDevicePixel>(
+          mTopLevelViewportVisibleRectInBrowserCoords,
+          PixelCastJustification::ContentProcessIsLayerInUiProcess),
+      LayoutDeviceRect::MaxIntRect());
+  if (!rect) {
+    return Nothing();
+  }
+
+  return rect;
+}
+
 ScreenIntRect BrowserChild::GetOuterRect() {
   LayoutDeviceIntRect outerRect =
       RoundedToInt(mUnscaledOuterRect * mPuppetWidget->GetDefaultScale());
@@ -3450,7 +3429,6 @@ nsresult BrowserChild::CanCancelContentJS(
   if (aEpoch <= mCancelContentJSEpoch) {
     // The next page loaded before we got here, so we shouldn't try to cancel
     // the content JS.
-    TABC_LOG("Unable to cancel content JS; the next page is already loaded!\n");
     return NS_OK;
   }
 
@@ -3820,7 +3798,7 @@ NS_IMETHODIMP BrowserChild::OnSecurityChange(nsIWebProgress* aWebProgress,
     }
 
     securityChangeData.emplace();
-    securityChangeData->securityInfo() = securityInfo.forget();
+    securityChangeData->securityInfo() = ToRefPtr(std::move(securityInfo));
     securityChangeData->isSecureContext() = isSecureContext;
   }
 
@@ -3833,18 +3811,11 @@ NS_IMETHODIMP BrowserChild::OnSecurityChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP BrowserChild::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
                                                    nsIRequest* aRequest,
                                                    uint32_t aEvent) {
-  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
-    return NS_OK;
-  }
-
-  Maybe<WebProgressData> webProgressData;
-  RequestData requestData;
-  nsresult rv = PrepareProgressListenerData(aWebProgress, aRequest,
-                                            webProgressData, requestData);
-  NS_ENSURE_SUCCESS(rv, rv);
-  Unused << SendOnContentBlockingEvent(webProgressData, requestData, aEvent);
-
-  return NS_OK;
+  // The OnContentBlockingEvent only happenes in the parent process. It should
+  // not be seen in the content process.
+  MOZ_DIAGNOSTIC_ASSERT(
+      false, "OnContentBlockingEvent should not be seen in content process.");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP BrowserChild::OnProgressChange64(nsIWebProgress* aWebProgress,
@@ -4008,6 +3979,27 @@ BrowserChild::DoesWindowSupportProtectedMedia() {
 }
 #endif
 
+void BrowserChild::NotifyContentBlockingEvent(
+    uint32_t aEvent, nsIChannel* aChannel, bool aBlocked,
+    const nsACString& aTrackingOrigin,
+    const nsTArray<nsCString>& aTrackingFullHashes,
+    const Maybe<mozilla::AntiTrackingCommon::StorageAccessGrantedReason>&
+        aReason) {
+  if (!IPCOpen()) {
+    return;
+  }
+
+  Maybe<WebProgressData> webProgressData;
+  RequestData requestData;
+  nsresult rv = PrepareProgressListenerData(nullptr, aChannel, webProgressData,
+                                            requestData);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  Unused << SendNotifyContentBlockingEvent(aEvent, requestData, aBlocked,
+                                           PromiseFlatCString(aTrackingOrigin),
+                                           aTrackingFullHashes, aReason);
+}
+
 BrowserChildMessageManager::BrowserChildMessageManager(
     BrowserChild* aBrowserChild)
     : ContentFrameMessageManager(new nsFrameMessageManager(aBrowserChild)),
@@ -4021,6 +4013,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(BrowserChildMessageManager,
                                                 DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowserChild);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(BrowserChildMessageManager,

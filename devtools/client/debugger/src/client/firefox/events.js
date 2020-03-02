@@ -9,7 +9,7 @@ import type {
   PausedPacket,
   ThreadFront,
   Target,
-  DebuggerClient,
+  DevToolsClient,
 } from "./types";
 
 import Actions from "../../actions";
@@ -25,38 +25,62 @@ const {
 } = require("devtools/client/shared/workers-listener.js");
 
 type Dependencies = {
-  threadFront: ThreadFront,
-  tabTarget: Target,
   actions: typeof Actions,
-  debuggerClient: DebuggerClient,
+  devToolsClient: DevToolsClient,
 };
 
 let actions: typeof Actions;
 let isInterrupted: boolean;
+let threadFrontListeners: WeakMap<ThreadFront, Array<Function>>;
+let workersListener: Object;
 
 function addThreadEventListeners(thread: ThreadFront) {
+  const removeListeners = [];
   Object.keys(clientEvents).forEach(eventName => {
-    thread.on(eventName, clientEvents[eventName].bind(null, thread));
+    // EventEmitter.on returns a function that removes the event listener.
+    removeListeners.push(
+      thread.on(eventName, clientEvents[eventName].bind(null, thread))
+    );
   });
+  threadFrontListeners.set(thread, removeListeners);
+}
+
+function removeThreadEventListeners(thread: ThreadFront) {
+  const removeListeners = threadFrontListeners.get(thread) || [];
+  for (const removeListener of removeListeners) {
+    removeListener();
+  }
 }
 
 function attachAllTargets(currentTarget: Target) {
-  return prefs.fission && currentTarget.chrome && !currentTarget.isAddon;
+  return prefs.fission && currentTarget.isParentProcess;
 }
 
 function setupEvents(dependencies: Dependencies) {
-  const { tabTarget, threadFront, debuggerClient } = dependencies;
+  const { devToolsClient } = dependencies;
   actions = dependencies.actions;
   sourceQueue.initialize(actions);
 
-  addThreadEventListeners(threadFront);
-  tabTarget.on("workerListChanged", () => threadListChanged());
-  debuggerClient.mainRoot.on("processListChanged", () => threadListChanged());
+  devToolsClient.mainRoot.on("processListChanged", threadListChanged);
 
-  if (features.windowlessServiceWorkers || attachAllTargets(tabTarget)) {
-    const workersListener = new WorkersListener(debuggerClient.mainRoot);
-    workersListener.addListener(() => threadListChanged());
+  workersListener = new WorkersListener(devToolsClient.mainRoot);
+
+  threadFrontListeners = new WeakMap();
+}
+
+function setupEventsTopTarget(targetFront: Target) {
+  targetFront.on("workerListChanged", threadListChanged);
+  addThreadEventListeners(targetFront.threadFront);
+
+  if (features.windowlessServiceWorkers || attachAllTargets(targetFront)) {
+    workersListener.addListener(threadListChanged);
   }
+}
+
+function removeEventsTopTarget(targetFront: Target) {
+  targetFront.off("workerListChanged", threadListChanged);
+  removeThreadEventListeners(targetFront.threadFront);
+  workersListener.removeListener();
 }
 
 async function paused(threadFront: ThreadFront, packet: PausedPacket) {
@@ -116,18 +140,17 @@ function threadListChanged() {
   actions.updateThreads();
 }
 
-function replayFramePositions(
-  threadFront: ThreadFront,
-  { positions, frame, thread }: Object
-) {
-  actions.setFramePositions(positions, frame, thread);
-}
-
 const clientEvents = {
   paused,
   resumed,
   newSource,
-  replayFramePositions,
 };
 
-export { setupEvents, clientEvents, addThreadEventListeners, attachAllTargets };
+export {
+  removeEventsTopTarget,
+  setupEvents,
+  setupEventsTopTarget,
+  clientEvents,
+  addThreadEventListeners,
+  attachAllTargets,
+};

@@ -109,8 +109,8 @@ function checkAutoCompleteResults(actualValues, expectedValues, hostname, msg) {
 }
 
 function getIframeBrowsingContext(window, iframeNumber = 0) {
-  let bc = SpecialPowers.wrap(window).getWindowGlobalChild().browsingContext;
-  return SpecialPowers.unwrap(bc.getChildren()[iframeNumber]);
+  let bc = SpecialPowers.wrap(window).windowGlobalChild.browsingContext;
+  return SpecialPowers.unwrap(bc.children[iframeNumber]);
 }
 
 /**

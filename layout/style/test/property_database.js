@@ -257,6 +257,91 @@ var validGradientAndElementValues = [
   "radial-gradient(at calc(100px + -25px) top, red, blue)",
   "radial-gradient(at left calc(100px + -25px), red, blue)",
 
+  ...(IsCSSPropertyPrefEnabled("layout.css.conic-gradient.enabled")
+    ? [
+        // Conic gradient
+        "conic-gradient(red, blue)",
+        "conic-gradient(red,blue,yellow)",
+        "conic-gradient(  red  ,  blue,   yellow)",
+        "conic-gradient(red 0, blue 50deg)",
+        "conic-gradient(red 10%, blue 50%)",
+        "conic-gradient(red -50deg, blue 50deg)",
+        "conic-gradient(red 50deg, blue 0.3turn, yellow 200grad, orange 60%, 5rad)",
+
+        "conic-gradient(red 0 100%)",
+        "conic-gradient(red 0 50%, blue 50%)",
+        "conic-gradient(red 0 50deg, blue 50% 100%)",
+        "conic-gradient(red 0 50%, 0deg, blue 50%)",
+        "conic-gradient(red 0deg 50%, 0%, blue 50% 100%)",
+
+        "conic-gradient(from 0, red, blue)",
+        "conic-gradient(from 40deg, red, blue)",
+        "conic-gradient(from 0.4turn, red, blue)",
+        "conic-gradient(from 200grad, red, blue)",
+        "conic-gradient(from 5rad, red, blue)",
+
+        "conic-gradient(at top, red, blue)",
+        "conic-gradient(at top left, red, blue)",
+        "conic-gradient(at left top, red, blue)",
+        "conic-gradient(at center center, red, blue)",
+        "conic-gradient(at 20% bottom, red, blue)",
+        "conic-gradient(at center 20%, red, blue)",
+        "conic-gradient(at left 35px, red, blue)",
+        "conic-gradient(at 10% 10em, red, blue)",
+        "conic-gradient(at 44px top, red, blue)",
+        "conic-gradient(at 0 0, red, blue)",
+        "conic-gradient(at 10px, red, blue)",
+
+        "conic-gradient(at calc(25%) top, red, blue)",
+        "conic-gradient(at left calc(25%), red, blue)",
+        "conic-gradient(at calc(25px) top, red, blue)",
+        "conic-gradient(at left calc(25px), red, blue)",
+        "conic-gradient(at calc(-25%) top, red, blue)",
+        "conic-gradient(at left calc(-25%), red, blue)",
+        "conic-gradient(at calc(-25px) top, red, blue)",
+        "conic-gradient(at left calc(-25px), red, blue)",
+        "conic-gradient(at calc(100px + -25%) top, red, blue)",
+        "conic-gradient(at left calc(100px + -25%), red, blue)",
+        "conic-gradient(at calc(100px + -25px) top, red, blue)",
+        "conic-gradient(at left calc(100px + -25px), red, blue)",
+
+        "conic-gradient(from 0 at 0 0, red, blue)",
+        "conic-gradient(from 40deg at 50%, red, blue)",
+        "conic-gradient(from 0.4turn at left 30%, red, blue)",
+        "conic-gradient(from 200grad at calc(100px + -25%) top, red, blue)",
+        "conic-gradient(from 5rad at 10px, red, blue)",
+
+        "repeating-conic-gradient(red, blue)",
+        "repeating-conic-gradient(red, yellow, blue)",
+        "repeating-conic-gradient(red 1deg, yellow 20%, blue 24em, green)",
+        "repeating-conic-gradient(red, yellow, green, blue 50%)",
+        "repeating-conic-gradient(red -50%, yellow -25%, green, blue)",
+        "repeating-conic-gradient(red -99deg, yellow, green, blue 120%)",
+        "repeating-conic-gradient(#ffff00, #ef3, rgba(10, 20, 30, 0.4))",
+        "repeating-conic-gradient(rgba(10, 20, 30, 0.4), #ffff00, #ef3)",
+
+        "repeating-conic-gradient(from 0, red, blue)",
+        "repeating-conic-gradient(from 40deg, red, blue)",
+        "repeating-conic-gradient(from 0.4turn, red, blue)",
+        "repeating-conic-gradient(from 200grad, red, blue)",
+        "repeating-conic-gradient(from 5rad, red, blue)",
+
+        "repeating-conic-gradient(at top left, red, blue)",
+        "repeating-conic-gradient(at 0 0, red, blue)",
+        "repeating-conic-gradient(at 20% bottom, red, blue)",
+        "repeating-conic-gradient(at center 20%, red, blue)",
+        "repeating-conic-gradient(at left 35px, red, blue)",
+        "repeating-conic-gradient(at 10% 10em, red, blue)",
+        "repeating-conic-gradient(at 44px top, red, blue)",
+
+        "repeating-conic-gradient(from 0 at 0 0, red, blue)",
+        "repeating-conic-gradient(from 40deg at 50%, red, blue)",
+        "repeating-conic-gradient(from 0.4turn at left 30%, red, blue)",
+        "repeating-conic-gradient(from 200grad at calc(100px + -25%) top, red, blue)",
+        "repeating-conic-gradient(from 5rad at 10px, red, blue)",
+      ]
+    : []),
+
   // 2008 GRADIENTS: -webkit-gradient()
   // ----------------------------------
   // linear w/ no color stops (valid) and a variety of position values:
@@ -428,6 +513,19 @@ var invalidGradientAndElementValues = [
   "radial-gradient(circle 50%, red, blue)",
   "radial-gradient(50% circle, red, blue)",
 
+  /* Invalid units */
+  "conic-gradient(red, blue 50px, yellow 30px)",
+  "conic-gradient(from 0%, black, white)",
+  "conic-gradient(from 60%, black, white)",
+  "conic-gradient(from 40px, black, white)",
+  "conic-gradient(from 50, black, white)",
+  "conic-gradient(at 50deg, black, white)",
+  "conic-gradient(from 40deg at 50deg, black, white)",
+  "conic-gradient(from 40deg at 50deg 60deg, black, white)",
+  /* Invalid keywords (or ordering) */
+  "conic-gradient(at 40% from 50deg, black, white)",
+  "conic-gradient(to 50deg, black, white)",
+
   /* Used to be valid only when prefixed */
   "linear-gradient(top left, red, blue)",
   "linear-gradient(0 0, red, blue)",
@@ -501,6 +599,10 @@ var invalidGradientAndElementValues = [
   "radial-gradient(red 0% 50% 75%, blue 75%)",
   "radial-gradient(center, red 0% 50% 100%)",
   "radial-gradient(center, red 0% 50% 75%, blue 75%)",
+  "conic-gradient(red 0% 50% 100%)",
+  "conic-gradient(red 0% 50% 75%, blue 75%)",
+  "conic-gradient(center, red 0% 50% 100%)",
+  "conic-gradient(center, red 0% 50% 75%, blue 75%)",
 
   "-moz-linear-gradient(unset, 10px 10px, from(blue))",
   "-moz-linear-gradient(unset, 10px 10px, blue 0)",
@@ -664,6 +766,13 @@ var invalidGradientAndElementValues = [
   "-webkit-radial-gradient(top 30deg, red, blue)",
   "-webkit-radial-gradient(left top 30deg, red, blue)",
   "-webkit-radial-gradient(10px 20px 30deg, red, blue)",
+
+  // Conic gradients should not support prefixed syntax
+  "-webkit-gradient(conic, 1 2, 3 4, color-stop(0, lime))",
+  "-webkit-conic-gradient(red, blue)",
+  "-moz-conic-gradient(red, blue)",
+  "-webkit-repeating-conic-gradient(red, blue)",
+  "-moz-repeating-conic-gradient(red, blue)",
 ];
 var unbalancedGradientAndElementValues = ["-moz-element(#a()"];
 
@@ -1477,6 +1586,13 @@ var gCSSProperties = {
     initial_values: ["none"],
     other_values: ["radio", "menulist"],
     invalid_values: [],
+  },
+  "-webkit-appearance": {
+    domProp: "webkitAppearance",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "-moz-appearance",
+    subproperties: ["-moz-appearance"],
   },
   "border-inline": {
     domProp: "borderInline",
@@ -2374,13 +2490,6 @@ var gCSSProperties = {
       "calc(50px + rubbish) 2",
     ],
   },
-  "-moz-columns": {
-    domProp: "MozColumns",
-    inherited: false,
-    type: CSS_TYPE_TRUE_SHORTHAND,
-    alias_for: "columns",
-    subproperties: ["column-count", "column-width"],
-  },
   "column-count": {
     domProp: "columnCount",
     inherited: false,
@@ -2390,13 +2499,6 @@ var gCSSProperties = {
     // negative and zero invalid per editor's draft
     invalid_values: ["-1", "0", "3px"],
   },
-  "-moz-column-count": {
-    domProp: "MozColumnCount",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-count",
-    subproperties: ["column-count"],
-  },
   "column-fill": {
     domProp: "columnFill",
     inherited: false,
@@ -2404,20 +2506,6 @@ var gCSSProperties = {
     initial_values: ["balance"],
     other_values: ["auto"],
     invalid_values: ["2px", "dotted", "5em"],
-  },
-  "-moz-column-fill": {
-    domProp: "MozColumnFill",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-fill",
-    subproperties: ["column-fill"],
-  },
-  "-moz-column-gap": {
-    domProp: "MozColumnGap",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-gap",
-    subproperties: ["column-gap"],
   },
   "column-rule": {
     domProp: "columnRule",
@@ -2449,22 +2537,11 @@ var gCSSProperties = {
       "5 green solid",
     ],
   },
-  "-moz-column-rule": {
-    domProp: "MozColumnRule",
-    inherited: false,
-    type: CSS_TYPE_TRUE_SHORTHAND,
-    alias_for: "column-rule",
-    subproperties: [
-      "column-rule-width",
-      "column-rule-style",
-      "column-rule-color",
-    ],
-  },
   "column-rule-width": {
     domProp: "columnRuleWidth",
     inherited: false,
     type: CSS_TYPE_LONGHAND,
-    prerequisites: { "-moz-column-rule-style": "solid" },
+    prerequisites: { "column-rule-style": "solid" },
     initial_values: ["medium", "3px", "calc(3px)", "calc(5em + 3px - 5em)"],
     other_values: [
       "thin",
@@ -2554,6 +2631,18 @@ var gCSSProperties = {
       "calc(2em / (4 / 3))",
       "calc(4 * (2em / 3))",
 
+      "min(5px)",
+      "min(5px,2em)",
+
+      "max(5px)",
+      "max(5px,2em)",
+
+      "calc(min(5px))",
+      "calc(min(5px,2em))",
+
+      "calc(max(5px))",
+      "calc(max(5px,2em))",
+
       // Valid cases with unitless zero (which is never
       // a length).
       "calc(0 * 2em)",
@@ -2587,13 +2676,9 @@ var gCSSProperties = {
       "-moz-max()",
       "calc(max())",
       "-moz-min(5px)",
-      "calc(min(5px))",
       "-moz-max(5px)",
-      "calc(max(5px))",
       "-moz-min(5px,2em)",
-      "calc(min(5px,2em))",
       "-moz-max(5px,2em)",
-      "calc(max(5px,2em))",
       "calc(50px/(2 - 2))",
       "calc(5 + 5)",
       "calc(5 * 5)",
@@ -2620,13 +2705,6 @@ var gCSSProperties = {
       "calc((0 + 2em) * 1)",
     ],
   },
-  "-moz-column-rule-width": {
-    domProp: "MozColumnRuleWidth",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-rule-width",
-    subproperties: ["column-rule-width"],
-  },
   "column-rule-style": {
     domProp: "columnRuleStyle",
     inherited: false,
@@ -2645,13 +2723,6 @@ var gCSSProperties = {
     ],
     invalid_values: ["20", "foo"],
   },
-  "-moz-column-rule-style": {
-    domProp: "MozColumnRuleStyle",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-rule-style",
-    subproperties: ["column-rule-style"],
-  },
   "column-rule-color": {
     domProp: "columnRuleColor",
     inherited: false,
@@ -2661,12 +2732,13 @@ var gCSSProperties = {
     other_values: ["red", "blue", "#ffff00"],
     invalid_values: ["ffff00"],
   },
-  "-moz-column-rule-color": {
-    domProp: "MozColumnRuleColor",
+  "column-span": {
+    domProp: "columnSpan",
     inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-rule-color",
-    subproperties: ["column-rule-color"],
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["none"],
+    other_values: ["all"],
+    invalid_values: ["-1", "0", "auto", "2px"],
   },
   "column-width": {
     domProp: "columnWidth",
@@ -2682,13 +2754,6 @@ var gCSSProperties = {
       "calc(0px)",
     ],
     invalid_values: ["20", "-1px", "50%"],
-  },
-  "-moz-column-width": {
-    domProp: "MozColumnWidth",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-width",
-    subproperties: ["column-width"],
   },
   "-moz-float-edge": {
     domProp: "MozFloatEdge",
@@ -3668,6 +3733,9 @@ var gCSSProperties = {
       "translate(calc(5px - 10% * 3))",
       "translate(calc(5px - 3 * 10%), 50px)",
       "translate(-50px, calc(5px - 10% * 3))",
+      "translate(10px, calc(min(5px,10%)))",
+      "translate(calc(max(5px,10%)), 10%)",
+      "translate(max(5px,10%), 10%)",
       "translatez(1px)",
       "translatez(4em)",
       "translatez(-4px)",
@@ -3722,8 +3790,6 @@ var gCSSProperties = {
       /* invalid calc() values */
       "translatey(-moz-min(5px,10%))",
       "translatex(-moz-max(5px,10%))",
-      "translate(10px, calc(min(5px,10%)))",
-      "translate(calc(max(5px,10%)), 10%)",
       "matrix(1, 0, 0, 1, max(5px * 3), calc(10% - 3px))",
       "perspective(-10px)",
       "matrix3d(dinosaur)",
@@ -5270,7 +5336,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     applies_to_marker: true,
-    /* XXX needs to be on pseudo-elements */
+    // XXX This really depends on pseudo-element-ness.
     initial_values: ["normal", "none"],
     other_values: [
       '""',
@@ -7612,6 +7678,8 @@ var gCSSProperties = {
       "overline 2em",
       "underline from-font",
       "red from-font overline",
+      "5% underline blue",
+      "dotted line-through 25%",
     ],
     invalid_values: [
       "none none",
@@ -7623,8 +7691,6 @@ var gCSSProperties = {
       "underline overline line-through blink none",
       "underline overline line-throuh blink blink",
       "rgb(0, rubbish, 0) underline",
-      "5% underline blue",
-      "dotted line-through 25%",
       "from font blue underline",
     ],
   },
@@ -7704,16 +7770,17 @@ var gCSSProperties = {
     applies_to_placeholder: true,
     applies_to_cue: true,
     initial_values: ["auto"],
-    other_values: ["from-font", "0", "-14px", "25px", "100em", "-45em"],
-    invalid_values: [
-      "13",
-      "-25",
-      "rubbish",
-      ",./!@#$",
+    other_values: [
+      "from-font",
+      "0",
+      "-14px",
+      "25px",
+      "100em",
+      "-45em",
       "43%",
       "-10%",
-      "from font",
     ],
+    invalid_values: ["13", "-25", "rubbish", ",./!@#$", "from font"],
   },
   "text-decoration-skip-ink": {
     domProp: "textDecorationSkipInk",
@@ -7723,7 +7790,7 @@ var gCSSProperties = {
     applies_to_first_line: true,
     applies_to_placeholder: true,
     initial_values: ["auto"],
-    other_values: ["none"],
+    other_values: ["none", "all"],
     invalid_values: [
       "13",
       "15%",
@@ -7746,14 +7813,13 @@ var gCSSProperties = {
     applies_to_first_line: true,
     applies_to_placeholder: true,
     initial_values: ["auto"],
-    other_values: ["from-font", "0", "-14px", "25px", "100em", "-45em"],
+    other_values: ["0", "-14px", "25px", "100em", "-45em", "43%", "-10%"],
     invalid_values: [
       "13",
       "-25",
       "rubbish",
       ",./!@#$",
-      "43%",
-      "-10%",
+      "from-font",
       "from font",
     ],
   },
@@ -7773,16 +7839,23 @@ var gCSSProperties = {
       "under left",
       "right under",
       "under right",
+      "from-font",
+      "from-font left",
+      "from-font right",
+      "left from-font",
+      "right from-font",
     ],
     invalid_values: [
       "none",
+      "auto from-font",
       "auto under",
+      "under from-font",
       "left right",
       "right auto",
       "0",
       "1px",
       "10%",
-      "from-font",
+      "from font",
     ],
   },
   "text-emphasis": {
@@ -8391,6 +8464,14 @@ var gCSSProperties = {
       "calc(50%)",
       "calc(50px/2)",
       "calc(50px/(2 - 1))",
+      "calc(min(5px))",
+      "calc(min(5px,2em))",
+      "calc(max(5px))",
+      "calc(max(5px,2em))",
+      "min(5px)",
+      "min(5px,2em)",
+      "max(5px)",
+      "max(5px,2em)",
     ],
     invalid_values: [
       "none",
@@ -8405,13 +8486,9 @@ var gCSSProperties = {
       "-moz-max()",
       "calc(max())",
       "-moz-min(5px)",
-      "calc(min(5px))",
       "-moz-max(5px)",
-      "calc(max(5px))",
       "-moz-min(5px,2em)",
-      "calc(min(5px,2em))",
       "-moz-max(5px,2em)",
-      "calc(max(5px,2em))",
       "calc(50px/(2 - 2))",
       /* If we ever support division by values, which is
        * complicated for the reasons described in
@@ -8873,8 +8950,8 @@ var gCSSProperties = {
     domProp: "imageOrientation",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: ["none"],
-    other_values: ["from-image"],
+    initial_values: ["from-image"],
+    other_values: ["none"],
     invalid_values: ["0", "0deg"],
   },
   "image-rendering": {
@@ -9641,6 +9718,14 @@ var gCSSProperties = {
       "calc(50%)",
       "calc(50px/2)",
       "calc(50px/(2 - 1))",
+      "calc(min(5px))",
+      "calc(min(5px,2em))",
+      "calc(max(5px))",
+      "calc(max(5px,2em))",
+      "min(5px)",
+      "min(5px,2em)",
+      "max(5px)",
+      "max(5px,2em)",
     ],
     invalid_values: [
       "none",
@@ -9654,13 +9739,9 @@ var gCSSProperties = {
       "-moz-max()",
       "calc(max())",
       "-moz-min(5px)",
-      "calc(min(5px))",
       "-moz-max(5px)",
-      "calc(max(5px))",
       "-moz-min(5px,2em)",
-      "calc(min(5px,2em))",
       "-moz-max(5px,2em)",
-      "calc(max(5px,2em))",
       "calc(50px/(2 - 2))",
       // If we ever support division by values, which is
       // complicated for the reasons described in
@@ -11509,6 +11590,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.individual-transform.enabled")) {
       "calc(5px - 10% * 3)",
       "calc(5px - 3 * 10%) 50px",
       "-50px calc(5px - 10% * 3)",
+      "10px calc(min(5px,10%))",
     ],
     invalid_values: [
       "1",
@@ -11517,7 +11599,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.individual-transform.enabled")) {
       "3px 4px 1px 7px",
       "4px 5px 10%",
       /* invalid calc() values */
-      "10px calc(min(5px,10%))",
       "calc(max(5px,10%) 10%)",
       "calc(nonsense)",
     ],
@@ -12481,15 +12562,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.overscroll-behavior.enabled")) {
     invalid_values: ["left", "1px", "contain auto none", "contain nonsense"],
   };
 }
-if (IsCSSPropertyPrefEnabled("layout.css.webkit-appearance.enabled")) {
-  gCSSProperties["-webkit-appearance"] = {
-    domProp: "webkitAppearance",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "-moz-appearance",
-    subproperties: ["-moz-appearance"],
-  };
-}
 
 if (IsCSSPropertyPrefEnabled("layout.css.offset-logical-properties.enabled")) {
   gCSSProperties["offset-block-start"] = {
@@ -12557,24 +12629,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.offset-logical-properties.enabled")) {
 }
 
 gCSSProperties["display"].other_values.push("flow-root");
-
-if (IsCSSPropertyPrefEnabled("layout.css.column-span.enabled")) {
-  gCSSProperties["column-span"] = {
-    domProp: "columnSpan",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: ["none"],
-    other_values: ["all"],
-    invalid_values: ["-1", "0", "auto", "2px"],
-  };
-  gCSSProperties["-moz-column-span"] = {
-    domProp: "MozColumnSpan",
-    inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "column-span",
-    subproperties: ["column-span"],
-  };
-}
 
 if (IsCSSPropertyPrefEnabled("layout.css.webkit-line-clamp.enabled")) {
   gCSSProperties["-webkit-line-clamp"] = {
@@ -12706,6 +12760,9 @@ if (false) {
       "perspective(0px)",
       "perspective(1000px)",
       "matrix3d(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)",
+      "translate(10px, calc(min(5px,10%)))",
+      "translate(calc(max(5px,10%)), 10%)",
+      "translate(max(5px,10%), 10%)",
     ],
     invalid_values: [
       "1px",
@@ -12734,8 +12791,6 @@ if (false) {
       /* invalid calc() values */
       "translatey(-moz-min(5px,10%))",
       "translatex(-moz-max(5px,10%))",
-      "translate(10px, calc(min(5px,10%)))",
-      "translate(calc(max(5px,10%)), 10%)",
       "matrix(1, 0, 0, 1, max(5px * 3), calc(10% - 3px))",
       "perspective(-10px)",
       "matrix3d(dinosaur)",
@@ -12915,6 +12970,8 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
     type: CSS_TYPE_LONGHAND,
     initial_values: ["none"],
     other_values: [
+      "path('')",
+      "path(' ')",
       "path('M 10 10 20 20 H 90 V 90 Z')",
       "path('M10 10 20,20H90V90Z')",
       "path('M 10 10 C 20 20, 40 20, 50 10')",
@@ -12933,7 +12990,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
       "ray(calc(180deg - 45deg) farthest-side)",
     ],
     invalid_values: [
-      "path('')",
       "path()",
       "path(a)",
       "path('M 10 Z')",
@@ -12984,6 +13040,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
 
 if (IsCSSPropertyPrefEnabled("layout.css.clip-path-path.enabled")) {
   gCSSProperties["clip-path"].other_values.push(
+    "path(evenodd, '')",
     "path(nonzero, 'M 10 10 h 100 v 100 h-100 v-100 z')",
     "path(evenodd, 'M 10 10 h 100 v 100 h-100 v-100 z')",
     "path('M10,30A20,20 0,0,1 50,30A20,20 0,0,1 90,30Q90,60 50,90Q10,60 10,30z')"
@@ -12991,7 +13048,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.clip-path-path.enabled")) {
 
   gCSSProperties["clip-path"].invalid_values.push(
     "path(nonzero)",
-    "path(evenodd, '')",
     "path(abs, 'M 10 10 L 10 10 z')"
   );
 }
@@ -13044,6 +13100,92 @@ if (IsCSSPropertyPrefEnabled("layout.css.zoom-transform-hack.enabled")) {
     initial_values: ["normal", "1.0", "0", "0%", "100%"],
     other_values: ["10%", "2", "2.5"],
     invalid_values: ["0 0", "foo", "10px"],
+  };
+}
+
+if (IsCSSPropertyPrefEnabled("layout.css.prefixes.columns")) {
+  gCSSProperties["-moz-columns"] = {
+    domProp: "MozColumns",
+    inherited: false,
+    type: CSS_TYPE_TRUE_SHORTHAND,
+    alias_for: "columns",
+    subproperties: ["column-count", "column-width"],
+  };
+
+  gCSSProperties["-moz-column-count"] = {
+    domProp: "MozColumnCount",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-count",
+    subproperties: ["column-count"],
+  };
+
+  gCSSProperties["-moz-column-fill"] = {
+    domProp: "MozColumnFill",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-fill",
+    subproperties: ["column-fill"],
+  };
+
+  gCSSProperties["-moz-column-gap"] = {
+    domProp: "MozColumnGap",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-gap",
+    subproperties: ["column-gap"],
+  };
+
+  gCSSProperties["-moz-column-rule"] = {
+    domProp: "MozColumnRule",
+    inherited: false,
+    type: CSS_TYPE_TRUE_SHORTHAND,
+    alias_for: "column-rule",
+    subproperties: [
+      "column-rule-width",
+      "column-rule-style",
+      "column-rule-color",
+    ],
+  };
+
+  gCSSProperties["-moz-column-rule-width"] = {
+    domProp: "MozColumnRuleWidth",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-rule-width",
+    subproperties: ["column-rule-width"],
+  };
+
+  gCSSProperties["-moz-column-rule-style"] = {
+    domProp: "MozColumnRuleStyle",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-rule-style",
+    subproperties: ["column-rule-style"],
+  };
+
+  gCSSProperties["-moz-column-rule-color"] = {
+    domProp: "MozColumnRuleColor",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-rule-color",
+    subproperties: ["column-rule-color"],
+  };
+
+  gCSSProperties["-moz-column-span"] = {
+    domProp: "MozColumnSpan",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-span",
+    subproperties: ["column-span"],
+  };
+
+  gCSSProperties["-moz-column-width"] = {
+    domProp: "MozColumnWidth",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "column-width",
+    subproperties: ["column-width"],
   };
 }
 

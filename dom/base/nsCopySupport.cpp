@@ -406,8 +406,8 @@ nsresult nsCopySupport::GetTransferableForNode(
   // Make a temporary selection with aNode in a single range.
   // XXX We should try to get rid of the Selection object here.
   // XXX bug 1245883
-  RefPtr<Selection> selection = new Selection();
-  RefPtr<nsRange> range = new nsRange(aNode);
+  RefPtr<Selection> selection = new Selection(nullptr);
+  RefPtr<nsRange> range = nsRange::Create(aNode);
   ErrorResult result;
   range->SelectNode(*aNode, result);
   if (NS_WARN_IF(result.Failed())) {
@@ -639,12 +639,13 @@ static nsresult AppendImagePromise(nsITransferable* aTransferable,
     // Fix the file extension in the URL
     nsAutoCString primaryExtension;
     mimeInfo->GetPrimaryExtension(primaryExtension);
-
-    rv = NS_MutateURI(imgUri)
-             .Apply(NS_MutatorMethod(&nsIURLMutator::SetFileExtension,
-                                     primaryExtension, nullptr))
-             .Finalize(imgUrl);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (!primaryExtension.IsEmpty()) {
+      rv = NS_MutateURI(imgUri)
+               .Apply(NS_MutatorMethod(&nsIURLMutator::SetFileExtension,
+                                       primaryExtension, nullptr))
+               .Finalize(imgUrl);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   }
 
   nsAutoCString fileName;
@@ -719,7 +720,7 @@ static bool IsSelectionInsideRuby(Selection* aSelection) {
   ;
   for (auto i : IntegerRange(rangeCount)) {
     nsRange* range = aSelection->GetRangeAt(i);
-    if (!IsInsideRuby(range->GetCommonAncestor())) {
+    if (!IsInsideRuby(range->GetClosestCommonInclusiveAncestor())) {
       return false;
     }
   }

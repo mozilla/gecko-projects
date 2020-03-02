@@ -5,57 +5,48 @@
 package org.mozilla.geckoview.test
 
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
-import android.support.test.InstrumentationRegistry
-
-import android.support.test.filters.MediumTest
-import android.support.test.filters.SdkSuppress
-import android.support.test.runner.AndroidJUnit4
-
-import java.math.BigInteger
-
-import java.net.URI
-
-import java.nio.ByteBuffer
-import java.nio.CharBuffer
-import java.nio.charset.Charset
-
-import java.security.MessageDigest
-
-import java.util.concurrent.CountDownLatch
-
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.filters.MediumTest
+import androidx.test.filters.SdkSuppress
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import org.hamcrest.MatcherAssert.assertThat
 import org.hamcrest.Matchers.*
-
 import org.json.JSONObject
-import org.junit.*
-
+import org.junit.After
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
 import org.junit.rules.ExpectedException
 import org.junit.runner.RunWith
-import org.junit.Ignore
-
 import org.mozilla.geckoview.GeckoWebExecutor
 import org.mozilla.geckoview.WebRequest
 import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
-
-import org.mozilla.geckoview.test.util.HttpBin
 import org.mozilla.geckoview.test.util.RuntimeCreator
+import org.mozilla.geckoview.test.util.TestServer
 import java.io.IOException
+import java.lang.IllegalStateException
+import java.math.BigInteger
 import java.net.UnknownHostException
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.Charset
+import java.security.MessageDigest
 import java.util.*
 
 @MediumTest
 @RunWith(AndroidJUnit4::class)
 class WebExecutorTest {
     companion object {
-        val TEST_ENDPOINT: String = "http://localhost:4242"
+        const val TEST_PORT: Int = 4242
+        const val TEST_ENDPOINT: String = "http://localhost:${TEST_PORT}"
     }
 
     lateinit var executor: GeckoWebExecutor
-    lateinit var server: HttpBin
+    lateinit var server: TestServer
 
     @get:Rule val thrown = ExpectedException.none()
 
@@ -65,15 +56,12 @@ class WebExecutorTest {
         // the tests which are not using @UiThreadTest, so we do that
         // ourselves here as GeckoRuntime needs to be initialized
         // on the UI thread.
-        val latch = CountDownLatch(1)
-        Handler(Looper.getMainLooper()).post {
+        runBlocking(Dispatchers.Main) {
             executor = GeckoWebExecutor(RuntimeCreator.getRuntime())
-            server = HttpBin(InstrumentationRegistry.getTargetContext(), URI.create(TEST_ENDPOINT))
-            server.start()
-            latch.countDown()
         }
 
-        latch.await()
+        server = TestServer(InstrumentationRegistry.getInstrumentation().targetContext)
+        server.start(TEST_PORT)
     }
 
     @After
@@ -98,7 +86,9 @@ class WebExecutorTest {
     }
 
     fun WebResponse.getBodyBytes(): ByteBuffer {
-        return ByteBuffer.wrap(body!!.readBytes())
+        body!!.use {
+            return ByteBuffer.wrap(it.readBytes())
+        }
     }
 
     fun WebResponse.getJSONBody(): JSONObject {
@@ -140,8 +130,9 @@ class WebExecutorTest {
 
         assertThat("URI should match", response.uri, equalTo(uri))
         assertThat("Status could should match", response.statusCode, equalTo(200))
-        assertThat("Content type should match", response.headers["Content-Type"], equalTo("application/json"))
+        assertThat("Content type should match", response.headers["Content-Type"], equalTo("application/json; charset=utf-8"))
         assertThat("Redirected should match", response.redirected, equalTo(false))
+        assertThat("isSecure should match", response.isSecure, equalTo(false))
 
         val body = response.getJSONBody()
         assertThat("Method should match", body.getString("method"), equalTo("POST"))
@@ -160,9 +151,9 @@ class WebExecutorTest {
     }
 
     @Test
-    fun test404() {
-        val response = fetch(WebRequest("$TEST_ENDPOINT/status/404"))
-        assertThat("Status code should match", response.statusCode, equalTo(404))
+    fun testStatus() {
+        val response = fetch(WebRequest("$TEST_ENDPOINT/status/500"))
+        assertThat("Status code should match", response.statusCode, equalTo(500))
     }
 
     @Test
@@ -205,8 +196,39 @@ class WebExecutorTest {
             "https://expired.badssl.com/"
         }
 
-        thrown.expect(equalTo(WebRequestError(WebRequestError.ERROR_SECURITY_BAD_CERT, WebRequestError.ERROR_CATEGORY_SECURITY)))
-        fetch(WebRequest(uri))
+        try {
+            fetch(WebRequest(uri))
+            throw IllegalStateException("fetch() should have thrown")
+        } catch (e: WebRequestError) {
+            assertThat("Category should match", e.category, equalTo(WebRequestError.ERROR_CATEGORY_SECURITY))
+            assertThat("Code should match", e.code, equalTo(WebRequestError.ERROR_SECURITY_BAD_CERT))
+            assertThat("Certificate should be present", e.certificate, notNullValue())
+            assertThat("Certificate issuer should be present", e.certificate?.issuerX500Principal?.name, not(isEmptyOrNullString()))
+        }
+    }
+
+    @Test
+    fun testSecure() {
+        val response = fetch(WebRequest("https://example.com"))
+        assertThat("Status should match", response.statusCode, equalTo(200))
+        assertThat("isSecure should match", response.isSecure, equalTo(true))
+
+        val expectedSubject = if (env.isAutomation)
+            "CN=example.com"
+        else
+            "CN=www.example.org,OU=Technology,O=Internet Corporation for Assigned Names and Numbers,L=Los Angeles,ST=California,C=US"
+
+        val expectedIssuer = if (env.isAutomation)
+            "OU=Profile Guided Optimization,O=Mozilla Testing,CN=Temporary Certificate Authority"
+        else
+            "CN=DigiCert SHA2 Secure Server CA,O=DigiCert Inc,C=US"
+
+        assertThat("Subject should match",
+                response.certificate?.subjectX500Principal?.name,
+                equalTo(expectedSubject))
+        assertThat("Issuer should match",
+                response.certificate?.issuerX500Principal?.name,
+                equalTo(expectedIssuer))
     }
 
     @Test
@@ -322,7 +344,7 @@ class WebExecutorTest {
 
     @Test(expected = IOException::class)
     fun readClosedStream() {
-        val response = executor.fetch(WebRequest("$TEST_ENDPOINT/anything")).pollDefault()!!
+        val response = executor.fetch(WebRequest("$TEST_ENDPOINT/bytes/1024")).pollDefault()!!
 
         assertThat("Status code should match", response.statusCode, equalTo(200))
 
@@ -331,11 +353,10 @@ class WebExecutorTest {
         stream.readBytes()
     }
 
-    @Ignore //bug 1596314 - disable test for frequent failures
     @Test(expected = IOException::class)
     fun readTimeout() {
-        val expectedCount = 1 * 1024 * 1024 // 1MB
-        val response = executor.fetch(WebRequest("$TEST_ENDPOINT/bytes/$expectedCount")).pollDefault()!!
+        val expectedCount = 10
+        val response = executor.fetch(WebRequest("$TEST_ENDPOINT/trickle/${expectedCount}")).pollDefault()!!
 
         assertThat("Status code should match", response.statusCode, equalTo(200))
         assertThat("Content-Length should match", response.headers["Content-Length"]!!.toInt(), equalTo(expectedCount))

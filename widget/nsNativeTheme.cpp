@@ -53,16 +53,6 @@ EventStates nsNativeTheme::GetContentState(nsIFrame* aFrame,
   if (frameContent->IsElement()) {
     flags = frameContent->AsElement()->State();
 
-    // <input type=number> needs special handling since its nested native
-    // anonymous <input type=text> takes focus for it.
-    if (aAppearance == StyleAppearance::NumberInput &&
-        frameContent->IsHTMLElement(nsGkAtoms::input)) {
-      nsNumberControlFrame* numberControlFrame = do_QueryFrame(aFrame);
-      if (numberControlFrame && numberControlFrame->IsFocused()) {
-        flags |= NS_EVENT_STATE_FOCUS;
-      }
-    }
-
     nsNumberControlFrame* numberControlFrame =
         nsNumberControlFrame::GetNumberControlFrameForSpinButton(aFrame);
     if (numberControlFrame &&
@@ -299,8 +289,7 @@ bool nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext,
           aAppearance == StyleAppearance::Textarea ||
           aAppearance == StyleAppearance::Listbox ||
           aAppearance == StyleAppearance::Menulist ||
-          (aAppearance == StyleAppearance::MenulistButton &&
-           StaticPrefs::layout_css_webkit_appearance_enabled())) &&
+          aAppearance == StyleAppearance::MenulistButton) &&
          aFrame->GetContent()->IsHTMLElement() &&
          aPresContext->HasAuthorSpecifiedRules(
              aFrame,
@@ -337,6 +326,7 @@ bool nsNativeTheme::IsFrameRTL(nsIFrame* aFrame) {
   return aFrame->GetWritingMode().IsPhysicalRTL();
 }
 
+/* static */
 bool nsNativeTheme::IsHTMLContent(nsIFrame* aFrame) {
   if (!aFrame) {
     return false;

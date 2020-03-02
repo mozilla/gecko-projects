@@ -53,12 +53,18 @@ nsresult HttpConnectionMgrParent::UpdateRequestTokenBucket(
 }
 
 nsresult HttpConnectionMgrParent::DoShiftReloadConnectionCleanup(
-    nsHttpConnectionInfo* aNotUsed) {
+    nsHttpConnectionInfo* aCi) {
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  Unused << SendDoShiftReloadConnectionCleanup();
+  Maybe<HttpConnectionInfoCloneArgs> optionArgs;
+  if (aCi) {
+    optionArgs.emplace();
+    nsHttpConnectionInfo::SerializeHttpConnectionInfo(aCi, optionArgs.ref());
+  }
+
+  Unused << SendDoShiftReloadConnectionCleanup(optionArgs);
   return NS_OK;
 }
 
@@ -156,7 +162,7 @@ nsresult HttpConnectionMgrParent::CancelTransaction(
   return NS_OK;
 }
 
-nsresult HttpConnectionMgrParent::ReclaimConnection(nsHttpConnection*) {
+nsresult HttpConnectionMgrParent::ReclaimConnection(HttpConnectionBase*) {
   MOZ_ASSERT_UNREACHABLE("ReclaimConnection should not be called");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -204,6 +210,12 @@ nsresult HttpConnectionMgrParent::ClearConnectionHistory() {
 
   Unused << SendClearConnectionHistory();
   return NS_OK;
+}
+
+nsresult HttpConnectionMgrParent::CompleteUpgrade(
+    HttpTransactionShell* aTrans, nsIHttpUpgradeListener* aUpgradeListener) {
+  // TODO: fix this in bug 1497249
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 nsHttpConnectionMgr* HttpConnectionMgrParent::AsHttpConnectionMgr() {

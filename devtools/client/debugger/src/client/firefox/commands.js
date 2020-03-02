@@ -28,7 +28,7 @@ import type {
 
 import type {
   Target,
-  DebuggerClient,
+  DevToolsClient,
   Grip,
   ThreadFront,
   ObjectFront,
@@ -44,7 +44,7 @@ import type {
 let targets: { [string]: Target };
 let currentThreadFront: ThreadFront;
 let currentTarget: Target;
-let debuggerClient: DebuggerClient;
+let devToolsClient: DevToolsClient;
 let sourceActors: { [ActorId]: SourceId };
 let breakpoints: { [string]: Object };
 let eventBreakpoints: ?EventListenerActiveList;
@@ -52,18 +52,19 @@ let eventBreakpoints: ?EventListenerActiveList;
 const CALL_STACK_PAGE_SIZE = 1000;
 
 type Dependencies = {
-  threadFront: ThreadFront,
-  tabTarget: Target,
-  debuggerClient: DebuggerClient,
+  devToolsClient: DevToolsClient,
 };
 
 function setupCommands(dependencies: Dependencies) {
-  currentThreadFront = dependencies.threadFront;
-  currentTarget = dependencies.tabTarget;
-  debuggerClient = dependencies.debuggerClient;
+  devToolsClient = dependencies.devToolsClient;
   targets = {};
   sourceActors = {};
   breakpoints = {};
+}
+
+function setupCommandsTopTarget(targetFront: Target) {
+  currentTarget = targetFront;
+  currentThreadFront = targetFront.threadFront;
 }
 
 function createObjectFront(grip: Grip): ObjectFront {
@@ -71,14 +72,14 @@ function createObjectFront(grip: Grip): ObjectFront {
     throw new Error("Actor is missing");
   }
 
-  return debuggerClient.createObjectFront(grip, currentThreadFront);
+  return devToolsClient.createObjectFront(grip, currentThreadFront);
 }
 
 async function loadObjectProperties(root: Node) {
   const utils = Reps.objectInspector.utils;
   const properties = await utils.loadProperties.loadItemProperties(
     root,
-    debuggerClient
+    devToolsClient
   );
   return utils.node.getChildren({
     item: root,
@@ -90,7 +91,7 @@ function releaseActor(actor: String) {
   if (!actor) {
     return;
   }
-  const objFront = debuggerClient.getFrontByID(actor);
+  const objFront = devToolsClient.getFrontByID(actor);
 
   if (objFront) {
     return objFront.release().catch(() => {});
@@ -98,7 +99,7 @@ function releaseActor(actor: String) {
 }
 
 function sendPacket(packet: Object) {
-  return debuggerClient.request(packet);
+  return devToolsClient.request(packet);
 }
 
 // Get a copy of the current targets.
@@ -161,14 +162,6 @@ function stepOut(thread: string): Promise<*> {
   return lookupThreadFront(thread).stepOut();
 }
 
-function rewind(thread: string): Promise<*> {
-  return lookupThreadFront(thread).rewind();
-}
-
-function reverseStepOver(thread: string): Promise<*> {
-  return lookupThreadFront(thread).reverseStepOver();
-}
-
 function breakOnNext(thread: string): Promise<*> {
   return lookupThreadFront(thread).breakOnNext();
 }
@@ -219,25 +212,6 @@ function locationKey(location: BreakpointLocation) {
   return `${sourceUrl}:${sourceId}:${line}:${column}`;
 }
 
-function maybeGenerateLogGroupId(options) {
-  if (
-    options.logValue &&
-    currentTarget.traits &&
-    currentTarget.traits.canRewind
-  ) {
-    return { ...options, logGroupId: `logGroup-${Math.random()}` };
-  }
-  return options;
-}
-
-async function maybeClearLogpoint(location: BreakpointLocation) {
-  const bp = breakpoints[locationKey(location)];
-  if (bp && bp.options.logGroupId && currentTarget) {
-    const consoleFront = await currentTarget.getFront("console");
-    consoleFront.emit("clearLogpointMessages", bp.options.logGroupId);
-  }
-}
-
 function hasBreakpoint(location: BreakpointLocation) {
   return !!breakpoints[locationKey(location)];
 }
@@ -246,15 +220,12 @@ function setBreakpoint(
   location: BreakpointLocation,
   options: BreakpointOptions
 ) {
-  maybeClearLogpoint(location);
-  options = maybeGenerateLogGroupId(options);
   breakpoints[locationKey(location)] = { location, options };
 
   return forEachThread(thread => thread.setBreakpoint(location, options));
 }
 
 function removeBreakpoint(location: PendingLocation) {
-  maybeClearLogpoint((location: any));
   delete breakpoints[locationKey((location: any))];
 
   return forEachThread(thread => thread.removeBreakpoint(location));
@@ -483,7 +454,7 @@ async function fetchThreads() {
 
   await updateTargets({
     currentTarget,
-    debuggerClient,
+    devToolsClient,
     targets,
     options,
   });
@@ -535,7 +506,7 @@ async function getSourceActorBreakableLines({
 }
 
 function getFrontByID(actorID: String) {
-  return debuggerClient.getFrontByID(actorID);
+  return devToolsClient.getFrontByID(actorID);
 }
 
 function timeWarp(position: ExecutionPoint) {
@@ -558,8 +529,6 @@ const clientCommands = {
   stepIn,
   stepOut,
   stepOver,
-  rewind,
-  reverseStepOver,
   breakOnNext,
   sourceContents,
   getSourceForActor,
@@ -598,4 +567,4 @@ const clientCommands = {
   fetchAncestorFramePositions,
 };
 
-export { setupCommands, clientCommands };
+export { setupCommands, setupCommandsTopTarget, clientCommands };

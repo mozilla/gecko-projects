@@ -63,10 +63,12 @@ class BackgroundParentImpl : public PBackgroundParent,
   virtual mozilla::ipc::IPCResult RecvFlushPendingFileDeletions() override;
 
   virtual PBackgroundSDBConnectionParent* AllocPBackgroundSDBConnectionParent(
+      const PersistenceType& aPersistenceType,
       const PrincipalInfo& aPrincipalInfo) override;
 
   virtual mozilla::ipc::IPCResult RecvPBackgroundSDBConnectionConstructor(
       PBackgroundSDBConnectionParent* aActor,
+      const PersistenceType& aPersistenceType,
       const PrincipalInfo& aPrincipalInfo) override;
 
   virtual bool DeallocPBackgroundSDBConnectionParent(
@@ -141,12 +143,6 @@ class BackgroundParentImpl : public PBackgroundParent,
 
   virtual already_AddRefed<PIdleSchedulerParent> AllocPIdleSchedulerParent()
       override;
-
-  virtual PPendingIPCBlobParent* AllocPPendingIPCBlobParent(
-      const IPCBlob& aBlob) override;
-
-  virtual bool DeallocPPendingIPCBlobParent(
-      PPendingIPCBlobParent* aActor) override;
 
   virtual already_AddRefed<PIPCBlobInputStreamParent>
   AllocPIPCBlobInputStreamParent(const nsID& aID,

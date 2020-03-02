@@ -15,6 +15,10 @@ job-defaults:
             linux64.*:
                 docker-image: {in-tree: "lint"}
                 max-run-time: 3600
+                env:
+                    RUSTFMT: /build/rust/bin/rustfmt
+                    RUSTUP_HOME: /build/rust
+                    CARGO_HOME: /build/rust
             default:
                 max-run-time: 3600
     treeherder:
@@ -139,7 +143,7 @@ mozharness:
         cache-dotcache: true
         cwd: '{checkout}/testing/mozharness'
         command: >
-            /usr/local/bin/tox -e py27-hg4.3
+            /usr/local/bin/tox -e py27-hg5.2
     when:
         files-changed:
             - 'testing/mozharness/**'
@@ -147,15 +151,13 @@ mozharness:
 mozharness-py3:
     description: mozharness integration tests
     treeherder:
-        tier: 3
         symbol: py3(mh)
     run:
         using: run-task
         cache-dotcache: true
         cwd: '{checkout}/testing/mozharness'
         command: >
-            /usr/local/bin/tox -e py35-hg4.3
-    run-on-projects: ['mozilla-central', 'try']
+            /usr/local/bin/tox -e py36-hg5.2
     when:
         files-changed:
             - 'testing/mozharness/**'
@@ -338,3 +340,16 @@ condprof:
         files-changed:
             - 'testing/condprofile/condprof**'
             - 'testing/condprofile/setup.py'
+
+talos:
+    description: testing/talos unit tests
+    platform: windows10-64/opt
+    python-version: [2]
+    treeherder:
+        symbol: tal
+    run:
+        using: python-test
+        subsuite: talos
+    when:
+        files-changed:
+            - 'testing/talos/**'

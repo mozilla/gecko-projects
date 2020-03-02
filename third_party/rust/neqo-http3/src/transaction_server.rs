@@ -42,9 +42,9 @@ pub struct TransactionServer {
 }
 
 impl TransactionServer {
-    pub fn new(stream_id: u64, conn_events: Http3ServerConnEvents) -> TransactionServer {
+    pub fn new(stream_id: u64, conn_events: Http3ServerConnEvents) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
-        TransactionServer {
+        Self {
             recv_state: TransactionRecvState::WaitingForHeaders,
             send_state: TransactionSendState::Initial,
             stream_id,
@@ -333,11 +333,9 @@ impl Http3Transaction for TransactionServer {
         matches!(self.send_state, TransactionSendState::SendingResponse { .. })
     }
 
-    fn is_state_sending_data(&self) -> bool {
-        self.has_data_to_send()
+    fn reset_receiving_side(&mut self) {
+        self.recv_state = TransactionRecvState::Closed;
     }
-
-    fn reset_receiving_side(&mut self) {}
 
     fn stop_sending(&mut self) {}
 

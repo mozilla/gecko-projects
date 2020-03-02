@@ -6,7 +6,7 @@ export const selectLayoutRender = ({
   state = {},
   prefs = {},
   rollCache = [],
-  lang = "",
+  locale = "",
 }) => {
   const { layout, feeds, spocs } = state;
   let spocIndexMap = {};
@@ -68,7 +68,7 @@ export const selectLayoutRender = ({
     filterArray.push("TopSites");
   }
 
-  if (!lang.startsWith("en-")) {
+  if (!locale.startsWith("en-")) {
     filterArray.push("Navigation");
   }
 
@@ -114,11 +114,16 @@ export const selectLayoutRender = ({
       const placementName = placement.name || "spocs";
       const spocsData = spocs.data[placementName];
       // We expect a spoc, spocs are loaded, and the server returned spocs.
-      if (spocs.loaded && spocsData && spocsData.length) {
+      if (
+        spocs.loaded &&
+        spocsData &&
+        spocsData.items &&
+        spocsData.items.length
+      ) {
         result = rollForSpocs(
           result,
           component.spocs,
-          spocsData,
+          spocsData.items,
           placementName
         );
       }
@@ -130,7 +135,10 @@ export const selectLayoutRender = ({
     return {
       ...component,
       data: {
-        spocs: handleSpocs([], component),
+        spocs: handleSpocs([], component).map((spoc, index) => ({
+          ...spoc,
+          pos: index,
+        })),
       },
     };
   };
@@ -232,7 +240,12 @@ export const selectLayoutRender = ({
   // all other SPOCS that never went through the probabilistic selection, its reason will
   // be "out_of_position".
   let spocsFill = [];
-  if (spocs.loaded && feeds.loaded && spocs.data.spocs) {
+  if (
+    spocs.loaded &&
+    feeds.loaded &&
+    spocs.data.spocs &&
+    spocs.data.spocs.items
+  ) {
     const chosenSpocsFill = [...chosenSpocs].map(spoc => ({
       id: spoc.id,
       reason: "n/a",
@@ -247,7 +260,7 @@ export const selectLayoutRender = ({
         displayed: 0,
         full_recalc: 0,
       }));
-    const outOfPositionSpocsFill = spocs.data.spocs
+    const outOfPositionSpocsFill = spocs.data.spocs.items
       .slice(spocIndexMap.spocs)
       .filter(spoc => !unchosenSpocs.has(spoc))
       .map(spoc => ({

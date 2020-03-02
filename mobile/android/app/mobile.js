@@ -128,7 +128,6 @@ pref("browser.sessionstore.backupInterval", 120000); // milliseconds -> 2 minute
 pref("browser.sessionstore.max_tabs_undo", 10);
 pref("browser.sessionstore.max_resumed_crashes", 2);
 pref("browser.sessionstore.privacy_level", 0); // saving data: 0 = all, 1 = unencrypted sites, 2 = never
-pref("browser.sessionstore.debug_logging", false);
 
 // Download protection lists are not available on Fennec.
 pref("urlclassifier.downloadAllowTable", "");
@@ -217,7 +216,7 @@ pref("extensions.webextensions.default-content-security-policy", "script-src 'se
 
 pref("extensions.webextensions.background-delayed-startup", true);
 
-pref("extensions.legacy.enabled", false);
+pref("extensions.experiments.enabled", false);
 
 /* block popups by default, and notify the user about blocked popups */
 pref("dom.disable_open_during_load", true);
@@ -350,10 +349,6 @@ pref("devtools.remote.wifi.enabled", false);
 // don't forget to change the all.js accordingly.
 pref("devtools.performance.recording.features", "[\"js\",\"leaf\",\"stackwalk\",\"java\"]");
 
-// With the typical screen sizes on mobile devices, we want to wrap page sources by default.
-pref("view_source.wrap_long_lines", true);
-
-
 pref("ui.touch.radius.enabled", false);
 pref("ui.touch.radius.leftmm", 3);
 pref("ui.touch.radius.topmm", 5);
@@ -361,7 +356,7 @@ pref("ui.touch.radius.rightmm", 3);
 pref("ui.touch.radius.bottommm", 2);
 pref("ui.touch.radius.visitedWeight", 120);
 
-pref("ui.mouse.radius.enabled", false);
+pref("ui.mouse.radius.enabled", true);
 pref("ui.mouse.radius.leftmm", 3);
 pref("ui.mouse.radius.topmm", 5);
 pref("ui.mouse.radius.rightmm", 3);
@@ -746,14 +741,7 @@ pref("dom.serviceWorkers.enabled", true);
 pref("dom.serviceWorkers.disable_open_click_delay", 5000);
 
 pref("dom.push.debug", false);
-// The upstream autopush endpoint must have the Google API key corresponding to
-// the App's sender ID; we bake this assumption directly into the URL.
-pref("dom.push.serverURL", "https://updates.push.services.mozilla.com/v1/gcm/@MOZ_ANDROID_GCM_SENDERID@");
 pref("dom.push.maxRecentMessageIDsPerSubscription", 0);
-
-#ifdef MOZ_ANDROID_GCM
-  pref("dom.push.enabled", true);
-#endif
 
 // The remote content URL where FxAccountsWebChannel messages originate.  Must use HTTPS.
 pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com");
@@ -766,13 +754,6 @@ pref("identity.fxaccounts.remote.oauth.uri", "https://oauth.accounts.firefox.com
 
 // Token server used by Firefox Account-authenticated Sync.
 pref("identity.sync.tokenserver.uri", "https://token.services.mozilla.com/1.0/sync/1.5");
-
-#ifdef NIGHTLY_BUILD
-// Use new audio focus management, "media.audioFocus.management".
-pref("dom.audiochannel.audioCompeting", false);
-#else
-pref("dom.audiochannel.audioCompeting", true);
-#endif
 
 pref("dom.audiochannel.mediaControl", true);
 

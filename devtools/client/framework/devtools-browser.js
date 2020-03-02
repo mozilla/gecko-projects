@@ -14,7 +14,7 @@
 
 const { Cc, Ci } = require("chrome");
 const Services = require("Services");
-const { gDevTools } = require("./devtools");
+const { gDevTools } = require("devtools/client/framework/devtools");
 
 // Load target and toolbox lazily as they need gDevTools to be fully initialized
 loader.lazyRequireGetter(
@@ -31,14 +31,14 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "DebuggerServer",
-  "devtools/server/debugger-server",
+  "DevToolsServer",
+  "devtools/server/devtools-server",
   true
 );
 loader.lazyRequireGetter(
   this,
-  "DebuggerClient",
-  "devtools/shared/client/debugger-client",
+  "DevToolsClient",
+  "devtools/shared/client/devtools-client",
   true
 );
 loader.lazyRequireGetter(
@@ -144,12 +144,6 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
       "menu_browserContentToolbox",
       remoteEnabled && win.gMultiProcessBrowser
     );
-
-    // Enable record/replay menu items?
-    const recordReplayEnabled = Services.prefs.getBoolPref(
-      "devtools.recordreplay.enabled"
-    );
-    toggleMenuItem("menu_webreplay", recordReplayEnabled);
 
     // The profiler's popup is experimental. The plan is to eventually turn it on
     // everywhere, but while it's under active development we don't want everyone
@@ -364,18 +358,18 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
   },
 
   async _getContentProcessTarget(processId) {
-    // Create a DebuggerServer in order to connect locally to it
-    DebuggerServer.init();
-    DebuggerServer.registerAllActors();
-    DebuggerServer.allowChromeProcess = true;
+    // Create a DevToolsServer in order to connect locally to it
+    DevToolsServer.init();
+    DevToolsServer.registerAllActors();
+    DevToolsServer.allowChromeProcess = true;
 
-    const transport = DebuggerServer.connectPipe();
-    const client = new DebuggerClient(transport);
+    const transport = DevToolsServer.connectPipe();
+    const client = new DevToolsClient(transport);
 
     await client.connect();
     const target = await client.mainRoot.getProcess(processId);
     // Ensure closing the connection in order to cleanup
-    // the debugger client and also the server created in the
+    // the devtools client and also the server created in the
     // content process
     target.on("close", () => {
       client.close();
@@ -784,7 +778,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
     }
 
     // Remove scripts loaded in content process to support the Browser Content Toolbox.
-    DebuggerServer.removeContentServerScript();
+    DevToolsServer.removeContentServerScript();
 
     gDevTools.destroy({ shuttingDown });
   },

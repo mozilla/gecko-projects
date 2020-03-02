@@ -42,7 +42,7 @@ class RenderCompositor {
   // have been pushed to the queue.
   // @return a RenderedFrameId for the frame
   virtual RenderedFrameId EndFrame(
-      const FfiVec<DeviceIntRect>& aDirtyRects) = 0;
+      const nsTArray<DeviceIntRect>& aDirtyRects) = 0;
   // Returns false when waiting gpu tasks is failed.
   // It might happen when rendering context is lost.
   virtual bool WaitForGPU() { return true; }
@@ -79,6 +79,8 @@ class RenderCompositor {
 
   virtual bool IsContextLost();
 
+  virtual bool SupportAsyncScreenshot() { return true; }
+
   virtual bool ShouldUseNativeCompositor() { return false; }
   virtual uint32_t GetMaxUpdateRects() { return 0; }
 
@@ -86,16 +88,17 @@ class RenderCompositor {
   virtual void CompositorBeginFrame() {}
   virtual void CompositorEndFrame() {}
   virtual void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset,
-                    uint32_t* aFboId, wr::DeviceIntRect aDirtyRect) {}
+                    uint32_t* aFboId, wr::DeviceIntRect aDirtyRect,
+                    wr::DeviceIntRect aValidRect) {}
   virtual void Unbind() {}
   virtual void CreateSurface(wr::NativeSurfaceId aId,
-                             wr::DeviceIntSize aTileSize) {}
+                             wr::DeviceIntSize aTileSize, bool aIsOpaque) {}
   virtual void DestroySurface(NativeSurfaceId aId) {}
-  virtual void CreateTile(wr::NativeSurfaceId, int32_t aX, int32_t aY,
-                          bool aIsOpaque) {}
+  virtual void CreateTile(wr::NativeSurfaceId, int32_t aX, int32_t aY) {}
   virtual void DestroyTile(wr::NativeSurfaceId, int32_t aX, int32_t aY) {}
   virtual void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
                           wr::DeviceIntRect aClipRect) {}
+  virtual void EnableNativeCompositor(bool aEnable) {}
 
   // Interface for partial present
   virtual bool UsePartialPresent() { return false; }

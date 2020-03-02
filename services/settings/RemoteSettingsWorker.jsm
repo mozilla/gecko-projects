@@ -56,13 +56,22 @@ class Worker {
     if (!this.worker) {
       this.worker = new ChromeWorker(this.source);
       this.worker.onmessage = this._onWorkerMessage.bind(this);
+      this.worker.onerror = error => {
+        // Worker crashed. Reject each pending callback.
+        for (const [, reject] of this.callbacks.values()) {
+          reject(error);
+        }
+        this.callbacks.clear();
+        // And terminate it.
+        this.stop();
+      };
     }
     // New activity: reset the idle timer.
     if (this.idleTimeoutId) {
       clearTimeout(this.idleTimeoutId);
     }
     return new Promise((resolve, reject) => {
-      const callbackId = ++this.lastCallbackId;
+      const callbackId = `${method}-${++this.lastCallbackId}`;
       this.callbacks.set(callbackId, [resolve, reject]);
       this.worker.postMessage({ callbackId, method, args });
     });
@@ -147,7 +156,9 @@ try {
     },
     {
       fetchState() {
-        return `Remaining: ${RemoteSettingsWorker.callbacks.size} callbacks.`;
+        const remainingCallbacks = RemoteSettingsWorker.callbacks;
+        const details = Array.from(remainingCallbacks.keys()).join(", ");
+        return `Remaining: ${remainingCallbacks.size} callbacks (${details}).`;
       },
     }
   );

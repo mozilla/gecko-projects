@@ -53,6 +53,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(Promise)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Promise)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
   tmp->mPromiseObj = nullptr;
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -378,14 +379,14 @@ class PromiseNativeHandlerShim final : public PromiseNativeHandler {
 
   MOZ_CAN_RUN_SCRIPT
   void ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override {
-    RefPtr<PromiseNativeHandler> inner = mInner.forget();
+    RefPtr<PromiseNativeHandler> inner = std::move(mInner);
     inner->ResolvedCallback(aCx, aValue);
     MOZ_ASSERT(!mInner);
   }
 
   MOZ_CAN_RUN_SCRIPT
   void RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override {
-    RefPtr<PromiseNativeHandler> inner = mInner.forget();
+    RefPtr<PromiseNativeHandler> inner = std::move(mInner);
     inner->RejectedCallback(aCx, aValue);
     MOZ_ASSERT(!mInner);
   }
@@ -772,7 +773,8 @@ void PromiseWorkerProxy::CleanUp() {
 }
 
 JSObject* PromiseWorkerProxy::CustomReadHandler(
-    JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
+    JSContext* aCx, JSStructuredCloneReader* aReader,
+    const JS::CloneDataPolicy& aCloneDataPolicy, uint32_t aTag,
     uint32_t aIndex) {
   if (NS_WARN_IF(!mCallbacks)) {
     return nullptr;
@@ -783,7 +785,8 @@ JSObject* PromiseWorkerProxy::CustomReadHandler(
 
 bool PromiseWorkerProxy::CustomWriteHandler(JSContext* aCx,
                                             JSStructuredCloneWriter* aWriter,
-                                            JS::Handle<JSObject*> aObj) {
+                                            JS::Handle<JSObject*> aObj,
+                                            bool* aSameProcessScopeRequired) {
   if (NS_WARN_IF(!mCallbacks)) {
     return false;
   }

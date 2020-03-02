@@ -439,7 +439,6 @@ void nsComboboxControlFrame::ReflowDropdown(nsPresContext* aPresContext,
   // dropped down
   ReflowChildFlags flags = mDroppedDown ? ReflowChildFlags::Default
                                         : ReflowChildFlags::NoMoveFrame |
-                                              ReflowChildFlags::NoVisibility |
                                               ReflowChildFlags::NoSizeView;
 
   // XXX Can this be different from the dropdown's writing mode?
@@ -1467,9 +1466,7 @@ class nsDisplayComboboxFocus : public nsPaintedDisplayItem {
       : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayComboboxFocus);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayComboboxFocus() { MOZ_COUNT_DTOR(nsDisplayComboboxFocus); }
-#endif
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayComboboxFocus)
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("ComboboxFocus", TYPE_COMBOBOX_FOCUS)

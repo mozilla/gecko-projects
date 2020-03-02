@@ -16,6 +16,8 @@ XPIDL_MODULE = 'widget_cocoa'
 EXPORTS += [
     'CFTypeRefPtr.h',
     'MediaHardwareKeysEventSourceMac.h',
+    'MediaHardwareKeysEventSourceMacMediaCenter.h',
+    'MediaPlayerWrapper.h',
     'mozView.h',
     'nsBidiKeyboard.h',
     'nsChangeObserver.h',
@@ -59,6 +61,7 @@ UNIFIED_SOURCES += [
     'nsSystemStatusBarCocoa.mm',
     'nsToolkit.mm',
     'nsTouchBar.mm',
+    'nsTouchBarInput.mm',
     'nsTouchBarInputIcon.mm',
     'nsTouchBarUpdater.mm',
     'nsWidgetFactory.mm',
@@ -76,7 +79,9 @@ UNIFIED_SOURCES += [
 # These files cannot be built in unified mode because they cause symbol conflicts
 SOURCES += [
     'MediaHardwareKeysEventSourceMac.mm',
+    'MediaHardwareKeysEventSourceMacMediaCenter.mm',
     'MediaKeysEventSourceFactory.cpp',
+    'MediaPlayerWrapper.mm',
     'nsChildView.mm',
     'nsClipboard.mm',
     'nsCocoaDebugUtils.mm',

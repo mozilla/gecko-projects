@@ -199,7 +199,7 @@ class NameResolver : public ParseNodeVisitor<NameResolver> {
           // Record the ParseNodeKind::PropertyDefinition/Shorthand but skip the
           // ParseNodeKind::Object so we're not flagged as a contributor.
           pos--;
-          MOZ_FALLTHROUGH;
+          [[fallthrough]];
 
         default:
           // Save any other nodes we encounter on the way up.
@@ -286,7 +286,8 @@ class NameResolver : public ParseNodeVisitor<NameResolver> {
             return false;
           }
         } else {
-          MOZ_ASSERT(left->isKind(ParseNodeKind::ComputedName));
+          MOZ_ASSERT(left->isKind(ParseNodeKind::ComputedName) ||
+                     left->isKind(ParseNodeKind::BigIntExpr));
         }
       } else {
         // Don't have consecutive '<' characters, and also don't start

@@ -33,6 +33,7 @@ exclude =
     testing/condprofile/condprof/runner.py,
     testing/condprofile/condprof/scenarii/heavy.py,
     testing/condprofile/condprof/scenarii/settled.py,
+    testing/condprofile/condprof/scenarii/synced.py
     testing/condprofile/condprof/helpers.py,
     testing/jsshell/benchmark.py,
     testing/marionette/mach_commands.py,
@@ -124,7 +125,6 @@ per-file-ignores =
     mozglue/**: F821
     python/mozbuild/**: F821
     python/mozversioncontrol/**: F821
-    taskcluster/**: F821
     testing/mozharness/**: F821
     testing/talos/**: F821
     toolkit/components/telemetry/**: F821

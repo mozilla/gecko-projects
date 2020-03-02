@@ -74,7 +74,7 @@ class ServiceWorkerUpdateJob::CompareCallback final
     : public serviceWorkerScriptCache::CompareCallback {
   RefPtr<ServiceWorkerUpdateJob> mJob;
 
-  ~CompareCallback() {}
+  ~CompareCallback() = default;
 
  public:
   explicit CompareCallback(ServiceWorkerUpdateJob* aJob) : mJob(aJob) {
@@ -140,11 +140,10 @@ class ServiceWorkerUpdateJob::ContinueInstallRunnable final
 };
 
 ServiceWorkerUpdateJob::ServiceWorkerUpdateJob(
-    nsIPrincipal* aPrincipal, const nsACString& aScope,
-    const nsACString& aScriptSpec, ServiceWorkerUpdateViaCache aUpdateViaCache)
-    : ServiceWorkerJob(Type::Update, aPrincipal, aScope, aScriptSpec),
-      mUpdateViaCache(aUpdateViaCache),
-      mOnFailure(OnFailure::DoNothing) {}
+    nsIPrincipal* aPrincipal, const nsACString& aScope, nsCString aScriptSpec,
+    ServiceWorkerUpdateViaCache aUpdateViaCache)
+    : ServiceWorkerUpdateJob(Type::Update, aPrincipal, aScope,
+                             std::move(aScriptSpec), aUpdateViaCache) {}
 
 already_AddRefed<ServiceWorkerRegistrationInfo>
 ServiceWorkerUpdateJob::GetRegistration() const {
@@ -155,12 +154,12 @@ ServiceWorkerUpdateJob::GetRegistration() const {
 
 ServiceWorkerUpdateJob::ServiceWorkerUpdateJob(
     Type aType, nsIPrincipal* aPrincipal, const nsACString& aScope,
-    const nsACString& aScriptSpec, ServiceWorkerUpdateViaCache aUpdateViaCache)
-    : ServiceWorkerJob(aType, aPrincipal, aScope, aScriptSpec),
+    nsCString aScriptSpec, ServiceWorkerUpdateViaCache aUpdateViaCache)
+    : ServiceWorkerJob(aType, aPrincipal, aScope, std::move(aScriptSpec)),
       mUpdateViaCache(aUpdateViaCache),
       mOnFailure(serviceWorkerScriptCache::OnFailure::DoNothing) {}
 
-ServiceWorkerUpdateJob::~ServiceWorkerUpdateJob() {}
+ServiceWorkerUpdateJob::~ServiceWorkerUpdateJob() = default;
 
 void ServiceWorkerUpdateJob::FailUpdateJob(ErrorResult& aRv) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -222,29 +221,34 @@ void ServiceWorkerUpdateJob::AsyncExecute() {
     return;
   }
 
-  // Begin step 1 of the Update algorithm.
+  // Invoke Update algorithm:
+  // https://w3c.github.io/ServiceWorker/#update-algorithm
   //
-  //  https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#update-algorithm
-
+  // "Let registration be the result of running the Get Registration algorithm
+  // passing job’s scope url as the argument."
   RefPtr<ServiceWorkerRegistrationInfo> registration =
       swm->GetRegistration(mPrincipal, mScope);
 
   if (!registration) {
     ErrorResult rv;
     rv.ThrowTypeError<MSG_SW_UPDATE_BAD_REGISTRATION>(
-        NS_ConvertUTF8toUTF16(mScope), NS_LITERAL_STRING("uninstalled"));
+        NS_ConvertUTF8toUTF16(mScope), u"uninstalled");
     FailUpdateJob(rv);
     return;
   }
 
-  // If a Register job with a new script executed ahead of us in the job queue,
-  // then our update for the old script no longer makes sense.  Simply abort
-  // in this case.
+  // "Let newestWorker be the result of running Get Newest Worker algorithm
+  // passing registration as the argument."
   RefPtr<ServiceWorkerInfo> newest = registration->Newest();
-  if (newest && !mScriptSpec.Equals(newest->ScriptSpec())) {
+
+  // "If job’s job type is update, and newestWorker is not null and its script
+  // url does not equal job’s script url, then:
+  //   1. Invoke Reject Job Promise with job and TypeError.
+  //   2. Invoke Finish Job with job and abort these steps."
+  if (newest && !newest->ScriptSpec().Equals(mScriptSpec)) {
     ErrorResult rv;
     rv.ThrowTypeError<MSG_SW_UPDATE_BAD_REGISTRATION>(
-        NS_ConvertUTF8toUTF16(mScope), NS_LITERAL_STRING("changed"));
+        NS_ConvertUTF8toUTF16(mScope), u"changed");
     FailUpdateJob(rv);
     return;
   }

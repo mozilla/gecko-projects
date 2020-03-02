@@ -15,11 +15,9 @@ LOCAL_INCLUDES += [
     '/layout/style',
 ]
 
-GENERATED_FILES += [
-    'ExampleStylesheet.h',
-]
-
-GENERATED_FILES['ExampleStylesheet.h'].script = 'generate_example_stylesheet.py'
-GENERATED_FILES['ExampleStylesheet.h'].inputs = ['example.css']
+GeneratedFile('ExampleStylesheet.h',
+              script='generate_example_stylesheet.py',
+              py2=True,
+              inputs=['example.css'])
 
 FINAL_LIBRARY = 'xul-gtest'

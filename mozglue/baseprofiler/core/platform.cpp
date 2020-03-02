@@ -552,6 +552,11 @@ class ActivePS {
 
     for (uint32_t i = 0; i < mFilters.length(); ++i) {
       std::string filter = mFilters[i];
+
+      if (filter == "*") {
+        return true;
+      }
+
       std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
 
       // Crude, non UTF-8 compatible, case insensitive substring search
@@ -617,7 +622,7 @@ class ActivePS {
 
     size_t n = aMallocSizeOf(sInstance);
 
-    n += sInstance->mProfileBuffer.SizeOfIncludingThis(aMallocSizeOf);
+    n += sInstance->mProfileBuffer.SizeOfExcludingThis(aMallocSizeOf);
 
     // Measurement of the following members may be added later if DMD finds it
     // is worthwhile:
@@ -938,8 +943,7 @@ uint32_t ActivePS::sNextGeneration = 0;
 #  undef PS_GET_LOCKLESS
 #  undef PS_GET_AND_SET
 
-Atomic<uint32_t, MemoryOrdering::Relaxed, recordreplay::Behavior::DontPreserve>
-    RacyFeatures::sActiveAndFeatures(0);
+Atomic<uint32_t, MemoryOrdering::Relaxed> RacyFeatures::sActiveAndFeatures(0);
 
 /* static */
 void RacyFeatures::SetActive(uint32_t aFeatures) {
@@ -2144,14 +2148,17 @@ void SamplerThread::Run() {
             auto state = localBlocksRingBuffer.GetState();
             if (state.mClearedBlockCount != previousState.mClearedBlockCount) {
               LOG("Stack sample too big for local storage, needed %u bytes",
-                  unsigned(state.mRangeEnd.ConvertToU64() -
-                           previousState.mRangeEnd.ConvertToU64()));
-            } else if (state.mRangeEnd.ConvertToU64() -
-                           previousState.mRangeEnd.ConvertToU64() >=
+                  unsigned(
+                      state.mRangeEnd.ConvertToProfileBufferIndex() -
+                      previousState.mRangeEnd.ConvertToProfileBufferIndex()));
+            } else if (state.mRangeEnd.ConvertToProfileBufferIndex() -
+                           previousState.mRangeEnd
+                               .ConvertToProfileBufferIndex() >=
                        CorePS::CoreBlocksRingBuffer().BufferLength()->Value()) {
               LOG("Stack sample too big for profiler storage, needed %u bytes",
-                  unsigned(state.mRangeEnd.ConvertToU64() -
-                           previousState.mRangeEnd.ConvertToU64()));
+                  unsigned(
+                      state.mRangeEnd.ConvertToProfileBufferIndex() -
+                      previousState.mRangeEnd.ConvertToProfileBufferIndex()));
             } else {
               CorePS::CoreBlocksRingBuffer().AppendContents(
                   localBlocksRingBuffer);
@@ -3361,9 +3368,11 @@ void profiler_add_marker_for_thread(int aThreadId,
       static_cast<uint32_t>(aCategoryPair), aPayload, delta.ToMilliseconds());
 }
 
-void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
-                      ProfilingCategoryPair aCategoryPair, TracingKind aKind,
-                      const Maybe<uint64_t>& aInnerWindowID) {
+void profiler_tracing_marker(const char* aCategoryString,
+                             const char* aMarkerName,
+                             ProfilingCategoryPair aCategoryPair,
+                             TracingKind aKind,
+                             const Maybe<uint64_t>& aInnerWindowID) {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
   VTUNE_TRACING(aMarkerName, aKind);
@@ -3379,10 +3388,11 @@ void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
       TracingMarkerPayload(aCategoryString, aKind, aInnerWindowID));
 }
 
-void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
-                      ProfilingCategoryPair aCategoryPair, TracingKind aKind,
-                      UniqueProfilerBacktrace aCause,
-                      const Maybe<uint64_t>& aInnerWindowID) {
+void profiler_tracing_marker(const char* aCategoryString,
+                             const char* aMarkerName,
+                             ProfilingCategoryPair aCategoryPair,
+                             TracingKind aKind, UniqueProfilerBacktrace aCause,
+                             const Maybe<uint64_t>& aInnerWindowID) {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
   VTUNE_TRACING(aMarkerName, aKind);

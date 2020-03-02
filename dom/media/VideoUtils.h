@@ -21,7 +21,6 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/UniquePtr.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsINamed.h"
 #include "nsIThread.h"
@@ -292,7 +291,7 @@ RefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
   };
 
   Helper::Iteration(p, aWork, aCondition);
-  return p.forget();
+  return p;
 }
 
 // Simple timer to run a runnable after a timeout.

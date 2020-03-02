@@ -23,13 +23,12 @@ from condprof.android import AndroidEnv  # NOQA
 from condprof.changelog import Changelog  # NOQA
 from condprof.scenarii import scenarii  # NOQA
 from condprof.util import (
-    LOG,
-    ERROR,
+    logger,
     get_version,
     get_current_platform,
     extract_from_dmg,
 )  # NOQA
-from condprof.customization import get_customizations  # NOQA
+from condprof.customization import get_customizations, find_customization  # NOQA
 from condprof.client import read_changelog, ProfileNotFoundError  # NOQA
 
 
@@ -43,12 +42,6 @@ def main(args=sys.argv[1:]):
     )
     parser.add_argument(
         "--customization", help="Profile customization to use", type=str, default="all"
-    )
-    parser.add_argument(
-        "--fresh-profile",
-        help="Create a fresh profile",
-        action="store_true",
-        default=False,
     )
     parser.add_argument(
         "--visible", help="Don't use headless mode", action="store_true", default=False
@@ -90,8 +83,16 @@ def main(args=sys.argv[1:]):
 
     args.android = args.firefox is not None and args.firefox.startswith("org.mozilla")
 
+    # early checks to avoid extra work
+    if args.customization != "all":
+        if find_customization(args.customization) is None:
+            raise IOError("Cannot find customization %r" % args.customization)
+
+    if args.scenario != "all" and args.scenario not in scenarii:
+        raise IOError("Cannot find scenario %r" % args.scenario)
+
     if not args.android and args.firefox is not None:
-        LOG("Verifying Desktop Firefox binary")
+        logger.info("Verifying Desktop Firefox binary")
         # we want to verify we do have a firefox binary
         # XXX so lame
         if not os.path.exists(args.firefox):
@@ -104,15 +105,15 @@ def main(args=sys.argv[1:]):
             raise IOError("Cannot find %s" % args.firefox)
 
         version = get_version(args.firefox)
-        LOG("Working with Firefox %s" % version)
+        logger.info("Working with Firefox %s" % version)
 
-    LOG(os.environ)
+    logger.info(os.environ)
     args.archive = os.path.abspath(args.archive)
-    LOG("Archives directory is %s" % args.archive)
+    logger.info("Archives directory is %s" % args.archive)
     if not os.path.exists(args.archive):
         os.makedirs(args.archive, exist_ok=True)
 
-    LOG("Verifying Geckodriver binary presence")
+    logger.info("Verifying Geckodriver binary presence")
     if shutil.which(args.geckodriver) is None and not os.path.exists(args.geckodriver):
         raise IOError("Cannot find %s" % args.geckodriver)
 
@@ -122,9 +123,9 @@ def main(args=sys.argv[1:]):
         else:
             plat = get_current_platform()
         changelog = read_changelog(plat)
-        LOG("Got the changelog from TaskCluster")
+        logger.info("Got the changelog from TaskCluster")
     except ProfileNotFoundError:
-        LOG("changelog not found on TaskCluster, creating a local one.")
+        logger.info("changelog not found on TaskCluster, creating a local one.")
         changelog = Changelog(args.archive)
     loop = asyncio.get_event_loop()
 
@@ -151,33 +152,45 @@ def main(args=sys.argv[1:]):
 
     async def run_all(args):
         if args.scenario != "all":
-            return await one_run(args.scenario, args.customization)
+            selected_scenario = [args.scenario]
+        else:
+            selected_scenario = scenarii.keys()
 
         # this is the loop that generates all combinations of profile
         # for the current platform when "all" is selected
         res = []
-        for scenario in scenarii.keys():
+        failures = 0
+
+        def display_error(scenario, customization):
+            logger.error("%s x %s failed." % (scenario, customization), exc_info=True)
+
+        for scenario in selected_scenario:
             if args.customization != "all":
                 try:
                     res.append(await one_run(scenario, args.customization))
                 except Exception:
-                    ERROR("Something went wrong on this one.")
+                    failures += 1
+                    display_error(scenario, args.customization)
                     if args.strict:
                         raise
             else:
                 for customization in get_customizations():
+                    logger.info("Customization %s" % customization)
                     try:
                         res.append(await one_run(scenario, customization))
                     except Exception:
-                        ERROR("Something went wrong on this one.")
+                        failures += 1
+                        display_error(scenario, customization)
                         if args.strict:
                             raise
-        return res
+        return failures, [one_res for one_res in res if one_res]
 
     try:
-        loop.run_until_complete(run_all(args))
-        LOG("Saving changelog in %s" % args.archive)
+        failures, results = loop.run_until_complete(run_all(args))
+        logger.info("Saving changelog in %s" % args.archive)
         changelog.save(args.archive)
+        if failures > 0:
+            raise Exception("At least one scenario failed")
     finally:
         loop.close()
 

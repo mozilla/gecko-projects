@@ -2,14 +2,17 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
- * Test that we can get a stack to a promise's allocation point in the chrome
- * process.
+ * Test Root actor and browsing context `listRemoteFrames` methods.
  */
 
 "use strict";
 
+const TEST_URL = MAIN_DOMAIN + "doc_iframe.html";
+const IFRAME_URL =
+  "http://example.com/browser/devtools/server/tests/browser/doc_iframe_content.html";
+
 add_task(async function() {
-  const tabTarget = await addTabTarget(MAIN_DOMAIN + "doc_iframe.html");
+  const tabTarget = await addTabTarget(TEST_URL);
   await testLocalListFrames(tabTarget);
   await testBrowserListFrames(tabTarget);
 });
@@ -20,24 +23,22 @@ async function testLocalListFrames(tabTarget) {
   // we should move this to descriptorFront.listRemoteFrames once we have
   // tabDescriptors
   const { frames } = await tabTarget.listRemoteFrames();
-  is(frames.length, 2, "Got two frames");
 
-  info("Check that we can connect to the remote targets");
-  for (const frame of frames) {
+  if (SpecialPowers.useRemoteSubframes) {
+    // With fission, one frame is running out of process
+    is(frames.length, 1, "Got one remote frame with fission");
+
+    info("Check that we can connect to the remote target");
+    const frame = frames[0];
     const frameTarget = await frame.getTarget();
     ok(frameTarget && frameTarget.actor, "Valid frame target retrieved");
-  }
 
-  // However we can confirm that the newly created iframe is there.
-  const browser = gBrowser.selectedBrowser;
-  const oopID = await SpecialPowers.spawn(browser, [], async () => {
-    const oop = content.document.querySelector("iframe");
-    return oop.frameLoader.browsingContext.id;
-  });
-  ok(
-    frames.find(f => f.id === oopID),
-    "tabTarget.listRemoteFrames returns the oop frame descriptor"
-  );
+    is(frameTarget.url, IFRAME_URL, "The target is for the remote frame");
+  } else {
+    // Only remote frames are returned by listRemoteFrames, without fission
+    // all frames are in the same process
+    is(frames.length, 0, "Got no frame from the tab target");
+  }
 }
 async function testBrowserListFrames(tabTarget) {
   // Now, we can test against the entire browser. getMainProcess will return

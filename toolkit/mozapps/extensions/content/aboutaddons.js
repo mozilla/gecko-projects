@@ -113,6 +113,7 @@ const PERMISSION_MASKS = {
 const PREF_DISCOVERY_API_URL = "extensions.getAddons.discovery.api_url";
 const PREF_THEME_RECOMMENDATION_URL =
   "extensions.recommendations.themeRecommendationUrl";
+const PREF_RECOMMENDATION_HIDE_NOTICE = "extensions.recommendations.hideNotice";
 const PREF_PRIVACY_POLICY_URL = "extensions.recommendations.privacyPolicyUrl";
 const PREF_RECOMMENDATION_ENABLED = "browser.discovery.enabled";
 const PREF_TELEMETRY_ENABLED = "datareporting.healthreport.uploadEnabled";
@@ -1816,9 +1817,6 @@ class InlineOptionsBrowser extends HTMLElement {
         // Select boxes can appear in the wrong spot after scrolling, this will
         // clear that up. Bug 1390445.
         this.browser.frameLoader.requestUpdatePosition();
-        // Sometimes after scrolling the inner brower needs to repaint to get
-        // the right mouse position. Force that to happen. Bug 1548687.
-        window.windowUtils.flushApzRepaints();
       }
     }, 100);
   }
@@ -1892,24 +1890,6 @@ class InlineOptionsBrowser extends HTMLElement {
       browser.setAttribute("remoteType", E10SUtils.EXTENSION_REMOTE_TYPE);
 
       readyPromise = promiseEvent("XULFrameLoaderCreated", browser);
-
-      readyPromise.then(() => {
-        if (!browser.messageManager) {
-          // Early exit if the the extension page's XUL browser has been
-          // destroyed in the meantime (e.g. because the extension has been
-          // reloaded while the options page was still loading).
-          return;
-        }
-
-        // Subscribe a "contextmenu" listener to handle the context menus for
-        // the extension option page running in the extension process (the
-        // context menu will be handled only for extension running in OOP mode,
-        // but that's ok as it is the default on any platform that uses these
-        // extensions options pages).
-        browser.messageManager.addMessageListener("contextmenu", message => {
-          windowRoot.ownerGlobal.openContextMenu(message);
-        });
-      });
     } else {
       readyPromise = promiseEvent("load", browser, true);
     }
@@ -1938,8 +1918,7 @@ class InlineOptionsBrowser extends HTMLElement {
       let messageListener = {
         receiveMessage({ name, data }) {
           if (name === "Extension:BrowserResized") {
-            // Add a pixel to work around a scrolling issue, bug 1548687.
-            browser.style.height = `${data.height + 1}px`;
+            browser.style.height = `${data.height}px`;
           } else if (name === "Extension:BrowserContentLoaded") {
             resolve();
           }
@@ -3735,10 +3714,14 @@ customElements.define("recommended-addon-list", RecommendedAddonList);
 
 class TaarMessageBar extends HTMLElement {
   connectedCallback() {
-    this.hidden = !this.hidden && !DiscoveryAPI.clientIdDiscoveryEnabled;
+    this.hidden =
+      Services.prefs.getBoolPref(PREF_RECOMMENDATION_HIDE_NOTICE, false) ||
+      !DiscoveryAPI.clientIdDiscoveryEnabled;
     if (this.childElementCount == 0 && !this.hidden) {
       this.appendChild(importTemplate("taar-notice"));
       this.addEventListener("click", this);
+      this.messageBar = this.querySelector("message-bar");
+      this.messageBar.addEventListener("message-bar:user-dismissed", this);
     }
   }
 
@@ -3759,6 +3742,8 @@ class TaarMessageBar extends HTMLElement {
         SUPPORT_URL + "personalized-addons",
         "tab"
       );
+    } else if (e.type == "message-bar:user-dismissed") {
+      Services.prefs.setBoolPref(PREF_RECOMMENDATION_HIDE_NOTICE, true);
     }
   }
 }

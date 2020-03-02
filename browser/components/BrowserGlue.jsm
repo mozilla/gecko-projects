@@ -330,6 +330,17 @@ let ACTORS = {
       },
     },
   },
+
+  WebRTC: {
+    parent: {
+      moduleURI: "resource:///actors/WebRTCParent.jsm",
+    },
+    child: {
+      moduleURI: "resource:///actors/WebRTCChild.jsm",
+    },
+
+    allFrames: true,
+  },
 };
 
 let LEGACY_ACTORS = {
@@ -392,20 +403,52 @@ let LEGACY_ACTORS = {
       observers: ["keyword-uri-fixup"],
     },
   },
+};
 
-  WebRTC: {
-    child: {
-      module: "resource:///actors/WebRTCChild.jsm",
-      messages: [
-        "rtcpeer:Allow",
-        "rtcpeer:Deny",
-        "webrtc:Allow",
-        "webrtc:Deny",
-        "webrtc:StopSharing",
-      ],
+// See Bug 1618306
+// This should be moved to BrowserGlue.jsm and this file should be deleted
+// when we turn on separate about:welcome for all users.
+const ACTOR_CONFIG = {
+  parent: {
+    moduleURI: "resource:///actors/AboutWelcomeParent.jsm",
+  },
+  child: {
+    moduleURI: "resource:///actors/AboutWelcomeChild.jsm",
+    events: {
+      // This is added so the actor instantiates immediately and makes
+      // methods available to the page js on load.
+      DOMWindowCreated: {},
     },
   },
+  matches: ["about:welcome"],
 };
+
+const AboutWelcomeActorHelper = {
+  register() {
+    ChromeUtils.registerWindowActor("AboutWelcome", ACTOR_CONFIG);
+  },
+  unregister() {
+    ChromeUtils.unregisterWindowActor("AboutWelcome");
+  },
+};
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "isSeparateAboutWelcome",
+  "browser.aboutwelcome.enabled",
+  false,
+  (prefName, prevValue, isEnabled) => {
+    if (isEnabled) {
+      AboutWelcomeActorHelper.register();
+    } else {
+      AboutWelcomeActorHelper.unregister();
+    }
+  }
+);
+
+if (isSeparateAboutWelcome) {
+  AboutWelcomeActorHelper.register();
+}
 
 (function earlyBlankFirstPaint() {
   if (
@@ -555,6 +598,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ShellService: "resource:///modules/ShellService.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
   TabUnloader: "resource:///modules/TabUnloader.jsm",
+  TRRRacer: "resource:///modules/TRRPerformance.jsm",
   UIState: "resource://services-sync/UIState.jsm",
   WebChannel: "resource://gre/modules/WebChannel.jsm",
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.jsm",
@@ -583,7 +627,6 @@ let initializedModules = {};
   ],
   ["ContentSearch", "resource:///modules/ContentSearch.jsm", "init"],
   ["UpdateListener", "resource://gre/modules/UpdateListener.jsm", "init"],
-  ["webrtcUI", "resource:///modules/webrtcUI.jsm", "init"],
 ].forEach(([name, resource, init]) => {
   XPCOMUtils.defineLazyGetter(this, name, () => {
     ChromeUtils.import(resource, initializedModules);
@@ -639,9 +682,6 @@ const listeners = {
     "AsyncPrefs:SetPref": ["AsyncPrefs"],
     "AsyncPrefs:ResetPref": ["AsyncPrefs"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE LISTENERS ADDED IN AsyncPrefs.init
-
-    "webrtc:UpdateGlobalIndicators": ["webrtcUI"],
-    "webrtc:UpdatingIndicators": ["webrtcUI"],
   },
 
   mm: {
@@ -665,12 +705,6 @@ const listeners = {
     ContentSearch: ["ContentSearch"],
     "Reader:FaviconRequest": ["ReaderParent"],
     "Reader:UpdateReaderButton": ["ReaderParent"],
-    "rtcpeer:CancelRequest": ["webrtcUI"],
-    "rtcpeer:Request": ["webrtcUI"],
-    "webrtc:CancelRequest": ["webrtcUI"],
-    "webrtc:Request": ["webrtcUI"],
-    "webrtc:StopRecording": ["webrtcUI"],
-    "webrtc:UpdateBrowserIndicators": ["webrtcUI"],
   },
 
   observe(subject, topic, data) {
@@ -1001,7 +1035,7 @@ BrowserGlue.prototype = {
         // parent only: configure default prefs, set up pref observers, register
         // pdf content handler, and initializes parent side message manager
         // shim for privileged api access.
-        PdfJs.init();
+        PdfJs.init(this._isNewProfile);
         break;
       case "shield-init-complete":
         this._shieldInitComplete = true;
@@ -1135,15 +1169,6 @@ BrowserGlue.prototype = {
   _beforeUIStartup: function BG__beforeUIStartup() {
     SessionStartup.init();
 
-    if (Services.prefs.prefHasUserValue(PREF_PDFJS_ENABLED_CACHE_STATE)) {
-      Services.ppmm.sharedData.set(
-        "pdfjs.enabled",
-        Services.prefs.getBoolPref(PREF_PDFJS_ENABLED_CACHE_STATE)
-      );
-    } else {
-      PdfJs.earlyInit();
-    }
-
     // check if we're in safe mode
     if (Services.appinfo.inSafeMode) {
       Services.ww.openWindow(
@@ -1160,6 +1185,15 @@ BrowserGlue.prototype = {
 
     // handle any UI migration
     this._migrateUI();
+
+    if (Services.prefs.prefHasUserValue(PREF_PDFJS_ENABLED_CACHE_STATE)) {
+      Services.ppmm.sharedData.set(
+        "pdfjs.enabled",
+        Services.prefs.getBoolPref(PREF_PDFJS_ENABLED_CACHE_STATE)
+      );
+    } else {
+      PdfJs.earlyInit(this._isNewProfile);
+    }
 
     listeners.init();
 
@@ -1260,14 +1294,23 @@ BrowserGlue.prototype = {
   },
 
   _trackSlowStartup() {
-    if (
-      Services.startup.interrupted ||
-      Services.prefs.getBoolPref("browser.slowStartup.notificationDisabled")
-    ) {
+    let disabled = Services.prefs.getBoolPref(
+      "browser.slowStartup.notificationDisabled"
+    );
+
+    Services.telemetry.scalarSet(
+      "browser.startup.slow_startup_notification_disabled",
+      disabled
+    );
+
+    if (Services.startup.interrupted || disabled) {
       return;
     }
 
-    let currentTime = Date.now() - Services.startup.getStartupInfo().process;
+    let currentTime = Math.round(Cu.now());
+
+    Services.telemetry.scalarSet("browser.startup.recorded_time", currentTime);
+
     let averageTime = 0;
     let samples = 0;
     try {
@@ -1280,6 +1323,8 @@ BrowserGlue.prototype = {
     let totalTime = averageTime * samples + currentTime;
     samples++;
     averageTime = totalTime / samples;
+
+    Services.telemetry.scalarSet("browser.startup.average_time", averageTime);
 
     if (
       samples >= Services.prefs.getIntPref("browser.slowStartup.maxSamples")
@@ -1322,6 +1367,10 @@ BrowserGlue.prototype = {
   _showSlowStartupNotification(profileAge) {
     if (profileAge < 90) {
       // 3 months
+      Services.telemetry.scalarSet(
+        "browser.startup.too_new_for_notification",
+        true
+      );
       return;
     }
 
@@ -1329,6 +1378,15 @@ BrowserGlue.prototype = {
     if (!win) {
       return;
     }
+
+    Services.telemetry.scalarSet("browser.startup.slow_startup_notified", true);
+
+    const NO_ACTION = 0;
+    const OPENED_SUMO = 1;
+    const NEVER_SHOW_AGAIN = 2;
+    const DISMISS_NOTIFICATION = 3;
+
+    Services.telemetry.scalarSet("browser.startup.action", NO_ACTION);
 
     let productName = gBrandBundle.GetStringFromName("brandFullName");
     let message = win.gNavigatorBundle.getFormattedString(
@@ -1343,6 +1401,7 @@ BrowserGlue.prototype = {
           "slowStartup.helpButton.accesskey"
         ),
         callback() {
+          Services.telemetry.scalarSet("browser.startup.action", OPENED_SUMO);
           win.openTrustedLinkIn(
             "https://support.mozilla.org/kb/reset-firefox-easily-fix-most-problems",
             "tab"
@@ -1357,6 +1416,10 @@ BrowserGlue.prototype = {
           "slowStartup.disableNotificationButton.accesskey"
         ),
         callback() {
+          Services.telemetry.scalarSet(
+            "browser.startup.action",
+            NEVER_SHOW_AGAIN
+          );
           Services.prefs.setBoolPref(
             "browser.slowStartup.notificationDisabled",
             true
@@ -1365,12 +1428,22 @@ BrowserGlue.prototype = {
       },
     ];
 
+    let closeCallback = closeType => {
+      if (closeType == "dismissed") {
+        Services.telemetry.scalarSet(
+          "browser.startup.action",
+          DISMISS_NOTIFICATION
+        );
+      }
+    };
+
     win.gNotificationBox.appendNotification(
       message,
       "slow-startup",
       "chrome://browser/skin/slowStartup-16.png",
       win.gNotificationBox.PRIORITY_INFO_LOW,
-      buttons
+      buttons,
+      closeCallback
     );
   },
 
@@ -1661,6 +1734,10 @@ BrowserGlue.prototype = {
         "security.protectionspopup.recordEventTelemetry"
       )
     );
+    Services.telemetry.setEventRecordingEnabled(
+      "security.ui.app_menu",
+      Services.prefs.getBoolPref("security.app_menu.recordEventTelemetry")
+    );
 
     let tpEnabled = Services.prefs.getBoolPref(
       "privacy.trackingprotection.enabled"
@@ -1680,14 +1757,6 @@ BrowserGlue.prototype = {
       "network.cookie.cookieBehavior"
     );
     Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
-
-    let exceptions = 0;
-    for (let permission of Services.perms.all) {
-      if (permission.type == "trackingprotection") {
-        exceptions++;
-      }
-    }
-    Services.telemetry.scalarSet("contentblocking.exceptions", exceptions);
 
     let fpEnabled = Services.prefs.getBoolPref(
       "privacy.trackingprotection.fingerprinting.enabled"
@@ -1723,41 +1792,6 @@ BrowserGlue.prototype = {
       cmEnabled
     );
     Services.telemetry.scalarSet("contentblocking.category", categoryPref);
-  },
-
-  _recordContentBlockerTelemetry() {
-    [
-      "other",
-      "script",
-      "image",
-      "stylesheet",
-      "object",
-      "document",
-      "subdocument",
-      "refresh",
-      "xbl",
-      "ping",
-      "xmlhttprequest",
-      "objectsubrequest",
-      "dtd",
-      "font",
-      "media",
-      "websocket",
-      "csp_report",
-      "xslt",
-      "beacon",
-      "fetch",
-      "image",
-      "manifest",
-      "saveas_download",
-      "speculative",
-    ].forEach(type => {
-      Services.telemetry.keyedScalarSet(
-        "security.contentblocker_permissions",
-        type,
-        Services.perms.getAllWithTypePrefix(type).length
-      );
-    });
   },
 
   _recordDataSanitizationPrefs() {
@@ -1965,6 +1999,14 @@ BrowserGlue.prototype = {
 
     if (AppConstants.MOZ_CRASHREPORTER) {
       UnsubmittedCrashHandler.init();
+      UnsubmittedCrashHandler.scheduleCheckForUnsubmittedCrashReports();
+    }
+
+    if (AppConstants.ASAN_REPORTER) {
+      var { AsanReporter } = ChromeUtils.import(
+        "resource:///modules/AsanReporter.jsm"
+      );
+      AsanReporter.init();
     }
 
     Sanitizer.onStartup();
@@ -2018,182 +2060,248 @@ BrowserGlue.prototype = {
    * to the other ones scheduled together.
    */
   _scheduleStartupIdleTasks() {
-    Services.tm.idleDispatchToMainThread(async () => {
-      await ContextualIdentityService.load();
-      Discovery.update();
-    });
+    const idleTasks = [
+      // It's important that SafeBrowsing is initialized reasonably
+      // early, so we use a maximum timeout for it.
+      {
+        task: () => {
+          SafeBrowsing.init();
+        },
+        timeout: 5000,
+      },
 
-    // Begin listening for incoming push messages.
-    Services.tm.idleDispatchToMainThread(() => {
-      try {
-        PushService.wrappedJSObject.ensureReady();
-      } catch (ex) {
-        // NS_ERROR_NOT_AVAILABLE will get thrown for the PushService getter
-        // if the PushService is disabled.
-        if (ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
-          throw ex;
-        }
+      {
+        task: async () => {
+          await ContextualIdentityService.load();
+          Discovery.update();
+        },
+      },
+
+      // Begin listening for incoming push messages.
+      {
+        task: () => {
+          try {
+            PushService.wrappedJSObject.ensureReady();
+          } catch (ex) {
+            // NS_ERROR_NOT_AVAILABLE will get thrown for the PushService
+            // getter if the PushService is disabled.
+            if (ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
+              throw ex;
+            }
+          }
+        },
+      },
+
+      {
+        task: () => {
+          this._recordContentBlockingTelemetry();
+        },
+      },
+
+      {
+        task: () => {
+          this._recordDataSanitizationPrefs();
+        },
+      },
+
+      {
+        task: () => {
+          let siteSpecific = Services.prefs.getBoolPref(
+            "browser.zoom.siteSpecific",
+            false
+          );
+          Services.telemetry.scalarSet("a11y.sitezoom", siteSpecific);
+        },
+      },
+
+      // Load the Login Manager data from disk off the main thread, some time
+      // after startup.  If the data is required before this runs, for example
+      // because a restored page contains a password field, it will be loaded on
+      // the main thread, and this initialization request will be ignored.
+      {
+        task: () => {
+          try {
+            Services.logins;
+          } catch (ex) {
+            Cu.reportError(ex);
+          }
+        },
+        timeout: 3000,
+      },
+
+      // Add breach alerts pref observer reasonably early so the pref flip works
+      {
+        task: () => {
+          this._addBreachAlertsPrefObserver();
+        },
+      },
+
+      {
+        condition: AppConstants.platform == "win",
+        task: () => {
+          // For Windows 7, initialize the jump list module.
+          const WINTASKBAR_CONTRACTID = "@mozilla.org/windows-taskbar;1";
+          if (
+            WINTASKBAR_CONTRACTID in Cc &&
+            Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available
+          ) {
+            let temp = {};
+            ChromeUtils.import(
+              "resource:///modules/WindowsJumpLists.jsm",
+              temp
+            );
+            temp.WinTaskbarJumpList.startup();
+          }
+        },
+      },
+
+      {
+        task: () => {
+          this._checkForDefaultBrowser();
+        },
+      },
+
+      {
+        task: () => {
+          let { setTimeout } = ChromeUtils.import(
+            "resource://gre/modules/Timer.jsm"
+          );
+          setTimeout(function() {
+            Services.tm.idleDispatchToMainThread(
+              Services.startup.trackStartupCrashEnd
+            );
+          }, STARTUP_CRASHES_END_DELAY_MS);
+        },
+      },
+
+      {
+        task: () => {
+          let handlerService = Cc[
+            "@mozilla.org/uriloader/handler-service;1"
+          ].getService(Ci.nsIHandlerService);
+          handlerService.asyncInit();
+        },
+      },
+
+      {
+        condition: AppConstants.platform == "win",
+        task: () => {
+          JawsScreenReaderVersionCheck.onWindowsRestored();
+        },
+      },
+
+      {
+        task: () => {
+          RFPHelper.init();
+        },
+      },
+
+      {
+        task: () => {
+          Blocklist.loadBlocklistAsync();
+        },
+      },
+
+      {
+        condition:
+          Services.prefs.getIntPref(
+            "browser.livebookmarks.migrationAttemptsLeft",
+            0
+          ) > 0,
+        task: () => {
+          LiveBookmarkMigrator.migrate().catch(Cu.reportError);
+        },
+      },
+
+      {
+        task: () => {
+          TabUnloader.init();
+        },
+      },
+
+      {
+        condition: Services.prefs.getBoolPref("corroborator.enabled", false),
+        task: () => {
+          Corroborate.init().catch(Cu.reportError);
+        },
+      },
+
+      // request startup of Chromium remote debugging protocol
+      // (observer will only be notified when --remote-debugger is passed)
+      {
+        condition: AppConstants.ENABLE_REMOTE_AGENT,
+        task: () => {
+          Services.obs.notifyObservers(null, "remote-startup-requested");
+        },
+      },
+
+      // Marionette needs to be initialized as very last step
+      {
+        task: () => {
+          Services.obs.notifyObservers(null, "marionette-startup-requested");
+        },
+      },
+
+      // Run TRR performance measurements for DoH.
+      {
+        task: () => {
+          if (
+            Services.prefs.getBoolPref("doh-rollout.trrRace.enabled", false)
+          ) {
+            if (
+              !Services.prefs.getBoolPref("doh-rollout.trrRace.complete", false)
+            ) {
+              new TRRRacer().run();
+            }
+          } else {
+            Services.prefs.addObserver(
+              "doh-rollout.trrRace.enabled",
+              function observer() {
+                if (
+                  Services.prefs.getBoolPref(
+                    "doh-rollout.trrRace.enabled",
+                    false
+                  )
+                ) {
+                  Services.prefs.removeObserver(
+                    "doh-rollout.trrRace.enabled",
+                    observer
+                  );
+                  if (
+                    !Services.prefs.getBoolPref(
+                      "doh-rollout.trrRace.complete",
+                      false
+                    )
+                  ) {
+                    new TRRRacer().run();
+                  }
+                }
+              }
+            );
+          }
+        },
+      },
+    ];
+
+    for (let task of idleTasks) {
+      if ("condition" in task && !task.condition) {
+        continue;
       }
-    });
 
-    Services.tm.idleDispatchToMainThread(() => {
-      this._recordContentBlockingTelemetry();
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      this._recordContentBlockerTelemetry();
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      this._recordDataSanitizationPrefs();
-    });
-
-    // Load the Login Manager data from disk off the main thread, some time
-    // after startup.  If the data is required before this runs, for example
-    // because a restored page contains a password field, it will be loaded on
-    // the main thread, and this initialization request will be ignored.
-    Services.tm.idleDispatchToMainThread(() => {
-      try {
-        Services.logins;
-      } catch (ex) {
-        Cu.reportError(ex);
-      }
-    }, 3000);
-
-    // Add breach alerts pref observer reasonably early so the pref flip works
-    Services.tm.idleDispatchToMainThread(() => {
-      this._addBreachAlertsPrefObserver();
-    });
-
-    // It's important that SafeBrowsing is initialized reasonably
-    // early, so we use a maximum timeout for it.
-    Services.tm.idleDispatchToMainThread(() => {
-      SafeBrowsing.init();
-    }, 5000);
-
-    if (AppConstants.MOZ_CRASHREPORTER) {
-      UnsubmittedCrashHandler.scheduleCheckForUnsubmittedCrashReports();
-    }
-
-    if (AppConstants.ASAN_REPORTER) {
-      var { AsanReporter } = ChromeUtils.import(
-        "resource:///modules/AsanReporter.jsm"
+      ChromeUtils.idleDispatch(
+        () => {
+          if (!Services.startup.shuttingDown) {
+            Services.profiler.AddMarker("startupIdleTask");
+            try {
+              task.task();
+            } catch (ex) {
+              Cu.reportError(ex);
+            }
+          }
+        },
+        task.timeout ? { timeout: task.timeout } : undefined
       );
-      AsanReporter.init();
     }
-
-    if (AppConstants.platform == "win") {
-      Services.tm.idleDispatchToMainThread(() => {
-        // For Windows 7, initialize the jump list module.
-        const WINTASKBAR_CONTRACTID = "@mozilla.org/windows-taskbar;1";
-        if (
-          WINTASKBAR_CONTRACTID in Cc &&
-          Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available
-        ) {
-          let temp = {};
-          ChromeUtils.import("resource:///modules/WindowsJumpLists.jsm", temp);
-          temp.WinTaskbarJumpList.startup();
-        }
-      });
-    }
-
-    Services.tm.idleDispatchToMainThread(() => {
-      this._checkForDefaultBrowser();
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      let { setTimeout } = ChromeUtils.import(
-        "resource://gre/modules/Timer.jsm"
-      );
-      setTimeout(function() {
-        Services.tm.idleDispatchToMainThread(
-          Services.startup.trackStartupCrashEnd
-        );
-      }, STARTUP_CRASHES_END_DELAY_MS);
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      let handlerService = Cc[
-        "@mozilla.org/uriloader/handler-service;1"
-      ].getService(Ci.nsIHandlerService);
-      handlerService.asyncInit();
-    });
-
-    if (AppConstants.platform == "win") {
-      Services.tm.idleDispatchToMainThread(() => {
-        JawsScreenReaderVersionCheck.onWindowsRestored();
-      });
-    }
-
-    Services.tm.idleDispatchToMainThread(() => {
-      RFPHelper.init();
-    });
-
-    ChromeUtils.idleDispatch(() => {
-      Blocklist.loadBlocklistAsync();
-    });
-
-    if (
-      Services.prefs.getIntPref(
-        "browser.livebookmarks.migrationAttemptsLeft",
-        0
-      ) > 0
-    ) {
-      Services.tm.idleDispatchToMainThread(() => {
-        LiveBookmarkMigrator.migrate().catch(Cu.reportError);
-      });
-    }
-
-    Services.tm.idleDispatchToMainThread(() => {
-      TabUnloader.init();
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      if (Services.prefs.getBoolPref("corroborator.enabled", false)) {
-        Corroborate.init().catch(Cu.reportError);
-      }
-    });
-
-    // request startup of Chromium remote debugging protocol
-    // (observer will only be notified when --remote-debugger is passed)
-    if (AppConstants.ENABLE_REMOTE_AGENT) {
-      Services.tm.idleDispatchToMainThread(() => {
-        Services.obs.notifyObservers(null, "remote-startup-requested");
-      });
-    }
-
-    // Temporary for Delegated Credentials Study:
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1582591
-    // Disable in automation and non-nightly builds.
-    if (!Cu.isInAutomation && AppConstants.NIGHTLY_BUILD) {
-      let env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-
-      // Disable under xpcshell-test.
-      if (!env.exists("XPCSHELL_TEST_PROFILE_DIR")) {
-        let { DelegatedCredsExperiment } = ChromeUtils.import(
-          "resource:///modules/DelegatedCredsExperiment.jsm"
-        );
-
-        let currentDate = new Date();
-        let expiryDate = new Date("2020-01-10 0:00:00");
-        if (currentDate < expiryDate) {
-          Services.tm.idleDispatchToMainThread(() => {
-            DelegatedCredsExperiment.runTest();
-          });
-        } else {
-          Services.tm.idleDispatchToMainThread(() => {
-            DelegatedCredsExperiment.uninstall();
-          });
-        }
-      }
-    }
-
-    // Marionette needs to be initialized as very last step
-    Services.tm.idleDispatchToMainThread(() => {
-      Services.obs.notifyObservers(null, "marionette-startup-requested");
-    });
   },
 
   /**
@@ -2208,46 +2316,61 @@ BrowserGlue.prototype = {
    * value, this is unlikely.
    */
   _scheduleArbitrarilyLateIdleTasks() {
-    Services.tm.idleDispatchToMainThread(() => {
-      this._sendMediaTelemetry();
-    });
+    const idleTasks = [
+      () => {
+        this._sendMediaTelemetry();
+      },
 
-    Services.tm.idleDispatchToMainThread(() => {
-      // Telemetry for master-password - we do this after a delay as it
-      // can cause IO if NSS/PSM has not already initialized.
-      let tokenDB = Cc["@mozilla.org/security/pk11tokendb;1"].getService(
-        Ci.nsIPK11TokenDB
-      );
-      let token = tokenDB.getInternalKeyToken();
-      let mpEnabled = token.hasPassword;
-      if (mpEnabled) {
-        Services.telemetry
-          .getHistogramById("MASTER_PASSWORD_ENABLED")
-          .add(mpEnabled);
-      }
-    });
+      () => {
+        // Telemetry for master-password - we do this after a delay as it
+        // can cause IO if NSS/PSM has not already initialized.
+        let tokenDB = Cc["@mozilla.org/security/pk11tokendb;1"].getService(
+          Ci.nsIPK11TokenDB
+        );
+        let token = tokenDB.getInternalKeyToken();
+        let mpEnabled = token.hasPassword;
+        if (mpEnabled) {
+          Services.telemetry
+            .getHistogramById("MASTER_PASSWORD_ENABLED")
+            .add(mpEnabled);
+        }
+      },
 
-    Services.tm.idleDispatchToMainThread(() => {
-      let obj = {};
-      ChromeUtils.import("resource://gre/modules/GMPInstallManager.jsm", obj);
-      this._gmpInstallManager = new obj.GMPInstallManager();
-      // We don't really care about the results, if someone is interested they
-      // can check the log.
-      this._gmpInstallManager.simpleCheckAndInstall().catch(() => {});
-    });
+      () => {
+        let obj = {};
+        ChromeUtils.import("resource://gre/modules/GMPInstallManager.jsm", obj);
+        this._gmpInstallManager = new obj.GMPInstallManager();
+        // We don't really care about the results, if someone is interested they
+        // can check the log.
+        this._gmpInstallManager.simpleCheckAndInstall().catch(() => {});
+      },
 
-    Services.tm.idleDispatchToMainThread(() => {
-      RemoteSettings.init();
-      this._addBreachesSyncHandler();
-    });
+      () => {
+        RemoteSettings.init();
+        this._addBreachesSyncHandler();
+      },
 
-    Services.tm.idleDispatchToMainThread(() => {
-      PublicSuffixList.init();
-    });
+      () => {
+        PublicSuffixList.init();
+      },
 
-    Services.tm.idleDispatchToMainThread(() => {
-      RemoteSecuritySettings.init();
-    });
+      () => {
+        RemoteSecuritySettings.init();
+      },
+    ];
+
+    for (let task of idleTasks) {
+      ChromeUtils.idleDispatch(() => {
+        if (!Services.startup.shuttingDown) {
+          Services.profiler.AddMarker("startupLateIdleTask");
+          try {
+            task();
+          } catch (ex) {
+            Cu.reportError(ex);
+          }
+        }
+      });
+    }
   },
 
   _addBreachesSyncHandler() {
@@ -2795,7 +2918,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 90;
+    const UI_VERSION = 92;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version")) {
@@ -3258,6 +3381,43 @@ BrowserGlue.prototype = {
         "chrome://browser/content/places/bookmarksSidebar.xul",
         "chrome://browser/content/places/bookmarksSidebar.xhtml"
       );
+    }
+
+    // Clear socks proxy values if they were shared from http, to prevent
+    // websocket breakage after bug 1577862 (see bug 969282).
+    if (
+      currentUIVersion < 91 &&
+      Services.prefs.getBoolPref("network.proxy.share_proxy_settings", false) &&
+      Services.prefs.getIntPref("network.proxy.type", 0) == 1
+    ) {
+      let httpProxy = Services.prefs.getCharPref("network.proxy.http", "");
+      let httpPort = Services.prefs.getIntPref("network.proxy.http_port", 0);
+      let socksProxy = Services.prefs.getCharPref("network.proxy.socks", "");
+      let socksPort = Services.prefs.getIntPref("network.proxy.socks_port", 0);
+      if (httpProxy && httpProxy == socksProxy && httpPort == socksPort) {
+        Services.prefs.setCharPref(
+          "network.proxy.socks",
+          Services.prefs.getCharPref("network.proxy.backup.socks", "")
+        );
+        Services.prefs.setIntPref(
+          "network.proxy.socks_port",
+          Services.prefs.getIntPref("network.proxy.backup.socks_port", 0)
+        );
+      }
+    }
+
+    if (currentUIVersion < 92) {
+      // privacy.userContext.longPressBehavior pref was renamed and changed to a boolean
+      let longpress = Services.prefs.getIntPref(
+        "privacy.userContext.longPressBehavior",
+        0
+      );
+      if (longpress == 1) {
+        Services.prefs.setBoolPref(
+          "privacy.userContext.newTabContainerOnLeftClick.enabled",
+          true
+        );
+      }
     }
 
     // Update the migration version.

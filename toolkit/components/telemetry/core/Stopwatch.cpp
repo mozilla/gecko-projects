@@ -49,8 +49,7 @@ static void LogError(JSContext* aCx, const nsCString& aMessage) {
   }
 }
 
-namespace mozilla {
-namespace telemetry {
+namespace mozilla::telemetry {
 
 class Timer final {
  public:
@@ -185,12 +184,6 @@ Timers::Timers() : mTimers(dom::RootingCx()) {
 
   mTimers = JS::NewMapObject(jsapi.cx());
   MOZ_RELEASE_ASSERT(mTimers);
-
-  // Telemetry is disabled when recording/replaying, so don't report errors
-  // when it is used.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    mSuppressErrors = true;
-  }
 }
 
 JSObject* Timers::Get(JSContext* aCx, const nsAString& aHistogram,
@@ -428,5 +421,4 @@ void Stopwatch::SetTestModeEnabled(const dom::GlobalObject& aGlobal,
   Timers::Singleton().SuppressErrors() = aTesting;
 }
 
-}  // namespace telemetry
-}  // namespace mozilla
+}  // namespace mozilla::telemetry

@@ -21,7 +21,7 @@ namespace js {
 class FunctionExtended;
 struct SelfHostedLazyScript;
 
-typedef JSNative Native;
+using Native = JSNative;
 }  // namespace js
 
 static const uint32_t JSSLOT_BOUND_FUNCTION_TARGET = 2;
@@ -37,54 +37,76 @@ class FunctionFlags {
  public:
   enum FunctionKind {
     NormalFunction = 0,
-    Arrow,  /* ES6 '(args) => body' syntax */
-    Method, /* ES6 MethodDefinition */
+    Arrow,   // ES6 '(args) => body' syntax
+    Method,  // ES6 MethodDefinition
     ClassConstructor,
     Getter,
     Setter,
-    AsmJS, /* function is an asm.js module or exported function */
-    Wasm,  /* function is an exported WebAssembly function */
+    AsmJS,  // An asm.js module or exported function
+    Wasm,   // An exported WebAssembly function
     FunctionKindLimit
   };
 
-  // I wish I didn't have to name this enum it makes consumers uglier
-  enum Flags {
-    INTERPRETED = 0x0001, /* function has a JSScript and environment. */
-    CONSTRUCTOR = 0x0002, /* function that can be called as a constructor */
-    EXTENDED = 0x0004,    /* structure is FunctionExtended */
-    BOUND_FUN = 0x0008, /* function was created with Function.prototype.bind. */
-    WASM_JIT_ENTRY = 0x0010,   /* the wasm function has a jit entry */
-    HAS_GUESSED_ATOM = 0x0020, /* function had no explicit name, but a
-                                  name was guessed for it anyway. See
-                                  atom_ for more info about this flag. */
-    HAS_BOUND_FUNCTION_NAME_PREFIX =
-        0x0020,      /* bound functions reuse the HAS_GUESSED_ATOM
-                        flag to track if atom_ already contains the
-                        "bound " function name prefix */
-    LAMBDA = 0x0040, /* function comes from a FunctionExpression, ArrowFunction,
-                        or Function() call (not a FunctionDeclaration or
-                        nonstandard function-statement) */
-    SELF_HOSTED =
-        0x0080, /* On an interpreted function, indicates a self-hosted builtin,
-                   which must not be decompilable nor constructible. On a native
-                   function, indicates an 'intrinsic', intended for use from
-                   self-hosted code only. */
-    HAS_INFERRED_NAME = 0x0100, /* function had no explicit name, but a name was
-                                   set by SetFunctionName at compile time or
-                                   SetFunctionName at runtime. See atom_ for
-                                   more info about this flag. */
-    INTERPRETED_LAZY =
-        0x0200, /* function is interpreted but doesn't have a script yet */
-    RESOLVED_LENGTH =
-        0x0400,             /* f.length has been resolved (see fun_resolve). */
-    RESOLVED_NAME = 0x0800, /* f.name has been resolved (see fun_resolve). */
-    NEW_SCRIPT_CLEARED =
-        0x1000, /* For a function used as an interpreted constructor, whether
-                   a 'new' type had constructor information cleared. */
+  enum Flags : uint16_t {
+    // The general kind of a function. This is used to describe characteristics
+    // of functions that do not merit a dedicated flag bit below.
+    FUNCTION_KIND_SHIFT = 0,
+    FUNCTION_KIND_MASK = 0x0007,
 
-    FUNCTION_KIND_SHIFT = 13,
-    FUNCTION_KIND_MASK = 0x7 << FUNCTION_KIND_SHIFT,
+    // The AllocKind used was FunctionExtended and extra slots were allocated.
+    // These slots may be used by the engine or the embedding so care must be
+    // taken to avoid conflicts.
+    EXTENDED = 1 << 3,
 
+    // Set if function is a self-hosted builtin or intrinsic. An 'intrinsic'
+    // here means a native function used inside self-hosted code. In general, a
+    // self-hosted function should appear to script as though it were a native
+    // builtin.
+    SELF_HOSTED = 1 << 4,
+
+    // An interpreted function has or may-have bytecode and an environment. Only
+    // one of these flags may be used at a time. As a memory optimization, the
+    // SELF_HOSTED and INTERPRETED_LAZY flags together indicate there is no
+    // js::BaseScript at all and we must clone from the self-hosted realm in
+    // order to get bytecode.
+    INTERPRETED = 1 << 5,
+    INTERPRETED_LAZY = 1 << 6,
+
+    // Function may be called as a constructor. This corresponds in the spec as
+    // having a [[Construct]] internal method.
+    CONSTRUCTOR = 1 << 7,
+
+    // A 'Bound Function Exotic Object' created by Function.prototype.bind.
+    BOUND_FUN = 1 << 8,
+
+    // Function comes from a FunctionExpression, ArrowFunction, or Function()
+    // call (not a FunctionDeclaration or nonstandard function-statement).
+    LAMBDA = 1 << 9,
+
+    // The WASM function has a JIT entry which emulates the
+    // js::BaseScript::jitCodeRaw_ mechanism.
+    WASM_JIT_ENTRY = 1 << 10,
+
+    // Function had no explicit name, but a name was set by SetFunctionName at
+    // compile time or SetFunctionName at runtime.
+    HAS_INFERRED_NAME = 1 << 11,
+
+    // Function had no explicit name, but a name was guessed for it anyway. For
+    // a Bound function, tracks if atom_ already contains the "bound " prefix.
+    ATOM_EXTRA_FLAG = 1 << 12,
+    HAS_GUESSED_ATOM = ATOM_EXTRA_FLAG,
+    HAS_BOUND_FUNCTION_NAME_PREFIX = ATOM_EXTRA_FLAG,
+
+    // The 'length' or 'name property has been resolved. See fun_resolve.
+    RESOLVED_NAME = 1 << 13,
+    RESOLVED_LENGTH = 1 << 14,
+
+    // For a function used as an interpreted constructor, whether a 'new' type
+    // had constructor information cleared.
+    NEW_SCRIPT_CLEARED = 1 << 15,
+
+    // Shifted form of FunctionKinds.
+    NORMAL_KIND = NormalFunction << FUNCTION_KIND_SHIFT,
     ASMJS_KIND = AsmJS << FUNCTION_KIND_SHIFT,
     WASM_KIND = Wasm << FUNCTION_KIND_SHIFT,
     ARROW_KIND = Arrow << FUNCTION_KIND_SHIFT,
@@ -93,30 +115,30 @@ class FunctionFlags {
     GETTER_KIND = Getter << FUNCTION_KIND_SHIFT,
     SETTER_KIND = Setter << FUNCTION_KIND_SHIFT,
 
-    /* Derived Flags values for convenience: */
-    NATIVE_FUN = 0,
-    NATIVE_CTOR = NATIVE_FUN | CONSTRUCTOR,
-    NATIVE_CLASS_CTOR = NATIVE_FUN | CONSTRUCTOR | CLASSCONSTRUCTOR_KIND,
-    ASMJS_CTOR = ASMJS_KIND | NATIVE_CTOR,
-    ASMJS_LAMBDA_CTOR = ASMJS_KIND | NATIVE_CTOR | LAMBDA,
-    WASM = WASM_KIND | NATIVE_FUN,
-    INTERPRETED_METHOD = INTERPRETED | METHOD_KIND,
-    INTERPRETED_CLASS_CONSTRUCTOR =
-        INTERPRETED | CLASSCONSTRUCTOR_KIND | CONSTRUCTOR,
+    // Derived Flags combinations to use when creating functions.
+    NATIVE_FUN = NORMAL_KIND,
+    NATIVE_CTOR = CONSTRUCTOR | NORMAL_KIND,
+    ASMJS_CTOR = CONSTRUCTOR | ASMJS_KIND,
+    ASMJS_LAMBDA_CTOR = CONSTRUCTOR | LAMBDA | ASMJS_KIND,
+    WASM = WASM_KIND,
+    INTERPRETED_NORMAL = INTERPRETED | CONSTRUCTOR | NORMAL_KIND,
+    INTERPRETED_CLASS_CTOR = INTERPRETED | CONSTRUCTOR | CLASSCONSTRUCTOR_KIND,
+    INTERPRETED_GENERATOR_OR_ASYNC = INTERPRETED | NORMAL_KIND,
+    INTERPRETED_LAMBDA = INTERPRETED | LAMBDA | CONSTRUCTOR | NORMAL_KIND,
+    INTERPRETED_LAMBDA_ARROW = INTERPRETED | LAMBDA | ARROW_KIND,
+    INTERPRETED_LAMBDA_GENERATOR_OR_ASYNC = INTERPRETED | LAMBDA | NORMAL_KIND,
     INTERPRETED_GETTER = INTERPRETED | GETTER_KIND,
     INTERPRETED_SETTER = INTERPRETED | SETTER_KIND,
-    INTERPRETED_LAMBDA = INTERPRETED | LAMBDA | CONSTRUCTOR,
-    INTERPRETED_LAMBDA_ARROW = INTERPRETED | LAMBDA | ARROW_KIND,
-    INTERPRETED_LAMBDA_GENERATOR_OR_ASYNC = INTERPRETED | LAMBDA,
-    INTERPRETED_NORMAL = INTERPRETED | CONSTRUCTOR,
-    INTERPRETED_GENERATOR_OR_ASYNC = INTERPRETED,
-    NO_XDR_FLAGS = RESOLVED_LENGTH | RESOLVED_NAME,
+    INTERPRETED_METHOD = INTERPRETED | METHOD_KIND,
 
-    /* Flags preserved when cloning a function.
-       (Exception: js::MakeDefaultConstructor produces default constructors for
-       ECMAScript classes by cloning self-hosted functions, and then clearing
-       their SELF_HOSTED bit, setting their CONSTRUCTOR bit, and otherwise
-       munging them to look like they originated with the class definition.) */
+    // Flags that XDR ignores. See also: js::BaseScript::MutableFlags.
+    MUTABLE_FLAGS = RESOLVED_NAME | RESOLVED_LENGTH | NEW_SCRIPT_CLEARED,
+
+    // Flags preserved when cloning a function. (Exception:
+    // js::MakeDefaultConstructor produces default constructors for ECMAScript
+    // classes by cloning self-hosted functions, and then clearing their
+    // SELF_HOSTED bit, setting their CONSTRUCTOR bit, and otherwise munging
+    // them to look like they originated with the class definition.) */
     STABLE_ACROSS_CLONES =
         CONSTRUCTOR | LAMBDA | SELF_HOSTED | FUNCTION_KIND_MASK
   };
@@ -288,8 +310,6 @@ class FunctionFlags {
     setFlags(SELF_HOSTED);
   }
 
-  void setArrow() { setKind(Arrow); }
-
   void setResolvedLength() { setFlags(RESOLVED_LENGTH); }
   void setResolvedName() { setFlags(RESOLVED_NAME); }
 
@@ -301,7 +321,6 @@ class FunctionFlags {
   void clearInferredName() { clearFlags(HAS_INFERRED_NAME); }
 
   void setGuessedAtom() { setFlags(HAS_GUESSED_ATOM); }
-  void clearGuessedAtom() { clearFlags(HAS_GUESSED_ATOM); }
 
   void setPrefixedBoundFunctionName() {
     setFlags(HAS_BOUND_FUNCTION_NAME_PREFIX);
@@ -380,7 +399,7 @@ class JSFunction : public js::NativeObject {
   //      in |var o = {[Symbol.iterator]: function(){}}|. When it happens at
   //      compile-time, the HAS_INFERRED_NAME is set directly in the
   //      bytecode emitter, when it happens at runtime, the flag is set when
-  //      evaluating the JSOP_SETFUNNAME bytecode.
+  //      evaluating the JSOp::SetFunName bytecode.
   //   d. HAS_GUESSED_ATOM and HAS_INFERRED_NAME cannot both be set.
   //   e. |atom_| can be null if neither an explicit, nor inferred, nor a
   //      guessed name was set.
@@ -412,11 +431,9 @@ class JSFunction : public js::NativeObject {
 
     // Note: this should be kept in sync with
     // FunctionBox::needsCallObjectRegardlessOfBindings().
-    MOZ_ASSERT_IF(baseScript()->funHasExtensibleScope() ||
-                      baseScript()->needsHomeObject() ||
-                      baseScript()->isDerivedClassConstructor() ||
-                      isGenerator() || isAsync(),
-                  nonLazyScript()->bodyScope()->hasEnvironment());
+    MOZ_ASSERT_IF(
+        baseScript()->funHasExtensibleScope() || isGenerator() || isAsync(),
+        nonLazyScript()->bodyScope()->hasEnvironment());
 
     return nonLazyScript()->bodyScope()->hasEnvironment();
   }
@@ -519,12 +536,25 @@ class JSFunction : public js::NativeObject {
   bool isBuiltinFunctionConstructor();
   bool needsPrototypeProperty();
 
+  // Returns true if this function must have a non-configurable .prototype data
+  // property. This is used to ensure looking up .prototype elsewhere will have
+  // no side-effects.
+  bool hasNonConfigurablePrototypeDataProperty();
+
+  // Returns true if |new Fun()| should not allocate a new object caller-side
+  // but pass the uninitialized-lexical MagicValue and rely on the callee to
+  // construct its own |this| object.
+  bool constructorNeedsUninitializedThis() const {
+    MOZ_ASSERT(isConstructor());
+    MOZ_ASSERT(isInterpreted());
+    return isBoundFunction() || isDerivedClassConstructor();
+  }
+
   /* Returns the strictness of this function, which must be interpreted. */
   bool strict() const { return baseScript()->strict(); }
 
   void setFlags(uint16_t flags) { flags_ = FunctionFlags(flags); }
   void setFlags(FunctionFlags flags) { flags_ = flags; }
-  void setKind(FunctionFlags::FunctionKind kind) { flags_.setKind(kind); }
 
   // Make the function constructible.
   void setIsConstructor() { flags_.setIsConstructor(); }
@@ -539,7 +569,6 @@ class JSFunction : public js::NativeObject {
   void setIsSelfHostedBuiltin() { flags_.setIsSelfHostedBuiltin(); }
   void setIsIntrinsic() { flags_.setIsIntrinsic(); }
 
-  void setArrow() { flags_.setArrow(); }
   void setResolvedLength() { flags_.setResolvedLength(); }
   void setResolvedName() { flags_.setResolvedName(); }
 
@@ -606,13 +635,6 @@ class JSFunction : public js::NativeObject {
     setAtom(atom);
     flags_.setGuessedAtom();
   }
-  void clearGuessedAtom() {
-    MOZ_ASSERT(hasGuessedAtom());
-    MOZ_ASSERT(!isBoundFunction());
-    MOZ_ASSERT(atom_);
-    setAtom(nullptr);
-    flags_.clearGuessedAtom();
-  }
 
   void setPrefixedBoundFunctionName(JSAtom* atom) {
     MOZ_ASSERT(!hasBoundFunctionNamePrefix());
@@ -642,8 +664,6 @@ class JSFunction : public js::NativeObject {
     MOZ_ASSERT(isInterpreted());
     reinterpret_cast<js::GCPtrObject*>(&u.scripted.env_)->init(obj);
   }
-
-  void unsetEnvironment() { setEnvironment(nullptr); }
 
  public:
   static constexpr size_t offsetOfNargs() {
@@ -900,7 +920,7 @@ class JSFunction : public js::NativeObject {
     return u.native.extra.wasmJitEntry_;
   }
 
-  bool isDerivedClassConstructor();
+  bool isDerivedClassConstructor() const;
 
   static unsigned offsetOfNative() {
     return offsetof(JSFunction, u.native.func_);
@@ -1017,8 +1037,8 @@ extern bool AsyncFunctionConstructor(JSContext* cx, unsigned argc, Value* vp);
 extern bool AsyncGeneratorConstructor(JSContext* cx, unsigned argc, Value* vp);
 
 // If enclosingEnv is null, the function will have a null environment()
-// (yes, null, not the global).  In all cases, the global will be used as the
-// parent.
+// (yes, null, not the global lexical environment).  In all cases, the global
+// will be used as the terminating environment.
 
 extern JSFunction* NewFunctionWithProto(
     JSContext* cx, JSNative native, unsigned nargs, FunctionFlags flags,
@@ -1052,8 +1072,8 @@ inline JSFunction* NewNativeConstructor(
 }
 
 // Allocate a new scripted function.  If enclosingEnv is null, the
-// global will be used.  In all cases the parent of the resulting object will be
-// the global.
+// global lexical environment will be used.  In all cases the terminating
+// environment of the resulting object will be the global.
 extern JSFunction* NewScriptedFunction(
     JSContext* cx, unsigned nargs, FunctionFlags flags, HandleAtom atom,
     HandleObject proto = nullptr,
@@ -1142,18 +1162,19 @@ class FunctionExtended : public JSFunction {
 };
 
 extern bool CanReuseScriptForClone(JS::Realm* realm, HandleFunction fun,
-                                   HandleObject newParent);
+                                   HandleObject newEnclosingEnv);
 
-extern JSFunction* CloneFunctionReuseScript(
-    JSContext* cx, HandleFunction fun, HandleObject parent,
-    gc::AllocKind kind = gc::AllocKind::FUNCTION,
-    NewObjectKind newKindArg = GenericObject, HandleObject proto = nullptr);
+extern JSFunction* CloneFunctionReuseScript(JSContext* cx, HandleFunction fun,
+                                            HandleObject enclosingEnv,
+                                            gc::AllocKind kind,
+                                            NewObjectKind newKindArg,
+                                            HandleObject proto);
 
 // Functions whose scripts are cloned are always given singleton types.
 extern JSFunction* CloneFunctionAndScript(
-    JSContext* cx, HandleFunction fun, HandleObject parent,
+    JSContext* cx, HandleFunction fun, HandleObject enclosingEnv,
     HandleScope newScope, Handle<ScriptSourceObject*> sourceObject,
-    gc::AllocKind kind = gc::AllocKind::FUNCTION, HandleObject proto = nullptr);
+    gc::AllocKind kind, HandleObject proto = nullptr);
 
 extern JSFunction* CloneAsmJSModuleFunction(JSContext* cx, HandleFunction fun);
 

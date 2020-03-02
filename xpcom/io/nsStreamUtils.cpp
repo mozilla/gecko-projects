@@ -7,7 +7,6 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/Attributes.h"
 #include "nsStreamUtils.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsICloneableInputStream.h"
 #include "nsIEventTarget.h"
@@ -34,13 +33,17 @@ static NS_DEFINE_CID(kStreamTransportServiceCID, NS_STREAMTRANSPORTSERVICE_CID);
 // those can be shut down at any time, and in these cases, Cancel() is called
 // instead of Run().
 class nsInputStreamReadyEvent final : public CancelableRunnable,
-                                      public nsIInputStreamCallback {
+                                      public nsIInputStreamCallback,
+                                      public nsIRunnablePriority {
  public:
   NS_DECL_ISUPPORTS_INHERITED
 
   nsInputStreamReadyEvent(const char* aName, nsIInputStreamCallback* aCallback,
-                          nsIEventTarget* aTarget)
-      : CancelableRunnable(aName), mCallback(aCallback), mTarget(aTarget) {}
+                          nsIEventTarget* aTarget, uint32_t aPriority)
+      : CancelableRunnable(aName),
+        mCallback(aCallback),
+        mTarget(aTarget),
+        mPriority(aPriority) {}
 
  private:
   ~nsInputStreamReadyEvent() {
@@ -58,7 +61,7 @@ class nsInputStreamReadyEvent final : public CancelableRunnable,
     nsresult rv = mTarget->IsOnCurrentThread(&val);
     if (NS_FAILED(rv) || !val) {
       nsCOMPtr<nsIInputStreamCallback> event = NS_NewInputStreamReadyEvent(
-          "~nsInputStreamReadyEvent", mCallback, mTarget);
+          "~nsInputStreamReadyEvent", mCallback, mTarget, mPriority);
       mCallback = nullptr;
       if (event) {
         rv = event->OnInputStreamReady(nullptr);
@@ -99,14 +102,20 @@ class nsInputStreamReadyEvent final : public CancelableRunnable,
     return NS_OK;
   }
 
+  NS_IMETHOD GetPriority(uint32_t* aPriority) override {
+    *aPriority = mPriority;
+    return NS_OK;
+  }
+
  private:
   nsCOMPtr<nsIAsyncInputStream> mStream;
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   nsCOMPtr<nsIEventTarget> mTarget;
+  uint32_t mPriority;
 };
 
 NS_IMPL_ISUPPORTS_INHERITED(nsInputStreamReadyEvent, CancelableRunnable,
-                            nsIInputStreamCallback)
+                            nsIInputStreamCallback, nsIRunnablePriority)
 
 //-----------------------------------------------------------------------------
 
@@ -194,11 +203,11 @@ NS_IMPL_ISUPPORTS_INHERITED(nsOutputStreamReadyEvent, CancelableRunnable,
 
 already_AddRefed<nsIInputStreamCallback> NS_NewInputStreamReadyEvent(
     const char* aName, nsIInputStreamCallback* aCallback,
-    nsIEventTarget* aTarget) {
+    nsIEventTarget* aTarget, uint32_t aPriority) {
   NS_ASSERTION(aCallback, "null callback");
   NS_ASSERTION(aTarget, "null target");
   RefPtr<nsInputStreamReadyEvent> ev =
-      new nsInputStreamReadyEvent(aName, aCallback, aTarget);
+      new nsInputStreamReadyEvent(aName, aCallback, aTarget, aPriority);
   return ev.forget();
 }
 
@@ -466,7 +475,7 @@ class nsAStreamCopier : public nsIInputStreamCallback,
   nsresult mCancelStatus;
 
   // virtual since subclasses call superclass Release()
-  virtual ~nsAStreamCopier() {}
+  virtual ~nsAStreamCopier() = default;
 };
 
 NS_IMPL_ISUPPORTS_INHERITED(nsAStreamCopier, CancelableRunnable,
@@ -475,7 +484,7 @@ NS_IMPL_ISUPPORTS_INHERITED(nsAStreamCopier, CancelableRunnable,
 class nsStreamCopierIB final : public nsAStreamCopier {
  public:
   nsStreamCopierIB() : nsAStreamCopier() {}
-  virtual ~nsStreamCopierIB() {}
+  virtual ~nsStreamCopierIB() = default;
 
   struct MOZ_STACK_CLASS ReadSegmentsState {
     // the nsIOutputStream will outlive the ReadSegmentsState on the stack
@@ -517,7 +526,7 @@ class nsStreamCopierIB final : public nsAStreamCopier {
 class nsStreamCopierOB final : public nsAStreamCopier {
  public:
   nsStreamCopierOB() : nsAStreamCopier() {}
-  virtual ~nsStreamCopierOB() {}
+  virtual ~nsStreamCopierOB() = default;
 
   struct MOZ_STACK_CLASS WriteSegmentsState {
     // the nsIInputStream will outlive the WriteSegmentsState on the stack

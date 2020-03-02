@@ -15,6 +15,7 @@ namespace dom {
  * MediaControlKeysEvent represents all possible control buttons in controller
  * interface, no matter it's physical one, such as keyboard, headset, or a
  * virtual one, such as the interface provided by Android MediaController.
+ * Note. keep this sync with `MediaControlKeysTestEvent` in ChromeUtils.webidl.
  */
 enum class MediaControlKeysEvent : uint32_t {
   ePlay,
@@ -24,6 +25,8 @@ enum class MediaControlKeysEvent : uint32_t {
   eNextTrack,
   eSeekBackward,
   eSeekForward,
+  // Keep this the last element, or you have to modify the serialized structure
+  // in `MediaControlIPC.h` when you use other element as the last one.
   eStop,
 };
 
@@ -33,8 +36,9 @@ enum class MediaControlKeysEvent : uint32_t {
  * and then everytime when the media key events occur, `OnKeyPressed` will be
  * called so that we can do related handling.
  */
-class MediaControlKeysEventListener : public nsISupports {
+class MediaControlKeysEventListener {
  public:
+  NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
   MediaControlKeysEventListener() = default;
 
   virtual void OnKeyPressed(MediaControlKeysEvent aKeyEvent) = 0;
@@ -49,24 +53,24 @@ class MediaControlKeysEventListener : public nsISupports {
  */
 class MediaControlKeysHandler final : public MediaControlKeysEventListener {
  public:
-  NS_DECL_ISUPPORTS
-
+  NS_INLINE_DECL_REFCOUNTING(MediaControlKeysHandler, override)
   void OnKeyPressed(MediaControlKeysEvent aKeyEvent) override;
 
  private:
   virtual ~MediaControlKeysHandler() = default;
 };
 
+enum class PlaybackState : uint8_t;
+
 /**
- * MediaControlKeysEventSource is a base class which is used to implement
+ * MediaControlKeysEventSource is an abstract class which is used to implement
  * transporting media control keys event to all its listeners when media keys
  * event happens.
  */
-class MediaControlKeysEventSource : public nsISupports {
+class MediaControlKeysEventSource {
  public:
-  NS_DECL_ISUPPORTS
-
-  MediaControlKeysEventSource() = default;
+  NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
+  MediaControlKeysEventSource();
 
   virtual void AddListener(MediaControlKeysEventListener* aListener);
   virtual void RemoveListener(MediaControlKeysEventListener* aListener);
@@ -78,9 +82,13 @@ class MediaControlKeysEventSource : public nsISupports {
   virtual void Close();
   virtual bool IsOpened() const = 0;
 
+  virtual void SetPlaybackState(PlaybackState aState);
+  virtual PlaybackState GetPlaybackState() const;
+
  protected:
   virtual ~MediaControlKeysEventSource() = default;
   nsTArray<RefPtr<MediaControlKeysEventListener>> mListeners;
+  PlaybackState mPlaybackState;
 };
 
 }  // namespace dom

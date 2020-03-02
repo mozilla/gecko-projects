@@ -48,9 +48,11 @@ const {
   getRecordingPreferencesFromBrowser,
   setRecordingPreferencesOnBrowser,
   getSymbolsFromThisBrowser,
-} = ChromeUtils.import(
-  "resource://devtools/client/performance-new/popup/background.jsm.js"
-);
+} =
+  /** @type {import("resource://devtools/client/performance-new/popup/background.jsm.js")} */
+  (ChromeUtils.import(
+    "resource://devtools/client/performance-new/popup/background.jsm.js"
+  ));
 
 const { receiveProfile } = require("devtools/client/performance-new/browser");
 
@@ -75,10 +77,13 @@ const {
  * the devtools panel. By forcing a theme here, we're unaffected by
  * the devtools setting when we show the popup.
  */
-document.documentElement.setAttribute(
-  "force-theme",
-  window.gIsDarkMode ? "dark" : "light"
-);
+{
+  const popupWindow = /** @type {PopupWindow} */ (window);
+  document.documentElement.setAttribute(
+    "force-theme",
+    popupWindow.gIsDarkMode ? "dark" : "light"
+  );
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   gInit();

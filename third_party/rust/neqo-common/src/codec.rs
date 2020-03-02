@@ -18,13 +18,21 @@ pub struct Decoder<'a> {
 
 impl<'a> Decoder<'a> {
     /// Make a new view of the provided slice.
+    #[must_use]
     pub fn new(buf: &[u8]) -> Decoder {
         Decoder { buf, offset: 0 }
     }
 
     /// Get the number of bytes remaining until the end.
+    #[must_use]
     pub fn remaining(&self) -> usize {
         self.buf.len() - self.offset
+    }
+
+    /// The number of bytes from the underlying slice that have been decoded.
+    #[must_use]
+    pub fn offset(&self) -> usize {
+        self.offset
     }
 
     /// Skip n bytes.  Panics if `n` is too large.
@@ -72,7 +80,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes arbitrary data.
-    pub fn decode(&mut self, n: usize) -> Option<&[u8]> {
+    pub fn decode(&mut self, n: usize) -> Option<&'a [u8]> {
         if self.remaining() < n {
             return None;
         }
@@ -112,13 +120,13 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes the rest of the buffer.  Infallible.
-    pub fn decode_remainder(&mut self) -> &[u8] {
+    pub fn decode_remainder(&mut self) -> &'a [u8] {
         let res = &self.buf[self.offset..];
         self.offset = self.buf.len();
         res
     }
 
-    fn decode_checked(&mut self, n: Option<u64>) -> Option<&[u8]> {
+    fn decode_checked(&mut self, n: Option<u64>) -> Option<&'a [u8]> {
         let len = match n {
             Some(l) => l,
             _ => return None,
@@ -134,13 +142,13 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes a TLS-style length-prefixed buffer.
-    pub fn decode_vec(&mut self, n: usize) -> Option<&[u8]> {
+    pub fn decode_vec(&mut self, n: usize) -> Option<&'a [u8]> {
         let len = self.decode_uint(n);
         self.decode_checked(len)
     }
 
     /// Decodes a QUIC varint-length-prefixed buffer.
-    pub fn decode_vvec(&mut self) -> Option<&[u8]> {
+    pub fn decode_vvec(&mut self) -> Option<&'a [u8]> {
         let len = self.decode_varint();
         self.decode_checked(len)
     }
@@ -149,6 +157,7 @@ impl<'a> Decoder<'a> {
 // Implement `Deref` for `Decoder` so that values can be examined without moving the cursor.
 impl<'a> Deref for Decoder<'a> {
     type Target = [u8];
+    #[must_use]
     fn deref(&self) -> &[u8] {
         &self.buf[self.offset..]
     }
@@ -161,12 +170,14 @@ impl<'a> Debug for Decoder<'a> {
 }
 
 impl<'a> From<&'a [u8]> for Decoder<'a> {
+    #[must_use]
     fn from(buf: &'a [u8]) -> Decoder<'a> {
         Decoder::new(buf)
     }
 }
 
 impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
+    #[must_use]
     fn eq(&self, other: &Decoder<'b>) -> bool {
         self.buf == other.buf
     }
@@ -180,6 +191,7 @@ pub struct Encoder {
 
 impl Encoder {
     /// Static helper function for previewing the results of encoding without doing it.
+    #[must_use]
     pub fn varint_len(v: u64) -> usize {
         match () {
             _ if v < (1 << 6) => 1,
@@ -191,11 +203,13 @@ impl Encoder {
     }
 
     /// Default construction of an empty buffer.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Construction of a buffer with a predetermined capacity.
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buf: Vec::with_capacity(capacity),
@@ -203,12 +217,14 @@ impl Encoder {
     }
 
     /// Create a view of the current contents of the buffer.
-    /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])
+    /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
+    #[must_use]
     pub fn as_decoder(&self) -> Decoder {
         Decoder::new(&self)
     }
 
     /// Don't use this except in testing.
+    #[must_use]
     pub fn from_hex(s: &str) -> Self {
         if s.len() % 2 != 0 {
             panic!("Needs to be even length");
@@ -323,6 +339,11 @@ impl Encoder {
         self.buf[start..].rotate_right(count);
         self
     }
+
+    /// Truncate the encoder to the given size.
+    pub fn truncate(&mut self, len: usize) {
+        self.buf.truncate(len);
+    }
 }
 
 impl Debug for Encoder {
@@ -332,12 +353,14 @@ impl Debug for Encoder {
 }
 
 impl<'a> From<Decoder<'a>> for Encoder {
+    #[must_use]
     fn from(dec: Decoder<'a>) -> Self {
         Self::from(&dec.buf[dec.offset..])
     }
 }
 
 impl From<&[u8]> for Encoder {
+    #[must_use]
     fn from(buf: &[u8]) -> Self {
         Self {
             buf: Vec::from(buf),
@@ -346,6 +369,7 @@ impl From<&[u8]> for Encoder {
 }
 
 impl Into<Vec<u8>> for Encoder {
+    #[must_use]
     fn into(self) -> Vec<u8> {
         self.buf
     }
@@ -353,6 +377,7 @@ impl Into<Vec<u8>> for Encoder {
 
 impl Deref for Encoder {
     type Target = [u8];
+    #[must_use]
     fn deref(&self) -> &[u8] {
         &self.buf[..]
     }

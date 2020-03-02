@@ -287,6 +287,11 @@ void CompositorOGL::Destroy() {
 void CompositorOGL::CleanupResources() {
   if (!mGLContext) return;
 
+  if (mSurfacePoolHandle) {
+    mSurfacePoolHandle->Pool()->DestroyGLResourcesForContext(mGLContext);
+    mSurfacePoolHandle = nullptr;
+  }
+
   RefPtr<GLContext> ctx = mGLContext->GetSharedContext();
   if (!ctx) {
     ctx = mGLContext;
@@ -758,7 +763,6 @@ CompositorOGL::RenderTargetForNativeLayer(NativeLayer* aNativeLayer,
   }
 
   aNativeLayer->SetSurfaceIsFlipped(true);
-  aNativeLayer->SetGLContext(mGLContext);
 
   IntRect layerRect = aNativeLayer->GetRect();
   IntRegion invalidRelativeToLayer =
@@ -1041,6 +1045,12 @@ Maybe<IntRect> CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
 #endif  // defined(MOZ_WIDGET_ANDROID)
   mGLContext->fClear(LOCAL_GL_COLOR_BUFFER_BIT | LOCAL_GL_DEPTH_BUFFER_BIT);
 
+  for (auto iter = aInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
+    const IntRect& r = iter.Get();
+    mCurrentFrameInvalidRegion.OrWith(
+        IntRect(r.X(), FlipY(r.YMost()), r.Width(), r.Height()));
+  }
+
   return Some(rect);
 }
 
@@ -1230,7 +1240,11 @@ ShaderConfigOGL CompositorOGL::GetShaderConfigFor(Effect* aEffect,
     }
     case EffectTypes::NV12:
       config.SetNV12(true);
-      config.SetTextureTarget(LOCAL_GL_TEXTURE_RECTANGLE_ARB);
+      if (gl()->IsExtensionSupported(gl::GLContext::ARB_texture_rectangle)) {
+        config.SetTextureTarget(LOCAL_GL_TEXTURE_RECTANGLE_ARB);
+      } else {
+        config.SetTextureTarget(LOCAL_GL_TEXTURE_2D);
+      }
       break;
     case EffectTypes::COMPONENT_ALPHA: {
       config.SetComponentAlpha(true);
@@ -2029,6 +2043,7 @@ void CompositorOGL::EndFrame() {
 
   InsertFrameDoneSync();
 
+  mGLContext->SetDamage(mCurrentFrameInvalidRegion);
   mGLContext->SwapBuffers();
   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
 
@@ -2040,6 +2055,8 @@ void CompositorOGL::EndFrame() {
       mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
     }
   }
+
+  mCurrentFrameInvalidRegion.SetEmpty();
 
   Compositor::EndFrame();
 }
@@ -2066,6 +2083,15 @@ void CompositorOGL::WaitForGPU() {
   }
   mPreviousFrameDoneSync = mThisFrameDoneSync;
   mThisFrameDoneSync = nullptr;
+}
+
+RefPtr<SurfacePoolHandle> CompositorOGL::GetSurfacePoolHandle() {
+#ifdef XP_MACOSX
+  if (!mSurfacePoolHandle) {
+    mSurfacePoolHandle = SurfacePool::Create(0)->GetHandleForGL(mGLContext);
+  }
+#endif
+  return mSurfacePoolHandle;
 }
 
 bool CompositorOGL::NeedToRecreateFullWindowRenderTarget() const {
@@ -2135,11 +2161,15 @@ void CompositorOGL::Pause() {
   java::GeckoSurfaceTexture::DetachAllFromGLContext((int64_t)mGLContext.get());
   // ReleaseSurface internally calls MakeCurrent
   gl()->ReleaseSurface();
+#elif defined(MOZ_WAYLAND)
+  // ReleaseSurface internally calls MakeCurrent
+  gl()->ReleaseSurface();
 #endif
 }
 
 bool CompositorOGL::Resume() {
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_UIKIT)
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_UIKIT) || \
+    defined(MOZ_WAYLAND)
   if (!gl() || gl()->IsDestroyed()) return false;
 
   // RenewSurface internally calls MakeCurrent.

@@ -68,7 +68,7 @@ static void DisableXULCacheChangedCallback(const char* aPref, void* aClosure) {
 
 nsXULPrototypeCache* nsXULPrototypeCache::sInstance = nullptr;
 
-nsXULPrototypeCache::nsXULPrototypeCache() {}
+nsXULPrototypeCache::nsXULPrototypeCache() = default;
 
 nsXULPrototypeCache::~nsXULPrototypeCache() { FlushScripts(); }
 
@@ -156,8 +156,8 @@ nsresult nsXULPrototypeCache::PutPrototype(nsXULPrototypeDocument* aDocument) {
   nsCOMPtr<nsIURI> uri;
   NS_GetURIWithoutRef(aDocument->GetURI(), getter_AddRefs(uri));
 
-  // Put() releases any old value and addrefs the new one
-  mPrototypeTable.Put(uri, aDocument);
+  // Put() releases any old value
+  mPrototypeTable.Put(uri, RefPtr{aDocument});
 
   return NS_OK;
 }
@@ -168,7 +168,7 @@ mozilla::StyleSheet* nsXULPrototypeCache::GetStyleSheet(nsIURI* aURI) {
 
 nsresult nsXULPrototypeCache::PutStyleSheet(StyleSheet* aStyleSheet) {
   nsIURI* uri = aStyleSheet->GetSheetURI();
-  mStyleSheetTable.Put(uri, aStyleSheet);
+  mStyleSheetTable.Put(uri, RefPtr{aStyleSheet});
   return NS_OK;
 }
 
@@ -341,9 +341,7 @@ nsresult nsXULPrototypeCache::HasData(nsIURI* uri, bool* exists) {
     *exists = sc->HasEntry(spec.get());
   } else {
     *exists = false;
-    return NS_OK;
   }
-  *exists = NS_SUCCEEDED(rv);
   return NS_OK;
 }
 
@@ -377,7 +375,7 @@ nsresult nsXULPrototypeCache::BeginCaching(nsIURI* aURI) {
   rv = aURI->GetHost(package);
   if (NS_FAILED(rv)) return rv;
   nsAutoCString locale;
-  LocaleService::GetInstance()->GetAppLocaleAsLangTag(locale);
+  LocaleService::GetInstance()->GetAppLocaleAsBCP47(locale);
 
   nsAutoCString fileChromePath, fileLocale;
 

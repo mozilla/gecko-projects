@@ -18,12 +18,12 @@
 #  include "mozilla/gfx/DeviceManagerDx.h"  // for DeviceManagerDx
 #  include "mozilla/layers/ImageDataSerializer.h"
 #endif
+#include "mozilla/dom/WebGLParent.h"
 #include "mozilla/ipc/Transport.h"           // for Transport
 #include "mozilla/layers/AnimationHelper.h"  // for CompositorAnimationStorage
 #include "mozilla/layers/APZCTreeManagerParent.h"  // for APZCTreeManagerParent
 #include "mozilla/layers/APZUpdater.h"             // for APZUpdater
 #include "mozilla/layers/AsyncCompositionManager.h"
-#include "mozilla/layers/CanvasParent.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/LayerManagerComposite.h"
@@ -641,25 +641,27 @@ bool ContentCompositorBridgeParent::DeallocPTextureParent(
 
 mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvInitPCanvasParent(
     Endpoint<PCanvasParent>&& aEndpoint) {
-  MOZ_RELEASE_ASSERT(!mCanvasParent,
-                     "Canvas Parent must be released before recreating.");
+  MOZ_RELEASE_ASSERT(!mCanvasTranslator,
+                     "mCanvasTranslator must be released before recreating.");
 
-  mCanvasParent = CanvasParent::Create(std::move(aEndpoint));
+  mCanvasTranslator = CanvasTranslator::Create(std::move(aEndpoint));
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
 ContentCompositorBridgeParent::RecvReleasePCanvasParent() {
-  MOZ_RELEASE_ASSERT(mCanvasParent, "Canvas Parent hasn't been created.");
+  MOZ_RELEASE_ASSERT(mCanvasTranslator,
+                     "mCanvasTranslator hasn't been created.");
 
-  mCanvasParent = nullptr;
+  mCanvasTranslator = nullptr;
   return IPC_OK();
 }
 
 UniquePtr<SurfaceDescriptor>
 ContentCompositorBridgeParent::LookupSurfaceDescriptorForClientDrawTarget(
     const uintptr_t aDrawTarget) {
-  return mCanvasParent->LookupSurfaceDescriptorForClientDrawTarget(aDrawTarget);
+  return mCanvasTranslator->WaitForSurfaceDescriptor(
+      reinterpret_cast<void*>(aDrawTarget));
 }
 
 bool ContentCompositorBridgeParent::IsSameProcess() const {
@@ -713,7 +715,7 @@ static inline bool AllowDirectDXGISurfaceDrawing() {
     return false;
   }
 #if defined(XP_WIN)
-  DeviceManagerDx* dm = DeviceManagerDx::Get();
+  gfx::DeviceManagerDx* dm = gfx::DeviceManagerDx::Get();
   MOZ_ASSERT(dm);
   if (!dm || !dm->GetCompositorDevice() || !dm->TextureSharingWorks()) {
     return false;
@@ -738,7 +740,8 @@ mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvPreferredDXGIAdapter(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  RefPtr<ID3D11Device> device = DeviceManagerDx::Get()->GetCompositorDevice();
+  RefPtr<ID3D11Device> device =
+      gfx::DeviceManagerDx::Get()->GetCompositorDevice();
   if (!device) {
     return IPC_FAIL_NO_REASON(this);
   }
@@ -762,6 +765,14 @@ mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvPreferredDXGIAdapter(
   *aOutDesc = DxgiAdapterDesc::From(desc);
 #endif
   return IPC_OK();
+}
+
+already_AddRefed<dom::PWebGLParent>
+ContentCompositorBridgeParent::AllocPWebGLParent(
+    const webgl::InitContextDesc& aInitDesc,
+    webgl::InitContextResult* const out) {
+  RefPtr<dom::PWebGLParent> ret = dom::WebGLParent::Create(aInitDesc, out);
+  return ret.forget();
 }
 
 }  // namespace layers

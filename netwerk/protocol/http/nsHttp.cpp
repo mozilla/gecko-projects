@@ -27,11 +27,11 @@
 namespace mozilla {
 namespace net {
 
-const nsCString kHttp3Version = NS_LITERAL_CSTRING("h3-24");
+const nsCString kHttp3Version = NS_LITERAL_CSTRING("h3-25");
 
 // define storage for all atoms
 namespace nsHttp {
-#define HTTP_ATOM(_name, _value) nsHttpAtom _name = {_value};
+#define HTTP_ATOM(_name, _value) nsHttpAtom _name(_value);
 #include "nsHttpAtomList.h"
 #undef HTTP_ATOM
 }  // namespace nsHttp
@@ -142,7 +142,7 @@ Mutex* GetLock() { return sLock; }
 
 // this function may be called from multiple threads
 nsHttpAtom ResolveAtom(const char* str) {
-  nsHttpAtom atom = {nullptr};
+  nsHttpAtom atom;
 
   if (!str || !sAtomTable) return atom;
 
@@ -538,13 +538,6 @@ void SetLastActiveTabLoadOptimizationHit(TimeStamp const& when) {
   }
 }
 
-HttpVersion GetHttpVersionFromSpdy(SpdyVersion sv) {
-  MOZ_DIAGNOSTIC_ASSERT(sv != SpdyVersion::NONE);
-  MOZ_ASSERT(sv == SpdyVersion::HTTP_2);
-
-  return HttpVersion::v2_0;
-}
-
 }  // namespace nsHttp
 
 template <typename T>
@@ -842,8 +835,10 @@ void LogHeaders(const char* lineStart) {
 }
 
 nsresult HttpProxyResponseToErrorCode(uint32_t aStatusCode) {
-  MOZ_ASSERT(aStatusCode >= 300,
-             "Call HttpProxyResponseToErrorCode with successful status code!");
+  // In proxy CONNECT case, we treat every response code except 200 as an error.
+  // Even if the proxy server returns other 2xx codes (i.e. 206), this function
+  // still returns an error code.
+  MOZ_ASSERT(aStatusCode != 200);
 
   nsresult rv;
   switch (aStatusCode) {

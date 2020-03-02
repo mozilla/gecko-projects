@@ -11,15 +11,14 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Compiler.h"
-#include "mozilla/Move.h"
 #include "mozilla/TemplateLib.h"
 #include "mozilla/UniquePtr.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <utility>
 
 #include "jstypes.h"
-
 #include "mozmemory.h"
 
 /* The public JS engine namespace. */
@@ -30,10 +29,6 @@ namespace mozilla {}
 
 /* The private JS engine namespace. */
 namespace js {}
-
-#define JS_STATIC_ASSERT(cond) static_assert(cond, "JS_STATIC_ASSERT")
-#define JS_STATIC_ASSERT_IF(cond, expr) \
-  MOZ_STATIC_ASSERT_IF(cond, expr, "JS_STATIC_ASSERT_IF")
 
 extern MOZ_NORETURN MOZ_COLD JS_PUBLIC_API void JS_Assert(const char* s,
                                                           const char* file,
@@ -332,7 +327,8 @@ struct MOZ_RAII JS_PUBLIC_DATA AutoEnterOOMUnsafeRegion {
   MOZ_NORETURN MOZ_COLD void crash(size_t size, const char* reason);
 
   using AnnotateOOMAllocationSizeCallback = void (*)(size_t);
-  static AnnotateOOMAllocationSizeCallback annotateOOMSizeCallback;
+  static mozilla::Atomic<AnnotateOOMAllocationSizeCallback, mozilla::Relaxed>
+      annotateOOMSizeCallback;
   static void setAnnotateOOMAllocationSizeCallback(
       AnnotateOOMAllocationSizeCallback callback) {
     annotateOOMSizeCallback = callback;

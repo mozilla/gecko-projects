@@ -44,6 +44,7 @@ import bisection
 from ctypes.util import find_library
 from datetime import datetime, timedelta
 from manifestparser import TestManifest
+from manifestparser.util import normsep
 from manifestparser.filters import (
     chunk_by_dir,
     chunk_by_runtime,
@@ -1485,10 +1486,6 @@ toolbar#nav-bar {
                 self.log.error(NO_TESTS_FOUND.format(options.flavor, manifest.fmt_filters()))
 
         paths = []
-
-        # When running mochitest locally the manifest is based on topsrcdir,
-        # but when running in automation it is based on the test root.
-        manifest_root = build_obj.topsrcdir if build_obj else self.testRootAbs
         for test in tests:
             if len(tests) == 1 and 'disabled' in test:
                 del test['disabled']
@@ -1503,18 +1500,23 @@ toolbar#nav-bar {
                     (test['name'], test['manifest']))
                 continue
 
-            manifest_relpath = os.path.relpath(test['manifest'], manifest_root)
-            self.tests_by_manifest[manifest_relpath].append(tp)
-            self.prefs_by_manifest[manifest_relpath].add(test.get('prefs'))
-            self.env_vars_by_manifest[manifest_relpath].add(test.get('environment'))
+            manifest_key = test['manifest_relpath']
+            # Ignore ancestor_manifests that live at the root (e.g, don't have a
+            # path separator).
+            if 'ancestor_manifest' in test and '/' in normsep(test['ancestor_manifest']):
+                manifest_key = '{}:{}'.format(test['ancestor_manifest'], manifest_key)
+
+            self.tests_by_manifest[manifest_key.replace('\\', '/')].append(tp)
+            self.prefs_by_manifest[manifest_key].add(test.get('prefs'))
+            self.env_vars_by_manifest[manifest_key].add(test.get('environment'))
 
             for key in ['prefs', 'environment']:
                 if key in test and not options.runByManifest and 'disabled' not in test:
                     self.log.error("parsing {}: runByManifest mode must be enabled to "
-                                   "set the `{}` key".format(manifest_relpath, key))
+                                   "set the `{}` key".format(test['manifest_relpath'], key))
                     sys.exit(1)
 
-            testob = {'path': tp, 'manifest': manifest_relpath}
+            testob = {'path': tp, 'manifest': manifest_key}
             if 'disabled' in test:
                 testob['disabled'] = test['disabled']
             if 'expected' in test:
@@ -1847,7 +1849,7 @@ toolbar#nav-bar {
             'ws': options.sslPort,
         }
 
-    def merge_base_profiles(self, options):
+    def merge_base_profiles(self, options, category):
         """Merge extra profile data from testing/profiles."""
         profile_data_dir = os.path.join(SCRIPT_DIR, 'profile_data')
 
@@ -1860,7 +1862,7 @@ toolbar#nav-bar {
                 profile_data_dir = path
 
         with open(os.path.join(profile_data_dir, 'profiles.json'), 'r') as fh:
-            base_profiles = json.load(fh)['mochitest']
+            base_profiles = json.load(fh)[category]
 
         # values to use when interpolating preferences
         interpolation = {
@@ -1913,7 +1915,7 @@ toolbar#nav-bar {
         # 3) Prefs from --setpref
 
         # Prefs from base profiles
-        self.merge_base_profiles(options)
+        self.merge_base_profiles(options, 'mochitest')
 
         # Hardcoded prefs (TODO move these into a base profile)
         prefs = {
@@ -1955,10 +1957,6 @@ toolbar#nav-bar {
             prefs['media.video_loopback_dev'] = self.mediaDevices['video']
             prefs['media.cubeb.output_device'] = "Null Output"
             prefs['media.volume_scale'] = "1.0"
-
-        # Disable web replay rewinding by default if recordings are being saved.
-        if options.recordingPath:
-            prefs["devtools.recordreplay.enableRewinding"] = False
 
         self.profile.set_preferences(prefs)
 
@@ -2572,10 +2570,10 @@ toolbar#nav-bar {
             # should by synchronized with the default pref value indicated in
             # StaticPrefList.yaml.
             #
-            # Currently for automation, the pref defaults to true in nightly
-            # builds and false otherwise (but can be overridden with --setpref).
+            # Currently for automation, the pref defaults to true (but can be
+            # overridden with --setpref).
             "serviceworker_e10s": self.extraPrefs.get(
-                'dom.serviceWorkers.parent_intercept', mozinfo.info['nightly_build']),
+                'dom.serviceWorkers.parent_intercept', True),
 
             "socketprocess_e10s": self.extraPrefs.get(
                 'network.process.enabled', False),
@@ -2760,9 +2758,6 @@ toolbar#nav-bar {
 
             if options.jsdebugger:
                 options.browserArgs.extend(['-jsdebugger', '-wait-for-jsdebugger'])
-
-            if options.recordingPath:
-                options.browserArgs.extend(['--save-recordings', options.recordingPath])
 
             # Remove the leak detection file so it can't "leak" to the tests run.
             # The file is not there if leak logging was not enabled in the

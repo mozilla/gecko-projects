@@ -124,14 +124,10 @@ class BytecodeSite : public TempObject {
   // Bytecode address within innermost active function.
   jsbytecode* pc_;
 
-  // Optimization information at the pc.
-  TrackedOptimizations* optimizations_;
-
  public:
-  BytecodeSite() : tree_(nullptr), pc_(nullptr), optimizations_(nullptr) {}
+  BytecodeSite() : tree_(nullptr), pc_(nullptr) {}
 
-  BytecodeSite(InlineScriptTree* tree, jsbytecode* pc)
-      : tree_(tree), pc_(pc), optimizations_(nullptr) {
+  BytecodeSite(InlineScriptTree* tree, jsbytecode* pc) : tree_(tree), pc_(pc) {
     MOZ_ASSERT(tree_ != nullptr);
     MOZ_ASSERT(pc_ != nullptr);
   }
@@ -141,17 +137,6 @@ class BytecodeSite : public TempObject {
   jsbytecode* pc() const { return pc_; }
 
   JSScript* script() const { return tree_ ? tree_->script() : nullptr; }
-
-  bool hasOptimizations() const { return !!optimizations_; }
-
-  TrackedOptimizations* optimizations() const {
-    MOZ_ASSERT(hasOptimizations());
-    return optimizations_;
-  }
-
-  void setOptimizations(TrackedOptimizations* optimizations) {
-    optimizations_ = optimizations;
-  }
 };
 
 enum AnalysisMode {
@@ -185,9 +170,8 @@ class CompileInfo {
         hadOverflowBailout_(script->hadOverflowBailout()),
         hadFrequentBailouts_(script->hadFrequentBailouts()),
         mayReadFrameArgsDirectly_(script->mayReadFrameArgsDirectly()),
-        trackRecordReplayProgress_(script->trackRecordReplayProgress()),
         inlineScriptTree_(inlineScriptTree) {
-    MOZ_ASSERT_IF(osrPc, JSOp(*osrPc) == JSOP_LOOPHEAD);
+    MOZ_ASSERT_IF(osrPc, JSOp(*osrPc) == JSOp::LoopHead);
 
     // The function here can flow in from anywhere so look up the canonical
     // function to ensure that we do not try to embed a nursery pointer in
@@ -203,8 +187,8 @@ class CompileInfo {
     nargs_ = fun ? fun->nargs() : 0;
     nlocals_ = script->nfixed();
 
-    // An extra slot is needed for global scopes because INITGLEXICAL (stack
-    // depth 1) is compiled as a SETPROP (stack depth 2) on the global lexical
+    // An extra slot is needed for global scopes because InitGLexical (stack
+    // depth 1) is compiled as a SetProp (stack depth 2) on the global lexical
     // scope.
     uint32_t extra = script->isGlobalCode() ? 1 : 0;
     nstack_ = std::max<unsigned>(script->nslots() - script->nfixed(),
@@ -246,7 +230,6 @@ class CompileInfo {
         hadOverflowBailout_(false),
         hadFrequentBailouts_(false),
         mayReadFrameArgsDirectly_(false),
-        trackRecordReplayProgress_(false),
         inlineScriptTree_(nullptr),
         needsBodyEnvironmentObject_(false),
         funNeedsSomeEnvironmentObject_(false) {
@@ -265,7 +248,7 @@ class CompileInfo {
   InlineScriptTree* inlineScriptTree() const { return inlineScriptTree_; }
 
   bool hasOsrAt(jsbytecode* pc) const {
-    MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPHEAD);
+    MOZ_ASSERT(JSOp(*pc) == JSOp::LoopHead);
     return pc == osrPc();
   }
 
@@ -296,10 +279,6 @@ class CompileInfo {
   inline JSFunction* getFunction(jsbytecode* pc) const;
 
   BigInt* getBigInt(jsbytecode* pc) const { return script_->getBigInt(pc); }
-
-  jssrcnote* getNote(GSNCache& gsn, jsbytecode* pc) const {
-    return GetSrcNote(gsn, script(), pc);
-  }
 
   // Total number of slots: args, locals, and stack.
   unsigned nslots() const { return nslots_; }
@@ -377,6 +356,7 @@ class CompileInfo {
   bool argumentsAliasesFormals() const {
     return script()->argumentsAliasesFormals();
   }
+  bool hasMappedArgsObj() const { return script()->hasMappedArgsObj(); }
   bool needsArgsObj() const { return scriptNeedsArgsObj_; }
   bool argsObjAliasesFormals() const {
     return scriptNeedsArgsObj_ && script()->hasMappedArgsObj();
@@ -501,7 +481,6 @@ class CompileInfo {
   bool hadOverflowBailout() const { return hadOverflowBailout_; }
   bool hadFrequentBailouts() const { return hadFrequentBailouts_; }
   bool mayReadFrameArgsDirectly() const { return mayReadFrameArgsDirectly_; }
-  bool trackRecordReplayProgress() const { return trackRecordReplayProgress_; }
 
  private:
   unsigned nimplicit_;
@@ -526,7 +505,6 @@ class CompileInfo {
   bool hadFrequentBailouts_;
 
   bool mayReadFrameArgsDirectly_;
-  bool trackRecordReplayProgress_;
 
   InlineScriptTree* inlineScriptTree_;
 

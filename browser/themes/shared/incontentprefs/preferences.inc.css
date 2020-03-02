@@ -7,7 +7,6 @@
 
 :root {
   --in-content-warning-container: var(--grey-20);
-  text-rendering: optimizeLegibility;
 }
 
 @supports -moz-bool-pref("browser.in-content.dark-mode") {
@@ -18,8 +17,12 @@
 }
 }
 
-:root,
-body {
+#preferences-root {
+  text-rendering: optimizeLegibility;
+}
+
+#preferences-root,
+#preferences-body {
   margin: 0;
   padding: 0;
   height: 100%;
@@ -28,6 +31,7 @@ body {
 }
 
 #preferences-body {
+  vertical-align: top; /* See bug 1606130 */
   display: -moz-box;
   -moz-box-orient: vertical;
 }
@@ -139,7 +143,7 @@ button > hbox > label {
 }
 
 .accessory-button {
-  height: 30px;
+  min-height: 30px;
   min-width: 150px;
   margin: 4px 0;
 }
@@ -302,6 +306,7 @@ button > hbox > label {
 
 #downloadFolder {
   -moz-box-flex: 1;
+  margin-block: 4px;
   margin-inline-start: 0;
   padding-inline-start: 30px;
   background-repeat: no-repeat;
@@ -403,6 +408,25 @@ button > hbox > label {
 
 .homepage-button:last-of-type {
   margin-inline-end: 0;
+}
+
+#homeContentsGroup checkbox[src] .checkbox-icon {
+  -moz-context-properties: fill;
+  fill: currentColor;
+  margin-inline: 4px 8px;
+  width: 16px;
+}
+
+#homeContentsGroup [data-subcategory] {
+  margin-top: 14px;
+}
+
+#homeContentsGroup [data-subcategory] .section-checkbox {
+  font-weight: 600;
+}
+
+#homeContentsGroup [data-subcategory] > vbox menulist {
+  margin-block: 0;
 }
 
 /* Search Pane */
@@ -914,7 +938,7 @@ image.update-throbber {
 }
 
 menulist {
-  height: 30px;
+  min-height: 30px;
   margin-block: 4px;
 }
 
@@ -1042,4 +1066,21 @@ richlistitem .text-link {
 
 richlistitem .text-link:hover {
   color: inherit;
+}
+
+#proxy-grid,
+#dnsOverHttps-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+#proxy-grid > .thin {
+  grid-column-end: 3;
+  height: 20px;
+}
+
+#dnsOverHttps-grid.custom-container-hidden #networkCustomDnsOverHttpsInputLabelContainer,
+#dnsOverHttps-grid.custom-container-hidden #networkCustomDnsOverHttpsInput {
+  display: none;
 }

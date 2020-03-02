@@ -7,31 +7,29 @@
 #ifndef nsThreadUtils_h__
 #define nsThreadUtils_h__
 
-#include "prthread.h"
-#include "prinrval.h"
+#include <utility>
+
 #include "MainThreadUtils.h"
+#include "mozilla/AbstractEventQueue.h"
+#include "mozilla/Atomics.h"
+#include "mozilla/Likely.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/Tuple.h"
+#include "mozilla/TypeTraits.h"
+#include "nsCOMPtr.h"
 #include "nsICancelableRunnable.h"
 #include "nsIIdlePeriod.h"
 #include "nsIIdleRunnable.h"
 #include "nsINamed.h"
 #include "nsIRunnable.h"
+#include "nsIThread.h"
 #include "nsIThreadManager.h"
 #include "nsITimer.h"
-#include "nsIThread.h"
 #include "nsString.h"
-#include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
+#include "prinrval.h"
+#include "prthread.h"
 #include "xpcpublic.h"
-#include "mozilla/AbstractEventQueue.h"
-#include "mozilla/Atomics.h"
-#include "mozilla/Likely.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/Tuple.h"
-#include "mozilla/TypeTraits.h"
-
-#include <utility>
 
 //-----------------------------------------------------------------------------
 // These methods are alternatives to the methods on nsIThreadManager, provided
@@ -40,6 +38,8 @@
 /**
  * Create a new thread, and optionally provide an initial event for the thread.
  *
+ * @param aName
+ *   The name of the thread.
  * @param aResult
  *   The resulting nsIThread object.
  * @param aInitialEvent
@@ -50,13 +50,7 @@
  * @returns NS_ERROR_INVALID_ARG
  *   Indicates that the given name is not unique.
  */
-extern nsresult NS_NewThread(
-    nsIThread** aResult, nsIRunnable* aInitialEvent = nullptr,
-    uint32_t aStackSize = nsIThreadManager::DEFAULT_STACK_SIZE);
 
-/**
- * Creates a named thread, otherwise the same as NS_NewThread
- */
 extern nsresult NS_NewNamedThread(
     const nsACString& aName, nsIThread** aResult,
     nsIRunnable* aInitialEvent = nullptr,
@@ -369,7 +363,7 @@ bool SpinEventLoopUntil(Pred&& aPredicate, nsIThread* aThread = nullptr) {
  */
 extern bool NS_IsInCompositorThread();
 
-extern bool NS_IsInCanvasThread();
+extern bool NS_IsInCanvasThreadOrWorker();
 
 extern bool NS_IsInVRThread();
 
@@ -427,10 +421,10 @@ class IdlePeriod : public nsIIdlePeriod {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIIDLEPERIOD
 
-  IdlePeriod() {}
+  IdlePeriod() = default;
 
  protected:
-  virtual ~IdlePeriod() {}
+  virtual ~IdlePeriod() = default;
 
  private:
   IdlePeriod(const IdlePeriod&) = delete;
@@ -457,9 +451,7 @@ class Runnable : public nsIRunnable
 #  endif
 {
  public:
-  // Runnable refcount changes are preserved when recording/replaying to ensure
-  // that they are destroyed at consistent points.
-  NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 #  ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
   NS_DECL_NSINAMED
@@ -474,7 +466,7 @@ class Runnable : public nsIRunnable
 #  endif
 
  protected:
-  virtual ~Runnable() {}
+  virtual ~Runnable() = default;
 
 #  ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
   const char* mName = nullptr;
@@ -497,7 +489,7 @@ class CancelableRunnable : public Runnable, public nsICancelableRunnable {
   explicit CancelableRunnable(const char* aName) : Runnable(aName) {}
 
  protected:
-  virtual ~CancelableRunnable() {}
+  virtual ~CancelableRunnable() = default;
 
  private:
   CancelableRunnable(const CancelableRunnable&) = delete;
@@ -514,7 +506,7 @@ class IdleRunnable : public CancelableRunnable, public nsIIdleRunnable {
   explicit IdleRunnable(const char* aName) : CancelableRunnable(aName) {}
 
  protected:
-  virtual ~IdleRunnable() {}
+  virtual ~IdleRunnable() = default;
 
  private:
   IdleRunnable(const IdleRunnable&) = delete;
@@ -538,7 +530,8 @@ class PrioritizableRunnable : public Runnable, public nsIRunnablePriority {
   NS_DECL_NSIRUNNABLEPRIORITY
 
  protected:
-  virtual ~PrioritizableRunnable(){};
+  virtual ~PrioritizableRunnable() = default;
+  ;
   nsCOMPtr<nsIRunnable> mRunnable;
   uint32_t mPriority;
 };
@@ -659,6 +652,47 @@ already_AddRefed<mozilla::Runnable> NS_NewRunnableFunction(
       aName, std::forward<Function>(aFunction)));
 }
 
+// Creates a new object implementing nsIRunnable and nsICancelableRunnable,
+// which runs a given function on Run and clears the stored function object on a
+// call to `Cancel` (and thus destroys all objects it holds).
+template <typename Function>
+already_AddRefed<mozilla::CancelableRunnable> NS_NewCancelableRunnableFunction(
+    const char* aName, Function&& aFunc) {
+  class FuncCancelableRunnable final : public mozilla::CancelableRunnable {
+   public:
+    static_assert(std::is_void_v<decltype(
+                      std::declval<std::remove_reference_t<Function>>()())>);
+
+    NS_INLINE_DECL_REFCOUNTING_INHERITED(FuncCancelableRunnable,
+                                         CancelableRunnable)
+
+    explicit FuncCancelableRunnable(const char* aName, Function&& aFunc)
+        : CancelableRunnable{aName},
+          mFunc{mozilla::Some(std::forward<Function>(aFunc))} {}
+
+    NS_IMETHOD Run() override {
+      MOZ_ASSERT(mFunc);
+
+      (*mFunc)();
+
+      return NS_OK;
+    }
+
+    nsresult Cancel() override {
+      mFunc.reset();
+      return NS_OK;
+    }
+
+   private:
+    ~FuncCancelableRunnable() = default;
+
+    mozilla::Maybe<std::remove_reference_t<Function>> mFunc;
+  };
+
+  return mozilla::MakeAndAddRef<FuncCancelableRunnable>(
+      aName, std::forward<Function>(aFunc));
+}
+
 namespace mozilla {
 namespace detail {
 
@@ -669,7 +703,7 @@ class TimerBehaviour {
   void CancelTimer() {}
 
  protected:
-  ~TimerBehaviour() {}
+  ~TimerBehaviour() = default;
 };
 
 template <>
@@ -770,7 +804,7 @@ template <typename PtrType, class C, typename R, bool Owning,
           mozilla::RunnableKind Kind, typename... As>
 struct nsRunnableMethodTraits<PtrType, R (C::*)(As...), Owning, Kind> {
   typedef typename mozilla::RemoveRawOrSmartPointer<PtrType>::Type class_type;
-  static_assert(mozilla::IsBaseOf<C, class_type>::value,
+  static_assert(std::is_base_of<C, class_type>::value,
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
@@ -782,7 +816,7 @@ template <typename PtrType, class C, typename R, bool Owning,
 struct nsRunnableMethodTraits<PtrType, R (C::*)(As...) const, Owning, Kind> {
   typedef const typename mozilla::RemoveRawOrSmartPointer<PtrType>::Type
       class_type;
-  static_assert(mozilla::IsBaseOf<C, class_type>::value,
+  static_assert(std::is_base_of<C, class_type>::value,
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
@@ -795,7 +829,7 @@ template <typename PtrType, class C, typename R, bool Owning,
 struct nsRunnableMethodTraits<PtrType, R (__stdcall C::*)(As...), Owning,
                               Kind> {
   typedef typename mozilla::RemoveRawOrSmartPointer<PtrType>::Type class_type;
-  static_assert(mozilla::IsBaseOf<C, class_type>::value,
+  static_assert(std::is_base_of<C, class_type>::value,
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
@@ -806,7 +840,7 @@ template <typename PtrType, class C, typename R, bool Owning,
           mozilla::RunnableKind Kind>
 struct nsRunnableMethodTraits<PtrType, R (NS_STDCALL C::*)(), Owning, Kind> {
   typedef typename mozilla::RemoveRawOrSmartPointer<PtrType>::Type class_type;
-  static_assert(mozilla::IsBaseOf<C, class_type>::value,
+  static_assert(std::is_base_of<C, class_type>::value,
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
@@ -819,7 +853,7 @@ struct nsRunnableMethodTraits<PtrType, R (__stdcall C::*)(As...) const, Owning,
                               Kind> {
   typedef const typename mozilla::RemoveRawOrSmartPointer<PtrType>::Type
       class_type;
-  static_assert(mozilla::IsBaseOf<C, class_type>::value,
+  static_assert(std::is_base_of<C, class_type>::value,
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
@@ -832,7 +866,7 @@ struct nsRunnableMethodTraits<PtrType, R (NS_STDCALL C::*)() const, Owning,
                               Kind> {
   typedef const typename mozilla::RemoveRawOrSmartPointer<PtrType>::Type
       class_type;
-  static_assert(mozilla::IsBaseOf<C, class_type>::value,
+  static_assert(std::is_base_of<C, class_type>::value,
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
@@ -1043,14 +1077,14 @@ struct SmartPointerStorageClass
 template <typename T>
 struct NonLValueReferenceStorageClass
     : mozilla::Conditional<
-          mozilla::IsRvalueReference<T>::value,
+          std::is_rvalue_reference_v<T>,
           StoreCopyPassByRRef<typename mozilla::RemoveReference<T>::Type>,
           typename SmartPointerStorageClass<T>::Type> {};
 
 template <typename T>
 struct NonPointerStorageClass
     : mozilla::Conditional<
-          mozilla::IsLvalueReference<T>::value,
+          std::is_lvalue_reference_v<T>,
           typename LValueReferenceStorageClass<
               typename mozilla::RemoveReference<T>::Type>::Type,
           typename NonLValueReferenceStorageClass<T>::Type> {};
@@ -1626,7 +1660,7 @@ inline already_AddRefed<T> do_AddRef(nsRevocableEventPtr<T>& aObj) {
  */
 class nsThreadPoolNaming {
  public:
-  nsThreadPoolNaming() : mCounter(0) {}
+  nsThreadPoolNaming() = default;
 
   /**
    * Returns a thread name as "<aPoolName> #<n>" and increments the counter.
@@ -1639,7 +1673,7 @@ class nsThreadPoolNaming {
   }
 
  private:
-  mozilla::Atomic<uint32_t> mCounter;
+  mozilla::Atomic<uint32_t> mCounter{0};
 
   nsThreadPoolNaming(const nsThreadPoolNaming&) = delete;
   void operator=(const nsThreadPoolNaming&) = delete;

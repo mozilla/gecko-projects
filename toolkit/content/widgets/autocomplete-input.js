@@ -10,6 +10,9 @@
   const { AppConstants } = ChromeUtils.import(
     "resource://gre/modules/AppConstants.jsm"
   );
+  const { XPCOMUtils } = ChromeUtils.import(
+    "resource://gre/modules/XPCOMUtils.jsm"
+  );
 
   class AutocompleteInput extends HTMLInputElement {
     constructor() {
@@ -19,6 +22,13 @@
         this,
         "PrivateBrowsingUtils",
         "resource://gre/modules/PrivateBrowsingUtils.jsm"
+      );
+
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
+        "disablePopupAutohide",
+        "ui.popup.disable_autohide",
+        false
       );
 
       this.addEventListener("input", event => {
@@ -84,6 +94,7 @@
               this.mController.handleEnter(true);
             }
             if (!this.ignoreBlurWhileSearching) {
+              this._dontClosePopup = this.disablePopupAutohide;
               this.detachController();
             }
           }
@@ -417,7 +428,10 @@
     }
 
     detachController() {
-      if (this.mController.input.wrappedJSObject == this.nsIAutocompleteInput) {
+      if (
+        this.mController.input &&
+        this.mController.input.wrappedJSObject == this.nsIAutocompleteInput
+      ) {
         this.mController.input = null;
       }
     }
@@ -432,6 +446,10 @@
     }
 
     closePopup() {
+      if (this._dontClosePopup) {
+        delete this._dontClosePopup;
+        return;
+      }
       this.popup.closePopup();
     }
 

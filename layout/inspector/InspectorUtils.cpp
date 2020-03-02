@@ -11,7 +11,6 @@
 
 #include "gfxTextRun.h"
 #include "nsArray.h"
-#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIContentInlines.h"
@@ -34,6 +33,7 @@
 #include "nsCSSValue.h"
 #include "nsColor.h"
 #include "mozilla/ServoStyleSet.h"
+#include "nsLayoutUtils.h"
 #include "nsStyleUtil.h"
 #include "nsQueryObject.h"
 #include "mozilla/ServoBindings.h"
@@ -90,6 +90,9 @@ void InspectorUtils::GetAllStyleSheets(GlobalObject& aGlobalObject,
   for (size_t i = 0; i < aDocument.SheetCount(); i++) {
     aResult.AppendElement(aDocument.SheetAt(i));
   }
+
+  // FIXME(emilio, bug 1617948): This doesn't deal with adopted stylesheets, and
+  // it should. It should also handle duplicates correctly when it does.
 }
 
 bool InspectorUtils::IsIgnorableWhitespace(CharacterData& aDataNode) {
@@ -329,9 +332,8 @@ bool InspectorUtils::SelectorMatchesElement(
 
 /* static */
 bool InspectorUtils::IsInheritedProperty(GlobalObject& aGlobalObject,
-                                         const nsAString& aPropertyName) {
-  NS_ConvertUTF16toUTF8 propName(aPropertyName);
-  return Servo_Property_IsInherited(&propName);
+                                         const nsACString& aPropertyName) {
+  return Servo_Property_IsInherited(&aPropertyName);
 }
 
 /* static */
@@ -386,7 +388,7 @@ void InspectorUtils::GetCSSPropertyPrefs(GlobalObject& aGlobalObject,
 
 /* static */
 void InspectorUtils::GetSubpropertiesForCSSProperty(GlobalObject& aGlobal,
-                                                    const nsAString& aProperty,
+                                                    const nsACString& aProperty,
                                                     nsTArray<nsString>& aResult,
                                                     ErrorResult& aRv) {
   nsCSSPropertyID propertyID = nsCSSProps::LookupProperty(aProperty);
@@ -397,7 +399,7 @@ void InspectorUtils::GetSubpropertiesForCSSProperty(GlobalObject& aGlobal,
   }
 
   if (propertyID == eCSSPropertyExtra_variable) {
-    aResult.AppendElement(aProperty);
+    aResult.AppendElement(NS_ConvertUTF8toUTF16(aProperty));
     return;
   }
 
@@ -417,11 +419,10 @@ void InspectorUtils::GetSubpropertiesForCSSProperty(GlobalObject& aGlobal,
 
 /* static */
 bool InspectorUtils::CssPropertyIsShorthand(GlobalObject& aGlobalObject,
-                                            const nsAString& aProperty,
+                                            const nsACString& aProperty,
                                             ErrorResult& aRv) {
-  NS_ConvertUTF16toUTF8 prop(aProperty);
   bool found;
-  bool isShorthand = Servo_Property_IsShorthand(&prop, &found);
+  bool isShorthand = Servo_Property_IsShorthand(&aProperty, &found);
   if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
   }
@@ -447,13 +448,12 @@ static uint8_t ToServoCssType(InspectorPropertyType aType) {
 }
 
 bool InspectorUtils::CssPropertySupportsType(GlobalObject& aGlobalObject,
-                                             const nsAString& aProperty,
+                                             const nsACString& aProperty,
                                              InspectorPropertyType aType,
                                              ErrorResult& aRv) {
-  NS_ConvertUTF16toUTF8 property(aProperty);
   bool found;
   bool result =
-      Servo_Property_SupportsType(&property, ToServoCssType(aType), &found);
+      Servo_Property_SupportsType(&aProperty, ToServoCssType(aType), &found);
   if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
     return false;
@@ -463,16 +463,14 @@ bool InspectorUtils::CssPropertySupportsType(GlobalObject& aGlobalObject,
 
 /* static */
 void InspectorUtils::GetCSSValuesForProperty(GlobalObject& aGlobalObject,
-                                             const nsAString& aProperty,
+                                             const nsACString& aProperty,
                                              nsTArray<nsString>& aResult,
                                              ErrorResult& aRv) {
-  NS_ConvertUTF16toUTF8 property(aProperty);
   bool found;
-  Servo_Property_GetCSSValuesForProperty(&property, &found, &aResult);
+  Servo_Property_GetCSSValuesForProperty(&aProperty, &found, &aResult);
   if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
   }
-  return;
 }
 
 /* static */
@@ -491,7 +489,7 @@ void InspectorUtils::RgbToColorName(GlobalObject& aGlobalObject, uint8_t aR,
 
 /* static */
 void InspectorUtils::ColorToRGBA(GlobalObject& aGlobalObject,
-                                 const nsAString& aColorString,
+                                 const nsACString& aColorString,
                                  Nullable<InspectorRGBATuple>& aResult) {
   nscolor color = NS_RGB(0, 0, 0);
 
@@ -510,13 +508,9 @@ void InspectorUtils::ColorToRGBA(GlobalObject& aGlobalObject,
 
 /* static */
 bool InspectorUtils::IsValidCSSColor(GlobalObject& aGlobalObject,
-                                     const nsAString& aColorString) {
+                                     const nsACString& aColorString) {
   return ServoCSSParser::IsValidCSSColor(aColorString);
 }
-
-void InspectorUtils::GetBindingURLs(GlobalObject& aGlobalObject,
-                                    Element& aElement,
-                                    nsTArray<nsString>& aResult) {}
 
 /* static */
 bool InspectorUtils::SetContentState(GlobalObject& aGlobalObject,
@@ -592,12 +586,14 @@ already_AddRefed<ComputedStyle> InspectorUtils::GetCleanComputedStyleForElement(
 }
 
 /* static */
-void InspectorUtils::GetUsedFontFaces(
-    GlobalObject& aGlobalObject, nsRange& aRange, uint32_t aMaxRanges,
-    bool aSkipCollapsedWhitespace,
-    nsTArray<nsAutoPtr<InspectorFontFace>>& aResult, ErrorResult& aRv) {
+void InspectorUtils::GetUsedFontFaces(GlobalObject& aGlobalObject,
+                                      nsRange& aRange, uint32_t aMaxRanges,
+                                      bool aSkipCollapsedWhitespace,
+                                      nsLayoutUtils::UsedFontFaceList& aResult,
+                                      ErrorResult& aRv) {
   nsresult rv =
       aRange.GetUsedFontFaces(aResult, aMaxRanges, aSkipCollapsedWhitespace);
+
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
   }
@@ -672,9 +668,9 @@ void InspectorUtils::ClearPseudoClassLocks(GlobalObject& aGlobalObject,
 /* static */
 void InspectorUtils::ParseStyleSheet(GlobalObject& aGlobalObject,
                                      StyleSheet& aSheet,
-                                     const nsAString& aInput,
+                                     const nsACString& aInput,
                                      ErrorResult& aRv) {
-  aRv = aSheet.ReparseSheet(aInput);
+  aSheet.ReparseSheet(aInput, aRv);
 }
 
 bool InspectorUtils::IsCustomElementName(GlobalObject&, const nsAString& aName,

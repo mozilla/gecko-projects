@@ -81,10 +81,12 @@ class FakeAudioTrack : public mozilla::ProcessedMediaTrack {
     mListener = aListener;
   }
 
-  void RemoveListener(MediaTrackListener* aListener) override {
+  RefPtr<GenericPromise> RemoveListener(
+      MediaTrackListener* aListener) override {
     mozilla::MutexAutoLock lock(mMutex);
     MOZ_ASSERT(mListener == aListener);
     mListener = nullptr;
+    return GenericPromise::CreateAndResolve(true, __func__);
   }
 
   void ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags) override {}
@@ -106,8 +108,11 @@ class FakeAudioTrack : public mozilla::ProcessedMediaTrack {
       return;
     }
 
-    RefPtr<mozilla::SharedBuffer> samples = mozilla::SharedBuffer::Create(
-        AUDIO_BUFFER_SIZE * NUM_CHANNELS * sizeof(int16_t));
+    CheckedInt<size_t> bufferSize(sizeof(int16_t));
+    bufferSize *= NUM_CHANNELS;
+    bufferSize *= AUDIO_BUFFER_SIZE;
+    RefPtr<mozilla::SharedBuffer> samples =
+        mozilla::SharedBuffer::Create(bufferSize);
     int16_t* data = reinterpret_cast<int16_t*>(samples->Data());
     for (int i = 0; i < (AUDIO_BUFFER_SIZE * NUM_CHANNELS); i++) {
       // saw tooth audio sample

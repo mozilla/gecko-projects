@@ -114,6 +114,13 @@ bool Realm::init(JSContext* cx, JSPrincipals* principals) {
   return true;
 }
 
+void Realm::setIsSelfHostingRealm() {
+  MOZ_ASSERT(!isSelfHostingRealm_);
+  MOZ_ASSERT(zone()->isSelfHostingZone());
+  isSelfHostingRealm_ = true;
+  isSystem_ = true;
+}
+
 bool JSRuntime::createJitRuntime(JSContext* cx) {
   using namespace js::jit;
 
@@ -723,14 +730,6 @@ bool Realm::collectCoverageForDebug() const {
 void Realm::clearScriptCounts() { zone()->clearScriptCounts(this); }
 
 void Realm::clearScriptLCov() { zone()->clearScriptLCov(this); }
-
-void Realm::collectCodeCoverageInfo(JSScript* script, const char* name) {
-  coverage::LCovRealm* lcov = lcovRealm();
-  if (!lcov) {
-    return;
-  }
-  lcov->collectCodeCoverageInfo(script, name);
-}
 
 void ObjectRealm::addSizeOfExcludingThis(
     mozilla::MallocSizeOf mallocSizeOf, size_t* innerViewsArg,

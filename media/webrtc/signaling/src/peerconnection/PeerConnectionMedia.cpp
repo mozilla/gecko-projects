@@ -69,7 +69,7 @@ void PeerConnectionMedia::StunAddrsHandler::OnStunAddrsAvailable(
              (int)addrs.Length());
   if (pcm_) {
     pcm_->mStunAddrs = addrs;
-    pcm_->mLocalAddrsCompleted = true;
+    pcm_->mLocalAddrsRequestState = STUN_ADDR_REQUEST_COMPLETE;
     pcm_->FlushIceCtxOperationQueueIfReady();
     // If parent process returns 0 STUN addresses, change ICE connection
     // state to failed.
@@ -88,7 +88,7 @@ PeerConnectionMedia::PeerConnectionMedia(PeerConnectionImpl* parent)
       mSTSThread(mParent->GetSTSThread()),
       mForceProxy(false),
       mStunAddrsRequest(nullptr),
-      mLocalAddrsCompleted(false),
+      mLocalAddrsRequestState(STUN_ADDR_REQUEST_NONE),
       mTargetForDefaultLocalAddressLookupIsSet(false),
       mDestroyed(false) {
   if (XRE_IsContentProcess()) {
@@ -107,10 +107,14 @@ PeerConnectionMedia::~PeerConnectionMedia() {
 }
 
 void PeerConnectionMedia::InitLocalAddrs() {
+  if (mLocalAddrsRequestState == STUN_ADDR_REQUEST_PENDING) {
+    return;
+  }
   if (mStunAddrsRequest) {
+    mLocalAddrsRequestState = STUN_ADDR_REQUEST_PENDING;
     mStunAddrsRequest->SendGetStunAddrs();
   } else {
-    mLocalAddrsCompleted = true;
+    mLocalAddrsRequestState = STUN_ADDR_REQUEST_COMPLETE;
   }
 }
 
@@ -278,6 +282,18 @@ nsresult PeerConnectionMedia::UpdateMediaPipelines() {
 }
 
 void PeerConnectionMedia::StartIceChecks(const JsepSession& aSession) {
+  ASSERT_ON_THREAD(mMainThread);
+
+  if (!mCanRegisterMDNSHostnamesDirectly) {
+    for (auto& pair : mMDNSHostnamesToRegister) {
+      mRegisteredMDNSHostnames.insert(pair.first);
+      mStunAddrsRequest->SendRegisterMDNSHostname(
+          nsCString(pair.first.c_str()), nsCString(pair.second.c_str()));
+    }
+    mMDNSHostnamesToRegister.clear();
+    mCanRegisterMDNSHostnamesDirectly = true;
+  }
+
   std::vector<std::string> attributes;
   if (aSession.RemoteIsIceLite()) {
     attributes.push_back("ice-lite");
@@ -401,7 +417,7 @@ bool PeerConnectionMedia::GetPrefObfuscateHostAddresses() const {
   obfuscate_host_addresses &=
       !MediaManager::Get()->IsActivelyCapturingOrHasAPermission(winId);
   obfuscate_host_addresses &=
-      !HostInObfuscationWhitelist(mParent->GetWindow()->GetDocBaseURI());
+      !HostInObfuscationWhitelist(mParent->GetWindow()->GetDocumentURI());
   obfuscate_host_addresses &= XRE_IsContentProcess();
 
   return obfuscate_host_addresses;
@@ -477,8 +493,8 @@ void PeerConnectionMedia::FlushIceCtxOperationQueueIfReady() {
   ASSERT_ON_THREAD(mMainThread);
 
   if (IsIceCtxReady()) {
-    for (auto& mQueuedIceCtxOperation : mQueuedIceCtxOperations) {
-      mQueuedIceCtxOperation->Run();
+    for (auto& queuedIceCtxOperation : mQueuedIceCtxOperations) {
+      queuedIceCtxOperation->Run();
     }
     mQueuedIceCtxOperations.clear();
   }
@@ -497,6 +513,14 @@ void PeerConnectionMedia::PerformOrEnqueueIceCtxOperation(
 
 void PeerConnectionMedia::GatherIfReady() {
   ASSERT_ON_THREAD(mMainThread);
+
+  // Init local addrs here so that if we re-gather after an ICE restart
+  // resulting from changing WiFi networks, we get new local addrs.
+  // Otherwise, we would reuse the addrs from the original WiFi network
+  // and the ICE restart will fail.
+  if (!mStunAddrs.Length()) {
+    InitLocalAddrs();
+  }
 
   // If we had previously queued gathering or ICE start, unqueue them
   mQueuedIceCtxOperations.clear();
@@ -823,15 +847,20 @@ void PeerConnectionMedia::OnCandidateFound_m(
   if (mStunAddrsRequest && !aCandidateInfo.mMDNSAddress.empty()) {
     MOZ_ASSERT(!aCandidateInfo.mActualAddress.empty());
 
-    auto itor = mRegisteredMDNSHostnames.find(aCandidateInfo.mMDNSAddress);
+    if (mCanRegisterMDNSHostnamesDirectly) {
+      auto itor = mRegisteredMDNSHostnames.find(aCandidateInfo.mMDNSAddress);
 
-    // We'll see the address twice if we're generating both UDP and TCP
-    // candidates.
-    if (itor == mRegisteredMDNSHostnames.end()) {
-      mRegisteredMDNSHostnames.insert(aCandidateInfo.mMDNSAddress);
-      mStunAddrsRequest->SendRegisterMDNSHostname(
-          nsCString(aCandidateInfo.mMDNSAddress.c_str()),
-          nsCString(aCandidateInfo.mActualAddress.c_str()));
+      // We'll see the address twice if we're generating both UDP and TCP
+      // candidates.
+      if (itor == mRegisteredMDNSHostnames.end()) {
+        mRegisteredMDNSHostnames.insert(aCandidateInfo.mMDNSAddress);
+        mStunAddrsRequest->SendRegisterMDNSHostname(
+            nsCString(aCandidateInfo.mMDNSAddress.c_str()),
+            nsCString(aCandidateInfo.mActualAddress.c_str()));
+      }
+    } else {
+      mMDNSHostnamesToRegister.emplace(aCandidateInfo.mMDNSAddress,
+                                       aCandidateInfo.mActualAddress);
     }
   }
 

@@ -42,7 +42,7 @@ class nsFrameLoaderOwner : public nsISupports {
   already_AddRefed<nsFrameLoader> GetFrameLoader();
   void SetFrameLoader(nsFrameLoader* aNewFrameLoader);
 
-  already_AddRefed<mozilla::dom::BrowsingContext> GetBrowsingContext();
+  mozilla::dom::BrowsingContext* GetBrowsingContext();
 
   // Destroy (if it exists) and recreate our frameloader, based on new
   // remoteness requirements. This should follow the same path as
@@ -61,6 +61,7 @@ class nsFrameLoaderOwner : public nsISupports {
   bool ShouldPreserveBrowsingContext(
       const mozilla::dom::RemotenessOptions& aOptions);
   void ChangeRemotenessCommon(bool aPreserveContext,
+                              bool aSwitchingInProgressLoad,
                               const nsAString& aRemoteType,
                               std::function<void()>& aFrameLoaderInit,
                               mozilla::ErrorResult& aRv);

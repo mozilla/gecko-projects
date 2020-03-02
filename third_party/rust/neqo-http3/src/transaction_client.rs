@@ -9,7 +9,7 @@ use crate::hframe::{HFrame, HFrameReader};
 use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
 use crate::Header;
-use neqo_common::{qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
@@ -36,8 +36,8 @@ struct Request {
 }
 
 impl Request {
-    pub fn new(method: &str, scheme: &str, host: &str, path: &str, headers: &[Header]) -> Request {
-        let mut r = Request {
+    pub fn new(method: &str, scheme: &str, host: &str, path: &str, headers: &[Header]) -> Self {
+        let mut r = Self {
             method: method.to_owned(),
             scheme: scheme.to_owned(),
             host: host.to_owned(),
@@ -180,9 +180,9 @@ impl TransactionClient {
         path: &str,
         headers: &[Header],
         conn_events: Http3ClientEvents,
-    ) -> TransactionClient {
+    ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
-        TransactionClient {
+        Self {
             send_state: TransactionSendState::SendingHeaders {
                 request: Request::new(method, scheme, host, path, headers),
                 fin: false,
@@ -237,7 +237,7 @@ impl TransactionClient {
                 data_frame.encode(&mut enc);
                 match conn.stream_send(self.stream_id, &enc) {
                     Ok(sent) => {
-                        assert_eq!(sent, enc.len());
+                        debug_assert_eq!(sent, enc.len());
                     }
                     Err(e) => return Err(Error::TransportError(e)),
                 }
@@ -291,6 +291,7 @@ impl TransactionClient {
             HFrame::PushPromise { .. } => Err(Error::HttpIdError),
             HFrame::Headers { .. } => {
                 // TODO implement trailers!
+                qwarn!([self], "Received trailers");
                 Err(Error::HttpFrameUnexpected)
             }
             _ => Err(Error::HttpFrameUnexpected),
@@ -451,7 +452,7 @@ impl TransactionClient {
                     *remaining_data_len
                 };
                 let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[..to_read])?;
-                assert!(amount <= to_read);
+                debug_assert!(amount <= to_read);
                 *remaining_data_len -= amount;
 
                 if fin {
@@ -471,6 +472,10 @@ impl TransactionClient {
             }
             _ => Ok((0, false)),
         }
+    }
+
+    pub fn is_state_sending_data(&self) -> bool {
+        self.send_state == TransactionSendState::SendingData
     }
 }
 
@@ -586,10 +591,6 @@ impl Http3Transaction for TransactionClient {
         } else {
             false
         }
-    }
-
-    fn is_state_sending_data(&self) -> bool {
-        self.send_state == TransactionSendState::SendingData
     }
 
     fn reset_receiving_side(&mut self) {

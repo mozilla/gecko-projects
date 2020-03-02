@@ -22,15 +22,18 @@ value :
   | \w+  # string identifier or value;
 """
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import, print_function, unicode_literals
 
-import sys
+import errno
+import io
+from optparse import OptionParser
 import os
 import re
 import six
-from optparse import OptionParser
-import errno
+import sys
+
 from mozbuild.makeutil import Makefile
+from mozpack.path import normsep
 
 # hack around win32 mangling our line endings
 # http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/65443
@@ -46,6 +49,15 @@ __all__ = [
   'Preprocessor',
   'preprocess'
 ]
+
+
+def _to_text(a):
+    # We end up converting a lot of different types (text_type, binary_type,
+    # int, etc.) to Unicode in this script. This function handles all of those
+    # possibilities.
+    if isinstance(a, (six.text_type, six.binary_type)):
+        return six.ensure_text(a)
+    return six.text_type(a)
 
 
 def path_starts_with(path, prefix):
@@ -483,7 +495,7 @@ class Preprocessor:
                 except OSError as error:
                     if error.errno != errno.EEXIST:
                         raise
-            return open(path, 'wb')
+            return io.open(path, 'w', encoding='utf-8', newline='\n')
 
         p = self.getCommandLineParser()
         options, args = p.parse_args(args=args)
@@ -505,7 +517,7 @@ class Preprocessor:
 
         if args:
             for f in args:
-                with open(f, 'rU') as input:
+                with io.open(f, 'rU', encoding='utf-8') as input:
                     self.processFile(input=input, output=out)
             if depfile:
                 mk = Makefile()
@@ -628,7 +640,7 @@ class Preprocessor:
         except Exception:
             # XXX do real error reporting
             raise Preprocessor.Error(self, 'SYNTAX_ERR', args)
-        if type(val) == str:
+        if isinstance(val, six.text_type) or isinstance(val, six.binary_type):
             # we're looking for a number value, strings are false
             val = False
         if not val:
@@ -639,7 +651,6 @@ class Preprocessor:
             self.ifStates[-1] = self.disableLevel
         else:
             self.ifStates.append(self.disableLevel)
-        pass
 
     def do_ifdef(self, args, replace=False):
         if self.disableLevel and not replace:
@@ -655,7 +666,6 @@ class Preprocessor:
             self.ifStates[-1] = self.disableLevel
         else:
             self.ifStates.append(self.disableLevel)
-        pass
 
     def do_ifndef(self, args, replace=False):
         if self.disableLevel and not replace:
@@ -671,7 +681,6 @@ class Preprocessor:
             self.ifStates[-1] = self.disableLevel
         else:
             self.ifStates.append(self.disableLevel)
-        pass
 
     def do_else(self, args, ifState=2):
         self.ensure_not_else()
@@ -715,7 +724,7 @@ class Preprocessor:
 
         def vsubst(v):
             if v in self.context:
-                return str(self.context[v])
+                return _to_text(self.context[v])
             return ''
         for i in range(1, len(lst), 2):
             lst[i] = vsubst(lst[i])
@@ -770,7 +779,7 @@ class Preprocessor:
         def repl(matchobj):
             varname = matchobj.group('VAR')
             if varname in self.context:
-                return str(self.context[varname])
+                return _to_text(self.context[varname])
             if fatal:
                 raise Preprocessor.Error(self, 'UNDEFINED_VAR', varname)
             return matchobj.group(0)
@@ -793,16 +802,16 @@ class Preprocessor:
         self.checkLineNumbers = False
         if isName:
             try:
-                args = str(args)
+                args = _to_text(args)
                 if filters:
                     args = self.applyFilters(args)
                 if not os.path.isabs(args):
                     args = os.path.join(self.curdir, args)
-                args = open(args, 'rU')
+                args = io.open(args, 'rU', encoding='utf-8')
             except Preprocessor.Error:
                 raise
             except Exception:
-                raise Preprocessor.Error(self, 'FILE_NOT_FOUND', str(args))
+                raise Preprocessor.Error(self, 'FILE_NOT_FOUND', _to_text(args))
         self.checkLineNumbers = bool(re.search('\.(js|jsm|java|webidl)(?:\.in)?$', args.name))
         oldFile = self.context['FILE']
         oldLine = self.context['LINE']
@@ -820,9 +829,9 @@ class Preprocessor:
             self.curdir = os.path.dirname(abspath)
             self.includes.add(six.ensure_text(abspath))
             if self.topobjdir and path_starts_with(abspath, self.topobjdir):
-                abspath = '$OBJDIR' + abspath[len(self.topobjdir):]
+                abspath = '$OBJDIR' + normsep(abspath[len(self.topobjdir):])
             elif self.topsrcdir and path_starts_with(abspath, self.topsrcdir):
-                abspath = '$SRCDIR' + abspath[len(self.topsrcdir):]
+                abspath = '$SRCDIR' + normsep(abspath[len(self.topsrcdir):])
             self.context['FILE'] = abspath
             self.context['DIRECTORY'] = os.path.dirname(abspath)
         self.context['LINE'] = 0
@@ -844,7 +853,7 @@ class Preprocessor:
         self.do_include(args)
 
     def do_error(self, args):
-        raise Preprocessor.Error(self, 'Error: ', str(args))
+        raise Preprocessor.Error(self, 'Error: ', _to_text(args))
 
 
 def preprocess(includes=[sys.stdin], defines={},
@@ -853,7 +862,7 @@ def preprocess(includes=[sys.stdin], defines={},
     pp = Preprocessor(defines=defines,
                       marker=marker)
     for f in includes:
-        with open(f, 'rU') as input:
+        with io.open(f, 'rU', encoding='utf-8') as input:
             pp.processFile(input=input, output=output)
     return pp.includes
 

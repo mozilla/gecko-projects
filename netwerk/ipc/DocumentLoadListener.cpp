@@ -9,7 +9,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/MozPromiseInlines.h"  // For MozPromise::FromDomPromise
-#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ClientChannelHelper.h"
 #include "mozilla/dom/ContentParent.h"
@@ -33,6 +32,9 @@
 #include "nsExternalHelperAppService.h"
 #include "nsCExternalHandlerService.h"
 #include "nsMimeTypes.h"
+#include "nsIViewSourceChannel.h"
+#include "nsIOService.h"
+#include "mozilla/dom/WindowGlobalParent.h"
 
 mozilla::LazyLogModule gDocumentChannelLog("DocumentChannel");
 #define LOG(fmt) MOZ_LOG(gDocumentChannelLog, mozilla::LogLevel::Verbose, fmt)
@@ -64,7 +66,9 @@ class ParentProcessDocumentOpenInfo final : public nsDocumentOpenInfo,
       : nsDocumentOpenInfo(aFlags, false),
         mBrowsingContext(aBrowsingContext),
         mListener(aListener),
-        mPluginsAllowed(aPluginsAllowed) {}
+        mPluginsAllowed(aPluginsAllowed) {
+    LOG(("ParentProcessDocumentOpenInfo ctor [this=%p]", this));
+  }
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -139,10 +143,7 @@ class ParentProcessDocumentOpenInfo final : public nsDocumentOpenInfo,
   }
 
   NS_IMETHOD OnStartRequest(nsIRequest* request) override {
-    nsCOMPtr<nsIMultiPartChannel> multiPartChannel = do_QueryInterface(request);
-    if (multiPartChannel) {
-      mExpectingOnAfterLastPart = true;
-    }
+    LOG(("ParentProcessDocumentOpenInfo OnStartRequest [this=%p]", this));
 
     nsresult rv = nsDocumentOpenInfo::OnStartRequest(request);
 
@@ -155,32 +156,27 @@ class ParentProcessDocumentOpenInfo final : public nsDocumentOpenInfo,
       m_targetStreamListener = mListener;
       return m_targetStreamListener->OnStartRequest(request);
     }
-    return rv;
-  }
-
-  NS_IMETHOD OnStopRequest(nsIRequest* request, nsresult aStatus) override {
-    // If we're not a multipart stream (and thus not expecting OnAfterLastPart),
-    // then this is the final OnStopRequest we'll get. If we haven't been
-    // targeting our default listener, then we need to manually notify it that
-    // we're done, and nothing further will be arriving. If we got cloned, then
-    // we don't need to do this, as only the last link needs to do it.
-    bool needToNotifyListener = false;
-    if (!mExpectingOnAfterLastPart && m_targetStreamListener != mListener &&
-        !mCloned) {
-      needToNotifyListener = true;
-    }
-
-    nsresult rv = nsDocumentOpenInfo::OnStopRequest(request, aStatus);
-
-    if (needToNotifyListener) {
-      // Tell the DocumentLoadListener to notify the content process that it's
-      // been entirely retargeted, and to stop waiting.
-      // Clear mListener's pointer to the DocumentLoadListener to break the
-      // reference cycle.
-      RefPtr<DocumentLoadListener> doc = do_GetInterface(ToSupports(mListener));
-      MOZ_ASSERT(doc);
-      doc->DisconnectChildListeners(NS_BINDING_RETARGETED, NS_OK);
-      mListener->SetListenerAfterRedirect(nullptr);
+    if (m_targetStreamListener != mListener) {
+      LOG(
+          ("ParentProcessDocumentOpenInfo targeted to non-default listener "
+           "[this=%p]",
+           this));
+      // If this is the only part, then we can immediately tell our listener
+      // that it won't be getting any content and disconnect it. For multipart
+      // channels we have to wait until we've handled all parts before we know.
+      // This does mean that the content process can still Cancel() a multipart
+      // response while the response is being handled externally, but this
+      // matches the single-process behaviour.
+      // If we got cloned, then we don't need to do this, as only the last link
+      // needs to do it.
+      // Multi-part channels are guaranteed to call OnAfterLastPart, which we
+      // forward to the listeners, so it will handle disconnection at that
+      // point.
+      nsCOMPtr<nsIMultiPartChannel> multiPartChannel =
+          do_QueryInterface(request);
+      if (!multiPartChannel && !mCloned) {
+        DisconnectChildListeners();
+      }
     }
     return rv;
   }
@@ -191,18 +187,24 @@ class ParentProcessDocumentOpenInfo final : public nsDocumentOpenInfo,
   }
 
  private:
-  virtual ~ParentProcessDocumentOpenInfo() = default;
+  virtual ~ParentProcessDocumentOpenInfo() {
+    LOG(("ParentProcessDocumentOpenInfo dtor [this=%p]", this));
+  }
+
+  void DisconnectChildListeners() {
+    // Tell the DocumentLoadListener to notify the content process that it's
+    // been entirely retargeted, and to stop waiting.
+    // Clear mListener's pointer to the DocumentLoadListener to break the
+    // reference cycle.
+    RefPtr<DocumentLoadListener> doc = do_GetInterface(ToSupports(mListener));
+    MOZ_ASSERT(doc);
+    doc->DisconnectChildListeners(NS_BINDING_RETARGETED, NS_OK);
+    mListener->SetListenerAfterRedirect(nullptr);
+  }
 
   RefPtr<mozilla::dom::BrowsingContext> mBrowsingContext;
   RefPtr<ParentChannelListener> mListener;
   bool mPluginsAllowed;
-
-  /**
-   * Set to true if we got OnStartRequest called with a multipart
-   * channel, and thus expect OnAfterLastPart to be called when
-   * the channel is complete.
-   */
-  bool mExpectingOnAfterLastPart = false;
 
   /**
    * Set to true if we got cloned to create a chained listener.
@@ -233,13 +235,14 @@ NS_INTERFACE_MAP_BEGIN(DocumentLoadListener)
   NS_INTERFACE_MAP_ENTRY_CONCRETE(DocumentLoadListener)
 NS_INTERFACE_MAP_END
 
-DocumentLoadListener::DocumentLoadListener(BrowserParent* aBrowser,
-                                           nsILoadContext* aLoadContext,
-                                           PBOverrideStatus aOverrideStatus,
-                                           ADocumentChannelBridge* aBridge)
+DocumentLoadListener::DocumentLoadListener(
+    CanonicalBrowsingContext* aProcessTopBrowsingContext,
+    nsILoadContext* aLoadContext, PBOverrideStatus aOverrideStatus,
+    ADocumentChannelBridge* aBridge)
     : mLoadContext(aLoadContext), mPBOverride(aOverrideStatus) {
   LOG(("DocumentLoadListener ctor [this=%p]", this));
-  mParentChannelListener = new ParentChannelListener(this, aBrowser);
+  mParentChannelListener = new ParentChannelListener(
+      this, aProcessTopBrowsingContext, aLoadContext->UsePrivateBrowsing());
   mDocumentChannelBridge = aBridge;
 }
 
@@ -247,53 +250,173 @@ DocumentLoadListener::~DocumentLoadListener() {
   LOG(("DocumentLoadListener dtor [this=%p]", this));
 }
 
+already_AddRefed<LoadInfo> DocumentLoadListener::CreateLoadInfo(
+    CanonicalBrowsingContext* aBrowsingContext, nsDocShellLoadState* aLoadState,
+    uint64_t aOuterWindowId) {
+  OriginAttributes attrs;
+  mLoadContext->GetOriginAttributes(attrs);
+
+  // TODO: Block copied from nsDocShell::DoURILoad, refactor out somewhere
+  bool inheritPrincipal = false;
+
+  if (aLoadState->PrincipalToInherit()) {
+    bool isSrcdoc =
+        aLoadState->HasLoadFlags(nsDocShell::INTERNAL_LOAD_FLAGS_IS_SRCDOC);
+    bool inheritAttrs = nsContentUtils::ChannelShouldInheritPrincipal(
+        aLoadState->PrincipalToInherit(), aLoadState->URI(),
+        true,  // aInheritForAboutBlank
+        isSrcdoc);
+
+    bool isURIUniqueOrigin = nsIOService::IsDataURIUniqueOpaqueOrigin() &&
+                             SchemeIsData(aLoadState->URI());
+    inheritPrincipal = inheritAttrs && !isURIUniqueOrigin;
+  }
+
+  nsSecurityFlags securityFlags =
+      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
+  uint32_t sandboxFlags = aBrowsingContext->GetSandboxFlags();
+
+  if (aLoadState->LoadType() == LOAD_ERROR_PAGE) {
+    securityFlags |= nsILoadInfo::SEC_LOAD_ERROR_PAGE;
+  }
+
+  if (inheritPrincipal) {
+    securityFlags |= nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL;
+  }
+
+  RefPtr<LoadInfo> loadInfo =
+      new LoadInfo(aBrowsingContext, aLoadState->TriggeringPrincipal(), attrs,
+                   aOuterWindowId, securityFlags, sandboxFlags);
+  return loadInfo.forget();
+}
+
+already_AddRefed<WindowGlobalParent> GetParentEmbedderWindowGlobal(
+    CanonicalBrowsingContext* aBrowsingContext) {
+  RefPtr<WindowGlobalParent> parent =
+      aBrowsingContext->GetEmbedderWindowGlobal();
+  if (parent && parent->BrowsingContext() == aBrowsingContext->GetParent()) {
+    return parent.forget();
+  }
+  return nullptr;
+}
+
+// parent-process implementation of
+// nsGlobalWindowOuter::GetTopExcludingExtensionAccessibleContentFrames
+already_AddRefed<WindowGlobalParent>
+GetTopWindowExcludingExtensionAccessibleContentFrames(
+    CanonicalBrowsingContext* aBrowsingContext, nsIURI* aURIBeingLoaded) {
+  CanonicalBrowsingContext* bc = aBrowsingContext;
+  RefPtr<WindowGlobalParent> prev;
+  while (RefPtr<WindowGlobalParent> parent =
+             GetParentEmbedderWindowGlobal(bc)) {
+    CanonicalBrowsingContext* parentBC = parent->BrowsingContext();
+
+    nsIPrincipal* parentPrincipal = parent->DocumentPrincipal();
+    nsIURI* uri = prev ? prev->GetDocumentURI() : aURIBeingLoaded;
+
+    // If the new parent has permission to load the current page, we're
+    // at a moz-extension:// frame which has a host permission that allows
+    // it to load the document that we've loaded.  In that case, stop at
+    // this frame and consider it the top-level frame.
+    if (uri &&
+        BasePrincipal::Cast(parentPrincipal)->AddonAllowsLoad(uri, true)) {
+      break;
+    }
+
+    bc = parentBC;
+    prev = parent;
+  }
+  if (!prev) {
+    prev = bc->GetCurrentWindowGlobal();
+  }
+  return prev.forget();
+}
+
+CanonicalBrowsingContext* DocumentLoadListener::GetBrowsingContext() {
+  MOZ_ASSERT(mChannel);
+  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
+  MOZ_ASSERT(loadInfo);
+  RefPtr<BrowsingContext> bc;
+  MOZ_ALWAYS_SUCCEEDS(loadInfo->GetTargetBrowsingContext(getter_AddRefs(bc)));
+  MOZ_ASSERT(bc);
+  return bc->Canonical();
+}
+
 bool DocumentLoadListener::Open(
-    BrowserParent* aBrowser, nsDocShellLoadState* aLoadState,
-    class LoadInfo* aLoadInfo, const nsString* aInitiatorType,
+    CanonicalBrowsingContext* aBrowsingContext,
+    CanonicalBrowsingContext* aProcessTopBrowsingContext,
+    nsDocShellLoadState* aLoadState, class LoadInfo* aLoadInfo,
     nsLoadFlags aLoadFlags, uint32_t aLoadType, uint32_t aCacheKey,
     bool aIsActive, bool aIsTopLevelDoc, bool aHasNonEmptySandboxingFlags,
-    const Maybe<URIParams>& aTopWindowURI,
-    const Maybe<PrincipalInfo>& aContentBlockingAllowListPrincipal,
-    const nsString& aCustomUserAgent, const uint64_t& aChannelId,
-    const TimeStamp& aAsyncOpenTime, const Maybe<uint32_t>& aDocumentOpenFlags,
-    bool aPluginsAllowed, nsresult* aRv) {
+    const uint64_t& aChannelId, const TimeStamp& aAsyncOpenTime,
+    const Maybe<uint32_t>& aDocumentOpenFlags, bool aPluginsAllowed,
+    nsDOMNavigationTiming* aTiming, Maybe<ClientInfo>&& aInfo,
+    uint64_t aOuterWindowId, nsresult* aRv) {
   LOG(("DocumentLoadListener Open [this=%p, uri=%s]", this,
        aLoadState->URI()->GetSpecOrDefault().get()));
-  if (!nsDocShell::CreateChannelForLoadState(
-          aLoadState, aLoadInfo, mParentChannelListener, nullptr,
-          aInitiatorType, aLoadFlags, aLoadType, aCacheKey, aIsActive,
-          aIsTopLevelDoc, aHasNonEmptySandboxingFlags, *aRv,
-          getter_AddRefs(mChannel))) {
+
+  OriginAttributes attrs;
+  mLoadContext->GetOriginAttributes(attrs);
+
+  // If this is a top-level load, then rebuild the LoadInfo from scratch,
+  // since the goal is to be able to initiate loads in the parent, where the
+  // content process won't have provided us with an existing one.
+  // TODO: Handle TYPE_SUBDOCUMENT LoadInfo construction, and stop passing
+  // aLoadInfo across IPC.
+  RefPtr<LoadInfo> loadInfo = aLoadInfo;
+  if (!aBrowsingContext->GetParent()) {
+    // If we're a top level load, then we should have not got an existing
+    // LoadInfo, or if we did, it should be TYPE_DOCUMENT.
+    MOZ_ASSERT(!aLoadInfo || aLoadInfo->InternalContentPolicyType() ==
+                                 nsIContentPolicy::TYPE_DOCUMENT);
+    loadInfo = CreateLoadInfo(aBrowsingContext, aLoadState, aOuterWindowId);
+  }
+
+  if (!nsDocShell::CreateAndConfigureRealChannelForLoadState(
+          aLoadState, loadInfo, mParentChannelListener, nullptr, attrs,
+          aLoadFlags, aLoadType, aCacheKey, aIsActive, aIsTopLevelDoc,
+          aHasNonEmptySandboxingFlags, *aRv, getter_AddRefs(mChannel))) {
     mParentChannelListener = nullptr;
     return false;
   }
 
-  nsDocShell::ConfigureChannel(mChannel, aLoadState, aInitiatorType, aLoadType,
-                               aCacheKey, aHasNonEmptySandboxingFlags);
+  nsCOMPtr<nsIURI> uriBeingLoaded =
+      AntiTrackingCommon::MaybeGetDocumentURIBeingLoaded(mChannel);
+  CanonicalBrowsingContext* bc = GetBrowsingContext();
+  RefPtr<WindowGlobalParent> topWindow =
+      GetTopWindowExcludingExtensionAccessibleContentFrames(bc, uriBeingLoaded);
 
-  // Computation of the top window uses the docshell tree, so only
-  // works in the source process. We compute it manually and override
-  // it so that it gets the right value.
-  // This probably isn't fission compatible.
   RefPtr<HttpBaseChannel> httpBaseChannel = do_QueryObject(mChannel, aRv);
   if (httpBaseChannel) {
-    nsCOMPtr<nsIURI> topWindowURI = DeserializeURI(aTopWindowURI);
+    nsCOMPtr<nsIURI> topWindowURI;
+    if (topWindow) {
+      nsCOMPtr<nsIPrincipal> topWindowPrincipal =
+          topWindow->DocumentPrincipal();
+      if (topWindowPrincipal && !topWindowPrincipal->GetIsNullPrincipal()) {
+        topWindowPrincipal->GetURI(getter_AddRefs(topWindowURI));
+      }
+    }
     httpBaseChannel->SetTopWindowURI(topWindowURI);
 
-    if (aContentBlockingAllowListPrincipal) {
-      nsCOMPtr<nsIPrincipal> contentBlockingAllowListPrincipal =
-          PrincipalInfoToPrincipal(*aContentBlockingAllowListPrincipal);
-      httpBaseChannel->SetContentBlockingAllowListPrincipal(
-          contentBlockingAllowListPrincipal);
+    nsCOMPtr<nsIPrincipal> contentBlockingAllowListPrincipal;
+    if (topWindow) {
+      contentBlockingAllowListPrincipal =
+          topWindow->GetContentBlockingAllowListPrincipal();
     }
 
-    // The content process docshell can specify a custom override
-    // for the user agent value. If we had one, then add it to
-    // the header now.
-    if (!aCustomUserAgent.IsEmpty()) {
-      NS_ConvertUTF16toUTF8 utf8CustomUserAgent(aCustomUserAgent);
-      *aRv = httpBaseChannel->SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"),
-                                               utf8CustomUserAgent, false);
+    if (bc->IsTop() && contentBlockingAllowListPrincipal &&
+        contentBlockingAllowListPrincipal->GetIsNullPrincipal()) {
+      OriginAttributes attrs;
+      aLoadInfo->GetOriginAttributes(&attrs);
+      AntiTrackingCommon::RecomputeContentBlockingAllowListPrincipal(
+          uriBeingLoaded, attrs,
+          getter_AddRefs(contentBlockingAllowListPrincipal));
+    }
+
+    if (contentBlockingAllowListPrincipal &&
+        contentBlockingAllowListPrincipal->GetIsContentPrincipal()) {
+      httpBaseChannel->SetContentBlockingAllowListPrincipal(
+          contentBlockingAllowListPrincipal);
     }
   }
 
@@ -318,15 +441,24 @@ bool DocumentLoadListener::Open(
     timedChannel->SetAsyncOpen(aAsyncOpenTime);
   }
 
+  // nsViewSourceChannel normally replaces the nsIRequest passed to
+  // OnStart/StopRequest with itself. We don't need this, and instead
+  // we want the original request so that we get different ones for
+  // each part of a multipart channel.
+  if (nsCOMPtr<nsIViewSourceChannel> viewSourceChannel =
+          do_QueryInterface(mChannel)) {
+    viewSourceChannel->SetReplaceRequest(false);
+  }
+
   // Setup a ClientChannelHelper to watch for redirects, and copy
   // across any serviceworker related data between channels as needed.
-  AddClientChannelHelperInParent(mChannel, GetMainThreadSerialEventTarget());
+  AddClientChannelHelperInParent(mChannel, std::move(aInfo));
 
   if (aDocumentOpenFlags) {
     RefPtr<ParentProcessDocumentOpenInfo> openInfo =
         new ParentProcessDocumentOpenInfo(mParentChannelListener,
                                           aPluginsAllowed, *aDocumentOpenFlags,
-                                          aBrowser->GetBrowsingContext());
+                                          aProcessTopBrowsingContext);
     openInfo->Prepare();
 
     *aRv = mChannel->AsyncOpen(openInfo);
@@ -340,6 +472,10 @@ bool DocumentLoadListener::Open(
 
   mChannelCreationURI = aLoadState->URI();
   mLoadStateLoadFlags = aLoadState->LoadFlags();
+  mLoadStateLoadType = aLoadState->LoadType();
+  mTiming = aTiming;
+  mSrcdocData = aLoadState->SrcdocData();
+  mBaseURI = aLoadState->BaseURI();
   return true;
 }
 
@@ -356,21 +492,26 @@ void DocumentLoadListener::DocumentChannelBridgeDisconnected() {
 }
 
 void DocumentLoadListener::Cancel(const nsresult& aStatusCode) {
+  LOG(
+      ("DocumentLoadListener Cancel [this=%p, "
+       "aStatusCode=%" PRIx32 " ]",
+       this, static_cast<uint32_t>(aStatusCode)));
   if (mChannel && !mDoingProcessSwitch) {
     mChannel->Cancel(aStatusCode);
   }
 }
 
-void DocumentLoadListener::Suspend() {
-  if (mChannel && !mDoingProcessSwitch) {
-    mChannel->Suspend();
+void DocumentLoadListener::DisconnectChildListeners(nsresult aStatus,
+                                                    nsresult aLoadGroupStatus) {
+  LOG(
+      ("DocumentLoadListener DisconnectChildListener [this=%p, "
+       "aStatus=%" PRIx32 " aLoadGroupStatus=%" PRIx32 " ]",
+       this, static_cast<uint32_t>(aStatus),
+       static_cast<uint32_t>(aLoadGroupStatus)));
+  if (mDocumentChannelBridge) {
+    mDocumentChannelBridge->DisconnectChildListeners(aStatus, aLoadGroupStatus);
   }
-}
-
-void DocumentLoadListener::Resume() {
-  if (mChannel && !mDoingProcessSwitch) {
-    mChannel->Resume();
-  }
+  DocumentChannelBridgeDisconnected();
 }
 
 void DocumentLoadListener::RedirectToRealChannelFinished(nsresult aRv) {
@@ -417,11 +558,14 @@ DocumentLoadListener::ReadyToVerify(nsresult aResultCode) {
 }
 
 void DocumentLoadListener::FinishReplacementChannelSetup(bool aSucceeded) {
+  LOG(
+      ("DocumentLoadListener FinishReplacementChannelSetup [this=%p, "
+       "aSucceeded=%d]",
+       this, aSucceeded));
   nsresult rv;
 
-  if (mDoingProcessSwitch && mDocumentChannelBridge) {
-    mDocumentChannelBridge->DisconnectChildListeners(NS_BINDING_ABORTED,
-                                                     NS_BINDING_ABORTED);
+  if (mDoingProcessSwitch) {
+    DisconnectChildListeners(NS_BINDING_ABORTED, NS_BINDING_ABORTED);
   }
 
   nsCOMPtr<nsIParentChannel> redirectChannel;
@@ -490,17 +634,6 @@ void DocumentLoadListener::FinishReplacementChannelSetup(bool aSucceeded) {
         [redirectChannel](const ClassificationFlagsParams& aParams) {
           redirectChannel->NotifyClassificationFlags(
               aParams.mClassificationFlags, aParams.mIsThirdParty);
-        },
-        [redirectChannel](
-            const NotifyChannelClassifierProtectionDisabledParams& aParams) {
-          redirectChannel->NotifyChannelClassifierProtectionDisabled(
-              aParams.mAcceptedReason);
-        },
-        [redirectChannel](const NotifyCookieAllowedParams&) {
-          redirectChannel->NotifyCookieAllowed();
-        },
-        [redirectChannel](const NotifyCookieBlockedParams& aParams) {
-          redirectChannel->NotifyCookieBlocked(aParams.mRejectedReason);
         });
   }
 
@@ -530,6 +663,7 @@ void DocumentLoadListener::FinishReplacementChannelSetup(bool aSucceeded) {
 
 void DocumentLoadListener::ResumeSuspendedChannel(
     nsIStreamListener* aListener) {
+  LOG(("DocumentLoadListener ResumeSuspendedChannel [this=%p]", this));
   RefPtr<nsHttpChannel> httpChannel = do_QueryObject(mChannel);
   if (httpChannel) {
     httpChannel->SetApplyConversion(mOldApplyConversion);
@@ -718,6 +852,10 @@ void DocumentLoadListener::SerializeRedirectData(
   nsDocShell::ExtractLastVisit(mChannel, getter_AddRefs(previousURI),
                                &previousFlags);
   aArgs.lastVisitInfo() = LastVisitInfo{previousURI, previousFlags};
+  aArgs.srcdocData() = mSrcdocData;
+  aArgs.baseUri() = mBaseURI;
+  aArgs.loadStateLoadFlags() = mLoadStateLoadFlags;
+  aArgs.loadStateLoadType() = mLoadStateLoadType;
 }
 
 void DocumentLoadListener::TriggerCrossProcessSwitch() {
@@ -759,6 +897,10 @@ DocumentLoadListener::RedirectToRealChannel(
     RedirectToRealChannelArgs args;
     SerializeRedirectData(args, !!aDestinationProcess, aRedirectFlags,
                           aLoadFlags);
+    if (mTiming) {
+      mTiming->Anonymize(args.uri());
+      args.timing() = Some(std::move(mTiming));
+    }
 
     return cp->SendCrossProcessRedirect(args);
   }
@@ -912,9 +1054,11 @@ DocumentLoadListener::OnStartRequest(nsIRequest* aRequest) {
   // SessionStore.jsm. This will determine if a new process needs to be
   // spawned and if so SwitchProcessTo() will be called which will set a
   // ContentProcessIdPromise.
-  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
-  obsService->NotifyObservers(ToSupports(this), "channel-on-may-change-process",
-                              nullptr);
+  if (status != NS_BINDING_ABORTED) {
+    nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+    obsService->NotifyObservers(ToSupports(this),
+                                "channel-on-may-change-process", nullptr);
+  }
 
   if (mRedirectContentProcessIdPromise) {
     TriggerCrossProcessSwitch();
@@ -1047,29 +1191,6 @@ DocumentLoadListener::NotifyClassificationFlags(uint32_t aClassificationFlags,
   mIParentChannelFunctions.AppendElement(IParentChannelFunction{
       VariantIndex<3>{},
       ClassificationFlagsParams{aClassificationFlags, aIsThirdParty}});
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentLoadListener::NotifyChannelClassifierProtectionDisabled(
-    uint32_t aAcceptedReason) {
-  mIParentChannelFunctions.AppendElement(IParentChannelFunction{
-      VariantIndex<4>{},
-      NotifyChannelClassifierProtectionDisabledParams{aAcceptedReason}});
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentLoadListener::NotifyCookieAllowed() {
-  mIParentChannelFunctions.AppendElement(
-      IParentChannelFunction{VariantIndex<5>{}, NotifyCookieAllowedParams()});
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentLoadListener::NotifyCookieBlocked(uint32_t aRejectedReason) {
-  mIParentChannelFunctions.AppendElement(IParentChannelFunction{
-      VariantIndex<6>{}, NotifyCookieBlockedParams{aRejectedReason}});
   return NS_OK;
 }
 
@@ -1214,7 +1335,7 @@ DocumentLoadListener::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
 }
 
 NS_IMETHODIMP
-DocumentLoadListener::GetCrossOriginOpenerPolicy(
+DocumentLoadListener::GetCachedCrossOriginOpenerPolicy(
     nsILoadInfo::CrossOriginOpenerPolicy* aPolicy) {
   MOZ_ASSERT(aPolicy);
   if (!aPolicy) {
@@ -1223,7 +1344,7 @@ DocumentLoadListener::GetCrossOriginOpenerPolicy(
 
   RefPtr<nsHttpChannel> httpChannel = do_QueryObject(mChannel);
   if (!httpChannel) {
-    *aPolicy = nsILoadInfo::OPENER_POLICY_NULL;
+    *aPolicy = nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
     return NS_OK;
   }
 

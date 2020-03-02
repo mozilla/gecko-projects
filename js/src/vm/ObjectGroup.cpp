@@ -61,9 +61,6 @@ void ObjectGroup::finalize(JSFreeOp* fop) {
     fop->delete_(this, newScript, newScript->gcMallocBytes(),
                  MemoryUse::ObjectGroupAddendum);
   }
-  if (maybePreliminaryObjectsDontCheckGeneration()) {
-    maybePreliminaryObjectsDontCheckGeneration()->clear();
-  }
   fop->delete_(this, maybePreliminaryObjectsDontCheckGeneration(),
                MemoryUse::ObjectGroupAddendum);
 }
@@ -138,6 +135,10 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
 
 /* static */
 bool ObjectGroup::useSingletonForClone(JSFunction* fun) {
+  if (!IsTypeInferenceEnabled()) {
+    return false;
+  }
+
   if (!fun->isInterpreted()) {
     return false;
   }
@@ -187,8 +188,8 @@ bool ObjectGroup::useSingletonForClone(JSFunction* fun) {
 bool ObjectGroup::useSingletonForNewObject(JSContext* cx, JSScript* script,
                                            jsbytecode* pc) {
   /*
-   * Make a heuristic guess at a use of JSOP_NEW that the constructed object
-   * should have a fresh group. We do this when the NEW is immediately
+   * Make a heuristic guess at a use of JSOp::New that the constructed object
+   * should have a fresh group. We do this when the New is immediately
    * followed by a simple assignment to an object's .prototype field.
    * This is designed to catch common patterns for subclassing in JS:
    *
@@ -203,19 +204,20 @@ bool ObjectGroup::useSingletonForNewObject(JSContext* cx, JSScript* script,
    * Sub2 lets us continue to distinguish the two subclasses and any extra
    * properties added to those prototype objects.
    */
+  if (!IsTypeInferenceEnabled()) {
+    return false;
+  }
   if (script->isGenerator() || script->isAsync()) {
     return false;
   }
-  if (JSOp(*pc) != JSOP_NEW) {
+  if (JSOp(*pc) != JSOp::New) {
     return false;
   }
-  pc += JSOP_NEW_LENGTH;
-  if (JSOp(*pc) == JSOP_SETPROP) {
-    if (script->getName(pc) == cx->names().prototype) {
-      return true;
-    }
+  pc += JSOpLength_New;
+  if (JSOp(*pc) != JSOp::SetProp) {
+    return false;
   }
-  return false;
+  return script->getName(pc) == cx->names().prototype;
 }
 
 /* static */
@@ -227,6 +229,10 @@ bool ObjectGroup::useSingletonForAllocationSite(JSScript* script,
    * singleton types. For now this is only done for plain objects, but not
    * typed arrays or normal arrays.
    */
+
+  if (!IsTypeInferenceEnabled()) {
+    return false;
+  }
 
   if (script->function() && !script->treatAsRunOnce()) {
     return false;
@@ -390,16 +396,17 @@ struct ObjectGroupRealm::NewEntry {
 
     Lookup(const JSClass* clasp, TaggedProto proto, JSObject* associated)
         : clasp(clasp), proto(proto), associated(associated) {
-      MOZ_ASSERT((associated && associated->is<JSFunction>()) == !clasp);
+      MOZ_ASSERT(clasp);
+      MOZ_ASSERT_IF(associated && associated->is<JSFunction>(),
+                    clasp == &PlainObject::class_);
     }
 
     explicit Lookup(const NewEntry& entry)
         : clasp(entry.group.unbarrieredGet()->clasp()),
           proto(entry.group.unbarrieredGet()->proto()),
           associated(entry.associated) {
-      if (associated && associated->is<JSFunction>()) {
-        clasp = nullptr;
-      }
+      MOZ_ASSERT_IF(associated && associated->is<JSFunction>(),
+                    clasp == &PlainObject::class_);
     }
   };
 
@@ -438,7 +445,7 @@ struct MovableCellHasher<ObjectGroupRealm::NewEntry> {
 
   static inline bool match(const ObjectGroupRealm::NewEntry& key,
                            const Lookup& lookup) {
-    if (lookup.clasp && key.group.unbarrieredGet()->clasp() != lookup.clasp) {
+    if (key.group.unbarrieredGet()->clasp() != lookup.clasp) {
       return false;
     }
 
@@ -475,7 +482,7 @@ class ObjectGroupRealm::NewTable
 MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
     const JSClass* clasp, TaggedProto proto, JSObject* associated) {
   if (group_ && associated_ == associated && group_->proto() == proto &&
-      (!clasp || group_->clasp() == clasp)) {
+      group_->clasp() == clasp) {
     return group_;
   }
   return nullptr;
@@ -485,17 +492,16 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
 ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
                                           TaggedProto proto,
                                           JSObject* associated) {
+  MOZ_ASSERT(clasp);
   MOZ_ASSERT_IF(associated, proto.isObject());
   MOZ_ASSERT_IF(proto.isObject(),
                 cx->isInsideCurrentCompartment(proto.toObject()));
 
-  // A null lookup clasp is used for 'new' groups with an associated
-  // function. The group starts out as a plain object but might mutate into an
-  // unboxed plain object.
-  MOZ_ASSERT_IF(!clasp, !!associated);
+  if (associated && !associated->is<TypeDescr>() && !IsTypeInferenceEnabled()) {
+    associated = nullptr;
+  }
 
   if (associated) {
-    MOZ_ASSERT_IF(!associated->is<TypeDescr>(), !clasp);
     if (associated->is<JSFunction>()) {
       // Canonicalize new functions to use the original one associated with its
       // script.
@@ -509,18 +515,14 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
         associated = nullptr;
       }
     } else if (associated->is<TypeDescr>()) {
-      if (!clasp) {
+      if (!IsTypedObjectClass(clasp)) {
         // This can happen when we call Reflect.construct with a TypeDescr as
-        // newTarget argument. We're creating a plain object in this case, so
+        // newTarget argument. We're not creating a TypedObject in this case, so
         // don't set the TypeDescr on the group.
         associated = nullptr;
       }
     } else {
       associated = nullptr;
-    }
-
-    if (!associated) {
-      clasp = &PlainObject::class_;
     }
   }
 
@@ -572,8 +574,7 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
       ObjectGroupRealm::NewEntry::Lookup(clasp, proto, associated));
   if (p) {
     ObjectGroup* group = p->group;
-    MOZ_ASSERT_IF(clasp, group->clasp() == clasp);
-    MOZ_ASSERT_IF(!clasp, group->clasp() == &PlainObject::class_);
+    MOZ_ASSERT(group->clasp() == clasp);
     MOZ_ASSERT(group->proto() == proto);
     groups.defaultNewGroupCache.put(group, associated);
     return group;
@@ -586,9 +587,8 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
   }
 
   Rooted<TaggedProto> protoRoot(cx, proto);
-  ObjectGroup* group = ObjectGroupRealm::makeGroup(
-      cx, cx->realm(), clasp ? clasp : &PlainObject::class_, protoRoot,
-      initialFlags);
+  ObjectGroup* group = ObjectGroupRealm::makeGroup(cx, cx->realm(), clasp,
+                                                   protoRoot, initialFlags);
   if (!group) {
     return nullptr;
   }
@@ -808,6 +808,10 @@ ArrayObject* ObjectGroup::newArrayObject(JSContext* cx, const Value* vp,
       return nullptr;
     }
     return obj;
+  }
+
+  if (!IsTypeInferenceEnabled()) {
+    return NewDenseCopiedArray(cx, length, vp, nullptr, newKind);
   }
 
   // Get a type which captures all the elements in the array to be created.
@@ -1129,8 +1133,8 @@ JSObject* ObjectGroup::newPlainObject(JSContext* cx, IdValuePair* properties,
                                       size_t nproperties,
                                       NewObjectKind newKind) {
   // Watch for simple cases where we don't try to reuse plain object groups.
-  if (newKind == SingletonObject || nproperties == 0 ||
-      nproperties >= PropertyTree::MAX_HEIGHT) {
+  if (!IsTypeInferenceEnabled() || newKind == SingletonObject ||
+      nproperties == 0 || nproperties >= PropertyTree::MAX_HEIGHT) {
     return NewPlainObjectWithProperties(cx, properties, nproperties, newKind);
   }
 
@@ -1411,7 +1415,8 @@ ObjectGroup* ObjectGroup::allocationSiteGroup(
 
   uint32_t offset = scriptArg->pcToOffset(pc);
 
-  if (offset >= ObjectGroupRealm::AllocationSiteKey::OFFSET_LIMIT) {
+  if (!IsTypeInferenceEnabled() ||
+      offset >= ObjectGroupRealm::AllocationSiteKey::OFFSET_LIMIT) {
     if (protoArg) {
       return defaultNewGroup(cx, GetClassForProtoKey(kind),
                              TaggedProto(protoArg));
@@ -1456,7 +1461,7 @@ ObjectGroup* ObjectGroup::allocationSiteGroup(
     return nullptr;
   }
 
-  if (JSOp(*pc) == JSOP_NEWOBJECT) {
+  if (JSOp(*pc) == JSOp::NewObject) {
     // Keep track of the preliminary objects with this group, so we can try
     // to use an unboxed layout for the object once some are allocated.
     Shape* shape = script->getObject(pc)->as<PlainObject>().lastProperty();
@@ -1548,9 +1553,11 @@ ArrayObject* ObjectGroup::getOrFixupCopyOnWriteObject(JSContext* cx,
 
   // Update type information in the initializer object group.
   MOZ_ASSERT(obj->slotSpan() == 0);
-  for (size_t i = 0; i < obj->getDenseInitializedLength(); i++) {
-    const Value& v = obj->getDenseElement(i);
-    AddTypePropertyId(cx, group, nullptr, JSID_VOID, v);
+  if (IsTypeInferenceEnabled()) {
+    for (size_t i = 0; i < obj->getDenseInitializedLength(); i++) {
+      const Value& v = obj->getDenseElement(i);
+      AddTypePropertyId(cx, group, nullptr, JSID_VOID, v);
+    }
   }
 
   obj->setGroup(group);
@@ -1645,6 +1652,11 @@ ObjectGroup* ObjectGroupRealm::makeGroup(
     Handle<TaggedProto> proto, ObjectGroupFlags initialFlags /* = 0 */) {
   MOZ_ASSERT_IF(proto.isObject(),
                 cx->isInsideCurrentCompartment(proto.toObject()));
+
+  if (!IsTypeInferenceEnabled()) {
+    // Don't track type information.
+    initialFlags |= OBJECT_FLAG_DYNAMIC_MASK;
+  }
 
   ObjectGroup* group = Allocate<ObjectGroup>(cx);
   if (!group) {

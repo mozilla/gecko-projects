@@ -28,15 +28,20 @@ class JS_PUBLIC_API ContextOptions {
         wasmGc_(false),
         testWasmAwaitTier2_(false),
 #ifdef ENABLE_WASM_BIGINT
-        enableWasmBigInt_(false),
+        enableWasmBigInt_(true),
 #endif
         throwOnAsmJSValidationFailure_(false),
+        disableIon_(false),
+        disableEvalSecurityChecks_(false),
         asyncStack_(true),
         throwOnDebuggeeWouldRun_(true),
         dumpStackOnDebuggeeWouldRun_(false),
         werror_(false),
         strictMode_(false),
         extraWarnings_(false),
+#ifdef JS_ENABLE_SMOOSH
+        trySmoosh_(false),
+#endif
         fuzzing_(false) {
   }
 
@@ -118,6 +123,23 @@ class JS_PUBLIC_API ContextOptions {
     return *this;
   }
 
+  // Override to allow disabling Ion for this context irrespective of the
+  // process-wide Ion-enabled setting. This must be set right after creating
+  // the context.
+  bool disableIon() const { return disableIon_; }
+  ContextOptions& setDisableIon() {
+    disableIon_ = true;
+    return *this;
+  }
+
+  // Override to allow disabling the eval restriction security checks for
+  // this context.
+  bool disableEvalSecurityChecks() const { return disableEvalSecurityChecks_; }
+  ContextOptions& setDisableEvalSecurityChecks() {
+    disableEvalSecurityChecks_ = true;
+    return *this;
+  }
+
   bool asyncStack() const { return asyncStack_; }
   ContextOptions& setAsyncStack(bool flag) {
     asyncStack_ = flag;
@@ -168,6 +190,16 @@ class JS_PUBLIC_API ContextOptions {
     return *this;
   }
 
+#ifdef JS_ENABLE_SMOOSH
+  // Try compiling SmooshMonkey frontend first, and fallback to C++
+  // implementation when it fails.
+  bool trySmoosh() const { return trySmoosh_; }
+  ContextOptions& setTrySmoosh(bool flag) {
+    trySmoosh_ = flag;
+    return *this;
+  }
+#endif  // JS_ENABLE_SMOOSH
+
   bool fuzzing() const { return fuzzing_; }
   // Defined out-of-line because it depends on a compile-time option
   ContextOptions& setFuzzing(bool flag);
@@ -194,12 +226,17 @@ class JS_PUBLIC_API ContextOptions {
   bool enableWasmBigInt_ : 1;
 #endif
   bool throwOnAsmJSValidationFailure_ : 1;
+  bool disableIon_ : 1;
+  bool disableEvalSecurityChecks_ : 1;
   bool asyncStack_ : 1;
   bool throwOnDebuggeeWouldRun_ : 1;
   bool dumpStackOnDebuggeeWouldRun_ : 1;
   bool werror_ : 1;
   bool strictMode_ : 1;
   bool extraWarnings_ : 1;
+#ifdef JS_ENABLE_SMOOSH
+  bool trySmoosh_ : 1;
+#endif
   bool fuzzing_ : 1;
 };
 

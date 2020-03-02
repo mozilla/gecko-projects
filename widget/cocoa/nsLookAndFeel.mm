@@ -40,8 +40,6 @@ nsLookAndFeel::nsLookAndFeel()
       mUseOverlayScrollbarsCached(false),
       mAllowOverlayScrollbarsOverlap(-1),
       mAllowOverlayScrollbarsOverlapCached(false),
-      mPrefersReducedMotion(-1),
-      mPrefersReducedMotionCached(false),
       mSystemUsesDarkTheme(-1),
       mSystemUsesDarkThemeCached(false),
       mColorTextSelectBackground(0),
@@ -251,7 +249,7 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
         break;
       }
       // Otherwise fall through and return the regular button text:
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case ColorID::Buttontext:
     case ColorID::MozButtonhovertext:
       aColor = mColorButtonHoverText;
@@ -774,6 +772,8 @@ void nsLookAndFeel::EnsureInit() {
   color = [NSColor currentControlTint];
   mColorActiveSourceListSelection =
       (color == NSGraphiteControlTint) ? NS_RGB(0xa0, 0xa0, 0xa0) : NS_RGB(0x0a, 0x64, 0xdc);
+
+  RecordTelemetry();
 
   NS_OBJC_END_TRY_ABORT_BLOCK
 }

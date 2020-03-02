@@ -355,9 +355,6 @@ extern const mozilla::Module kLayoutModule;
 extern const mozilla::Module kKeyValueModule;
 extern const mozilla::Module kXREModule;
 extern const mozilla::Module kEmbeddingModule;
-#if defined(MOZ_WIDGET_ANDROID)
-extern const mozilla::Module kBrowserModule;
-#endif
 
 static nsTArray<const mozilla::Module*>* sExtraStaticModules;
 
@@ -443,9 +440,6 @@ nsresult nsComponentManagerImpl::Init() {
   RegisterModule(&kKeyValueModule);
   RegisterModule(&kXREModule);
   RegisterModule(&kEmbeddingModule);
-#if defined(MOZ_WIDGET_ANDROID)
-  RegisterModule(&kBrowserModule);
-#endif
 
   for (uint32_t i = 0; i < sExtraStaticModules->Length(); ++i) {
     RegisterModule((*sExtraStaticModules)[i]);
@@ -1598,7 +1592,7 @@ nsComponentManagerImpl::RegisterFactory(const nsCID& aClass, const char* aName,
     return NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-  nsAutoPtr<nsFactoryEntry> f(new nsFactoryEntry(aClass, aFactory));
+  auto f = MakeUnique<nsFactoryEntry>(aClass, aFactory);
 
   SafeMutexAutoLock lock(mLock);
   if (auto entry = mFactories.LookupForAdd(f->mCIDEntry->cid)) {
@@ -1610,12 +1604,12 @@ nsComponentManagerImpl::RegisterFactory(const nsCID& aClass, const char* aName,
     }
     if (aContractID) {
       nsDependentCString contractID(aContractID);
-      mContractIDs.Put(contractID, f);
+      mContractIDs.Put(contractID, f.get());
       // We allow dynamically-registered contract IDs to override static
       // entries, so invalidate any static entry for this contract ID.
       StaticComponents::InvalidateContractID(contractID);
     }
-    entry.OrInsert([&f]() { return f.forget(); });
+    entry.OrInsert([&f]() { return f.release(); });
   }
 
   return NS_OK;

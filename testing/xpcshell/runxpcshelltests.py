@@ -1226,10 +1226,10 @@ class XPCShellTests(object):
         # should by synchronized with the default pref value indicated in
         # StaticPrefList.yaml.
         #
-        # Currently for automation, the pref defaults to true in nightly
-        # builds and false otherwise (but can be overridden with --setpref).
+        # Currently for automation, the pref defaults to true (but can be
+        # overridden with --setpref).
         self.mozInfo['serviceworker_e10s'] = prefs.get(
-            'dom.serviceWorkers.parent_intercept', self.mozInfo['nightly_build'])
+            'dom.serviceWorkers.parent_intercept', True)
 
         self.mozInfo['verify'] = options.get('verify', False)
         self.mozInfo['webrender'] = self.enable_webrender
@@ -1335,6 +1335,11 @@ class XPCShellTests(object):
 
         if not self.updateMozinfo(prefs, options):
             return False
+
+        if "tsan" in self.mozInfo and self.mozInfo["tsan"] and not options.get('threadCount'):
+            # TSan requires significantly more memory, so reduce the amount of parallel
+            # tests we run to avoid OOMs and timeouts.
+            self.threadCount = self.threadCount / 2
 
         self.stack_fixer_function = None
         if self.utility_path and os.path.exists(self.utility_path):

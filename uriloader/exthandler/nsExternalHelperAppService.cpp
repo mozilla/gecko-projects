@@ -57,6 +57,8 @@
 #include "nsIIOService.h"
 #include "nsNetCID.h"
 
+#include "nsIApplicationReputation.h"
+
 #include "nsDSURIContentListener.h"
 #include "nsMimeTypes.h"
 // used for header disposition information.
@@ -96,6 +98,7 @@
 #  include "nsWindowsHelpers.h"
 #endif
 
+#include "mozilla/Components.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ipc/URIUtils.h"
@@ -405,7 +408,6 @@ static const nsDefaultMimeTypeEntry defaultMimeEntries[] = {
     {IMAGE_GIF, "gif"},
     {TEXT_XML, "xml"},
     {APPLICATION_RDF, "rdf"},
-    {TEXT_XUL, "xul"},
     {IMAGE_PNG, "png"},
     // -- end extensions used during startup
     {TEXT_CSS, "css"},
@@ -505,7 +507,6 @@ static const nsExtraMimeTypeEntry extraMimeEntries[] = {
      "Extensible HyperText Markup Language"},
     {APPLICATION_MATHML_XML, "mml", "Mathematical Markup Language"},
     {APPLICATION_RDF, "rdf", "Resource Description Framework"},
-    {TEXT_XUL, "xul", "XML-Based User Interface Language"},
     {TEXT_XML, "xml,xsl,xbl", "Extensible Markup Language"},
     {TEXT_CSS, "css", "Style Sheet"},
     {TEXT_VCARD, "vcf,vcard", "Contact Information"},
@@ -1525,16 +1526,18 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
     aChannel->GetContentLength(&mContentLength);
   }
 
-  mMaybeCloseWindowHelper = new MaybeCloseWindowHelper(mBrowsingContext);
-  mMaybeCloseWindowHelper->SetShouldCloseWindow(mShouldCloseWindow);
+  if (mBrowsingContext) {
+    mMaybeCloseWindowHelper = new MaybeCloseWindowHelper(mBrowsingContext);
+    mMaybeCloseWindowHelper->SetShouldCloseWindow(mShouldCloseWindow);
 
-  nsCOMPtr<nsIPropertyBag2> props(do_QueryInterface(request, &rv));
-  // Determine whether a new window was opened specifically for this request
-  if (props) {
-    bool tmp = false;
-    if (NS_SUCCEEDED(props->GetPropertyAsBool(
-            NS_LITERAL_STRING("docshell.newWindowTarget"), &tmp))) {
-      mMaybeCloseWindowHelper->SetShouldCloseWindow(tmp);
+    nsCOMPtr<nsIPropertyBag2> props(do_QueryInterface(request, &rv));
+    // Determine whether a new window was opened specifically for this request
+    if (props) {
+      bool tmp = false;
+      if (NS_SUCCEEDED(props->GetPropertyAsBool(
+              NS_LITERAL_STRING("docshell.newWindowTarget"), &tmp))) {
+        mMaybeCloseWindowHelper->SetShouldCloseWindow(tmp);
+      }
     }
   }
 
@@ -1551,7 +1554,7 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
   // download. We don't run this in the content process, since we have
   // an instance running in the parent as well, which will handle this
   // if needed.
-  if (!XRE_IsContentProcess()) {
+  if (!XRE_IsContentProcess() && mMaybeCloseWindowHelper) {
     mBrowsingContext = mMaybeCloseWindowHelper->MaybeCloseWindow();
   }
 
@@ -1615,6 +1618,8 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
 
   bool alwaysAsk = true;
   mMimeInfo->GetAlwaysAskBeforeHandling(&alwaysAsk);
+  nsAutoCString MIMEType;
+  mMimeInfo->GetMIMEType(MIMEType);
   if (alwaysAsk) {
     // But we *don't* ask if this mimeInfo didn't come from
     // our user configuration datastore and the user has said
@@ -1629,8 +1634,6 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
       handlerSvc->Exists(mMimeInfo, &mimeTypeIsInDatastore);
     }
     if (!handlerSvc || !mimeTypeIsInDatastore) {
-      nsAutoCString MIMEType;
-      mMimeInfo->GetMIMEType(MIMEType);
       if (!GetNeverAskFlagFromPref(NEVER_ASK_FOR_SAVE_TO_DISK_PREF,
                                    MIMEType.get())) {
         // Don't need to ask after all.
@@ -1642,6 +1645,21 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
         // Don't need to ask after all.
         alwaysAsk = false;
       }
+    }
+  } else if (MIMEType.EqualsLiteral("text/plain")) {
+    nsAutoCString ext;
+    mMimeInfo->GetPrimaryExtension(ext);
+    // If people are sending us ApplicationReputation-eligible files with
+    // text/plain mimetypes, enforce asking the user what to do.
+    if (!ext.IsEmpty()) {
+      nsAutoCString dummyFileName("f");
+      if (ext.First() != '.') {
+        dummyFileName.Append(".");
+      }
+      ext.ReplaceChar(KNOWN_PATH_SEPARATORS FILE_ILLEGAL_CHARACTERS, '_');
+      nsCOMPtr<nsIApplicationReputationService> appRep =
+          components::ApplicationReputation::Service();
+      appRep->IsBinary(dummyFileName + ext, &alwaysAsk);
     }
   }
 
@@ -1773,7 +1791,7 @@ void nsExternalAppHandler::SendStatusChange(ErrorType type, nsresult rv,
         break;
       }
 #endif
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     default:
       // Generic read/write/launch error message.
@@ -2144,7 +2162,7 @@ nsresult nsExternalAppHandler::CreateFailedTransfer(bool aIsPrivateBrowsing) {
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Our failed transfer is ready.
-  mTransfer = transfer.forget();
+  mTransfer = std::move(transfer);
 
   return NS_OK;
 }

@@ -35,7 +35,7 @@ void nsSVGOuterSVGFrame::RegisterForeignObject(
 
   if (!mForeignObjectHash) {
     mForeignObjectHash =
-        new nsTHashtable<nsPtrHashKey<nsSVGForeignObjectFrame> >();
+        MakeUnique<nsTHashtable<nsPtrHashKey<nsSVGForeignObjectFrame>>>();
   }
 
   NS_ASSERTION(!mForeignObjectHash->GetEntry(aFrame),
@@ -549,9 +549,7 @@ class nsDisplayOuterSVG final : public nsPaintedDisplayItem {
       : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayOuterSVG);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayOuterSVG() { MOZ_COUNT_DTOR(nsDisplayOuterSVG); }
-#endif
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayOuterSVG)
 
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                        HitTestState* aState,
@@ -891,7 +889,7 @@ gfxMatrix nsSVGOuterSVGFrame::GetCanvasTM() {
 
     gfxMatrix tm = content->PrependLocalTransformsTo(
         gfxMatrix::Scaling(devPxPerCSSPx, devPxPerCSSPx));
-    mCanvasTM = new gfxMatrix(tm);
+    mCanvasTM = MakeUnique<gfxMatrix>(tm);
   }
   return *mCanvasTM;
 }

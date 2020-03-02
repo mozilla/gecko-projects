@@ -547,7 +547,7 @@ function testInlineCSS() {
 
       browser.test.assertThrows(
         () => style.sheet.wrappedJSObject.cssRules,
-        /operation is insecure/,
+        /Not allowed to access cross-origin stylesheet/,
         "Page content should not be able to access extension-generated CSS rules"
       );
 
@@ -685,10 +685,13 @@ function injectElements(tests, baseOpts) {
 
         for (let test of tests) {
           let { elem, srcElem, src } = createElement(test, opts);
+
           document.body.appendChild(elem);
           window.wrappedJSObject.elem = srcElem;
           window.wrappedJSObject.eval(
-            `elem.setAttribute(${uneval(test.srcAttr)}, ${uneval(src)})`
+            `elem.setAttribute(${JSON.stringify(
+              test.srcAttr
+            )}, ${JSON.stringify(src)})`
           );
         }
 
@@ -714,7 +717,9 @@ function injectElements(tests, baseOpts) {
           let { elem, srcElem, src } = createElement(test, opts);
           window.wrappedJSObject.elem = srcElem;
           window.wrappedJSObject.eval(
-            `elem.setAttribute(${uneval(test.srcAttr)}, ${uneval(src)})`
+            `elem.setAttribute(${JSON.stringify(
+              test.srcAttr
+            )}, ${JSON.stringify(src)})`
           );
           document.body.appendChild(elem);
         }
@@ -732,7 +737,9 @@ function injectElements(tests, baseOpts) {
           document.body.appendChild(elem);
           window.wrappedJSObject.elem = srcElem;
           window.wrappedJSObject.eval(
-            `elem.setAttribute(${uneval(test.srcAttr)}, ${uneval(src)})`
+            `elem.setAttribute(${JSON.stringify(
+              test.srcAttr
+            )}, ${JSON.stringify(src)})`
           );
         }
       }

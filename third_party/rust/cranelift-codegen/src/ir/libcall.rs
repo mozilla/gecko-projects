@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
 pub enum LibCall {
     /// probe for stack overflow. These are emitted for functions which need
-    /// when the `probestack_enabled` setting is true.
+    /// when the `enable_probestack` setting is true.
     Probestack,
     /// ceil.f32
     CeilF32,
@@ -106,7 +106,7 @@ impl LibCall {
 /// for `inst`.
 ///
 /// If there is an existing reference, use it, otherwise make a new one.
-pub fn get_libcall_funcref(
+pub(crate) fn get_libcall_funcref(
     libcall: LibCall,
     call_conv: CallConv,
     func: &mut Function,
@@ -202,7 +202,7 @@ fn make_funcref(
     func.import_function(ExtFuncData {
         name: ExternalName::LibCall(libcall),
         signature: sigref,
-        colocated: isa.flags().colocated_libcalls(),
+        colocated: isa.flags().use_colocated_libcalls(),
     })
 }
 

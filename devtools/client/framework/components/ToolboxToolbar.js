@@ -36,11 +36,6 @@ loader.lazyGetter(this, "MenuList", function() {
     require("devtools/client/shared/components/menu/MenuList")
   );
 });
-loader.lazyGetter(this, "WebReplayPlayer", function() {
-  return createFactory(
-    require("devtools/client/webreplay/components/WebReplayPlayer")
-  );
-});
 
 loader.lazyRequireGetter(
   this,
@@ -78,7 +73,7 @@ class ToolboxToolbar extends Component {
         })
       ),
       // Current docking type. Typically one of the position values in
-      // |hostTypes| but this is not always the case (e.g. when it is "custom").
+      // |hostTypes| but this is not always the case (e.g. for "browsertoolbox").
       currentHostType: PropTypes.string,
       // Are docking options enabled? They are not enabled in certain situations
       // like when the toolbox is opened in a tab.
@@ -466,17 +461,6 @@ class ToolboxToolbar extends Component {
     const debugTargetInfo = debugTargetData
       ? DebugTargetInfo({ debugTargetData, L10N, toolbox })
       : null;
-
-    if (toolbox.target.canRewind) {
-      return div(
-        {},
-        WebReplayPlayer({
-          toolbox: toolbox,
-        }),
-        debugTargetInfo,
-        toolbar
-      );
-    }
 
     return div({}, debugTargetInfo, toolbar);
   }

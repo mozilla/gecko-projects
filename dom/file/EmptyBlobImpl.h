@@ -18,16 +18,12 @@ class EmptyBlobImpl final : public BaseBlobImpl {
 
   explicit EmptyBlobImpl(const nsAString& aContentType)
       : BaseBlobImpl(NS_LITERAL_STRING("EmptyBlobImpl"), aContentType,
-                     0 /* aLength */) {
-    mImmutable = true;
-  }
+                     0 /* aLength */) {}
 
   EmptyBlobImpl(const nsAString& aName, const nsAString& aContentType,
                 int64_t aLastModifiedDate)
       : BaseBlobImpl(NS_LITERAL_STRING("EmptyBlobImpl"), aName, aContentType, 0,
-                     aLastModifiedDate) {
-    mImmutable = true;
-  }
+                     aLastModifiedDate) {}
 
   virtual void CreateInputStream(nsIInputStream** aStream,
                                  ErrorResult& aRv) override;
@@ -40,7 +36,7 @@ class EmptyBlobImpl final : public BaseBlobImpl {
   virtual bool IsMemoryFile() const override { return true; }
 
  private:
-  ~EmptyBlobImpl() {}
+  ~EmptyBlobImpl() = default;
 };
 
 }  // namespace dom

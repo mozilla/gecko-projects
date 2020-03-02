@@ -15,13 +15,14 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
+use neqo_common::{matches, qdebug, qerror, qinfo, qtrace};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{Frame, TxMode};
 use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
+use crate::tracking::PNSpace;
 use crate::{AppError, Error, Res};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -121,7 +122,7 @@ impl RangeTracker {
             let sub_len = min(*len, tmp_len);
             let remaining_len = len - sub_len;
             if new_state == RangeState::Sent && *state == RangeState::Acked {
-                qwarn!(
+                qinfo!(
                     "Attempted to downgrade overlapping range Acked range {}-{} with Sent {}-{}",
                     off,
                     len,
@@ -222,12 +223,12 @@ impl RangeTracker {
                 // Check for overlap
                 if *cur_off + *cur_len > off {
                     if *cur_state == RangeState::Acked {
-                        qwarn!(
+                        qinfo!(
                             "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                             cur_off,
                             cur_len,
                             off,
-                            len
+                            off + len
                         );
                     } else {
                         *cur_len = off - cur_off;
@@ -237,12 +238,12 @@ impl RangeTracker {
             }
 
             if *cur_state == RangeState::Acked {
-                qwarn!(
+                qinfo!(
                     "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                     cur_off,
                     cur_len,
                     off,
-                    len
+                    off + len
                 );
                 continue;
             }
@@ -283,17 +284,17 @@ impl TxBuffer {
 
     pub fn new() -> Self {
         Self {
-            send_buf: VecDeque::with_capacity(TxBuffer::BUFFER_SIZE),
+            send_buf: VecDeque::with_capacity(Self::BUFFER_SIZE),
             ..Self::default()
         }
     }
 
     /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_buffer = min(TxBuffer::BUFFER_SIZE - self.buffered(), buf.len());
+        let can_buffer = min(Self::BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            assert!(self.send_buf.len() <= TxBuffer::BUFFER_SIZE);
+            assert!(self.send_buf.len() <= Self::BUFFER_SIZE);
         }
         can_buffer
     }
@@ -335,8 +336,6 @@ impl TxBuffer {
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
-        assert!(self.ranges.highest_offset() >= offset + len as u64);
-
         self.ranges.mark_range(offset, len, RangeState::Acked);
 
         // We can drop contig acked range from the buffer
@@ -352,10 +351,6 @@ impl TxBuffer {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
-        assert!(self.ranges.highest_offset() >= offset + len as u64);
-        assert!(offset >= self.retired);
-
-        // Make eligible for sending again
         self.ranges.unmark_range(offset, len)
     }
 
@@ -368,7 +363,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        TxBuffer::BUFFER_SIZE - self.buffered()
+        Self::BUFFER_SIZE - self.buffered()
     }
 
     pub fn highest_sent(&self) -> u64 {
@@ -398,60 +393,44 @@ enum SendStreamState {
 impl SendStreamState {
     fn tx_buf(&self) -> Option<&TxBuffer> {
         match self {
-            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
-                Some(send_buf)
-            }
-            SendStreamState::Ready
-            | SendStreamState::DataRecvd { .. }
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => None,
+            Self::Send { send_buf } | Self::DataSent { send_buf, .. } => Some(send_buf),
+            Self::Ready | Self::DataRecvd { .. } | Self::ResetSent | Self::ResetRecvd => None,
         }
     }
 
     fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
-            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
-                Some(send_buf)
-            }
-            SendStreamState::Ready
-            | SendStreamState::DataRecvd { .. }
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => None,
+            Self::Send { send_buf } | Self::DataSent { send_buf, .. } => Some(send_buf),
+            Self::Ready | Self::DataRecvd { .. } | Self::ResetSent | Self::ResetRecvd => None,
         }
     }
 
     fn tx_avail(&self) -> u64 {
         match self {
             // In Ready, TxBuffer not yet allocated but size is known
-            SendStreamState::Ready => TxBuffer::BUFFER_SIZE.try_into().unwrap(),
-            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
+            Self::Ready => TxBuffer::BUFFER_SIZE.try_into().unwrap(),
+            Self::Send { send_buf } | Self::DataSent { send_buf, .. } => {
                 send_buf.avail().try_into().unwrap()
             }
-            SendStreamState::DataRecvd { .. }
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => 0,
+            Self::DataRecvd { .. } | Self::ResetSent | Self::ResetRecvd => 0,
         }
     }
 
     fn final_size(&self) -> Option<u64> {
         match self {
-            SendStreamState::DataSent { final_size, .. }
-            | SendStreamState::DataRecvd { final_size } => Some(*final_size),
-            SendStreamState::Ready
-            | SendStreamState::Send { .. }
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => None,
+            Self::DataSent { final_size, .. } | Self::DataRecvd { final_size } => Some(*final_size),
+            Self::Ready | Self::Send { .. } | Self::ResetSent | Self::ResetRecvd => None,
         }
     }
 
     fn name(&self) -> &str {
         match self {
-            SendStreamState::Ready => "Ready",
-            SendStreamState::Send { .. } => "Send",
-            SendStreamState::DataSent { .. } => "DataSent",
-            SendStreamState::DataRecvd { .. } => "DataRecvd",
-            SendStreamState::ResetSent => "ResetSent",
-            SendStreamState::ResetRecvd => "ResetRecvd",
+            Self::Ready => "Ready",
+            Self::Send { .. } => "Send",
+            Self::DataSent { .. } => "DataSent",
+            Self::DataRecvd { .. } => "DataRecvd",
+            Self::ResetSent => "ResetSent",
+            Self::ResetRecvd => "ResetRecvd",
         }
     }
 
@@ -765,40 +744,42 @@ impl SendStreams {
 
     pub(crate) fn get_frame(
         &mut self,
-        epoch: u16,
+        space: PNSpace,
         mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if epoch != 3 && epoch != 1 {
+        if space != PNSpace::ApplicationData {
             return None;
         }
 
         for (stream_id, stream) in self {
             let complete = stream.final_size().is_some();
             if let Some((offset, data)) = stream.next_bytes(mode) {
-                let (frame, length) =
-                    Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining);
-                qdebug!(
-                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}",
-                    stream_id.as_u64(),
-                    offset,
-                    offset + length as u64,
-                    epoch,
-                    mode,
-                );
-                let fin = complete && length == data.len();
-                debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
-                stream.mark_as_sent(offset, length, fin);
-
-                return Some((
-                    frame,
-                    Some(RecoveryToken::Stream(StreamRecoveryToken {
-                        id: *stream_id,
+                if let Some((frame, length)) =
+                    Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining)
+                {
+                    qdebug!(
+                        "Stream {} sending bytes {}-{}, space {:?}, mode {:?}",
+                        stream_id.as_u64(),
                         offset,
-                        length,
-                        fin,
-                    })),
-                ));
+                        offset + length as u64,
+                        space,
+                        mode,
+                    );
+                    let fin = complete && length == data.len();
+                    debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
+                    stream.mark_as_sent(offset, length, fin);
+
+                    return Some((
+                        frame,
+                        Some(RecoveryToken::Stream(StreamRecoveryToken {
+                            id: *stream_id,
+                            offset,
+                            length,
+                            fin,
+                        })),
+                    ));
+                }
             }
         }
         None
@@ -916,7 +897,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(4096);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
+        let mut s = SendStream::new(4.into(), 1024, Rc::clone(&flow_mgr), conn_events);
 
         let res = s.send(&[4; 100]).unwrap();
         assert_eq!(res, 100);
@@ -970,7 +951,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 0, flow_mgr.clone(), conn_events.clone());
+        let mut s = SendStream::new(4.into(), 0, Rc::clone(&flow_mgr), conn_events.clone());
 
         // Stream is initially blocked (conn:2, stream:0)
         // and will not accept data.
@@ -1034,7 +1015,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
         let conn_events = ConnectionEvents::default();
 
-        let _s = SendStream::new(4.into(), 100, flow_mgr.clone(), conn_events.clone());
+        let _s = SendStream::new(4.into(), 100, flow_mgr, conn_events.clone());
 
         // Creating a new stream with conn and stream credits should result in
         // an event.

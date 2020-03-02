@@ -464,7 +464,8 @@ function InitializeNumberFormat(numberFormat, thisValue, locales, options) {
 
     if (numberingSystem !== undefined) {
         numberingSystem = intl_ValidateAndCanonicalizeUnicodeExtensionType(numberingSystem,
-                                                                           "numberingSystem");
+                                                                           "numberingSystem",
+                                                                           "nu");
     }
 
     opt.nu = numberingSystem;
@@ -698,7 +699,7 @@ function createNumberFormatFormat(nf) {
         var x = ToNumeric(value);
 
         // Step 5.
-        return intl_FormatNumber(nf, x, /* formatToParts = */ false);
+        return intl_FormatNumber(nf, x, /* formatToParts = */ false, /* unitStyle = */ false);
     };
 }
 
@@ -746,14 +747,14 @@ function Intl_NumberFormat_formatToParts(value) {
                             "Intl_NumberFormat_formatToParts");
     }
 
-    // Ensure the NumberFormat internals are resolved.
-    getNumberFormatInternals(nf);
+    var internals = getNumberFormatInternals(nf);
+    var unitStyle = internals.style === "unit";
 
     // Step 4.
     var x = ToNumeric(value);
 
     // Step 5.
-    return intl_FormatNumber(nf, x, /* formatToParts = */ true);
+    return intl_FormatNumber(nf, x, /* formatToParts = */ true, unitStyle);
 }
 
 /**

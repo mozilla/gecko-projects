@@ -13,11 +13,14 @@ const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const {
   fetchNetworkUpdatePacket,
   propertiesEqual,
-} = require("../../utils/request-utils");
-const { RESPONSE_HEADERS } = require("../../constants");
+} = require("devtools/client/netmonitor/src/utils/request-utils");
+const {
+  RESPONSE_HEADERS,
+} = require("devtools/client/netmonitor/src/constants");
 
 // Components
 /* global
+  RequestListColumnInitiator,
   RequestListColumnCause,
   RequestListColumnContentSize,
   RequestListColumnCookies,
@@ -36,57 +39,95 @@ const { RESPONSE_HEADERS } = require("../../constants");
   RequestListColumnUrl,
   RequestListColumnWaterfall
 */
-
+loader.lazyGetter(this, "RequestListColumnInitiator", function() {
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnInitiator")
+  );
+});
 loader.lazyGetter(this, "RequestListColumnCause", function() {
-  return createFactory(require("./RequestListColumnCause"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnCause")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnContentSize", function() {
-  return createFactory(require("./RequestListColumnContentSize"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnContentSize")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnCookies", function() {
-  return createFactory(require("./RequestListColumnCookies"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnCookies")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnDomain", function() {
-  return createFactory(require("./RequestListColumnDomain"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnDomain")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnFile", function() {
-  return createFactory(require("./RequestListColumnFile"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnFile")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnUrl", function() {
-  return createFactory(require("./RequestListColumnUrl"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnUrl")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnMethod", function() {
-  return createFactory(require("./RequestListColumnMethod"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnMethod")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnProtocol", function() {
-  return createFactory(require("./RequestListColumnProtocol"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnProtocol")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnRemoteIP", function() {
-  return createFactory(require("./RequestListColumnRemoteIP"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnRemoteIP")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnResponseHeader", function() {
-  return createFactory(require("./RequestListColumnResponseHeader"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnResponseHeader")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnTime", function() {
-  return createFactory(require("./RequestListColumnTime"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnTime")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnScheme", function() {
-  return createFactory(require("./RequestListColumnScheme"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnScheme")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnSetCookies", function() {
-  return createFactory(require("./RequestListColumnSetCookies"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnSetCookies")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnStatus", function() {
-  return createFactory(require("./RequestListColumnStatus"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnStatus")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnTransferredSize", function() {
-  return createFactory(require("./RequestListColumnTransferredSize"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnTransferredSize")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnType", function() {
-  return createFactory(require("./RequestListColumnType"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnType")
+  );
 });
 loader.lazyGetter(this, "RequestListColumnWaterfall", function() {
-  return createFactory(require("./RequestListColumnWaterfall"));
+  return createFactory(
+    require("devtools/client/netmonitor/src/components/request-list/RequestListColumnWaterfall")
+  );
 });
 
 /**
@@ -123,8 +164,8 @@ const UPDATED_REQ_PROPS = [
   "index",
   "networkDetailsOpen",
   "isSelected",
+  "isVisible",
   "requestFilterTypes",
-  "waterfallWidth",
 ];
 
 /**
@@ -154,6 +195,11 @@ const COLUMN_COMPONENTS = [
     column: "cause",
     ColumnComponent: RequestListColumnCause,
     props: ["onCauseBadgeMouseDown"],
+  },
+  {
+    column: "initiator",
+    ColumnComponent: RequestListColumnInitiator,
+    props: ["onInitiatorBadgeMouseDown"],
   },
   { column: "type", ColumnComponent: RequestListColumnType },
   {
@@ -207,6 +253,7 @@ class RequestListItem extends Component {
       item: PropTypes.object.isRequired,
       index: PropTypes.number.isRequired,
       isSelected: PropTypes.bool.isRequired,
+      isVisible: PropTypes.bool.isRequired,
       firstRequestStartedMs: PropTypes.number.isRequired,
       fromCache: PropTypes.bool,
       networkDetailsOpen: PropTypes.bool,
@@ -218,13 +265,16 @@ class RequestListItem extends Component {
       onSecurityIconMouseDown: PropTypes.func.isRequired,
       onWaterfallMouseDown: PropTypes.func.isRequired,
       requestFilterTypes: PropTypes.object.isRequired,
-      waterfallWidth: PropTypes.number,
+      intersectionObserver: PropTypes.object,
     };
   }
 
   componentDidMount() {
     if (this.props.isSelected) {
       this.refs.listItem.focus();
+    }
+    if (this.props.intersectionObserver) {
+      this.props.intersectionObserver.observe(this.refs.listItem);
     }
 
     const { connector, item, requestFilterTypes } = this.props;
@@ -269,6 +319,12 @@ class RequestListItem extends Component {
     }
   }
 
+  componentWillUnmount() {
+    if (this.props.intersectionObserver) {
+      this.props.intersectionObserver.unobserve(this.refs.listItem);
+    }
+  }
+
   render() {
     const {
       blocked,
@@ -277,6 +333,7 @@ class RequestListItem extends Component {
       item,
       index,
       isSelected,
+      isVisible,
       firstRequestStartedMs,
       fromCache,
       onDoubleClick,
@@ -301,22 +358,20 @@ class RequestListItem extends Component {
         onDoubleClick,
       },
       ...COLUMN_COMPONENTS.filter(({ column }) => columns[column]).map(
-        ({ column, ColumnComponent, props: columnProps }) =>
-          column &&
-          ColumnComponent({
+        ({ column, ColumnComponent, props: columnProps }) => {
+          return ColumnComponent({
+            key: column,
             item,
-            ...(columnProps || []).reduce(
-              (acc, keyOrObject) => {
-                if (typeof keyOrObject == "string") {
-                  acc[keyOrObject] = this.props[keyOrObject];
-                } else {
-                  Object.assign(acc, keyOrObject);
-                }
-                return acc;
-              },
-              { item }
-            ),
-          })
+            ...(columnProps || []).reduce((acc, keyOrObject) => {
+              if (typeof keyOrObject == "string") {
+                acc[keyOrObject] = this.props[keyOrObject];
+              } else {
+                Object.assign(acc, keyOrObject);
+              }
+              return acc;
+            }, {}),
+          });
+        }
       ),
       ...RESPONSE_HEADERS.filter(header => columns[header]).map(header =>
         RequestListColumnResponseHeader({
@@ -332,6 +387,7 @@ class RequestListItem extends Component {
           firstRequestStartedMs,
           item,
           onWaterfallMouseDown,
+          isVisible,
         })
     );
   }

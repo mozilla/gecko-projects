@@ -6,12 +6,20 @@
 #![allow(non_snake_case)]
 
 extern crate byteorder;
+#[cfg(target_os = "macos")]
+#[macro_use]
+extern crate core_foundation;
 extern crate env_logger;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(target_os = "macos")]
+extern crate libloading;
 #[macro_use]
 extern crate log;
 extern crate pkcs11;
+#[cfg(target_os = "macos")]
+#[macro_use]
+extern crate rental;
 extern crate sha2;
 #[cfg(target_os = "windows")]
 extern crate winapi;
@@ -22,6 +30,8 @@ use std::sync::Mutex;
 mod manager;
 #[macro_use]
 mod util;
+#[cfg(target_os = "macos")]
+mod backend_macos;
 #[cfg(target_os = "windows")]
 mod backend_windows;
 
@@ -33,16 +43,20 @@ lazy_static! {
     /// OS APIs being used are not necessarily thread-safe (e.g. they may be using
     /// thread-local-storage), the `ManagerProxy` forwards calls from any thread to a single thread
     /// where the real `Manager` does the actual work.
-    static ref MANAGER_PROXY: Mutex<ManagerProxy> = {
-        env_logger::init();
-        Mutex::new(ManagerProxy::new())
-    };
+    static ref MANAGER_PROXY: Mutex<Option<ManagerProxy>> = Mutex::new(None);
 }
 
-macro_rules! try_to_get_manager {
+// Obtaining a handle on the manager proxy is a two-step process. First the mutex must be locked,
+// which (if successful), results in a mutex guard object. We must then get a mutable refence to the
+// underlying manager proxy (if set - otherwise we return an error). This can't happen all in one
+// macro without dropping a reference that needs to live long enough for this to be safe. In
+// practice, this looks like:
+//   let mut manager_guard = try_to_get_manager_guard!();
+//   let manager = manager_guard_to_manager!(manager_guard);
+macro_rules! try_to_get_manager_guard {
     () => {
         match MANAGER_PROXY.lock() {
-            Ok(manager_proxy) => manager_proxy,
+            Ok(maybe_manager_proxy) => maybe_manager_proxy,
             Err(poison_error) => {
                 error!(
                     "previous thread panicked acquiring manager lock: {}",
@@ -54,17 +68,45 @@ macro_rules! try_to_get_manager {
     };
 }
 
+macro_rules! manager_guard_to_manager {
+    ($manager_guard:ident) => {
+        match $manager_guard.as_mut() {
+            Some(manager_proxy) => manager_proxy,
+            None => {
+                error!("manager expected to be set, but it is not");
+                return CKR_DEVICE_ERROR;
+            }
+        }
+    };
+}
+
 /// This gets called to initialize the module. For this implementation, this consists of
 /// instantiating the `ManagerProxy`.
 extern "C" fn C_Initialize(_pInitArgs: CK_C_INITIALIZE_ARGS_PTR) -> CK_RV {
-    // Getting the manager initializes our logging, so do it first.
-    let _manager = try_to_get_manager!();
+    // This will fail if this has already been called, but this isn't a problem because either way,
+    // logging has been initialized.
+    let _ = env_logger::try_init();
+    let mut manager_guard = try_to_get_manager_guard!();
+    match manager_guard.replace(ManagerProxy::new()) {
+        Some(_unexpected_previous_manager) => {
+            #[cfg(target_os = "macos")]
+            {
+                info!("C_Initialize: manager previously set (this is expected on macOS - replacing it)");
+            }
+            #[cfg(target_os = "windows")]
+            {
+                warn!("C_Initialize: manager unexpectedly previously set (bravely continuing by replacing it)");
+            }
+        }
+        None => {}
+    }
     debug!("C_Initialize: CKR_OK");
     CKR_OK
 }
 
 extern "C" fn C_Finalize(_pReserved: CK_VOID_PTR) -> CK_RV {
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     match manager.stop() {
         Ok(()) => {
             debug!("C_Finalize: CKR_OK");
@@ -262,7 +304,8 @@ extern "C" fn C_OpenSession(
         error!("C_OpenSession: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     let session_handle = match manager.open_session() {
         Ok(session_handle) => session_handle,
         Err(()) => {
@@ -279,7 +322,8 @@ extern "C" fn C_OpenSession(
 
 /// This gets called to close a session. This is handled by the `ManagerProxy`.
 extern "C" fn C_CloseSession(hSession: CK_SESSION_HANDLE) -> CK_RV {
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     if manager.close_session(hSession).is_err() {
         error!("C_CloseSession: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
@@ -294,7 +338,8 @@ extern "C" fn C_CloseAllSessions(slotID: CK_SLOT_ID) -> CK_RV {
         error!("C_CloseAllSessions: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     match manager.close_all_sessions() {
         Ok(()) => {
             debug!("C_CloseAllSessions: CKR_OK");
@@ -406,7 +451,8 @@ extern "C" fn C_GetAttributeValue(
         let attr = unsafe { &*pTemplate.offset(i as isize) };
         attr_types.push(attr.attrType);
     }
-    let manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     let values = match manager.get_attributes(hObject, attr_types) {
         Ok(values) => values,
         Err(()) => {
@@ -476,7 +522,8 @@ extern "C" fn C_FindObjectsInit(
         };
         attrs.push((attr.attrType, slice.to_owned()));
     }
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     match manager.start_search(hSession, attrs) {
         Ok(()) => {}
         Err(()) => {
@@ -501,7 +548,8 @@ extern "C" fn C_FindObjects(
         error!("C_FindObjects: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     let handles = match manager.search(hSession, ulMaxObjectCount as usize) {
         Ok(handles) => handles,
         Err(()) => {
@@ -531,7 +579,8 @@ extern "C" fn C_FindObjects(
 /// This gets called after `C_FindObjectsInit` and `C_FindObjects` to finish a search. The module
 /// tells the `ManagerProxy` to clear the search.
 extern "C" fn C_FindObjectsFinal(hSession: CK_SESSION_HANDLE) -> CK_RV {
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     // It would be an error if there were no search for this session, but we can be permissive here.
     match manager.clear_search(hSession) {
         Ok(()) => {
@@ -691,7 +740,8 @@ extern "C" fn C_SignInit(
     } else {
         None
     };
-    let mut manager = try_to_get_manager!();
+    let mut manager_guard = try_to_get_manager_guard!();
+    let manager = manager_guard_to_manager!(manager_guard);
     match manager.start_sign(hSession, hKey, mechanism_params) {
         Ok(()) => {}
         Err(()) => {
@@ -719,7 +769,8 @@ extern "C" fn C_Sign(
     }
     let data = unsafe { std::slice::from_raw_parts(pData, ulDataLen as usize) };
     if pSignature.is_null() {
-        let manager = try_to_get_manager!();
+        let mut manager_guard = try_to_get_manager_guard!();
+        let manager = manager_guard_to_manager!(manager_guard);
         match manager.get_signature_length(hSession, data.to_vec()) {
             Ok(signature_length) => unsafe {
                 *pulSignatureLen = signature_length as CK_ULONG;
@@ -730,7 +781,8 @@ extern "C" fn C_Sign(
             }
         }
     } else {
-        let mut manager = try_to_get_manager!();
+        let mut manager_guard = try_to_get_manager_guard!();
+        let manager = manager_guard_to_manager!(manager_guard);
         match manager.sign(hSession, data.to_vec()) {
             Ok(signature) => {
                 let signature_capacity = unsafe { *pulSignatureLen } as usize;
@@ -1080,3 +1132,6 @@ pub extern "C" fn C_GetFunctionList(ppFunctionList: CK_FUNCTION_LIST_PTR_PTR) ->
     }
     CKR_OK
 }
+
+#[cfg_attr(target_os = "macos", link(name = "Security", kind = "framework"))]
+extern "C" {}

@@ -31,6 +31,7 @@ pref("devtools.webconsole.input.eagerEvaluation", false);
 pref("devtools.browserconsole.contentMessages", true);
 pref("devtools.webconsole.input.editorWidth", 800);
 pref("devtools.webconsole.input.editorOnboarding", true);
+pref("devtools.webconsole.input.context", false);
 
 global.loader = {
   lazyServiceGetter: () => {},
@@ -104,6 +105,11 @@ requireHacker.global_hook("default", (path, module) => {
     react: () => getModule("devtools/client/shared/vendor/react-dev"),
     "devtools/client/shared/vendor/react": () =>
       getModule("devtools/client/shared/vendor/react-dev"),
+    "chrome://mochitests/content/browser/devtools/client/webconsole/test/browser/stub-generator-helpers": () =>
+      getModule(
+        "devtools/client/webconsole/test/browser/stub-generator-helpers"
+      ),
+
     chrome: () =>
       `module.exports = { Cc: {}, Ci: {}, Cu: {}, components: {stack: {caller: ""}} }`,
     ChromeUtils: () => `module.exports = { import: () => ({}) }`,
@@ -116,8 +122,8 @@ requireHacker.global_hook("default", (path, module) => {
     "devtools/shared/plural-form": () =>
       getModule("devtools/client/webconsole/test/node/fixtures/PluralForm"),
     Services: () => `module.exports = require("devtools-services")`,
-    "devtools/server/debugger-server": () =>
-      `module.exports = {DebuggerServer: {}}`,
+    "devtools/server/devtools-server": () =>
+      `module.exports = {DevToolsServer: {}}`,
     "devtools/client/shared/components/SmartTrace": () => "{}",
     "devtools/client/netmonitor/src/components/TabboxPanel": () => "{}",
     "devtools/client/webconsole/utils/context-menu": () => "{}",
@@ -133,6 +139,7 @@ requireHacker.global_hook("default", (path, module) => {
       getModule("devtools/client/webconsole/test/node/fixtures/DevToolsUtils"),
     "devtools/server/actors/reflow": () => "{}",
     "devtools/shared/layout/utils": () => "{getCurrentZoom = () => {}}",
+    "resource://gre/modules/AppConstants.jsm": () => "module.exports = {};",
   };
 
   if (paths.hasOwnProperty(path)) {

@@ -8,54 +8,9 @@
 
 #include "mozilla/Unused.h"
 #include "mozilla/dom/CancelContentJSOptionsBinding.h"
-#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 
-#include "nsIAsyncStreamReader.h"
 #include "nsIObserverService.h"
-#include "nsImportModule.h"
-#include "nsStreamUtils.h"
-
-namespace {
-
-class AsyncStreamReaderPromiseHandler final : public PromiseNativeHandler {
- public:
-  explicit AsyncStreamReaderPromiseHandler(Promise* aFinalPromise)
-      : mPromise(aFinalPromise) {}
-
-  NS_DECL_ISUPPORTS
-
- public:
-  virtual void ResolvedCallback(JSContext* aCx,
-                                JS::Handle<JS::Value> aValue) override {
-    if (NS_WARN_IF(!aValue.isString())) {
-      mPromise->MaybeRejectWithUndefined();
-      return;
-    }
-
-    nsAutoString result;
-    if (NS_WARN_IF(!AssignJSString(aCx, result, aValue.toString()))) {
-      mPromise->MaybeRejectWithUndefined();
-      return;
-    }
-
-    mPromise->MaybeResolve(std::move(result));
-  }
-
-  virtual void RejectedCallback(JSContext* aCx,
-                                JS::Handle<JS::Value> aValue) override {
-    mPromise->MaybeRejectWithUndefined();
-  }
-
- private:
-  ~AsyncStreamReaderPromiseHandler() = default;
-
-  RefPtr<Promise> mPromise;
-};
-
-NS_IMPL_ISUPPORTS0(AsyncStreamReaderPromiseHandler)
-
-}  // namespace
 
 namespace mozilla {
 namespace dom {
@@ -66,7 +21,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserHost)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, RemoteBrowser)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(BrowserHost, mRoot)
+NS_IMPL_CYCLE_COLLECTION_WEAK(BrowserHost, mRoot)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserHost)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserHost)
@@ -125,8 +80,8 @@ void BrowserHost::DestroyComplete() {
   }
 }
 
-bool BrowserHost::Show(const ScreenIntSize& aSize, bool aParentIsActive) {
-  return mRoot->Show(aSize, aParentIsActive);
+bool BrowserHost::Show(const OwnerShowInfo& aShowInfo) {
+  return mRoot->Show(aShowInfo);
 }
 
 void BrowserHost::UpdateDimensions(const nsIntRect& aRect,
@@ -204,6 +159,16 @@ BrowserHost::NotifyResolutionChanged(void) {
   VisitAll([](BrowserParent* aBrowserParent) {
     aBrowserParent->NotifyResolutionChanged();
   });
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+BrowserHost::NotifyThemeChanged(void) {
+  if (!mRoot) {
+    return NS_OK;
+  }
+  VisitAll(
+      [](BrowserParent* aBrowserParent) { aBrowserParent->ThemeChanged(); });
   return NS_OK;
 }
 
@@ -324,88 +289,6 @@ BrowserHost::StopApzAutoscroll(nsViewID aScrollId, uint32_t aPresShellId) {
     return NS_OK;
   }
   mRoot->StopApzAutoscroll(aScrollId, aPresShellId);
-  return NS_OK;
-}
-
-/* bool saveRecording (in AString aFileName); */
-NS_IMETHODIMP
-BrowserHost::SaveRecording(const nsAString& aFileName, bool* _retval) {
-  if (!mRoot) {
-    return NS_OK;
-  }
-  nsCOMPtr<nsIFile> file;
-  nsresult rv = NS_NewLocalFile(aFileName, false, getter_AddRefs(file));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  return GetContentParent()->SaveRecording(file, _retval);
-}
-
-/* Promise getContentBlockingLog (); */
-NS_IMETHODIMP
-BrowserHost::GetContentBlockingLog(::mozilla::dom::Promise** aPromise) {
-  if (!mRoot) {
-    *aPromise = nullptr;
-    return NS_OK;
-  }
-  NS_ENSURE_ARG_POINTER(aPromise);
-
-  *aPromise = nullptr;
-  if (!mRoot->GetOwnerElement()) {
-    return NS_ERROR_FAILURE;
-  }
-
-  ErrorResult rv;
-  RefPtr<Promise> jsPromise = Promise::Create(
-      mRoot->GetOwnerElement()->OwnerDoc()->GetOwnerGlobal(), rv);
-  if (rv.Failed()) {
-    return NS_ERROR_FAILURE;
-  }
-
-  RefPtr<Promise> copy(jsPromise);
-  copy.forget(aPromise);
-
-  auto cblPromise = mRoot->SendGetContentBlockingLog();
-  cblPromise->Then(
-      GetMainThreadSerialEventTarget(), __func__,
-      [jsPromise](Tuple<IPCStream, bool>&& aResult) {
-        if (Get<1>(aResult)) {
-          const IPCStream& ipcStream(Get<0>(aResult));
-
-          nsCOMPtr<nsIInputStream> stream = DeserializeIPCStream(ipcStream);
-          nsCOMPtr<nsIAsyncInputStream> asyncStream;
-          nsresult rv = NS_MakeAsyncNonBlockingInputStream(
-              stream.forget(), getter_AddRefs(asyncStream));
-          if (NS_WARN_IF(NS_FAILED(rv))) {
-            jsPromise->MaybeRejectWithUndefined();
-            return;
-          }
-
-          nsCOMPtr<nsIAsyncStreamReader> ar =
-              do_ImportModule("resource://gre/modules/AsyncStreamReader.jsm");
-          if (NS_WARN_IF(!ar)) {
-            jsPromise->MaybeRejectWithUndefined();
-            return;
-          }
-
-          RefPtr<Promise> promise;
-          rv = ar->ReadAsyncStream(asyncStream, getter_AddRefs(promise));
-          if (NS_WARN_IF(NS_FAILED(rv))) {
-            jsPromise->MaybeRejectWithUndefined();
-            return;
-          }
-
-          RefPtr<AsyncStreamReaderPromiseHandler> handler =
-              new AsyncStreamReaderPromiseHandler(jsPromise);
-          promise->AppendNativeHandler(handler);
-        } else {
-          jsPromise->MaybeRejectWithUndefined();
-        }
-      },
-      [jsPromise](ResponseRejectReason&& aReason) {
-        jsPromise->MaybeRejectWithUndefined();
-      });
-
   return NS_OK;
 }
 

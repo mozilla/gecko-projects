@@ -16,8 +16,8 @@
 #include "nsDebug.h"      // for NS_WARNING
 #include "nsMathUtils.h"  // for NS_hypot
 
-#define GEL_LOG(...)
-// #define GEL_LOG(...) printf_stderr("GEL: " __VA_ARGS__)
+static mozilla::LazyLogModule sApzGelLog("apz.gesture");
+#define GEL_LOG(...) MOZ_LOG(sApzGelLog, LogLevel::Debug, (__VA_ARGS__))
 
 namespace mozilla {
 namespace layers {
@@ -538,7 +538,7 @@ void GestureEventListener::HandleInputTimeoutLongTap() {
       // just in case MaxTapTime > ContextMenuDelay cancel MaxTap timer
       // and fall through
       CancelMaxTapTimeoutTask();
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case GESTURE_FIRST_SINGLE_TOUCH_MAX_TAP_DOWN: {
       SetState(GESTURE_LONG_TOUCH_DOWN);
       mAsyncPanZoomController->HandleGestureEvent(

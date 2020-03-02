@@ -39,11 +39,14 @@ class ToastNotificationHandler final
         mTitle(aTitle),
         mMsg(aMsg),
         mHostPort(aHostPort),
-        mClickable(aClickable) {}
+        mClickable(aClickable),
+        mSentFinished(!aAlertListener) {}
 
   nsresult InitAlertAsync(nsIAlertNotification* aAlert);
 
   void OnWriteBitmapFinished(nsresult rv);
+
+  void UnregisterHandler();
 
  protected:
   virtual ~ToastNotificationHandler();
@@ -79,11 +82,13 @@ class ToastNotificationHandler final
   nsString mMsg;
   nsString mHostPort;
   bool mClickable;
+  bool mSentFinished;
 
   nsresult TryShowAlert();
   bool ShowAlert();
   nsresult AsyncSaveImage(imgIRequest* aRequest);
   nsresult OnWriteBitmapSuccess();
+  void SendFinished();
 
   bool CreateWindowsNotificationFromXml(IXmlDocument* aToastXml);
   Microsoft::WRL::ComPtr<IXmlDocument> InitializeXmlForTemplate(

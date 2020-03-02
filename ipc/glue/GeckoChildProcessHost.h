@@ -98,6 +98,7 @@ class GeckoChildProcessHost : public ChildProcessHost,
   // we return.  But we don't know if dynamic linking succeeded on
   // either platform.
   bool LaunchAndWaitForProcessHandle(StringVector aExtraOpts = StringVector());
+  bool WaitForProcessHandle();
 
   // Block until the child process has been created and it connects to
   // the IPC channel, meaning it's fully initialized.  (Or until an
@@ -118,6 +119,7 @@ class GeckoChildProcessHost : public ChildProcessHost,
 
   virtual bool CanShutdown() override { return true; }
 
+  using ChildProcessHost::TakeChannel;
   IPC::Channel* GetChannel() { return channelp(); }
   std::wstring GetChannelId() { return channel_id(); }
 

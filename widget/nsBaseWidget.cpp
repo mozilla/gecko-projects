@@ -5,77 +5,77 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsBaseWidget.h"
+
+#include <utility>
+
+#include "BasicLayers.h"
+#include "ClientLayerManager.h"
+#include "FrameLayerBuilder.h"
+#include "GLConsts.h"
+#include "InputData.h"
+#include "LiveResizeListener.h"
+#include "TouchEvents.h"
+#include "WritingModes.h"
+#include "X11UndefineNone.h"
+#include "base/thread.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/GlobalKeyListener.h"
+#include "mozilla/IMEStateManager.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/Sprintf.h"
+#include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEventDispatcherListener.h"
 #include "mozilla/UniquePtr.h"
-
-#include "mozilla/layers/CompositorBridgeChild.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layers/PLayerTransactionChild.h"
-#include "mozilla/layers/ImageBridgeChild.h"
-#include "LiveResizeListener.h"
-#include "nsBaseWidget.h"
-#include "nsDeviceContext.h"
-#include "nsCOMPtr.h"
-#include "nsGfxCIID.h"
-#include "nsWidgetsCID.h"
-#include "nsServiceManagerUtils.h"
-#include "nsIKeyEventInPluginCallback.h"
-#include "nsIScreenManager.h"
-#include "nsAppDirectoryServiceDefs.h"
-#include "nsISimpleEnumerator.h"
-#include "nsIContent.h"
-#include "mozilla/dom/Document.h"
-#include "mozilla/Preferences.h"
-#include "BasicLayers.h"
-#include "ClientLayerManager.h"
-#include "mozilla/layers/Compositor.h"
-#include "nsIAppWindow.h"
-#include "nsIBaseWindow.h"
-#include "nsXULPopupManager.h"
-#include "nsIWidgetListener.h"
-#include "npapi.h"
-#include "X11UndefineNone.h"
-#include "base/thread.h"
-#include "prdtoa.h"
-#include "prenv.h"
-#include "mozilla/Attributes.h"
 #include "mozilla/Unused.h"
-#include "nsContentUtils.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/MouseEvents.h"
-#include "GLConsts.h"
-#include "mozilla/GlobalKeyListener.h"
-#include "mozilla/StaticPrefs_apz.h"
-#include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/StaticPrefs_layout.h"
-#include "mozilla/StaticPrefs_layers.h"
-#include "mozilla/Unused.h"
-#include "mozilla/IMEStateManager.h"
 #include "mozilla/VsyncDispatcher.h"
-#include "mozilla/layers/IAPZCTreeManager.h"
+#include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/GPUProcessManager.h"
+#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZEventState.h"
 #include "mozilla/layers/APZInputBridge.h"
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/ChromeProcessController.h"
+#include "mozilla/layers/Compositor.h"
+#include "mozilla/layers/CompositorBridgeChild.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorOptions.h"
+#include "mozilla/layers/IAPZCTreeManager.h"
+#include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/InputAPZContext.h"
-#include "mozilla/layers/APZCCallbackHelper.h"
+#include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/BrowserParent.h"
-#include "mozilla/gfx/GPUProcessManager.h"
-#include "mozilla/gfx/gfxVars.h"
-#include "mozilla/Move.h"
-#include "mozilla/Sprintf.h"
 #include "mozilla/webrender/WebRenderTypes.h"
+#include "npapi.h"
+#include "nsAppDirectoryServiceDefs.h"
+#include "nsCOMPtr.h"
+#include "nsContentUtils.h"
+#include "nsDeviceContext.h"
+#include "nsGfxCIID.h"
+#include "nsIAppWindow.h"
+#include "nsIBaseWindow.h"
+#include "nsIContent.h"
+#include "nsIKeyEventInPluginCallback.h"
+#include "nsIScreenManager.h"
+#include "nsISimpleEnumerator.h"
+#include "nsIWidgetListener.h"
 #include "nsRefPtrHashtable.h"
-#include "TouchEvents.h"
-#include "WritingModes.h"
-#include "InputData.h"
-#include "FrameLayerBuilder.h"
+#include "nsServiceManagerUtils.h"
+#include "nsWidgetsCID.h"
+#include "nsXULPopupManager.h"
+#include "prdtoa.h"
+#include "prenv.h"
 #ifdef ACCESSIBILITY
 #  include "nsAccessibilityService.h"
 #endif
@@ -130,8 +130,7 @@ uint64_t AutoObserverNotifier::sObserverId = 0;
 // milliseconds.
 const uint32_t kAsyncDragDropTimeout = 1000;
 
-namespace mozilla {
-namespace widget {
+namespace mozilla::widget {
 
 void IMENotification::SelectionChangeDataBase::SetWritingMode(
     const WritingMode& aWritingMode) {
@@ -142,8 +141,7 @@ WritingMode IMENotification::SelectionChangeDataBase::GetWritingMode() const {
   return WritingMode(mWritingMode);
 }
 
-}  // namespace widget
-}  // namespace mozilla
+}  // namespace mozilla::widget
 
 NS_IMPL_ISUPPORTS(nsBaseWidget, nsIWidget, nsISupportsWeakReference)
 
@@ -311,7 +309,7 @@ void nsBaseWidget::DestroyCompositor() {
 
     // XXX CompositorBridgeChild and CompositorBridgeParent might be re-created
     // in ClientLayerManager destructor. See bug 1133426.
-    RefPtr<CompositorSession> session = mCompositorSession.forget();
+    RefPtr<CompositorSession> session = std::move(mCompositorSession);
     session->Shutdown();
   }
 }
@@ -642,6 +640,12 @@ void nsBaseWidget::SetSizeMode(nsSizeMode aMode) {
   MOZ_ASSERT(aMode == nsSizeMode_Normal || aMode == nsSizeMode_Minimized ||
              aMode == nsSizeMode_Maximized || aMode == nsSizeMode_Fullscreen);
   mSizeMode = aMode;
+}
+
+int32_t nsBaseWidget::GetWorkspaceID() { return 0; }
+
+void nsBaseWidget::MoveToWorkspace(int32_t workspaceID) {
+  // Noop.
 }
 
 //-------------------------------------------------------------------------
@@ -1138,7 +1142,7 @@ nsEventStatus nsBaseWidget::DispatchInputEvent(WidgetInputEvent* aEvent) {
     if (wheelEvent) {
       RefPtr<Runnable> r =
           new DispatchWheelInputOnControllerThread(*wheelEvent, mAPZC, this);
-      APZThreadUtils::RunOnControllerThread(r.forget());
+      APZThreadUtils::RunOnControllerThread(std::move(r));
       return nsEventStatus_eConsumeDoDefault;
     }
     // Allow dispatching keyboard events on Gecko thread.
@@ -1345,7 +1349,7 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight) {
 
   WindowUsesOMTC();
 
-  mLayerManager = lm.forget();
+  mLayerManager = std::move(lm);
 
   // Only track compositors for top-level windows, since other window types
   // may use the basic compositor.  Except on the OS X - see bug 1306383
@@ -1404,9 +1408,6 @@ CompositorBridgeChild* nsBaseWidget::GetRemoteRenderer() {
 }
 
 already_AddRefed<gfx::DrawTarget> nsBaseWidget::StartRemoteDrawing() {
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return recordreplay::child::DrawTargetForRemoteDrawing(mBounds.Size());
-  }
   return nullptr;
 }
 
@@ -2066,7 +2067,7 @@ void nsBaseWidget::RegisterPluginWindowForRemoteUpdates() {
     return;
   }
   MOZ_ASSERT(sPluginWidgetList);
-  sPluginWidgetList->Put(id, this);
+  sPluginWidgetList->Put(id, RefPtr{this});
 #endif
 }
 
@@ -2244,8 +2245,7 @@ already_AddRefed<nsIBidiKeyboard> nsIWidget::CreateBidiKeyboardInner() {
 }
 #endif
 
-namespace mozilla {
-namespace widget {
+namespace mozilla::widget {
 
 const char* ToChar(InputContext::Origin aOrigin) {
   switch (aOrigin) {
@@ -3039,8 +3039,7 @@ void IMENotification::TextChangeDataBase::Test() {
 
 #endif  // #ifdef DEBUG
 
-}  // namespace widget
-}  // namespace mozilla
+}  // namespace mozilla::widget
 
 #ifdef DEBUG
 //////////////////////////////////////////////////////////////

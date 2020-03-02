@@ -12,8 +12,8 @@
 
 #include "ds/InlineTable.h"
 #include "frontend/AbstractScope.h"
-#include "frontend/FunctionCreationData.h"
 #include "frontend/ParseNode.h"
+#include "frontend/Stencil.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
@@ -108,6 +108,8 @@ class SharedContext {
 
   Kind kind_;
 
+  CompilationInfo& compilationInfo_;
+
   ThisBinding thisBinding_;
 
  public:
@@ -151,15 +153,22 @@ class SharedContext {
   // True if a tagged template exists in the body.
   bool hasCallSiteObj_ : 1;
 
+  // Script is being parsed with a goal of Module.
+  bool hasModuleGoal_ : 1;
+
+  // Whether this script has nested functions.
+  bool hasInnerFunctions_ : 1;
+
   void computeAllowSyntax(Scope* scope);
   void computeInWith(Scope* scope);
   void computeThisBinding(Scope* scope);
 
  public:
-  SharedContext(JSContext* cx, Kind kind, Directives directives,
-                bool extraWarnings)
+  SharedContext(JSContext* cx, Kind kind, CompilationInfo& compilationInfo,
+                Directives directives, bool extraWarnings)
       : cx_(cx),
         kind_(kind),
+        compilationInfo_(compilationInfo),
         thisBinding_(ThisBinding::Global),
         strictScript(directives.strict()),
         localStrict(false),
@@ -173,7 +182,9 @@ class SharedContext {
         hasExplicitUseStrict_(false),
         bindingsAccessedDynamically_(false),
         hasDirectEval_(false),
-        hasCallSiteObj_(false) {}
+        hasCallSiteObj_(false),
+        hasModuleGoal_(false),
+        hasInnerFunctions_(false) {}
 
   // If this is the outermost SharedContext, the Scope that encloses
   // it. Otherwise nullptr.
@@ -201,8 +212,12 @@ class SharedContext {
     return false;
   }
 
+  CompilationInfo& compilationInfo() const { return compilationInfo_; }
+
   ThisBinding thisBinding() const { return thisBinding_; }
 
+  bool hasModuleGoal() const { return hasModuleGoal_; }
+  bool hasInnerFunctions() const { return hasInnerFunctions_; }
   bool allowNewTarget() const { return allowNewTarget_; }
   bool allowSuperProperty() const { return allowSuperProperty_; }
   bool allowSuperCall() const { return allowSuperCall_; }
@@ -221,6 +236,8 @@ class SharedContext {
   void setBindingsAccessedDynamically() { bindingsAccessedDynamically_ = true; }
   void setHasDirectEval() { hasDirectEval_ = true; }
   void setHasCallSiteObj() { hasCallSiteObj_ = true; }
+  void setHasModuleGoal() { hasModuleGoal_ = true; }
+  void setHasInnerFunctions() { hasInnerFunctions_ = true; }
 
   inline bool allBindingsClosedOver();
 
@@ -241,9 +258,11 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext {
  public:
   Rooted<GlobalScope::Data*> bindings;
 
-  GlobalSharedContext(JSContext* cx, ScopeKind scopeKind, Directives directives,
+  GlobalSharedContext(JSContext* cx, ScopeKind scopeKind,
+                      CompilationInfo& compilationInfo, Directives directives,
                       bool extraWarnings)
-      : SharedContext(cx, Kind::Global, directives, extraWarnings),
+      : SharedContext(cx, Kind::Global, compilationInfo, directives,
+                      extraWarnings),
         scopeKind_(scopeKind),
         bindings(cx) {
     MOZ_ASSERT(scopeKind == ScopeKind::Global ||
@@ -268,8 +287,8 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext {
   Rooted<EvalScope::Data*> bindings;
 
   EvalSharedContext(JSContext* cx, JSObject* enclosingEnv,
-                    Scope* enclosingScope, Directives directives,
-                    bool extraWarnings);
+                    CompilationInfo& compilationInfo, Scope* enclosingScope,
+                    Directives directives, bool extraWarnings);
 
   Scope* compilationEnclosingScope() const override { return enclosingScope_; }
 };
@@ -307,8 +326,16 @@ class FunctionBox : public ObjectBox, public SharedContext {
   // has expressions.
   VarScope::Data* extraVarScopeBindings_;
 
+  // Index into funcData, which lives inside of compilationInfo, for the
+  // functionCreationData associated with this functionBox. If there is not a
+  // functionCreationData associated with this functionBox, as in the case of
+  // the function box representing an already allocated function, then
+  // this index will be mozilla::Nothing.
+  mozilla::Maybe<size_t> funcDataIndex_;
+
   FunctionBox(JSContext* cx, TraceListNode* traceListHead,
-              uint32_t toStringStart, Directives directives, bool extraWarnings,
+              uint32_t toStringStart, CompilationInfo& compilationInfo,
+              Directives directives, bool extraWarnings,
               GeneratorKind generatorKind, FunctionAsyncKind asyncKind,
               JSAtom* explicitName, FunctionFlags flags);
 
@@ -316,29 +343,29 @@ class FunctionBox : public ObjectBox, public SharedContext {
                                      FunctionSyntaxKind kind, bool isArrow,
                                      bool allowSuperProperty);
 
+  const mozilla::Maybe<size_t>& functionCreationDataIndex() const {
+    return funcDataIndex_;
+  }
+  mozilla::Maybe<size_t>& functionCreationDataIndex() { return funcDataIndex_; }
+
  public:
   // Back pointer used by asm.js for error messages.
   FunctionNode* functionNode;
 
-  uint32_t sourceStart;
-  uint32_t sourceEnd;
-  uint32_t startLine;
-  uint32_t startColumn;
-  uint32_t toStringStart;
-  uint32_t toStringEnd;
+  SourceExtent extent;
+
   uint16_t length;
 
-  bool isGenerator_ : 1;         /* generator function or async generator */
-  bool isAsync_ : 1;             /* async function or async generator */
-  bool hasDestructuringArgs : 1; /* parameter list contains destructuring
-                                    expression */
-  bool hasParameterExprs : 1;    /* parameter list contains expressions */
-  bool hasDirectEvalInParameterExpr : 1; /* parameter list contains direct eval
-                                          */
+  bool isGenerator_ : 1;           /* generator function or async generator */
+  bool isAsync_ : 1;               /* async function or async generator */
+  bool hasDestructuringArgs : 1;   /* parameter list contains destructuring
+                                      expression */
+  bool hasParameterExprs : 1;      /* parameter list contains expressions */
   bool hasDuplicateParameters : 1; /* parameter list contains duplicate names */
   bool useAsm : 1;                 /* see useAsmOrInsideUseAsm */
-  bool isAnnexB : 1;   /* need to emit a synthesized Annex B assignment */
-  bool wasEmitted : 1; /* Bytecode has been emitted for this function. */
+  bool isAnnexB : 1;     /* need to emit a synthesized Annex B assignment */
+  bool wasEmitted : 1;   /* Bytecode has been emitted for this function. */
+  bool emitBytecode : 1; /* need to generate bytecode for this function. */
 
   // Fields for use in heuristics.
   bool declaredArguments : 1; /* the Parser declared 'arguments' */
@@ -388,7 +415,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
   // prologue: instead we can analyze how 'arguments' is used (using the
   // simple dataflow analysis in analyzeSSA) to determine that uses of
   // 'arguments' can just read from the stack frame directly. However, the
-  // dataflow analysis only looks at how JSOP_ARGUMENTS is used, so it will
+  // dataflow analysis only looks at how JSOp::Arguments is used, so it will
   // be unsound in several cases. The frontend filters out such cases by
   // setting this flag which eagerly sets script->needsArgsObj to true.
   //
@@ -398,43 +425,35 @@ class FunctionBox : public ObjectBox, public SharedContext {
   bool isDerivedClassConstructor_ : 1;
 
   // Whether this function has a .this binding. If true, we need to emit
-  // JSOP_FUNCTIONTHIS in the prologue to initialize it.
+  // JSOp::FunctionThis in the prologue to initialize it.
   bool hasThisBinding_ : 1;
-
-  // Whether this function has nested functions.
-  bool hasInnerFunctions_ : 1;
 
   uint16_t nargs_;
 
   JSAtom* explicitName_;
   FunctionFlags flags_;
 
-  mozilla::Maybe<FunctionCreationData> functionCreationData_;
+  FunctionCreationData* functionCreationData() const;
 
-  bool hasFunctionCreationData() { return functionCreationData_.isSome(); }
-
-  const mozilla::Maybe<FunctionCreationData>& functionCreationData() const {
-    return functionCreationData_;
-  }
-  mozilla::Maybe<FunctionCreationData>& functionCreationData() {
-    return functionCreationData_;
-  }
+  bool hasFunctionCreationIndex() const { return funcDataIndex_.isSome(); }
 
   Handle<FunctionCreationData> functionCreationDataHandle() {
     // This is safe because the FunctionCreationData are marked
-    // via ParserBase -> FunctionBox -> FunctionCreationData.
-    return Handle<FunctionCreationData>::fromMarkedLocation(
-        functionCreationData_.ptr());
+    // via CompilationInfo -> funcData.
+    FunctionCreationData* fcd = functionCreationData();
+    return Handle<FunctionCreationData>::fromMarkedLocation(fcd);
   }
 
   FunctionBox(JSContext* cx, TraceListNode* traceListHead, JSFunction* fun,
-              uint32_t toStringStart, Directives directives, bool extraWarnings,
+              uint32_t toStringStart, CompilationInfo& compilationInfo,
+              Directives directives, bool extraWarnings,
               GeneratorKind generatorKind, FunctionAsyncKind asyncKind);
 
   FunctionBox(JSContext* cx, TraceListNode* traceListHead,
-              Handle<FunctionCreationData> data, uint32_t toStringStart,
+              uint32_t toStringStart, CompilationInfo& compilationInfo,
               Directives directives, bool extraWarnings,
-              GeneratorKind generatorKind, FunctionAsyncKind asyncKind);
+              GeneratorKind generatorKind, FunctionAsyncKind asyncKind,
+              size_t index);
 
 #ifdef DEBUG
   bool atomsAreKept();
@@ -466,6 +485,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
   void initWithEnclosingParseContext(ParseContext* enclosing,
                                      Handle<FunctionCreationData> fun,
                                      FunctionSyntaxKind kind) {
+    MOZ_ASSERT(fun.get().kind == kind);
     initWithEnclosingParseContext(enclosing, kind, fun.get().flags.isArrow(),
                                   fun.get().flags.allowSuperProperty());
   }
@@ -476,22 +496,15 @@ class FunctionBox : public ObjectBox, public SharedContext {
                                   fun->allowSuperProperty());
   }
 
-  void initFieldInitializer(ParseContext* enclosing, JSFunction* fun,
-                            HasHeritage hasHeritage);
   void initFieldInitializer(ParseContext* enclosing,
-                            Handle<FunctionCreationData> data,
-                            HasHeritage hasHeritage);
+                            Handle<FunctionCreationData> data);
 
   void setEnclosingScopeForInnerLazyFunction(
       const AbstractScope& enclosingScope);
   void finish();
 
-  // Free non-LifoAlloc memory which would otherwise be leaked when
-  // the FunctionBox is LifoAlloc destroyed (without calling destructor)
-  void cleanupMemory() { clearDeferredAllocationInfo(); }
-
-  // Clear any deferred allocation info which will no longer be used.
-  void clearDeferredAllocationInfo() { functionCreationData().reset(); }
+  // Clear any function creation data which will no longer be used.
+  void clearFunctionCreationData() { functionCreationDataIndex().reset(); }
 
   JSFunction* function() const { return &object()->as<JSFunction>(); }
 
@@ -505,7 +518,6 @@ class FunctionBox : public ObjectBox, public SharedContext {
     gcThing = function;
     // After clobbering, these flags need to be updated
     setIsInterpreted(function->isInterpreted());
-    setIsInterpretedLazy(function->isInterpretedLazy());
   }
 
   Scope* compilationEnclosingScope() const override {
@@ -513,12 +525,16 @@ class FunctionBox : public ObjectBox, public SharedContext {
     // the enclosingScope_ must have be set correctly during initalization.
 
     MOZ_ASSERT(enclosingScope_);
-    return enclosingScope_.maybeScope();
+    return enclosingScope_.scope();
   }
 
   bool needsCallObjectRegardlessOfBindings() const {
-    return hasExtensibleScope() || needsHomeObject() ||
-           isDerivedClassConstructor() || isGenerator() || isAsync();
+    // Always create a CallObject if:
+    // - The scope is extensible at runtime due to sloppy eval.
+    // - The function is a generator or async function. (The debugger reads the
+    //   generator object directly from the frame.)
+
+    return hasExtensibleScope() || isGenerator() || isAsync();
   }
 
   bool hasExtraBodyVarScope() const {
@@ -529,7 +545,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
 
   bool needsExtraBodyVarEnvironmentRegardlessOfBindings() const {
     MOZ_ASSERT(hasParameterExprs);
-    return hasExtensibleScope() || needsDotGeneratorName();
+    return hasExtensibleScope();
   }
 
   bool isLikelyConstructorWrapper() const {
@@ -576,24 +592,19 @@ class FunctionBox : public ObjectBox, public SharedContext {
   bool definitelyNeedsArgsObj() const { return definitelyNeedsArgsObj_; }
   bool needsHomeObject() const { return needsHomeObject_; }
   bool isDerivedClassConstructor() const { return isDerivedClassConstructor_; }
-  bool hasInnerFunctions() const { return hasInnerFunctions_; }
   bool isNamedLambda() const { return flags_.isNamedLambda(explicitName()); }
   bool isGetter() const { return flags_.isGetter(); }
   bool isSetter() const { return flags_.isSetter(); }
   bool isMethod() const { return flags_.isMethod(); }
+  bool isClassConstructor() const { return flags_.isClassConstructor(); }
 
   bool isInterpreted() const { return flags_.isInterpreted(); }
   void setIsInterpreted(bool interpreted) {
     flags_.setFlags(FunctionFlags::INTERPRETED, interpreted);
   }
-  bool isInterpretedLazy() const { return flags_.isInterpretedLazy(); }
-  void setIsInterpretedLazy(bool interpretedLazy) {
-    flags_.setFlags(FunctionFlags::INTERPRETED_LAZY, interpretedLazy);
-  }
 
   void initLazyScript(LazyScript* script) {
     function()->initLazyScript(script);
-    setIsInterpretedLazy(function()->isInterpretedLazy());
   }
 
   FunctionFlags::FunctionKind kind() { return flags_.kind(); }
@@ -609,19 +620,18 @@ class FunctionBox : public ObjectBox, public SharedContext {
   }
   void setNeedsHomeObject() {
     MOZ_ASSERT_IF(hasObject(), function()->allowSuperProperty());
-    MOZ_ASSERT_IF(!hasObject(), functionCreationData().isSome());
+    MOZ_ASSERT_IF(!hasObject(), functionCreationDataIndex().isSome());
     MOZ_ASSERT_IF(!hasObject(),
                   functionCreationData()->flags.allowSuperProperty());
     needsHomeObject_ = true;
   }
   void setDerivedClassConstructor() {
     MOZ_ASSERT_IF(hasObject(), function()->isClassConstructor());
-    MOZ_ASSERT_IF(!hasObject(), functionCreationData().isSome());
+    MOZ_ASSERT_IF(!hasObject(), functionCreationDataIndex().isSome());
     MOZ_ASSERT_IF(!hasObject(),
                   functionCreationData()->flags.isClassConstructor());
     isDerivedClassConstructor_ = true;
   }
-  void setHasInnerFunctions() { hasInnerFunctions_ = true; }
 
   bool hasSimpleParameterList() const {
     return !hasRest() && !hasParameterExprs && !hasDestructuringArgs;
@@ -648,16 +658,16 @@ class FunctionBox : public ObjectBox, public SharedContext {
   bool useAsmOrInsideUseAsm() const { return useAsm; }
 
   void setStart(uint32_t offset, uint32_t line, uint32_t column) {
-    sourceStart = offset;
-    startLine = line;
-    startColumn = column;
+    extent.sourceStart = offset;
+    extent.lineno = line;
+    extent.column = column;
   }
 
   void setEnd(uint32_t end) {
     // For all functions except class constructors, the buffer and
     // toString ending positions are the same. Class constructors override
     // the toString ending position with the end of the class definition.
-    sourceEnd = toStringEnd = end;
+    extent.sourceEnd = extent.toStringEnd = end;
   }
 
   void setArgCount(uint16_t args) { nargs_ = args; }
@@ -680,6 +690,39 @@ class FunctionBox : public ObjectBox, public SharedContext {
     }
     MOZ_ASSERT(functionCreationData()->lazyScriptData);
     functionCreationData()->lazyScriptData->fieldInitializers.emplace(fi);
+  }
+
+  bool setTypeForScriptedFunction(JSContext* cx, bool singleton) {
+    if (hasObject()) {
+      RootedFunction fun(cx, function());
+      return JSFunction::setTypeForScriptedFunction(cx, fun, singleton);
+    }
+    functionCreationData()->typeForScriptedFunction.emplace(singleton);
+    return true;
+  }
+
+  void setTreatAsRunOnce() { function()->baseScript()->setTreatAsRunOnce(); }
+
+  void setInferredName(JSAtom* atom) {
+    if (hasObject()) {
+      function()->setInferredName(atom);
+      return;
+    }
+    functionCreationData()->setInferredName(atom);
+  }
+
+  JSAtom* inferredName() const {
+    if (hasObject()) {
+      return function()->inferredName();
+    }
+    return functionCreationData()->inferredName();
+  }
+
+  bool hasInferredName() const {
+    if (hasObject()) {
+      return function()->hasInferredName();
+    }
+    return functionCreationData()->hasInferredName();
   }
 
   void trace(JSTracer* trc) override;

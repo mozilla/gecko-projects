@@ -172,15 +172,7 @@ class Accessible : public nsISupports {
   /**
    * Return the unique identifier of the accessible.
    */
-  void* UniqueID() {
-    // When recording or replaying, use an ID which will be consistent when
-    // recording/replaying (pointer values are not consistent), so that IPC
-    // messages from the parent process can be handled when replaying.
-    if (recordreplay::IsRecordingOrReplaying()) {
-      return reinterpret_cast<void*>(recordreplay::ThingIndex(this));
-    }
-    return static_cast<void*>(this);
-  }
+  void* UniqueID() { return static_cast<void*>(this); }
 
   /**
    * Return language associated with the accessible.
@@ -1074,6 +1066,11 @@ class Accessible : public nsISupports {
    * Returns the accessible name specified by ARIA.
    */
   void ARIAName(nsString& aName) const;
+
+  /**
+   * Returns the accessible description specified by ARIA.
+   */
+  void ARIADescription(nsString& aDescription) const;
 
   /**
    * Returns the accessible name specified for this control using XUL

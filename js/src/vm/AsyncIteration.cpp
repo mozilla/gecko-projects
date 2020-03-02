@@ -8,11 +8,12 @@
 
 #include "builtin/Array.h"
 
-#include "builtin/Promise.h"
+#include "builtin/Promise.h"  // js::AsyncFromSyncIteratorMethod, js::AsyncGeneratorEnqueue
 #include "js/PropertySpec.h"
 #include "vm/GeneratorObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
+#include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/Realm.h"
 #include "vm/SelfHosting.h"
 
@@ -156,17 +157,17 @@ const JSClass AsyncGeneratorObject::class_ = {
 };
 
 const JSClassOps AsyncGeneratorObject::classOps_ = {
-    nullptr,                                  /* addProperty */
-    nullptr,                                  /* delProperty */
-    nullptr,                                  /* enumerate */
-    nullptr,                                  /* newEnumerate */
-    nullptr,                                  /* resolve */
-    nullptr,                                  /* mayResolve */
-    nullptr,                                  /* finalize */
-    nullptr,                                  /* call */
-    nullptr,                                  /* hasInstance */
-    nullptr,                                  /* construct */
-    CallTraceMethod<AbstractGeneratorObject>, /* trace */
+    nullptr,                                   // addProperty
+    nullptr,                                   // delProperty
+    nullptr,                                   // enumerate
+    nullptr,                                   // newEnumerate
+    nullptr,                                   // resolve
+    nullptr,                                   // mayResolve
+    nullptr,                                   // finalize
+    nullptr,                                   // call
+    nullptr,                                   // hasInstance
+    nullptr,                                   // construct
+    CallTraceMethod<AbstractGeneratorObject>,  // trace
 };
 
 // ES 2017 draft 9.1.13.

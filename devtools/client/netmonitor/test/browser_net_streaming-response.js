@@ -39,13 +39,14 @@ add_task(async function() {
     const requestsListStatus = requestItem.querySelector(".status-code");
     EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
     await waitUntil(() => requestsListStatus.title);
+    await waitForDOMIfNeeded(requestItem, ".requests-list-timings-total");
   }
 
   REQUESTS.forEach(([fmt], i) => {
     verifyRequestItemTarget(
       document,
       getDisplayedRequests(store.getState()),
-      getSortedRequests(store.getState()).get(i),
+      getSortedRequests(store.getState())[i],
       "GET",
       CONTENT_TYPE_SJS + "?fmt=" + fmt,
       {

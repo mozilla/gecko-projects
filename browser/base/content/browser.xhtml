@@ -62,9 +62,11 @@
   <link rel="localization" href="toolkit/global/textActions.ftl"/>
   <link rel="localization" href="browser/browser.ftl"/>
   <link rel="localization" href="browser/browserContext.ftl"/>
+  <link rel="localization" href="browser/browserSets.ftl"/>
   <link rel="localization" href="browser/menubar.ftl"/>
   <link rel="localization" href="browser/protectionsPanel.ftl"/>
   <link rel="localization" href="browser/appmenu.ftl"/>
+  <link rel="localization" href="preview/interventions.ftl"/>
 
   <title
     data-l10n-id="browser-main-window-title"
@@ -199,6 +201,9 @@
     <tooltip id="aHTMLTooltip" page="true"/>
     <tooltip id="remoteBrowserTooltip"/>
 
+    <menupopup id="new-tab-button-popup"
+               onpopupshowing="return CreateContainerTabMenu(event);"
+               onclick="checkForMiddleClick(this, event);"/>
     <!-- for search and content formfill/pw manager -->
 
     <panel is="autocomplete-richlistbox-popup"
@@ -629,25 +634,19 @@
     </menupopup>
     <menupopup id="SyncedTabsSidebarTabsFilterContext"
                class="textbox-contextmenu">
-      <menuitem label="&undoCmd.label;"
-                accesskey="&undoCmd.accesskey;"
+      <menuitem data-l10n-id="text-action-undo"
                 cmd="cmd_undo"/>
       <menuseparator/>
-      <menuitem label="&cutCmd.label;"
-                accesskey="&cutCmd.accesskey;"
+      <menuitem data-l10n-id="text-action-cut"
                 cmd="cmd_cut"/>
-      <menuitem label="&copyCmd.label;"
-                accesskey="&copyCmd.accesskey;"
+      <menuitem data-l10n-id="text-action-copy"
                 cmd="cmd_copy"/>
-      <menuitem label="&pasteCmd.label;"
-                accesskey="&pasteCmd.accesskey;"
+      <menuitem data-l10n-id="text-action-paste"
                 cmd="cmd_paste"/>
-      <menuitem label="&deleteCmd.label;"
-                accesskey="&deleteCmd.accesskey;"
+      <menuitem data-l10n-id="text-action-delete"
                 cmd="cmd_delete"/>
       <menuseparator/>
-      <menuitem label="&selectAllCmd.label;"
-                accesskey="&selectAllCmd.accesskey;"
+      <menuitem data-l10n-id="text-action-select-all"
                 cmd="cmd_selectAll"/>
       <menuseparator/>
       <menuitem data-lazy-l10n-id="synced-tabs-context-sync-now"
@@ -688,7 +687,7 @@
 # shared with other top level windows in macWindow.inc.xhtml.
 #include browser-menubar.inc
         </toolbaritem>
-        <spacer flex="1" skipintoolbarset="true" ordinal="1000"/>
+        <spacer flex="1" skipintoolbarset="true" style="-moz-box-ordinal-group: 1000;"/>
 #include titlebar-items.inc.xhtml
       </toolbar>
 
@@ -712,9 +711,7 @@
                   setfocus="false"
                   tooltip="tabbrowser-tab-tooltip"
                   stopwatchid="FX_TAB_CLICK_MS">
-              <hbox class="tab-drop-indicator-box">
-                <image class="tab-drop-indicator" hidden="true"/>
-              </hbox>
+              <hbox class="tab-drop-indicator" hidden="true"/>
               <arrowscrollbox orient="horizontal" flex="1" style="min-width: 1px;" clicktoscroll="true" class="tabbrowser-arrowscrollbox" scrolledtostart="true" scrolledtoend="true">
                 <tab is="tabbrowser-tab" class="tabbrowser-tab" selected="true" visuallyselected="true" fadein="true"/>
                 <toolbarbutton id="tabs-newtab-button"
@@ -991,6 +988,7 @@
                      onclick="gURLBar.handleCommand(event);"
                      tooltiptext="&goEndCap.tooltip;"/>
               <image class="urlbar-history-dropmarker urlbar-icon chromeclass-toolbar-additional"
+                     hidden="true"
                      tooltiptext="&urlbar.openHistoryPopup.tooltip;"/>
               <hbox id="page-action-buttons" context="pageActionContextMenu">
                 <toolbartabstop/>
@@ -1140,7 +1138,7 @@
       </toolbaritem>
 
       <hbox id="window-controls" hidden="true" pack="end" skipintoolbarset="true"
-            ordinal="1000">
+            style="-moz-box-ordinal-group: 1000;">
         <toolbarbutton id="minimize-button"
                        tooltiptext="&fullScreenMinimize.tooltip;"
                        oncommand="window.minimize();"/>
@@ -1345,7 +1343,7 @@
                    class="chromeclass-toolbar-additional"
                    title="&searchItem.title;"
                    align="center"
-                   flex="100"
+                   flex="175"
                    persist="width">
         <toolbartabstop/>
         <searchbar id="searchbar" flex="1"/>

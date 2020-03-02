@@ -15,6 +15,7 @@
 namespace mozilla {
 namespace dom {
 
+class PSHEntryOrSharedID;
 class SHistoryParent;
 class SHEntryParent;
 
@@ -26,7 +27,7 @@ class SHEntryParent;
 class LegacySHistory final : public nsSHistory {
  private:
   friend class SHistoryParent;
-  virtual ~LegacySHistory() {}
+  virtual ~LegacySHistory() = default;
 
   void EvictOutOfRangeWindowContentViewers(int32_t aIndex) override;
 

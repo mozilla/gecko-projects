@@ -632,8 +632,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   virtual mozilla::gfx::VsyncSource* GetHardwareVsync() {
     MOZ_ASSERT(mVsyncSource != nullptr);
-    MOZ_ASSERT(XRE_IsParentProcess() ||
-               mozilla::recordreplay::IsRecordingOrReplaying());
+    MOZ_ASSERT(XRE_IsParentProcess());
     return mVsyncSource;
   }
 
@@ -663,6 +662,12 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    * Update the frame rate (called e.g. after pref changes).
    */
   static void ReInitFrameRate();
+
+  /**
+   * Update allow sacrificing subpixel AA quality setting (called after pref
+   * changes).
+   */
+  void UpdateAllowSacrificingSubpixelAA();
 
   /**
    * Used to test which input types are handled via APZ.
@@ -755,8 +760,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
  protected:
   gfxPlatform();
   virtual ~gfxPlatform();
-
-  virtual bool HasBattery() { return false; }
 
   virtual void InitAcceleration();
   virtual void InitWebRenderConfig();
@@ -876,11 +879,11 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   static void InitOpenGLConfig();
   static void CreateCMSOutputProfile();
 
-  static void GetCMSOutputProfileData(void*& mem, size_t& size);
+  static nsTArray<uint8_t> GetCMSOutputProfileData();
 
   friend void RecordingPrefChanged(const char* aPrefName, void* aClosure);
 
-  virtual void GetPlatformCMSOutputProfile(void*& mem, size_t& size);
+  virtual nsTArray<uint8_t> GetPlatformCMSOutputProfileData();
 
   /**
    * Calling this function will compute and set the ideal tile size for the

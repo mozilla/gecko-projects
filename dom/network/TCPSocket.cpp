@@ -110,6 +110,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(TCPSocket, DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingDataAfterStartTLS)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSocketBridgeChild)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSocketBridgeParent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(TCPSocket, DOMEventTargetHelper)
@@ -758,7 +759,7 @@ bool TCPSocket::Send(JSContext* aCx, const ArrayBuffer& aData,
 
   nsCOMPtr<nsIArrayBufferInputStream> stream;
 
-  aData.ComputeLengthAndData();
+  aData.ComputeState();
   uint32_t byteLength =
       aByteLength.WasPassed() ? aByteLength.Value() : aData.Length();
 

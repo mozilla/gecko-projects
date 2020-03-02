@@ -70,8 +70,7 @@ mozilla::LazyLogModule gStorageLog("mozStorage");
     } while (0)
 #endif
 
-namespace mozilla {
-namespace storage {
+namespace mozilla::storage {
 
 using mozilla::dom::quota::QuotaObject;
 
@@ -766,10 +765,6 @@ nsresult Connection::initializeInternal() {
   if (srv != SQLITE_OK) {
     return convertResultCode(srv);
   }
-
-#if defined(MOZ_MEMORY_TEMP_STORE_PRAGMA)
-  (void)ExecuteSimpleSQL(NS_LITERAL_CSTRING("PRAGMA temp_store = 2;"));
-#endif
 
   // Register our built-in SQL functions.
   srv = registerFunctions(mDBConn);
@@ -2265,6 +2260,9 @@ Connection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
   }
 
   RefPtr<QuotaObject> databaseQuotaObject = GetQuotaObjectForFile(file);
+  if (NS_WARN_IF(!databaseQuotaObject)) {
+    return NS_ERROR_FAILURE;
+  }
 
   srv = ::sqlite3_file_control(mDBConn, nullptr, SQLITE_FCNTL_JOURNAL_POINTER,
                                &file);
@@ -2273,11 +2271,13 @@ Connection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
   }
 
   RefPtr<QuotaObject> journalQuotaObject = GetQuotaObjectForFile(file);
+  if (NS_WARN_IF(!journalQuotaObject)) {
+    return NS_ERROR_FAILURE;
+  }
 
   databaseQuotaObject.forget(aDatabaseQuotaObject);
   journalQuotaObject.forget(aJournalQuotaObject);
   return NS_OK;
 }
 
-}  // namespace storage
-}  // namespace mozilla
+}  // namespace mozilla::storage

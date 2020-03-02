@@ -6,10 +6,14 @@
 
 package org.mozilla.geckoview;
 
+import java.io.ByteArrayInputStream;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.AbstractSequentialList;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -419,6 +423,7 @@ public class GeckoSession implements Parcelable {
                 "GeckoView:ContentCrash",
                 "GeckoView:ContentKill",
                 "GeckoView:ContextMenu",
+                "GeckoView:DOMMetaViewportFit",
                 "GeckoView:DOMTitleChanged",
                 "GeckoView:DOMWindowClose",
                 "GeckoView:ExternalResponse",
@@ -455,6 +460,9 @@ public class GeckoSession implements Parcelable {
                                            message.getInt("screenY"),
                                            elem);
 
+                } else if ("GeckoView:DOMMetaViewportFit".equals(event)) {
+                    delegate.onMetaViewportFitChange(GeckoSession.this,
+                                                     message.getString("viewportfit"));
                 } else if ("GeckoView:DOMTitleChanged".equals(event)) {
                     delegate.onTitleChange(GeckoSession.this,
                                            message.getString("title"));
@@ -475,7 +483,7 @@ public class GeckoSession implements Parcelable {
                     }
 
                     try {
-                        delegate.onWebAppManifest(GeckoSession.this, manifest.toJSONObject());
+                        delegate.onWebAppManifest(GeckoSession.this, fixupWebAppManifest(manifest.toJSONObject()));
                     } catch (JSONException e) {
                         Log.e(LOGTAG, "Failed to convert web app manifest to JSON", e);
                     }
@@ -551,7 +559,8 @@ public class GeckoSession implements Parcelable {
 
                         delegate.onLoadError(GeckoSession.this, request.uri,
                                              new WebRequestError(WebRequestError.ERROR_MALFORMED_URI,
-                                                                 WebRequestError.ERROR_CATEGORY_URI));
+                                                                 WebRequestError.ERROR_CATEGORY_URI,
+                                                                 null));
 
                         return;
                     }
@@ -580,7 +589,7 @@ public class GeckoSession implements Parcelable {
                     final int errorModule = message.getInt("errorModule");
                     final int errorClass = message.getInt("errorClass");
 
-                    final WebRequestError err = WebRequestError.fromGeckoError(errorCode, errorModule, errorClass);
+                    final WebRequestError err = WebRequestError.fromGeckoError(errorCode, errorModule, errorClass, null);
 
                     final GeckoResult<String> result = delegate.onLoadError(GeckoSession.this, uri, err);
                     if (result == null) {
@@ -774,7 +783,6 @@ public class GeckoSession implements Parcelable {
                                       final String event,
                                       final GeckoBundle message,
                                       final EventCallback callback) {
-
                 if (delegate == null) {
                     callback.sendSuccess(/* granted */ false);
                     return;
@@ -799,6 +807,10 @@ public class GeckoSession implements Parcelable {
                         // doesn't support Web MIDI.
                         callback.sendError("Unsupported");
                         return;
+                    } else if ("autoplay-media-inaudible".equals(typeString)) {
+                        type = PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE;
+                    } else if ("autoplay-media-audible".equals(typeString)) {
+                        type = PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE;
                     } else {
                         throw new IllegalArgumentException("Unknown permission request: " + typeString);
                     }
@@ -1045,7 +1057,7 @@ public class GeckoSession implements Parcelable {
     }
 
     /**
-     * Get the current prompt delegate for this GeckoSession.
+     * Get the current permission delegate for this GeckoSession.
      * @return PermissionDelegate instance or null if using default delegate.
      */
     @UiThread
@@ -1257,6 +1269,9 @@ public class GeckoSession implements Parcelable {
 
         mWebExtensionListener = new WebExtension.Listener(this);
 
+        mAutofillSupport = new Autofill.Support(this);
+        mAutofillSupport.registerListeners();
+
         if (BuildConfig.DEBUG && handlersCount != mSessionHandlers.length) {
             throw new AssertionError("Add new handler to handlers list");
         }
@@ -1418,7 +1433,7 @@ public class GeckoSession implements Parcelable {
         final String chromeUri = mSettings.getChromeUri();
         final int screenId = mSettings.getScreenId();
         final boolean isPrivate = mSettings.getUsePrivateMode();
-        final boolean isRemote = mSettings.getUseMultiprocess();
+        final boolean isRemote = runtime.getSettings().getUseMultiprocess();
 
         mWindow = new Window(runtime, this, mNativeQueue);
         mWebExtensionListener.runtime = runtime;
@@ -1992,7 +2007,9 @@ public class GeckoSession implements Parcelable {
             mEventDispatcher.dispatch("GeckoView:FlushSessionState", null);
         }
 
-        getAutofillSupport().onActiveChanged(active);
+        ThreadUtils.postToUiThread(
+            () -> getAutofillSupport().onActiveChanged(active)
+        );
     }
 
     /**
@@ -2585,7 +2602,8 @@ public class GeckoSession implements Parcelable {
         final String mode = message.getString("mode");
         final String title = message.getString("title");
         final String msg = message.getString("msg");
-        GeckoResult<PromptDelegate.PromptResponse> res;
+        GeckoResult<PromptDelegate.PromptResponse> res = null;
+
         switch (type) {
             case "alert": {
                 final PromptDelegate.AlertPrompt prompt =
@@ -2708,6 +2726,29 @@ public class GeckoSession implements Parcelable {
                 res = delegate.onSharePrompt(session, prompt);
                 break;
             }
+            case "loginStorage": {
+                final int lsType = message.getInt("lsType");
+                final int hint = message.getInt("hint");
+                final GeckoBundle[] loginBundles =
+                    message.getBundleArray("logins");
+
+                if (loginBundles == null) {
+                    break;
+                }
+
+                final LoginStorage.LoginEntry[] logins =
+                    new LoginStorage.LoginEntry[loginBundles.length];
+
+                for (int i = 0; i < logins.length; ++i) {
+                    logins[i] = new LoginStorage.LoginEntry(loginBundles[i]);
+                }
+
+                final PromptDelegate.LoginStoragePrompt prompt =
+                    new PromptDelegate.LoginStoragePrompt(lsType, hint, logins);
+
+                res = delegate.onLoginStoragePrompt(session, prompt);
+                break;
+            }
             default: {
                 callback.sendError("Invalid type");
                 return;
@@ -2782,22 +2823,12 @@ public class GeckoSession implements Parcelable {
              * Contains the host associated with the certificate.
              */
             public final @NonNull String host;
+
             /**
-             * Contains the human-readable name of the certificate subject.
+             * The server certificate in use, if any.
              */
-            public final @NonNull String organization;
-            /**
-             * Contains the full name of the certificate subject, including location.
-             */
-            public final @NonNull String subjectName;
-            /**
-             * Contains the common name of the issuing authority.
-             */
-            public final @NonNull String issuerCommonName;
-            /**
-             * Contains the full/proper name of the issuing authority.
-             */
-            public final @NonNull String issuerOrganization;
+            public final @Nullable X509Certificate certificate;
+
             /**
              * Indicates the security level of the site; possible values are SECURITY_MODE_UNKNOWN,
              * SECURITY_MODE_IDENTIFIED, and SECURITY_MODE_VERIFIED. SECURITY_MODE_IDENTIFIED
@@ -2827,10 +2858,20 @@ public class GeckoSession implements Parcelable {
                 isException = identityData.getBoolean("securityException");
                 origin = identityData.getString("origin");
                 host = identityData.getString("host");
-                organization = identityData.getString("organization");
-                subjectName = identityData.getString("subjectName");
-                issuerCommonName = identityData.getString("issuerCommonName");
-                issuerOrganization = identityData.getString("issuerOrganization");
+
+                X509Certificate decodedCert = null;
+                try {
+                    final CertificateFactory factory = CertificateFactory.getInstance("X.509");
+                    final String certString = identityData.getString("certificate");
+                    if (certString != null) {
+                        final byte[] certBytes = Base64.decode(certString, Base64.NO_WRAP);
+                        decodedCert = (X509Certificate) factory.generateCertificate(new ByteArrayInputStream(certBytes));
+                    }
+                } catch (CertificateException e) {
+                    Log.e(LOGTAG, "Failed to decode certificate", e);
+                }
+
+                certificate = decodedCert;
             }
 
             /**
@@ -2844,10 +2885,7 @@ public class GeckoSession implements Parcelable {
                 isException = false;
                 origin = "";
                 host = "";
-                organization = "";
-                subjectName = "";
-                issuerCommonName = "";
-                issuerOrganization = "";
+                certificate = null;
             }
         }
 
@@ -2979,6 +3017,16 @@ public class GeckoSession implements Parcelable {
          */
         @UiThread
         default void onFullScreen(@NonNull GeckoSession session, boolean fullScreen) {}
+
+        /**
+         * A viewport-fit was discovered in the content or updated after the content.
+         *
+         * @param session The GeckoSession that initiated the callback.
+         * @param viewportFit The value of viewport-fit of meta element in content.
+         * @see <a href="https://drafts.csswg.org/css-round-display/#viewport-fit-descriptor">4.1. The viewport-fit descriptor</a>
+         */
+        @UiThread
+        default void onMetaViewportFitChange(@NonNull GeckoSession session, @NonNull String viewportFit) {}
 
         /**
          * Element details for onContextMenu callbacks.
@@ -3127,6 +3175,9 @@ public class GeckoSession implements Parcelable {
 
         /**
          * This is fired when the loaded document has a valid Web App Manifest present.
+         *
+         * The various colors (theme_color, background_color, etc.) present in the manifest
+         * have been  transformed into #AARRGGBB format.
          *
          * @param session The GeckoSession that contains the Web App Manifest
          * @param manifest A parsed and validated {@link JSONObject} containing the manifest contents.
@@ -3584,6 +3635,19 @@ public class GeckoSession implements Parcelable {
              * True if there was an active user gesture when the load was requested.
              */
             public final boolean hasUserGesture;
+
+            @Override
+            public String toString() {
+                final StringBuilder out = new StringBuilder("LoadRequest { ");
+                out
+                    .append("uri: " + uri)
+                    .append(", triggerUri: " + triggerUri)
+                    .append(", target: " + target)
+                    .append(", isRedirect: " + isRedirect)
+                    .append(", hasUserGesture: " + hasUserGesture)
+                    .append(" }");
+                return out.toString();
+            }
         }
 
         /**
@@ -3633,6 +3697,12 @@ public class GeckoSession implements Parcelable {
          * @param uri The URI that failed to load.
          * @param error A WebRequestError containing details about the error
          * @return A URI to display as an error. Returning null will halt the load entirely.
+         *         The following special methods are made available to the URI:
+         *         - document.addCertException(isTemporary), returns Promise
+         *         - document.getFailedCertSecurityInfo(), returns FailedCertSecurityInfo
+         *         - document.getNetErrorInfo(), returns NetErrorInfo
+         * @see <a href="https://searchfox.org/mozilla-central/source/dom/webidl/FailedCertSecurityInfo.webidl">FailedCertSecurityInfo IDL</a>
+         * @see <a href="https://searchfox.org/mozilla-central/source/dom/webidl/NetErrorInfo.webidl">NetErrorInfo IDL</a>
          */
         @UiThread
         default @Nullable GeckoResult<String> onLoadError(@NonNull GeckoSession session,
@@ -4598,6 +4668,101 @@ public class GeckoSession implements Parcelable {
             }
         }
 
+        /**
+         * LoginStoragePrompt contains the information necessary to handle a
+         * login storage request.
+         */
+        public class LoginStoragePrompt extends BasePrompt {
+            @Retention(RetentionPolicy.SOURCE)
+            @IntDef({ Type.SAVE })
+            /* package */ @interface LoginStorageType {}
+
+            // Sync with LoginStorageDelegate.Type in GeckoViewPrompt.js
+            /**
+             * Possible type of a {@link LoginStoragePrompt}.
+             */
+            public static class Type {
+                public static final int SAVE = 1;
+
+                protected Type() {}
+            }
+
+            @Retention(RetentionPolicy.SOURCE)
+            @IntDef(flag = true,
+                    value = { Hint.NONE })
+            /* package */ @interface LoginStorageHint {}
+
+            public static class Hint {
+                public static final int NONE = 0;
+
+                protected Hint() {}
+            }
+
+            /**
+             * The type of the prompt request, one of {@link LoginStoragePrompt.Type}.
+             */
+            public final @LoginStorageType int type;
+
+            /**
+             * The hint may provide some additional information on the nature or
+             * confidence level of the prompt request to support appropriate
+             * prompting styles. A flag combination of {@link LoginStoragePrompt.Hint}.
+             */
+            public final @LoginStorageHint int hint;
+
+            /**
+             * The logins that are subject to the prompt request.
+             * For {@link Type#SAVE}, it holds one
+             * {@link LoginStorage.LoginEntry} depicting the entry to be saved.
+             */
+            public final @NonNull LoginStorage.LoginEntry[] logins;
+
+            protected LoginStoragePrompt(
+                    final @LoginStorageType int type,
+                    final @LoginStorageHint int hint,
+                    final @NonNull LoginStorage.LoginEntry[] logins) {
+                super(null);
+
+                this.type = type;
+                this.hint = hint;
+                this.logins = logins;
+            }
+
+            /**
+             * Confirm the prompt by responding with a
+             * {@link LoginStorage.LoginEntry}.
+             * For {@link Type#SAVE}, confirm with the entry to be saved. This
+             * can be the original entry as provided by logins[0] or a modified
+             * entry based on that.
+             * Confirming a {@link Type#SAVE} prompt request triggers a
+             * {@link LoginStorage.Delegate#onLoginSave} request in the runtime
+             * delegate with the confirmed login entry.
+             *
+             * @param login A {@link LoginStorage.LoginEntry} specifying the
+             *              login entry saved.
+             *
+             * @return A {@link PromptResponse} which can be used to complete the
+             *         {@link GeckoResult} associated with this prompt.
+             */
+            @UiThread
+            public @NonNull PromptResponse confirm(
+                    final @NonNull LoginStorage.LoginEntry login) {
+                ensureResult().putBundle("login", login.toBundle());
+                return super.confirm();
+            }
+
+            /**
+             * Dismisses the prompt.
+             *
+             * @return A {@link PromptResponse} which can be used to complete the
+             *         {@link GeckoResult} associated with this prompt.
+             */
+            @UiThread
+            public @NonNull PromptResponse dismiss() {
+                return super.dismiss();
+            }
+        }
+
         // Delegate functions.
         /**
          * Display an alert prompt.
@@ -4749,6 +4914,24 @@ public class GeckoSession implements Parcelable {
         @UiThread
         default @Nullable GeckoResult<PromptResponse> onSharePrompt(@NonNull final GeckoSession session,
                                                                     @NonNull final SharePrompt prompt) {
+            return null;
+        }
+
+        /**
+         * Handle a login storage prompt.
+         * This is triggered by the user entering new or modified login
+         * credentials into a login form.
+         *
+         * @param session GeckoSession that triggered the prompt.
+         * @param prompt The {@link LoginStoragePrompt} that describes the prompt.
+         *
+         * @return A {@link GeckoResult} resolving to a {@link PromptResponse}
+         *         which includes all necessary information to resolve the prompt.
+         */
+        @UiThread
+        default @Nullable GeckoResult<PromptResponse> onLoginStoragePrompt(
+                @NonNull final GeckoSession session,
+                @NonNull final LoginStoragePrompt prompt) {
             return null;
         }
     }
@@ -4965,6 +5148,16 @@ public class GeckoSession implements Parcelable {
          * See: https://www.w3.org/TR/webxr
          */
         int PERMISSION_XR = 3;
+
+        /**
+         * Permission for allowing autoplay of inaudible (silent) video.
+         */
+        int PERMISSION_AUTOPLAY_INAUDIBLE = 4;
+
+        /**
+         * Permission for allowing autoplay of audible video.
+         */
+        int PERMISSION_AUTOPLAY_AUDIBLE = 5;
 
         /**
          * Callback interface for notifying the result of a permission request.
@@ -5216,7 +5409,10 @@ public class GeckoSession implements Parcelable {
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({PermissionDelegate.PERMISSION_GEOLOCATION,
             PermissionDelegate.PERMISSION_DESKTOP_NOTIFICATION,
-            PermissionDelegate.PERMISSION_XR})
+            PermissionDelegate.PERMISSION_PERSISTENT_STORAGE,
+            PermissionDelegate.PERMISSION_XR,
+            PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE,
+            PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE})
     /* package */ @interface Permission {}
 
     /**
@@ -5825,10 +6021,6 @@ public class GeckoSession implements Parcelable {
 
 
     private Autofill.Support getAutofillSupport() {
-        if (mAutofillSupport == null) {
-            mAutofillSupport = new Autofill.Support(this);
-        }
-
         return mAutofillSupport;
     }
 
@@ -5871,5 +6063,35 @@ public class GeckoSession implements Parcelable {
     @UiThread
     public @NonNull Autofill.Session getAutofillSession() {
         return getAutofillSupport().getAutofillSession();
+    }
+
+    private static String rgbaToArgb(final String color) {
+        // We expect #rrggbbaa
+        if (color.length() != 9 || !color.startsWith("#")) {
+            throw new IllegalArgumentException("Invalid color format");
+        }
+
+        return "#" + color.substring(7) + color.substring(1, 7);
+    }
+
+    private static void fixupManifestColor(final JSONObject manifest, final String name) throws JSONException {
+        if (manifest.isNull(name)) {
+            return;
+        }
+
+        manifest.put(name, rgbaToArgb(manifest.getString(name)));
+    }
+
+    private static JSONObject fixupWebAppManifest(final JSONObject manifest) {
+        // Colors are #rrggbbaa, but we want them to be #aarrggbb, since that's what
+        // android.graphics.Color expects.
+        try {
+            fixupManifestColor(manifest, "theme_color");
+            fixupManifestColor(manifest, "background_color");
+        } catch (JSONException e) {
+            Log.w(LOGTAG, "Failed to fixup web app manifest", e);
+        }
+
+        return manifest;
     }
 }

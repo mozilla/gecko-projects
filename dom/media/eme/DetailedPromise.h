@@ -40,18 +40,23 @@ class DetailedPromise : public Promise {
   void MaybeReject(nsresult aArg) = delete;
   void MaybeReject(nsresult aArg, const nsACString& aReason);
 
-  void MaybeReject(ErrorResult& aArg) = delete;
-  void MaybeReject(ErrorResult& aArg, const nsACString& aReason);
+  void MaybeReject(ErrorResult&& aArg) = delete;
+  void MaybeReject(ErrorResult&& aArg, const nsACString& aReason);
 
   // Facilities for rejecting with various spec-defined exception values.
-  inline void MaybeRejectWithDOMException(nsresult rv,
-                                          const nsACString& aMessage) {
-    MaybeReject(rv, aMessage);
+#define DOMEXCEPTION(name, err)                                   \
+  inline void MaybeRejectWith##name(const nsACString& aMessage) { \
+    LogRejectionReason(static_cast<uint32_t>(err), aMessage);     \
+    Promise::MaybeRejectWith##name(aMessage);                     \
+  }                                                               \
+  template <int N>                                                \
+  void MaybeRejectWith##name(const char(&aMessage)[N]) {          \
+    MaybeRejectWith##name(nsLiteralCString(aMessage));            \
   }
-  template <int N>
-  void MaybeRejectWithDOMException(nsresult rv, const char (&aMessage)[N]) {
-    MaybeRejectWithDOMException(rv, nsLiteralCString(aMessage));
-  }
+
+#include "mozilla/dom/DOMExceptionNames.h"
+
+#undef DOMEXCEPTION
 
   template <ErrNum errorNumber, typename... Ts>
   void MaybeRejectWithTypeError(Ts&&... aMessageArgs) = delete;
@@ -59,7 +64,7 @@ class DetailedPromise : public Promise {
   inline void MaybeRejectWithTypeError(const nsAString& aMessage) {
     ErrorResult res;
     res.ThrowTypeError(aMessage);
-    MaybeReject(res, NS_ConvertUTF16toUTF8(aMessage));
+    MaybeReject(std::move(res), NS_ConvertUTF16toUTF8(aMessage));
   }
 
   template <int N>
@@ -73,7 +78,7 @@ class DetailedPromise : public Promise {
   inline void MaybeRejectWithRangeError(const nsAString& aMessage) {
     ErrorResult res;
     res.ThrowRangeError(aMessage);
-    MaybeReject(res, NS_ConvertUTF16toUTF8(aMessage));
+    MaybeReject(std::move(res), NS_ConvertUTF16toUTF8(aMessage));
   }
 
   template <int N>

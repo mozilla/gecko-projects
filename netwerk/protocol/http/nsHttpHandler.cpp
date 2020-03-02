@@ -63,6 +63,7 @@
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/LazyIdleThread.h"
 
@@ -117,7 +118,7 @@
 
 #define ACCEPT_HEADER_NAVIGATION \
   "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-#define ACCEPT_HEADER_IMAGE "image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
+#define ACCEPT_HEADER_IMAGE "image/webp,*/*"
 #define ACCEPT_HEADER_STYLE "text/css,*/*;q=0.1"
 #define ACCEPT_HEADER_ALL "*/*"
 
@@ -132,8 +133,7 @@
 
 using mozilla::dom::Promise;
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 LazyLogModule gHttpLog("nsHttp");
 
@@ -223,6 +223,7 @@ nsHttpHandler::nsHttpHandler()
       mPhishyUserPassLength(1),
       mQoSBits(0x00),
       mEnforceAssocReq(false),
+      mImageAcceptHeader(ACCEPT_HEADER_IMAGE),
       mLastUniqueID(NowInSeconds()),
       mSessionStartTime(0),
       mLegacyAppName("Mozilla"),
@@ -294,6 +295,7 @@ nsHttpHandler::nsHttpHandler()
       mNextChannelId(1),
       mLastActiveTabLoadOptimizationLock(
           "nsHttpConnectionMgr::LastActiveTabLoadOptimization"),
+      mSpdyBlacklistLock("nsHttpHandler::SpdyBlacklist"),
       mThroughCaptivePortal(false) {
   LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
@@ -419,6 +421,7 @@ static const char* gCallbackPrefs[] = {
     TCP_FAST_OPEN_STALLS_LIMIT,
     TCP_FAST_OPEN_STALLS_IDLE,
     TCP_FAST_OPEN_STALLS_TIMEOUT,
+    "image.http.accept",
     nullptr,
 };
 
@@ -588,7 +591,7 @@ nsresult nsHttpHandler::InitConnectionMgr() {
     return NS_OK;
   }
 
-  if (gIOService->UseSocketProcess() && XRE_IsParentProcess()) {
+  if (nsIOService::UseSocketProcess() && XRE_IsParentProcess()) {
     if (!gIOService->SocketProcessReady()) {
       gIOService->CallOrWaitForSocketProcess(
           []() { Unused << gHttpHandler->InitConnectionMgr(); });
@@ -603,7 +606,7 @@ nsresult nsHttpHandler::InitConnectionMgr() {
 
     mConnMgr = connMgr;
   } else {
-    MOZ_ASSERT(XRE_IsSocketProcess() || !gIOService->UseSocketProcess());
+    MOZ_ASSERT(XRE_IsSocketProcess() || !nsIOService::UseSocketProcess());
     mConnMgr = new nsHttpConnectionMgr();
   }
 
@@ -635,7 +638,7 @@ nsresult nsHttpHandler::AddStandardRequestHeaders(
     accept.Assign(ACCEPT_HEADER_NAVIGATION);
   } else if (aContentPolicyType == nsIContentPolicy::TYPE_IMAGE ||
              aContentPolicyType == nsIContentPolicy::TYPE_IMAGESET) {
-    accept.Assign(ACCEPT_HEADER_IMAGE);
+    accept.Assign(mImageAcceptHeader);
   } else if (aContentPolicyType == nsIContentPolicy::TYPE_STYLESHEET) {
     accept.Assign(ACCEPT_HEADER_STYLE);
   } else {
@@ -823,6 +826,18 @@ void nsHttpHandler::NotifyObservers(nsIChannel* chan, const char* event) {
 nsresult nsHttpHandler::AsyncOnChannelRedirect(
     nsIChannel* oldChan, nsIChannel* newChan, uint32_t flags,
     nsIEventTarget* mainThreadEventTarget) {
+  MOZ_ASSERT(NS_IsMainThread() && (oldChan && newChan));
+
+  nsCOMPtr<nsIURI> oldURI;
+  oldChan->GetURI(getter_AddRefs(oldURI));
+  MOZ_ASSERT(oldURI);
+
+  nsCOMPtr<nsIURI> newURI;
+  newChan->GetURI(getter_AddRefs(newURI));
+  MOZ_ASSERT(newURI);
+
+  AntiTrackingCommon::RedirectHeuristic(oldChan, oldURI, newChan, newURI);
+
   // TODO E10S This helper has to be initialized on the other process
   RefPtr<nsAsyncRedirectVerifyHelper> redirectCallbackHelper =
       new nsAsyncRedirectVerifyHelper();
@@ -1933,6 +1948,13 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     }
   }
 
+  if (PREF_CHANGED("image.http.accept")) {
+    rv = Preferences::GetCString("image.http.accept", mImageAcceptHeader);
+    if (NS_FAILED(rv)) {
+      mImageAcceptHeader.Assign(ACCEPT_HEADER_IMAGE);
+    }
+  }
+
   // Enable HTTP response timeout if TCP Keepalives are disabled.
   mResponseTimeoutEnabled =
       !mTCPKeepaliveShortLivedEnabled && !mTCPKeepaliveLongLivedEnabled;
@@ -2367,8 +2389,7 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
   if (IsNeckoChild()) {
     ipc::URIParams params;
     SerializeURI(aURI, params);
-    gNeckoChild->SendSpeculativeConnect(params, IPC::Principal(aPrincipal),
-                                        anonymous);
+    gNeckoChild->SendSpeculativeConnect(params, aPrincipal, anonymous);
     return NS_OK;
   }
 
@@ -2669,11 +2690,17 @@ bool nsHttpHandler::IsBeforeLastActiveTabLoadOptimization(
 }
 
 void nsHttpHandler::BlacklistSpdy(const nsHttpConnectionInfo* ci) {
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+
   mConnMgr->BlacklistSpdy(ci);
-  mBlacklistedSpdyOrigins.PutEntry(ci->GetOrigin());
+  if (!mBlacklistedSpdyOrigins.Contains(ci->GetOrigin())) {
+    MutexAutoLock lock(mSpdyBlacklistLock);
+    mBlacklistedSpdyOrigins.PutEntry(ci->GetOrigin());
+  }
 }
 
 bool nsHttpHandler::IsSpdyBlacklisted(const nsHttpConnectionInfo* ci) {
+  MutexAutoLock lock(mSpdyBlacklistLock);
   return mBlacklistedSpdyOrigins.Contains(ci->GetOrigin());
 }
 
@@ -2717,5 +2744,47 @@ nsresult nsHttpHandler::CancelTransaction(HttpTransactionShell* trans,
   return mConnMgr->CancelTransaction(trans, reason);
 }
 
-}  // namespace net
-}  // namespace mozilla
+void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports* aChannel) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsWeakPtr channel(do_GetWeakReference(aChannel));
+  mIDToHttpChannelMap.Put(aId, std::move(channel));
+}
+
+void nsHttpHandler::RemoveHttpChannel(uint64_t aId) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  if (!NS_IsMainThread()) {
+    nsCOMPtr<nsIRunnable> idleRunnable(NewCancelableRunnableMethod<uint64_t>(
+        "nsHttpHandler::RemoveHttpChannel", this,
+        &nsHttpHandler::RemoveHttpChannel, aId));
+
+    NS_DispatchToMainThreadQueue(do_AddRef(idleRunnable),
+                                 EventQueuePriority::Idle);
+    return;
+  }
+
+  auto entry = mIDToHttpChannelMap.Lookup(aId);
+  if (entry) {
+    entry.Remove();
+  }
+}
+
+nsWeakPtr nsHttpHandler::GetWeakHttpChannel(uint64_t aId) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mIDToHttpChannelMap.Get(aId);
+}
+
+nsresult nsHttpHandler::CompleteUpgrade(
+    HttpTransactionShell* aTrans, nsIHttpUpgradeListener* aUpgradeListener) {
+  return mConnMgr->CompleteUpgrade(aTrans, aUpgradeListener);
+}
+
+nsresult nsHttpHandler::DoShiftReloadConnectionCleanup(
+    nsHttpConnectionInfo* aCi) {
+  return mConnMgr->DoShiftReloadConnectionCleanup(aCi);
+}
+
+}  // namespace mozilla::net

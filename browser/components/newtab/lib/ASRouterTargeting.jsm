@@ -344,12 +344,12 @@ function getSortedMessages(messages, options = {}) {
 
 const TargetingGetters = {
   get locale() {
-    return Services.locale.appLocaleAsLangTag;
+    return Services.locale.appLocaleAsBCP47;
   },
   get localeLanguageCode() {
     return (
-      Services.locale.appLocaleAsLangTag &&
-      Services.locale.appLocaleAsLangTag.substr(0, 2)
+      Services.locale.appLocaleAsBCP47 &&
+      Services.locale.appLocaleAsBCP47.substr(0, 2)
     );
   },
   get browserSettings() {
@@ -503,10 +503,6 @@ const TargetingGetters = {
   },
   get isWhatsNewPanelEnabled() {
     return isWhatsNewPanelEnabled;
-  },
-  get isFxABadgeEnabled() {
-    // Requires cleanup and update of remote messages. See Bug 1601965.
-    return true;
   },
   get userPrefs() {
     return {

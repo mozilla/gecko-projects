@@ -387,7 +387,7 @@ struct js::AsmJSMetadata : Metadata, AsmJSMetadataCacheablePod {
   const AsmJSMetadataCacheablePod& pod() const { return *this; }
 };
 
-typedef RefPtr<AsmJSMetadata> MutableAsmJSMetadata;
+using MutableAsmJSMetadata = RefPtr<AsmJSMetadata>;
 
 /*****************************************************************************/
 // ParseNode utilities
@@ -1912,8 +1912,9 @@ class MOZ_STACK_CLASS JS_HAZ_ROOTED ModuleValidator
     ErrorMetadata metadata;
     if (ts.computeErrorMetadata(&metadata, AsVariant(offset))) {
       if (ts.anyCharsAccess().options().throwOnAsmJSValidationFailureOption) {
-        ReportCompileError(cx_, std::move(metadata), nullptr, JSREPORT_ERROR,
-                           JSMSG_USE_ASM_TYPE_FAIL, &args);
+        ReportCompileErrorLatin1(cx_, std::move(metadata), nullptr,
+                                 JSREPORT_ERROR, JSMSG_USE_ASM_TYPE_FAIL,
+                                 &args);
       } else {
         // asm.js type failure is indicated by calling one of the fail*
         // functions below.  These functions always return false to
@@ -1940,7 +1941,7 @@ class MOZ_STACK_CLASS JS_HAZ_ROOTED ModuleValidator
     }
 
     asmJSMetadata_->toStringStart =
-        moduleFunctionNode_->funbox()->toStringStart;
+        moduleFunctionNode_->funbox()->extent.toStringStart;
     asmJSMetadata_->srcStart = moduleFunctionNode_->body()->pn_pos.begin;
     asmJSMetadata_->strict = parser_.pc_->sc()->strict() &&
                              !parser_.pc_->sc()->hasExplicitUseStrict();
@@ -7106,6 +7107,7 @@ static bool DoCompileAsmJS(JSContext* cx, AsmJSParser<Unit>& parser,
   // The module function dynamically links the AsmJSModule when called and
   // generates a set of functions wrapping all the exports.
   FunctionBox* funbox = parser.pc_->functionBox();
+
   RootedFunction moduleFun(cx, NewAsmJSModuleFunction(cx, funbox, moduleObj));
   if (!moduleFun) {
     return false;
@@ -7118,10 +7120,12 @@ static bool DoCompileAsmJS(JSContext* cx, AsmJSParser<Unit>& parser,
   MOZ_ASSERT(funbox->isInterpreted());
   funbox->clobberFunction(moduleFun);
 
-  // Clear any deferred allocation data. This is important in particular
+  // Clear any function creation data. This is important in particular
   // to avoid publishing a deferred function allocation on top of the
   // module function set on the funbox above.
-  funbox->clearDeferredAllocationInfo();
+  if (funbox->hasFunctionCreationIndex()) {
+    funbox->clearFunctionCreationData();
+  }
 
   // Success! Write to the console with a "warning" message indicating
   // total compilation time.

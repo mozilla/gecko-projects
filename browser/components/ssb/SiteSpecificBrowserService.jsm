@@ -39,7 +39,16 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   KeyValueService: "resource://gre/modules/kvstore.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   ImageTools: "resource:///modules/ssb/ImageTools.jsm",
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
 });
+
+if (AppConstants.platform == "win") {
+  ChromeUtils.defineModuleGetter(
+    this,
+    "WindowsSupport",
+    "resource:///modules/ssb/WindowsSupport.jsm"
+  );
+}
 
 /**
  * A schema version for the SSB data stored in the kvstore.
@@ -67,6 +76,41 @@ function uuid() {
 
 const sharedDataKey = id => `SiteSpecificBrowserBase:${id}`;
 const storeKey = id => SSB_STORE_PREFIX + id;
+
+/**
+ * Builds a lookup table for all the icons in order of size.
+ */
+function buildIconList(icons) {
+  let iconList = [];
+
+  for (let icon of icons) {
+    for (let sizeSpec of icon.sizes) {
+      let size =
+        sizeSpec == "any" ? Number.MAX_SAFE_INTEGER : parseInt(sizeSpec);
+
+      iconList.push({
+        icon,
+        size,
+      });
+    }
+  }
+
+  iconList.sort((a, b) => {
+    // Given that we're using MAX_SAFE_INTEGER adding a value to that would
+    // overflow and give odd behaviour. And we're using numbers supplied by a
+    // website so just compare for safety.
+    if (a.size < b.size) {
+      return -1;
+    }
+
+    if (a.size > b.size) {
+      return 1;
+    }
+
+    return 0;
+  });
+  return iconList;
+}
 
 const IS_MAIN_PROCESS =
   Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT;
@@ -418,9 +462,13 @@ class SiteSpecificBrowser extends SiteSpecificBrowserBase {
       );
     }
 
-    return SiteSpecificBrowser.createFromManifest(
-      await buildManifestForBrowser(browser)
-    );
+    let manifest = await buildManifestForBrowser(browser);
+    let ssb = await SiteSpecificBrowser.createFromManifest(manifest);
+
+    if (!manifest.name) {
+      ssb.name = browser.contentTitle;
+    }
+    return ssb;
   }
 
   /**
@@ -479,6 +527,16 @@ class SiteSpecificBrowser extends SiteSpecificBrowserBase {
 
     this._config.persisted = true;
     await this._maybeSave();
+
+    if (AppConstants.platform == "win") {
+      await WindowsSupport.install(this);
+    }
+
+    Services.obs.notifyObservers(
+      null,
+      "site-specific-browser-install",
+      this.id
+    );
   }
 
   /**
@@ -490,9 +548,19 @@ class SiteSpecificBrowser extends SiteSpecificBrowserBase {
       return;
     }
 
+    if (AppConstants.platform == "win") {
+      await WindowsSupport.uninstall(this);
+    }
+
     this._config.persisted = false;
     let kvstore = await SiteSpecificBrowserService.getKVStore();
     await kvstore.delete(storeKey(this.id));
+
+    Services.obs.notifyObservers(
+      null,
+      "site-specific-browser-uninstall",
+      this.id
+    );
   }
 
   /**
@@ -500,6 +568,23 @@ class SiteSpecificBrowser extends SiteSpecificBrowserBase {
    */
   get id() {
     return this._id;
+  }
+
+  get name() {
+    if (this._config.name) {
+      return this._config.name;
+    }
+
+    if (this._manifest.name) {
+      return this._manifest.name;
+    }
+
+    return this.startURI.host;
+  }
+
+  set name(val) {
+    this._config.name = val;
+    this._maybeSave();
   }
 
   /**
@@ -517,12 +602,62 @@ class SiteSpecificBrowser extends SiteSpecificBrowserBase {
   }
 
   /**
+   * Gets the best icon for the requested size. It may not be the exact size
+   * requested.
+   *
+   * Finds the smallest icon that is larger than the requested size. If no such
+   * icon exists returns the largest icon available. Returns null only if there
+   * are no icons at all.
+   *
+   * @param {Number} size the size of the desired icon in pixels.
+   * @return {IconResource} the icon resource for the icon.
+   */
+  getIcon(size) {
+    if (!this._iconSizes) {
+      this._iconSizes = buildIconList(this._manifest.icons);
+    }
+
+    if (!this._iconSizes.length) {
+      return null;
+    }
+
+    let i = 0;
+    while (i < this._iconSizes.length && this._iconSizes[i].size < size) {
+      i++;
+    }
+
+    return i < this._iconSizes.length
+      ? this._iconSizes[i].icon
+      : this._iconSizes[this._iconSizes.length - 1].icon;
+  }
+
+  /**
+   * Gets the best icon for the requested size. If there isn't a perfect match
+   * the closest match will be scaled.
+   *
+   * @param {Number} size the size of the desired icon in pixels.
+   * @return {string|null} a data URI for the icon.
+   */
+  async getScaledIcon(size) {
+    let icon = this.getIcon(size);
+    if (!icon) {
+      return null;
+    }
+
+    let { container } = await ImageTools.loadImage(
+      Services.io.newURI(icon.src)
+    );
+    return ImageTools.scaleImage(container, size, size);
+  }
+
+  /**
    * Updates this SSB from a new app manifest.
    *
    * @param {Manifest} manifest the new app manifest.
    */
   async updateFromManifest(manifest) {
     this._manifest = manifest;
+    this._iconSizes = null;
     this._scope = Services.io.newURI(this._manifest.scope);
     this._config.needsUpdate = false;
 
@@ -562,13 +697,17 @@ class SiteSpecificBrowser extends SiteSpecificBrowserBase {
       sa.appendElement(uristr);
     }
 
-    Services.ww.openWindow(
+    let win = Services.ww.openWindow(
       null,
       "chrome://browser/content/ssb/ssb.html",
       "_blank",
       "chrome,dialog=no,all",
       sa
     );
+
+    if (Services.appinfo.OS == "WINNT") {
+      WindowsSupport.applyOSIntegration(this, win);
+    }
   }
 }
 
@@ -656,6 +795,19 @@ const SiteSpecificBrowserService = {
     }
 
     return this.kvstore;
+  },
+
+  /**
+   * Checks if OS integration is enabled. This will affect whether installs and
+   * uninstalls have effects on the OS itself amongst other things. Generally
+   * only disabled for testing.
+   */
+  get useOSIntegration() {
+    if (Services.appinfo.OS != "WINNT") {
+      return false;
+    }
+
+    return Services.prefs.getBoolPref("browser.ssb.osintegration", true);
   },
 
   /**

@@ -521,7 +521,6 @@ All `"activity_stream_session"` pings have the following basic shape. Some field
   "locale": "en-US",
   "page": ["about:newtab" | "about:home" | "about:welcome" | "unknown"],
   "session_duration": 4199,
-  "region": "US",
   "profile_creation_date": 14786,
   "user_prefs": 7
 }
@@ -1025,7 +1024,8 @@ CFR impression ping has two forms, in which the message_id could be of different
   "addon_version": "20180710100040",
   "locale": "en-US",
   "message_id": "EXTENDED_TRIPLETS_1",
-  "event": "IMPRESSION"
+  "event": "IMPRESSION",
+  "event_context": { "page": ["about:welcome" | "about:home" | "about:newtab"] }
 }
 ```
 
@@ -1057,7 +1057,8 @@ This reports the user's interaction with Activity Stream Router.
   "locale": "en-US",
   "source": "ONBOARDING",
   "message_id": "onboarding_message_1",
-  "event": ["IMPRESSION" | "CLICK_BUTTION" | "INSTALL" | "BLOCK"]
+  "event": ["IMPRESSION" | "CLICK_BUTTION" | "INSTALL" | "BLOCK"],
+  "event_context": { "page": ["about:welcome" | "about:home" | "about:newtab"] }
 }
 ```
 
@@ -1181,5 +1182,36 @@ For message impressions we concatenate the ids of all messages in the panel.
   "message_id": "WHATS_NEW_70",
   "event": ["CLICK" | "IMPRESSION"],
   "value": { "view": ["application_menu" | "toolbar_dropdown"] }
+}
+```
+
+## Moments page pings
+
+This reports when a moments page message has set the user preference for
+`browser.startup.homepage_override.once`. It goes through the same policy
+as other CFR messages.
+
+```
+// Release ping
+{
+  "action": "cfr_user_event"
+  "addon_version": "20200225022813"
+  "bucket_id": "WNP_THANK_YOU"
+  "event": "MOMENTS_PAGE_SET"
+  "impression_id": "{d85d2268-b751-9543-b6d7-aad523bf2b26}"
+  "locale": "en-US"
+  "message_id": "n/a"
+  "source": "CFR"
+}
+
+// Beta and Nightly channels
+{
+  "source": "CFR",
+  "message_id": "WNP_THANK_YOU",
+  "bucket_id": "WNP_THANK_YOU",
+  "event": "MOMENTS_PAGE_SET",
+  "addon_version": "20200225022813",
+  "locale": "en-US",
+  "client_id": "21dc1375-b24e-984b-83e9-c8a9660ae4ff"
 }
 ```

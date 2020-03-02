@@ -18,9 +18,11 @@
 #define BRUSH_KIND_TEXT             3
 #define BRUSH_KIND_LINEAR_GRADIENT  4
 #define BRUSH_KIND_RADIAL_GRADIENT  5
-#define BRUSH_KIND_BLEND            6
-#define BRUSH_KIND_MIX_BLEND        7
-#define BRUSH_KIND_YV               8
+#define BRUSH_KIND_CONIC_GRADIENT   6
+#define BRUSH_KIND_BLEND            7
+#define BRUSH_KIND_MIX_BLEND        8
+#define BRUSH_KIND_YV               9
+#define BRUSH_KIND_OPACITY          10
 
 int vecs_per_brush(int brush_kind);
 
@@ -70,6 +72,22 @@ int vecs_per_brush(int brush_kind);
 #include brush_radial_gradient
 #endif
 
+#undef VECS_PER_SPECIFIC_BRUSH
+#undef WR_BRUSH_VS_FUNCTION
+#undef WR_BRUSH_FS_FUNCTION
+
+#ifdef WR_FEATURE_CONIC_GRADIENT_BRUSH
+#include brush_conic_gradient
+#endif
+
+#undef VECS_PER_SPECIFIC_BRUSH
+#undef WR_BRUSH_VS_FUNCTION
+#undef WR_BRUSH_FS_FUNCTION
+
+#ifdef WR_FEATURE_OPACITY_BRUSH
+#include brush_opacity
+#endif
+
 int vecs_per_brush(int brush_kind) {
     switch (brush_kind) {
         // The default arm should never be taken, we let it point to whichever shader
@@ -98,6 +116,15 @@ int vecs_per_brush(int brush_kind) {
 
         #ifdef WR_FEATURE_RADIAL_GRADIENT_BRUSH
         case BRUSH_KIND_RADIAL_GRADIENT: return VECS_PER_RADIAL_GRADIENT_BRUSH;
+        #endif
+
+
+        #ifdef WR_FEATURE_CONIC_GRADIENT_BRUSH
+        case BRUSH_KIND_CONIC_GRADIENT: return VECS_PER_CONIC_GRADIENT_BRUSH;
+        #endif
+
+        #ifdef WR_FEATURE_OPACITY_BRUSH
+        case BRUSH_KIND_OPACITY: return VECS_PER_OPACITY_BRUSH;
         #endif
     }
 }
@@ -159,6 +186,18 @@ void multi_brush_vs(
             radial_gradient_brush_vs(BRUSH_VS_PARAMS);
             break;
         #endif
+
+        #ifdef WR_FEATURE_CONIC_GRADIENT_BRUSH
+        case BRUSH_KIND_CONIC_GRADIENT:
+            conic_gradient_brush_vs(BRUSH_VS_PARAMS);
+            break;
+        #endif
+
+        #ifdef WR_FEATURE_OPACITY_BRUSH
+        case BRUSH_KIND_OPACITY:
+            opacity_brush_vs(BRUSH_VS_PARAMS);
+            break;
+        #endif
     }
 }
 
@@ -192,6 +231,14 @@ Fragment multi_brush_fs(int brush_kind) {
 
         #ifdef WR_FEATURE_RADIAL_GRADIENT_BRUSH
         case BRUSH_KIND_RADIAL_GRADIENT: return radial_gradient_brush_fs();
+        #endif
+
+        #ifdef WR_FEATURE_CONIC_GRADIENT_BRUSH
+        case BRUSH_KIND_CONIC_GRADIENT: return conic_gradient_brush_fs();
+        #endif
+
+        #ifdef WR_FEATURE_OPACITY_BRUSH
+        case BRUSH_KIND_OPACITY: return opacity_brush_fs();
         #endif
     }
 }

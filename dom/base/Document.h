@@ -16,7 +16,8 @@
 #include "nsCompatibility.h"      // for member
 #include "nsCOMPtr.h"             // for member
 #include "nsICookieSettings.h"
-#include "nsGkAtoms.h"  // for static class members
+#include "nsGkAtoms.h"           // for static class members
+#include "nsNameSpaceManager.h"  // for static class members
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIContentViewer.h"
@@ -40,6 +41,7 @@
 #include "nsStubMutationObserver.h"
 #include "nsTHashtable.h"  // for member
 #include "nsURIHashKey.h"
+#include "mozilla/ServoBindingTypes.h"
 #include "mozilla/UseCounter.h"
 #include "mozilla/WeakPtr.h"
 #include "Units.h"
@@ -48,6 +50,7 @@
 #include "nsClassHashtable.h"
 #include "ReferrerInfo.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/CallState.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/dom/ContentBlockingLog.h"
 #include "mozilla/dom/DispatcherTrait.h"
@@ -57,7 +60,6 @@
 #include "mozilla/LinkedList.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/SegmentedVector.h"
-#include "mozilla/StyleSheet.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/FailedCertSecurityInfoBinding.h"
@@ -131,10 +133,11 @@ class nsXULPrototypeElement;
 class PermissionDelegateHandler;
 class nsIPermissionDelegateHandler;
 struct nsFont;
+struct StyleUseCounters;
 
 namespace mozilla {
 class AbstractThread;
-class CSSStyleSheet;
+class StyleSheet;
 class EditorCommand;
 class Encoding;
 class ErrorResult;
@@ -142,11 +145,14 @@ class EventStates;
 class EventListenerManager;
 class FullscreenExit;
 class FullscreenRequest;
+struct LangGroupFontPrefs;
 class PendingAnimationTracker;
 class PresShell;
 class ServoStyleSet;
+enum class StyleOrigin : uint8_t;
 class SMILAnimationController;
 enum class StyleCursorKind : uint8_t;
+enum class StylePrefersColorScheme : uint8_t;
 template <typename>
 class OwningNonNull;
 struct URLExtraData;
@@ -211,6 +217,7 @@ class SVGUseElement;
 class Touch;
 class TouchList;
 class TreeWalker;
+enum class ViewportFitType : uint8_t;
 class XPathEvaluator;
 class XPathExpression;
 class XPathNSResolver;
@@ -240,6 +247,7 @@ enum BFCacheStatus {
   CONTAINS_MSE_CONTENT = 1 << 8,         // Status 8
   HAS_ACTIVE_SPEECH_SYNTHESIS = 1 << 9,  // Status 9
   HAS_USED_VR = 1 << 10,                 // Status 10
+  CONTAINS_REMOTE_SUBFRAMES = 1 << 11,   // Status 11
 };
 
 }  // namespace dom
@@ -288,7 +296,7 @@ class DocHeaderData {
 };
 
 class ExternalResourceMap {
-  typedef bool (*SubDocEnumFunc)(Document& aDocument, void* aData);
+  typedef CallState (*SubDocEnumFunc)(Document& aDocument, void* aData);
 
  public:
   /**
@@ -366,7 +374,7 @@ class ExternalResourceMap {
 
  protected:
   class PendingLoad : public ExternalResourceLoad, public nsIStreamListener {
-    ~PendingLoad() {}
+    ~PendingLoad() = default;
 
    public:
     explicit PendingLoad(Document* aDisplayDocument)
@@ -397,7 +405,7 @@ class ExternalResourceMap {
   friend class PendingLoad;
 
   class LoadgroupCallbacks final : public nsIInterfaceRequestor {
-    ~LoadgroupCallbacks() {}
+    ~LoadgroupCallbacks() = default;
 
    public:
     explicit LoadgroupCallbacks(nsIInterfaceRequestor* aOtherCallbacks)
@@ -468,6 +476,8 @@ class Document : public nsINode,
                  public nsStubMutationObserver,
                  public DispatcherTrait,
                  public SupportsWeakPtr<Document> {
+  friend class DocumentOrShadowRoot;
+
  protected:
   explicit Document(const char* aContentType);
   virtual ~Document();
@@ -1108,330 +1118,19 @@ class Document : public nsINode,
   }
 
   /**
-   * Get the content blocking log.
+   * Returns true if the document holds a CSP
+   * delivered through an HTTP Header.
    */
-  ContentBlockingLog* GetContentBlockingLog() { return &mContentBlockingLog; }
-
-  /**
-   * Get tracking content blocked flag for this document.
-   */
-  bool GetHasTrackingContentBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT);
+  bool GetHasCSPDeliveredThroughHeader() {
+    return mHasCSPDeliveredThroughHeader;
   }
 
   /**
-   * Get fingerprinting content blocked flag for this document.
+   * Return a promise which resolves to the content blocking events.
    */
-  bool GetHasFingerprintingContentBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_BLOCKED_FINGERPRINTING_CONTENT);
-  }
-
-  /**
-   * Get cryptomining content blocked flag for this document.
-   */
-  bool GetHasCryptominingContentBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_BLOCKED_CRYPTOMINING_CONTENT);
-  }
-
-  /**
-   * Get socialtracking content blocked flag for this document.
-   */
-  bool GetHasSocialTrackingContentBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_BLOCKED_SOCIALTRACKING_CONTENT);
-  }
-
-  /**
-   * Get all cookies blocked flag for this document.
-   */
-  bool GetHasAllCookiesBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL);
-  }
-
-  /**
-   * Get tracking cookies blocked flag for this document.
-   */
-  bool GetHasTrackingCookiesBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER);
-  }
-
-  /**
-   * Get social tracking cookies blocked flag for this document.
-   */
-  bool GetHasSocialTrackingCookiesBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER);
-  }
-
-  /**
-   * Get third-party cookies blocked flag for this document.
-   */
-  bool GetHasForeignCookiesBlocked() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN);
-  }
-
-  /**
-   * Get cookies blocked by site permission flag for this document.
-   */
-  bool GetHasCookiesBlockedByPermission() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_BY_PERMISSION);
-  }
-
-  /**
-   * Set the tracking content blocked flag for this document.
-   */
-  void SetHasTrackingContentBlocked(bool aHasTrackingContentBlocked,
-                                    const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked, nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT,
-        aHasTrackingContentBlocked);
-  }
-
-  /**
-   * Set the fingerprinting content blocked flag for this document.
-   */
-  void SetHasFingerprintingContentBlocked(bool aHasFingerprintingContentBlocked,
-                                          const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_BLOCKED_FINGERPRINTING_CONTENT,
-        aHasFingerprintingContentBlocked);
-  }
-
-  /**
-   * Set the cryptomining content blocked flag for this document.
-   */
-  void SetHasCryptominingContentBlocked(bool aHasCryptominingContentBlocked,
-                                        const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_BLOCKED_CRYPTOMINING_CONTENT,
-        aHasCryptominingContentBlocked);
-  }
-
-  /**
-   * Set the socialtracking content blocked flag for this document.
-   */
-  void SetHasSocialTrackingContentBlocked(bool aHasSocialTrackingContentBlocked,
-                                          const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_BLOCKED_SOCIALTRACKING_CONTENT,
-        aHasSocialTrackingContentBlocked);
-  }
-
-  /**
-   * Set the all cookies blocked flag for this document.
-   */
-  void SetHasAllCookiesBlocked(bool aHasAllCookiesBlocked,
-                               const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(aOriginBlocked,
-                             nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL,
-                             aHasAllCookiesBlocked);
-  }
-
-  /**
-   * Set the tracking cookies blocked flag for this document.
-   */
-  void SetHasTrackingCookiesBlocked(
-      bool aHasTrackingCookiesBlocked, const nsACString& aOriginBlocked,
-      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason,
-      const nsTArray<nsCString>& aTrackingFullHashes) {
-    RecordContentBlockingLog(
-        aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
-        aHasTrackingCookiesBlocked, aReason, aTrackingFullHashes);
-  }
-
-  /**
-   * Set the social tracking cookies blocked flag for this document.
-   */
-  void SetHasSocialTrackingCookiesBlocked(
-      bool aHasSocialTrackingCookiesBlocked, const nsACString& aOriginBlocked,
-      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason,
-      const nsTArray<nsCString>& aTrackingFullHashes) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER,
-        aHasSocialTrackingCookiesBlocked, aReason, aTrackingFullHashes);
-  }
-
-  /**
-   * Set the third-party cookies blocked flag for this document.
-   */
-  void SetHasForeignCookiesBlocked(bool aHasForeignCookiesBlocked,
-                                   const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN,
-        aHasForeignCookiesBlocked);
-  }
-
-  /**
-   * Set the cookies blocked by site permission flag for this document.
-   */
-  void SetHasCookiesBlockedByPermission(bool aHasCookiesBlockedByPermission,
-                                        const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_COOKIES_BLOCKED_BY_PERMISSION,
-        aHasCookiesBlockedByPermission);
-  }
-
-  /**
-   * Set the cookies loaded flag for this document.
-   */
-  void SetHasCookiesLoaded(bool aHasCookiesLoaded,
-                           const nsACString& aOriginLoaded) {
-    RecordContentBlockingLog(aOriginLoaded,
-                             nsIWebProgressListener::STATE_COOKIES_LOADED,
-                             aHasCookiesLoaded);
-  }
-
-  /**
-   * Get the cookies loaded flag for this document.
-   */
-  bool GetHasCookiesLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_LOADED);
-  }
-
-  /**
-   * Set the tracker cookies loaded flag for this document.
-   */
-  void SetHasTrackerCookiesLoaded(bool aHasTrackerCookiesLoaded,
-                                  const nsACString& aOriginLoaded) {
-    RecordContentBlockingLog(
-        aOriginLoaded, nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER,
-        aHasTrackerCookiesLoaded);
-  }
-
-  /**
-   * Get the tracker cookies loaded flag for this document.
-   */
-  bool GetHasTrackerCookiesLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER);
-  }
-
-  /**
-   * Set the social tracker cookies loaded flag for this document.
-   */
-  void SetHasSocialTrackerCookiesLoaded(bool aHasSocialTrackerCookiesLoaded,
-                                        const nsACString& aOriginLoaded) {
-    RecordContentBlockingLog(
-        aOriginLoaded,
-        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER,
-        aHasSocialTrackerCookiesLoaded);
-  }
-
-  /**
-   * Get the social tracker cookies loaded flag for this document.
-   */
-  bool GetHasSocialTrackerCookiesLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER);
-  }
-
-  /**
-   * Get level 1 tracking content loaded flag for this document.
-   */
-  bool GetHasLevel1TrackingContentLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_LOADED_LEVEL_1_TRACKING_CONTENT);
-  }
-
-  /**
-   * Set the level 1 tracking content loaded flag for this document.
-   */
-  void SetHasLevel1TrackingContentLoaded(bool aHasTrackingContentLoaded,
-                                         const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_LOADED_LEVEL_1_TRACKING_CONTENT,
-        aHasTrackingContentLoaded);
-  }
-
-  /**
-   * Get level 2 tracking content loaded flag for this document.
-   */
-  bool GetHasLevel2TrackingContentLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_LOADED_LEVEL_2_TRACKING_CONTENT);
-  }
-
-  /**
-   * Set the level 2 tracking content loaded flag for this document.
-   */
-  void SetHasLevel2TrackingContentLoaded(bool aHasTrackingContentLoaded,
-                                         const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_LOADED_LEVEL_2_TRACKING_CONTENT,
-        aHasTrackingContentLoaded);
-  }
-
-  /**
-   * Get fingerprinting content loaded flag for this document.
-   */
-  bool GetHasFingerprintingContentLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_LOADED_FINGERPRINTING_CONTENT);
-  }
-
-  /**
-   * Set the fingerprinting content loaded flag for this document.
-   */
-  void SetHasFingerprintingContentLoaded(bool aHasFingerprintingContentLoaded,
-                                         const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_LOADED_FINGERPRINTING_CONTENT,
-        aHasFingerprintingContentLoaded);
-  }
-
-  /**
-   * Get cryptomining content loaded flag for this document.
-   */
-  bool GetHasCryptominingContentLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_LOADED_CRYPTOMINING_CONTENT);
-  }
-
-  /**
-   * Set the cryptomining content loaded flag for this document.
-   */
-  void SetHasCryptominingContentLoaded(bool aHasCryptominingContentLoaded,
-                                       const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_LOADED_CRYPTOMINING_CONTENT,
-        aHasCryptominingContentLoaded);
-  }
-
-  /**
-   * Get socialtracking content loaded flag for this document.
-   */
-  bool GetHasSocialTrackingContentLoaded() {
-    return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_LOADED_SOCIALTRACKING_CONTENT);
-  }
-
-  /**
-   * Set the socialtracking content loaded flag for this document.
-   */
-  void SetHasSocialTrackingContentLoaded(bool aHasSocialTrackingContentLoaded,
-                                         const nsACString& aOriginBlocked) {
-    RecordContentBlockingLog(
-        aOriginBlocked,
-        nsIWebProgressListener::STATE_LOADED_SOCIALTRACKING_CONTENT,
-        aHasSocialTrackingContentLoaded);
-  }
+  typedef MozPromise<uint32_t, bool, true> GetContentBlockingEventsPromise;
+  MOZ_MUST_USE RefPtr<GetContentBlockingEventsPromise>
+  GetContentBlockingEvents();
 
   /**
    * Get the sandbox flags for this document.
@@ -1605,6 +1304,9 @@ class Document : public nsINode,
   void AddMetaViewportElement(HTMLMetaElement* aElement,
                               ViewportMetaData&& aData);
   void RemoveMetaViewportElement(HTMLMetaElement* aElement);
+
+  // Returns a ViewportMetaData for this document.
+  ViewportMetaData GetViewportMetaData() const;
 
   void UpdateForScrollAnchorAdjustment(nscoord aLength);
 
@@ -1908,7 +1610,7 @@ class Document : public nsINode,
 
     nsExpirationState* GetExpirationState() { return &mState; }
 
-    ~SelectorCacheKey() { MOZ_COUNT_DTOR(SelectorCacheKey); }
+    MOZ_COUNTED_DTOR(SelectorCacheKey)
   };
 
   class SelectorCacheKeyDeleter;
@@ -2010,13 +1712,13 @@ class Document : public nsINode,
   /**
    * Remove a stylesheet from the document
    */
-  void RemoveStyleSheet(StyleSheet* aSheet);
+  void RemoveStyleSheet(StyleSheet&);
 
   /**
    * Notify the document that the applicable state of the sheet changed
    * and that observers should be notified and style sets updated
    */
-  void SetStyleSheetApplicableState(StyleSheet&, bool aApplicable);
+  void StyleSheetApplicableStateChanged(StyleSheet&);
 
   enum additionalSheetType {
     eAgentSheet,
@@ -2547,8 +2249,8 @@ class Document : public nsINode,
    */
   int32_t GetDefaultNamespaceID() const { return mDefaultElementType; }
 
-  void DeleteAllProperties();
-  void DeleteAllPropertiesFor(nsINode* aNode);
+  void RemoveAllProperties();
+  void RemoveAllPropertiesFor(nsINode* aNode);
 
   nsPropertyTable& PropertyTable() { return mPropertyTable; }
 
@@ -2570,10 +2272,11 @@ class Document : public nsINode,
 
   /**
    * Enumerate all subdocuments.
-   * The enumerator callback should return true to continue enumerating, or
-   * false to stop.  This will never get passed a null aDocument.
+   * The enumerator callback should return CallState::Continue to continue
+   * enumerating, or CallState::Stop to stop.  This will never get passed a null
+   * aDocument.
    */
-  typedef bool (*SubDocEnumFunc)(Document&, void* aData);
+  typedef CallState (*SubDocEnumFunc)(Document&, void* aData);
   void EnumerateSubDocuments(SubDocEnumFunc aCallback, void* aData);
 
   /**
@@ -2885,8 +2588,9 @@ class Document : public nsINode,
 
   /**
    * Enumerate the external resource documents associated with this document.
-   * The enumerator callback should return true to continue enumerating, or
-   * false to stop.  This callback will never get passed a null aDocument.
+   * The enumerator callback should return CallState::Continue to continue
+   * enumerating, or CallState::Stop to stop.  This callback will never get
+   * passed a null aDocument.
    */
   void EnumerateExternalResources(SubDocEnumFunc aCallback, void* aData);
 
@@ -3874,8 +3578,6 @@ class Document : public nsINode,
 
   bool HasScriptsBlockedBySandbox();
 
-  bool InlineScriptAllowedByCSP();
-
   void ReportHasScrollLinkedEffect();
   bool HasScrollLinkedEffect() const { return mHasScrollLinkedEffect; }
 
@@ -3921,6 +3623,8 @@ class Document : public nsINode,
   void UpdateIntersectionObservations();
   void ScheduleIntersectionObserverNotification();
   MOZ_CAN_RUN_SCRIPT void NotifyIntersectionObservers();
+
+  DOMIntersectionObserver* GetLazyLoadImageObserver();
 
   // Dispatch a runnable related to the document.
   nsresult Dispatch(TaskCategory aCategory,
@@ -4029,6 +3733,8 @@ class Document : public nsINode,
   virtual bool UseWidthDeviceWidthFallbackViewport() const;
 
  private:
+  bool IsErrorPage() const;
+
   void InitializeLocalization(nsTArray<nsString>& aResourceIds);
 
   // Takes the bits from mStyleUseCounters if appropriate, and sets them in
@@ -4052,9 +3758,6 @@ class Document : public nsINode,
   // Get parent FeaturePolicy from container. The parent FeaturePolicy is
   // stored in parent iframe or container's browsingContext (cross process)
   already_AddRefed<mozilla::dom::FeaturePolicy> GetParentFeaturePolicy();
-
-  // Returns a ViewportMetaData for this document.
-  ViewportMetaData GetViewportMetaData() const;
 
   FlashClassification DocumentFlashClassificationInternal();
 
@@ -4178,6 +3881,9 @@ class Document : public nsINode,
 
   nsIPermissionDelegateHandler* PermDelegateHandler();
 
+  // CSS prefers-color-scheme media feature for this document.
+  StylePrefersColorScheme PrefersColorScheme() const;
+
   // Returns true if we use overlay scrollbars on the system wide or on the
   // given document.
   static bool UseOverlayScrollbars(const Document* aDocument);
@@ -4185,6 +3891,8 @@ class Document : public nsINode,
   static bool HasRecentlyStartedForegroundLoads();
 
   static bool AutomaticStorageAccessCanBeGranted(nsIPrincipal* aPrincipal);
+
+  already_AddRefed<Promise> AddCertException(bool aIsTemporary);
 
  protected:
   void DoUpdateSVGUseElementShadowTrees();
@@ -4240,8 +3948,6 @@ class Document : public nsINode,
   }
 
   void RemoveDocStyleSheetsFromStyleSets();
-  void RemoveStyleSheetsFromStyleSets(
-      const nsTArray<RefPtr<StyleSheet>>& aSheets, StyleOrigin);
   void ResetStylesheetsToURI(nsIURI* aURI);
   void FillStyleSet();
   void FillStyleSetUserAndUASheets();
@@ -4254,8 +3960,8 @@ class Document : public nsINode,
   }
   void AddContentEditableStyleSheetsToStyleSet(bool aDesignMode);
   void RemoveContentEditableStyleSheets();
-  void AddStyleSheetToStyleSets(StyleSheet* aSheet);
-  void RemoveStyleSheetFromStyleSets(StyleSheet* aSheet);
+  void AddStyleSheetToStyleSets(StyleSheet&);
+  void RemoveStyleSheetFromStyleSets(StyleSheet&);
   void NotifyStyleSheetApplicableStateChanged();
   // Just like EnableStyleSheetsForSet, but doesn't check whether
   // aSheetSet is null and allows the caller to control whether to set
@@ -4364,19 +4070,38 @@ class Document : public nsINode,
       const nsAString& aValue = EmptyString(),
       nsAString* aAdjustedValue = nullptr);
 
+  /**
+   * AutoRunningExecCommandMarker is AutoRestorer for mIsRunningExecCommand.
+   * Since it's a bit field, not a bool member, therefore, we cannot use
+   * AutoRestorer for it.
+   */
+  class MOZ_STACK_CLASS AutoRunningExecCommandMarker final {
+   public:
+    AutoRunningExecCommandMarker() = delete;
+    explicit AutoRunningExecCommandMarker(const AutoRunningExecCommandMarker&) =
+        delete;
+    // Guaranteeing the document's lifetime with `MOZ_CAN_RUN_SCRIPT`.
+    MOZ_CAN_RUN_SCRIPT explicit AutoRunningExecCommandMarker(
+        Document& aDocument)
+        : mDocument(aDocument),
+          mHasBeenRunning(aDocument.mIsRunningExecCommand) {
+      aDocument.mIsRunningExecCommand = true;
+    }
+    ~AutoRunningExecCommandMarker() {
+      if (!mHasBeenRunning) {
+        mDocument.mIsRunningExecCommand = false;
+      }
+    }
+
+   private:
+    Document& mDocument;
+    bool mHasBeenRunning;
+  };
+
   // Mapping table from HTML command name to internal command.
   typedef nsDataHashtable<nsStringCaseInsensitiveHashKey, InternalCommandData>
       InternalCommandDataHashtable;
   static InternalCommandDataHashtable* sInternalCommandDataHashtable;
-
-  void RecordContentBlockingLog(
-      const nsACString& aOrigin, uint32_t aType, bool aBlocked,
-      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason =
-          Nothing(),
-      const nsTArray<nsCString>& aTrackingFullHashes = nsTArray<nsCString>()) {
-    mContentBlockingLog.RecordLog(aOrigin, aType, aBlocked, aReason,
-                                  aTrackingFullHashes);
-  }
 
   mutable std::bitset<eDeprecatedOperationCount> mDeprecationWarnedAbout;
   mutable std::bitset<eDocumentWarningCount> mDocWarningWarnedAbout;
@@ -4433,9 +4158,6 @@ class Document : public nsINode,
 
   // Helper for GetScrollingElement/IsScrollingElement.
   bool IsPotentiallyScrollable(HTMLBodyElement* aBody);
-
-  // Return the same type parent docuement if exists, or return null.
-  Document* GetSameTypeParentDocument();
 
   void MaybeAllowStorageForOpenerAfterUserInteraction();
 
@@ -4707,6 +4429,9 @@ class Document : public nsINode,
   // True if a document load has a CSP with unsafe-inline attached.
   bool mHasUnsafeInlineCSP : 1;
 
+  // True if the document has a CSP delivered throuh a header
+  bool mHasCSPDeliveredThroughHeader : 1;
+
   // True if DisallowBFCaching has been called on this document.
   bool mBFCacheDisallowed : 1;
 
@@ -4881,6 +4606,9 @@ class Document : public nsINode,
   // We don't use the general deprecated operation mechanism for this because we
   // also record this as a `CountedUnknownProperty`.
   bool mHasWarnedAboutZoom : 1;
+
+  // While we're handling an execCommand call, set to true.
+  bool mIsRunningExecCommand : 1;
 
   uint8_t mPendingFullscreenRequests;
 
@@ -5117,11 +4845,6 @@ class Document : public nsINode,
   // existing in the set means the corresponding script isn't a tracking script.
   nsTHashtable<nsCStringHashKey> mTrackingScripts;
 
-  // The log of all content blocking actions taken on this document.  This is
-  // only stored on top-level documents and includes the activity log for all of
-  // the nested subdocuments as well.
-  ContentBlockingLog mContentBlockingLog;
-
   // List of ancestor principals.  This is set at the point a document
   // is connected to a docshell and not mutated thereafter.
   nsTArray<nsCOMPtr<nsIPrincipal>> mAncestorPrincipals;
@@ -5154,6 +4877,10 @@ class Document : public nsINode,
   };
 
   ViewportType mViewportType;
+
+  // viewport-fit described by
+  // https://drafts.csswg.org/css-round-display/#viewport-fit-descriptor
+  ViewportFitType mViewportFit;
 
   PLDHashTable* mSubDocuments;
 
@@ -5189,6 +4916,8 @@ class Document : public nsINode,
 
   // Array of intersection observers
   nsTHashtable<nsPtrHashKey<DOMIntersectionObserver>> mIntersectionObservers;
+
+  RefPtr<DOMIntersectionObserver> mLazyLoadImageObserver;
 
   // Stack of fullscreen elements. When we request fullscreen we push the
   // fullscreen element onto this stack, and when we cancel fullscreen we
@@ -5265,6 +4994,8 @@ class Document : public nsINode,
 
   nsCOMPtr<nsIRequest> mOnloadBlocker;
 
+  // Gecko-internal sheets used for extensions and such.
+  // Exposed to privileged script via nsIDOMWindowUtils.loadSheet.
   nsTArray<RefPtr<StyleSheet>> mAdditionalSheets[AdditionalSheetTypeCount];
 
   // Member to store out last-selected stylesheet set.
@@ -5318,6 +5049,9 @@ class Document : public nsINode,
   // Pres shell resolution saved before entering fullscreen mode.
   float mSavedResolution;
 
+  // Pres shell resolution saved before creating a MobileViewportManager.
+  float mSavedResolutionBeforeMVM;
+
   bool mPendingInitialTranslation;
 
   nsCOMPtr<nsICookieSettings> mCookieSettings;
@@ -5354,6 +5088,11 @@ class Document : public nsINode,
       mL10nProtoElements;
 
   void TraceProtos(JSTracer* aTrc);
+
+  float GetSavedResolutionBeforeMVM() { return mSavedResolutionBeforeMVM; }
+  void SetSavedResolutionBeforeMVM(float aResolution) {
+    mSavedResolutionBeforeMVM = aResolution;
+  }
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Document, NS_IDOCUMENT_IID)
@@ -5455,6 +5194,7 @@ enum DocumentFlavor {
   DocumentFlavorLegacyGuess,  // compat with old code until made HTML5-compliant
   DocumentFlavorHTML,         // HTMLDocument with HTMLness bit set to true
   DocumentFlavorSVG,          // SVGDocument
+  DocumentFlavorXML,          // XMLDocument
   DocumentFlavorPlain,        // Just a Document
 };
 

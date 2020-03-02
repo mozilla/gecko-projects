@@ -83,6 +83,10 @@ namespace mozilla {
 
 class Mutex;
 
+namespace layers {
+class TextureData;
+}
+
 namespace wr {
 struct FontInstanceOptions;
 struct FontInstancePlatformOptions;
@@ -287,6 +291,29 @@ class RadialGradientPattern : public Pattern {
 };
 
 /**
+ * This class is used for Conic Gradient Patterns, the gradient stops are
+ * stored in a separate object and are backend dependent. This class itself
+ * may be used on the stack.
+ */
+class ConicGradientPattern : public Pattern {
+ public:
+  /// For constructor parameter description, see member data documentation.
+  ConicGradientPattern(const Point& aCenter, Float aAngle,
+                       GradientStops* aStops, const Matrix& aMatrix = Matrix())
+      : mCenter(aCenter), mAngle(aAngle), mStops(aStops), mMatrix(aMatrix) {}
+
+  PatternType GetType() const override { return PatternType::CONIC_GRADIENT; }
+
+  Point mCenter;  //!< Center of the gradient
+  Float mAngle;   //!< Start angle of gradient
+  RefPtr<GradientStops>
+      mStops;      /**< GradientStops object for this gradient, this
+                        should match the backend type of the draw target
+                        this pattern will be used with. */
+  Matrix mMatrix;  //!< A matrix that transforms the pattern into user space
+};
+
+/**
  * This class is used for Surface Patterns, they wrap a surface and a
  * repetition mode for the surface. This may be used on the stack.
  */
@@ -344,6 +371,51 @@ class SourceSurface : public external::AtomicRefCounted<SourceSurface> {
   virtual IntRect GetRect() const { return IntRect(IntPoint(0, 0), GetSize()); }
   virtual SurfaceFormat GetFormat() const = 0;
 
+  /**
+   * Structure containing memory size information for the surface.
+   */
+  struct SizeOfInfo {
+    SizeOfInfo()
+        : mHeapBytes(0),
+          mNonHeapBytes(0),
+          mUnknownBytes(0),
+          mExternalHandles(0),
+          mExternalId(0),
+          mTypes(0) {}
+
+    void Accumulate(const SizeOfInfo& aOther) {
+      mHeapBytes += aOther.mHeapBytes;
+      mNonHeapBytes += aOther.mNonHeapBytes;
+      mUnknownBytes += aOther.mUnknownBytes;
+      mExternalHandles += aOther.mExternalHandles;
+      if (aOther.mExternalId) {
+        mExternalId = aOther.mExternalId;
+      }
+      mTypes |= aOther.mTypes;
+    }
+
+    void AddType(SurfaceType aType) { mTypes |= 1 << uint32_t(aType); }
+
+    size_t mHeapBytes;        // Bytes allocated on the heap.
+    size_t mNonHeapBytes;     // Bytes allocated off the heap.
+    size_t mUnknownBytes;     // Bytes allocated to either, but unknown.
+    size_t mExternalHandles;  // Open handles for the surface.
+    uint64_t mExternalId;     // External ID for WebRender, if available.
+    uint32_t mTypes;          // Bit shifted values representing SurfaceType.
+  };
+
+  /**
+   * Get the size information of the underlying data buffer.
+   */
+  virtual void SizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
+                                   SizeOfInfo& aInfo) const {
+    // Default is to estimate the footprint based on its size/format.
+    auto size = GetSize();
+    auto format = GetFormat();
+    aInfo.AddType(GetType());
+    aInfo.mUnknownBytes = size.width * size.height * BytesPerPixel(format);
+  }
+
   /** This returns false if some event has made this source surface invalid for
    * usage with current DrawTargets. For example in the case of Direct2D this
    * could return false if we have switched devices since this surface was
@@ -366,9 +438,15 @@ class SourceSurface : public external::AtomicRefCounted<SourceSurface> {
    * DataSourceSurface and if GetDataSurface will return the same object.
    */
   bool IsDataSourceSurface() const {
-    SurfaceType type = GetType();
-    return type == SurfaceType::DATA || type == SurfaceType::DATA_SHARED ||
-           type == SurfaceType::DATA_RECYCLING_SHARED;
+    switch (GetType()) {
+      case SurfaceType::DATA:
+      case SurfaceType::DATA_SHARED:
+      case SurfaceType::DATA_RECYCLING_SHARED:
+      case SurfaceType::DATA_ALIGNED:
+        return true;
+      default:
+        return false;
+    }
   }
 
   /**
@@ -476,6 +554,11 @@ class DataSourceSurface : public SourceSurface {
       return &mMap;
     }
 
+    const DataSourceSurface* GetSurface() const {
+      MOZ_ASSERT(mIsMapped);
+      return mSurface;
+    }
+
     bool IsMapped() const { return mIsMapped; }
 
    private:
@@ -539,15 +622,6 @@ class DataSourceSurface : public SourceSurface {
    * The caller needs to do null-check before using it.
    */
   already_AddRefed<DataSourceSurface> GetDataSurface() override;
-
-  /**
-   * Add the size of the underlying data buffer to the aggregate.
-   */
-  virtual void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
-                                      size_t& aHeapSizeOut,
-                                      size_t& aNonHeapSizeOut,
-                                      size_t& aExtHandlesOut,
-                                      uint64_t& aExtIdOut) const {}
 
   /**
    * Returns whether or not the data was allocated on the heap. This should
@@ -998,6 +1072,16 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget> {
    */
   virtual already_AddRefed<SourceSurface> Snapshot() = 0;
 
+  /**
+   * Returns a SourceSurface which wraps the buffer backing the DrawTarget. The
+   * contents of the buffer may change if there are drawing operations after
+   * calling but only guarantees that it reflects the state at the time it was
+   * called.
+   */
+  virtual already_AddRefed<SourceSurface> GetBackingSurface() {
+    return Snapshot();
+  }
+
   // Snapshots the contents and returns an alpha mask
   // based on the RGB values.
   virtual already_AddRefed<SourceSurface> IntoLuminanceSource(
@@ -1378,6 +1462,15 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget> {
    */
   virtual already_AddRefed<DrawTarget> CreateSimilarDrawTarget(
       const IntSize& aSize, SurfaceFormat aFormat) const = 0;
+
+  /**
+   * Create a DrawTarget whose backing surface is optimized for use with this
+   * DrawTarget.
+   */
+  virtual already_AddRefed<DrawTarget> CreateSimilarDrawTargetWithBacking(
+      const IntSize& aSize, SurfaceFormat aFormat) const {
+    return CreateSimilarDrawTarget(aSize, aFormat);
+  }
 
   /**
    * Create a DrawTarget whose snapshot is optimized for use with this
@@ -1895,6 +1988,15 @@ class GFX2D_API Factory {
 
   static void SetSystemTextQuality(uint8_t aQuality);
 
+  static already_AddRefed<DataSourceSurface>
+  CreateBGRA8DataSourceSurfaceForD3D11Texture(ID3D11Texture2D* aSrcTexture);
+
+  static bool ReadbackTexture(layers::TextureData* aDestCpuTexture,
+                              ID3D11Texture2D* aSrcTexture);
+
+  static bool ReadbackTexture(DataSourceSurface* aDestCpuTexture,
+                              ID3D11Texture2D* aSrcTexture);
+
  private:
   static StaticRefPtr<ID2D1Device> mD2D1Device;
   static StaticRefPtr<ID3D11Device> mD3D11Device;
@@ -1903,6 +2005,14 @@ class GFX2D_API Factory {
   static StaticRefPtr<IDWriteFontCollection> mDWriteSystemFonts;
   static StaticRefPtr<ID2D1DeviceContext> mMTDC;
   static StaticRefPtr<ID2D1DeviceContext> mOffMTDC;
+
+  static bool ReadbackTexture(uint8_t* aDestData, int32_t aDestStride,
+                              ID3D11Texture2D* aSrcTexture);
+
+  // DestTextureT can be TextureData or DataSourceSurface.
+  template <typename DestTextureT>
+  static bool ConvertSourceAndRetryReadback(DestTextureT* aDestCpuTexture,
+                                            ID3D11Texture2D* aSrcTexture);
 
  protected:
   // This guards access to the singleton devices above, as well as the
@@ -1913,7 +2023,7 @@ class GFX2D_API Factory {
   static StaticMutex mDTDependencyLock;
 
   friend class DrawTargetD2D1;
-#endif
+#endif  // WIN32
 
  private:
   static DrawEventRecorder* mRecorder;

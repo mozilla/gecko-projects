@@ -119,6 +119,12 @@ class _ToolbarPanelHub {
     }
   }
 
+  // Removes the button from the Appmenu.
+  // Only used in tests.
+  disableAppmenuButton() {
+    EveryWindow.unregisterCallback(APPMENU_BUTTON_ID);
+  }
+
   // Turns on the Toolbar button for all open windows and future windows.
   async enableToolbarButton() {
     if ((await this.messages).length) {
@@ -247,12 +253,17 @@ class _ToolbarPanelHub {
   /**
    * Attach event listener to dispatch message defined action.
    */
-  _attachClickListener(win, element, message) {
+  _attachCommandListener(win, element, message) {
     // Add event listener for `mouseup` not to overlap with the
     // `mousedown` & `click` events dispatched from PanelMultiView.jsm
     // https://searchfox.org/mozilla-central/rev/7531325c8660cfa61bf71725f83501028178cbb9/browser/components/customizableui/PanelMultiView.jsm#1830-1837
     element.addEventListener("mouseup", () => {
       this._dispatchUserAction(win, message);
+    });
+    element.addEventListener("keyup", e => {
+      if (e.key === "Enter" || e.key === " ") {
+        this._dispatchUserAction(win, message);
+      }
     });
   }
 
@@ -304,7 +315,7 @@ class _ToolbarPanelHub {
     }
 
     // Attach event listener on entire message container
-    this._attachClickListener(win, messageEl, message);
+    this._attachCommandListener(win, messageEl, message);
 
     return messageEl;
   }
@@ -371,10 +382,11 @@ class _ToolbarPanelHub {
         classList: "text-link",
         content: message.content.link_text,
       });
+      linkEl.disabled = true;
       wrapperEl.appendChild(linkEl);
-      this._attachClickListener(win, linkEl, message);
+      this._attachCommandListener(win, linkEl, message);
     } else {
-      this._attachClickListener(win, wrapperEl, message);
+      this._attachCommandListener(win, wrapperEl, message);
     }
 
     return messageEl;
@@ -393,6 +405,7 @@ class _ToolbarPanelHub {
   }
 
   async _contentArguments() {
+    const { defaultEngine } = Services.search;
     // Between now and 6 weeks ago
     const dateTo = new Date();
     const dateFrom = new Date(dateTo.getTime() - 42 * 24 * 60 * 60 * 1000);
@@ -425,6 +438,10 @@ class _ToolbarPanelHub {
         dateFrom
       ),
       ...totalEvents,
+      // Passing in `undefined` as string for the Fluent variable name
+      // in order to match and select the message that does not require
+      // the variable.
+      searchEngineName: defaultEngine ? defaultEngine.name : "undefined",
     };
   }
 
@@ -537,9 +554,13 @@ class _ToolbarPanelHub {
     const infoButton = doc.getElementById("protections-popup-info-button");
     const panelContainer = doc.getElementById("protections-popup");
     const toggleMessage = () => {
+      const learnMoreLink = doc.querySelector(
+        "#messaging-system-message-container .text-link"
+      );
       container.toggleAttribute("disabled");
       infoButton.toggleAttribute("checked");
       panelContainer.toggleAttribute("infoMessageShowing");
+      learnMoreLink.disabled = !learnMoreLink.disabled;
     };
     if (!container.childElementCount) {
       const message = await this._getMessages({
@@ -586,15 +607,15 @@ class _ToolbarPanelHub {
 
   /**
    * @param {object} browser MessageChannel target argument as a response to a user action
-   * @param {object} message Message selected from devtools page
+   * @param {object[]} messages Messages selected from devtools page
    */
-  forceShowMessage(browser, message) {
+  forceShowMessage(browser, messages) {
     const win = browser.browser.ownerGlobal;
     const doc = browser.browser.ownerDocument;
     this.removeMessages(win, WHATS_NEW_PANEL_SELECTOR);
     this.renderMessages(win, doc, WHATS_NEW_PANEL_SELECTOR, {
       force: true,
-      messages: [message],
+      messages: Array.isArray(messages) ? messages : [messages],
     });
     win.PanelUI.panel.addEventListener("popuphidden", event =>
       this.removeMessages(event.target.ownerGlobal, WHATS_NEW_PANEL_SELECTOR)

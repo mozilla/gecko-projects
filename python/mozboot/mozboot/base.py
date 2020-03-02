@@ -158,7 +158,7 @@ MODERN_MERCURIAL_VERSION = LooseVersion('4.8')
 MODERN_PYTHON_VERSION = LooseVersion('2.7.3')
 
 # Upgrade rust older than this.
-MODERN_RUST_VERSION = LooseVersion('1.39.0')
+MODERN_RUST_VERSION = LooseVersion('1.41.1')
 
 # Upgrade nasm older than this.
 MODERN_NASM_VERSION = LooseVersion('2.14')
@@ -311,6 +311,12 @@ class BaseBootstrapper(object):
         raise NotImplementedError(
             '%s does not yet implement ensure_node_packages()'
             % __name__)
+
+    def ensure_dump_syms_packages(self, state_dir, checkout_root):
+        '''
+        Install dump_syms.
+        '''
+        pass
 
     def install_toolchain_static_analysis(self, state_dir, checkout_root, toolchain_job):
         clang_tools_path = os.path.join(state_dir, 'clang-tools')
@@ -525,9 +531,9 @@ class BaseBootstrapper(object):
         string forces that no user or system hgrc file is used.
         """
         env = os.environ.copy()
-        env[b'HGPLAIN'] = b'1'
+        env['HGPLAIN'] = '1'
         if not load_hgrc:
-            env[b'HGRCPATH'] = b''
+            env['HGRCPATH'] = ''
 
         return env
 
@@ -745,6 +751,10 @@ class BaseBootstrapper(object):
 
         Invoke rustup from the given path to update the rust install."""
         subprocess.check_call([rustup, 'update'])
+        # This installs rustfmt when not already installed, or nothing
+        # otherwise, while the update above would have taken care of upgrading
+        # it.
+        subprocess.check_call([rustup, 'component', 'add', 'rustfmt'])
 
     def install_rust(self):
         """Download and run the rustup installer."""
@@ -768,7 +778,8 @@ class BaseBootstrapper(object):
             print('Running rustup-init...')
             subprocess.check_call([rustup_init, '-y',
                                    '--default-toolchain', 'stable',
-                                   '--default-host', platform, ])
+                                   '--default-host', platform,
+                                   '--component', 'rustfmt'])
             cargo_home, cargo_bin = self.cargo_home()
             self.print_rust_path_advice(RUST_INSTALL_COMPLETE,
                                         cargo_home, cargo_bin)

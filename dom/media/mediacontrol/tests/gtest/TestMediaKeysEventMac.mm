@@ -10,34 +10,13 @@
 
 #include "gtest/gtest.h"
 #include "MediaHardwareKeysEventSourceMac.h"
+#include "MediaHardwareKeysEventListenerTest.h"
 #include "mozilla/Maybe.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::widget;
 
 static const int kSystemDefinedEventMediaKeysSubtype = 8;
-
-class MediaHardwareKeysEventListenerTest : public MediaControlKeysEventListener {
- public:
-  NS_DECL_ISUPPORTS
-
-  void OnKeyPressed(MediaControlKeysEvent aKeyEvent) override {
-    mReceivedEvent = mozilla::Some(aKeyEvent);
-  }
-  bool IsResultEqualTo(MediaControlKeysEvent aResult) const {
-    if (mReceivedEvent) {
-      return *mReceivedEvent == aResult;
-    }
-    return false;
-  }
-  bool IsReceivedResult() const { return mReceivedEvent.isSome(); }
-
- private:
-  ~MediaHardwareKeysEventListenerTest() = default;
-  mozilla::Maybe<MediaControlKeysEvent> mReceivedEvent;
-};
-
-NS_IMPL_ISUPPORTS0(MediaHardwareKeysEventListenerTest)
 
 static void SendFakeEvent(RefPtr<MediaHardwareKeysEventSourceMac>& aSource, int aKeyData) {
   NSEvent* event = [NSEvent otherEventWithType:NSSystemDefined

@@ -665,7 +665,6 @@ void LoadShapeWrapperContents(MacroAssembler& masm, Register obj, Register dst,
 enum class MetaTwoByteKind : uint8_t {
   NativeTemplateObject,
   ScriptedTemplateObject,
-  ClassTemplateObject,
 };
 
 #ifdef JS_SIMULATOR
@@ -1022,9 +1021,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     buffer_.writeByte(uint32_t(kind));
   }
 
-  FieldOffset guardAnyClass(ObjOperandId obj, const JSClass* clasp) {
+  void guardAnyClass(ObjOperandId obj, const JSClass* clasp) {
     writeOpWithOperandId(CacheOp::GuardAnyClass, obj);
-    return addStubField(uintptr_t(clasp), StubField::Type::RawWord);
+    addStubField(uintptr_t(clasp), StubField::Type::RawWord);
   }
 
   void guardFunctionIsNative(ObjOperandId obj) {
@@ -1493,7 +1492,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     // Some native functions can be implemented faster if we know that
     // the return value is ignored.
     bool ignoresReturnValue =
-        op == JSOP_CALL_IGNORES_RV && calleeFunc->hasJitInfo() &&
+        op == JSOp::CallIgnoresRv && calleeFunc->hasJitInfo() &&
         calleeFunc->jitInfo()->type() == JSJitInfo::IgnoresReturnValueNative;
 
 #ifdef JS_SIMULATOR
@@ -1570,14 +1569,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     writeOp(CacheOp::MetaTwoByte);
     buffer_.writeByte(uint32_t(MetaTwoByteKind::ScriptedTemplateObject));
     reuseStubField(calleeOffset);
-    addStubField(uintptr_t(templateObject), StubField::Type::JSObject);
-  }
-
-  void metaClassTemplateObject(JSObject* templateObject,
-                               FieldOffset classOffset) {
-    writeOp(CacheOp::MetaTwoByte);
-    buffer_.writeByte(uint32_t(MetaTwoByteKind::ClassTemplateObject));
-    reuseStubField(classOffset);
     addStubField(uintptr_t(templateObject), StubField::Type::JSObject);
   }
 
@@ -2023,91 +2014,87 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     writeOperandId(rhs);
   }
 
-  void compareStringResult(uint32_t op, StringOperandId lhs,
-                           StringOperandId rhs) {
+  void compareStringResult(JSOp op, StringOperandId lhs, StringOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareStringResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareObjectResult(uint32_t op, ObjOperandId lhs, ObjOperandId rhs) {
+  void compareObjectResult(JSOp op, ObjOperandId lhs, ObjOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareObjectResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareObjectUndefinedNullResult(uint32_t op, ObjOperandId object) {
+  void compareObjectUndefinedNullResult(JSOp op, ObjOperandId object) {
     writeOpWithOperandId(CacheOp::CompareObjectUndefinedNullResult, object);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareSymbolResult(uint32_t op, SymbolOperandId lhs,
-                           SymbolOperandId rhs) {
+  void compareSymbolResult(JSOp op, SymbolOperandId lhs, SymbolOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareSymbolResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareInt32Result(uint32_t op, Int32OperandId lhs, Int32OperandId rhs) {
+  void compareInt32Result(JSOp op, Int32OperandId lhs, Int32OperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareInt32Result, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareDoubleResult(uint32_t op, NumberOperandId lhs,
-                           NumberOperandId rhs) {
+  void compareDoubleResult(JSOp op, NumberOperandId lhs, NumberOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareDoubleResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareBigIntResult(uint32_t op, BigIntOperandId lhs,
-                           BigIntOperandId rhs) {
+  void compareBigIntResult(JSOp op, BigIntOperandId lhs, BigIntOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareBigIntResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareBigIntInt32Result(uint32_t op, BigIntOperandId lhs,
+  void compareBigIntInt32Result(JSOp op, BigIntOperandId lhs,
                                 Int32OperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareBigIntInt32Result, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareInt32BigIntResult(uint32_t op, Int32OperandId lhs,
+  void compareInt32BigIntResult(JSOp op, Int32OperandId lhs,
                                 BigIntOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareInt32BigIntResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareBigIntNumberResult(uint32_t op, BigIntOperandId lhs,
+  void compareBigIntNumberResult(JSOp op, BigIntOperandId lhs,
                                  NumberOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareBigIntNumberResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareNumberBigIntResult(uint32_t op, NumberOperandId lhs,
+  void compareNumberBigIntResult(JSOp op, NumberOperandId lhs,
                                  BigIntOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareNumberBigIntResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareBigIntStringResult(uint32_t op, BigIntOperandId lhs,
+  void compareBigIntStringResult(JSOp op, BigIntOperandId lhs,
                                  StringOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareBigIntStringResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
-  void compareStringBigIntResult(uint32_t op, StringOperandId lhs,
+  void compareStringBigIntResult(JSOp op, StringOperandId lhs,
                                  BigIntOperandId rhs) {
     writeOpWithOperandId(CacheOp::CompareStringBigIntResult, lhs);
     writeOperandId(rhs);
-    buffer_.writeByte(uint32_t(op));
+    buffer_.writeByte(uint8_t(op));
   }
 
   void callPrintString(const char* str) {
@@ -2495,7 +2482,11 @@ class MOZ_RAII PropertyTypeCheckInfo {
 
  public:
   PropertyTypeCheckInfo(JSContext* cx, bool needsTypeBarrier)
-      : group_(cx), id_(cx), needsTypeBarrier_(needsTypeBarrier) {}
+      : group_(cx), id_(cx), needsTypeBarrier_(needsTypeBarrier) {
+    if (!IsTypeInferenceEnabled()) {
+      needsTypeBarrier_ = false;
+    }
+  }
 
   bool needsTypeBarrier() const { return needsTypeBarrier_; }
   bool isSet() const { return group_ != nullptr; }
@@ -2750,14 +2741,12 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
                                     bool* skipAttach);
   bool getTemplateObjectForNative(HandleFunction calleeFunc,
                                   MutableHandleObject result);
-  bool getTemplateObjectForClassHook(HandleObject calleeObj,
-                                     MutableHandleObject result);
 
   AttachDecision tryAttachArrayPush();
   AttachDecision tryAttachArrayJoin();
   AttachDecision tryAttachIsSuspendedGenerator();
-  AttachDecision tryAttachFunCall();
-  AttachDecision tryAttachFunApply();
+  AttachDecision tryAttachFunCall(HandleFunction calleeFunc);
+  AttachDecision tryAttachFunApply(HandleFunction calleeFunc);
   AttachDecision tryAttachCallScripted(HandleFunction calleeFunc);
   AttachDecision tryAttachSpecialCaseCallNative(HandleFunction calleeFunc);
   AttachDecision tryAttachCallNative(HandleFunction calleeFunc);

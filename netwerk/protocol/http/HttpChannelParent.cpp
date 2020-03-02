@@ -34,6 +34,8 @@
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "SerializedLoadContext.h"
+#include "nsIAuthPrompt.h"
+#include "nsIAuthPrompt2.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/LoadInfo.h"
 #include "nsQueryObject.h"
@@ -41,6 +43,7 @@
 #include "nsCORSListenerProxy.h"
 #include "nsIIPCSerializableInputStream.h"
 #include "nsIPrompt.h"
+#include "nsIPromptFactory.h"
 #include "mozilla/net/RedirectChannelRegistrar.h"
 #include "nsIWindowWatcher.h"
 #include "mozilla/dom/Document.h"
@@ -222,7 +225,7 @@ void HttpChannelParent::CleanupBackgroundChannel() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mBgParent) {
-    RefPtr<HttpBackgroundChannelParent> bgParent = mBgParent.forget();
+    RefPtr<HttpBackgroundChannelParent> bgParent = std::move(mBgParent);
     bgParent->OnChannelClosed();
     return;
   }
@@ -299,6 +302,29 @@ HttpChannelParent::GetInterface(const nsIID& aIID, void** result) {
   if (XRE_IsParentProcess() && aIID.Equals(NS_GET_IID(nsIAuthPromptProvider))) {
     *result = nullptr;
     return NS_OK;
+  }
+
+  // A system XHR can be created without reference to a window, hence mTabParent
+  // may be null.  In that case we want to let the window watcher pick a prompt
+  // directly.
+  if (!mBrowserParent && (aIID.Equals(NS_GET_IID(nsIAuthPrompt)) ||
+                          aIID.Equals(NS_GET_IID(nsIAuthPrompt2)))) {
+    nsresult rv;
+    nsCOMPtr<nsIWindowWatcher> wwatch =
+        do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    bool hasWindowCreator = false;
+    Unused << wwatch->HasWindowCreator(&hasWindowCreator);
+    if (!hasWindowCreator) {
+      return NS_ERROR_FAILURE;
+    }
+
+    nsCOMPtr<nsIPromptFactory> factory = do_QueryInterface(wwatch);
+    if (!factory) {
+      return NS_ERROR_NO_INTERFACE;
+    }
+    return factory->GetPrompt(nullptr, aIID, reinterpret_cast<void**>(result));
   }
 
   // Only support nsILoadContext if child channel's callbacks did too
@@ -484,8 +510,9 @@ bool HttpChannelParent::DoAsyncOpen(
     }
   }
 
-  RefPtr<ParentChannelListener> parentListener =
-      new ParentChannelListener(this, mBrowserParent);
+  RefPtr<ParentChannelListener> parentListener = new ParentChannelListener(
+      this, mBrowserParent ? mBrowserParent->GetBrowsingContext() : nullptr,
+      mLoadContext && mLoadContext->UsePrivateBrowsing());
 
   httpChannel->SetRequestMethod(nsDependentCString(requestMethod.get()));
 
@@ -620,8 +647,8 @@ bool HttpChannelParent::DoAsyncOpen(
   // Store the strong reference of channel and parent listener object until
   // all the initialization procedure is complete without failure, to remove
   // cycle reference in fail case and to avoid memory leakage.
-  mChannel = httpChannel.forget();
-  mParentListener = parentListener.forget();
+  mChannel = std::move(httpChannel);
+  mParentListener = std::move(parentListener);
   mChannel->SetNotificationCallbacks(mParentListener);
 
   mSuspendAfterSynthesizeResponse = aSuspendAfterSynthesizeResponse;
@@ -887,7 +914,22 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRedirect2Verify(
       nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
           do_QueryInterface(newHttpChannel);
       if (appCacheChannel) {
-        appCacheChannel->SetChooseApplicationCache(aChooseAppcache);
+        bool setChooseAppCache = false;
+        if (aChooseAppcache) {
+          nsCOMPtr<nsIURI> uri;
+          // Using GetURI because this is what DoAsyncOpen uses.
+          newHttpChannel->GetURI(getter_AddRefs(uri));
+
+          OriginAttributes attrs;
+          NS_GetOriginAttributes(newHttpChannel, attrs);
+
+          nsCOMPtr<nsIPrincipal> principal =
+              BasePrincipal::CreateContentPrincipal(uri, attrs);
+
+          setChooseAppCache = NS_ShouldCheckAppCache(principal);
+        }
+
+        appCacheChannel->SetChooseApplicationCache(setChooseAppCache);
       }
 
       nsCOMPtr<nsILoadInfo> newLoadInfo = newHttpChannel->LoadInfo();
@@ -1390,8 +1432,8 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   if (httpChannelImpl) {
     httpChannelImpl->GetLoadedFromApplicationCache(&loadedFromApplicationCache);
     if (loadedFromApplicationCache) {
-      mOfflineForeignMarker =
-          httpChannelImpl->GetOfflineCacheEntryAsForeignMarker();
+      mOfflineForeignMarker.reset(
+          httpChannelImpl->GetOfflineCacheEntryAsForeignMarker());
       nsCOMPtr<nsIApplicationCache> appCache;
       httpChannelImpl->GetApplicationCache(getter_AddRefs(appCache));
       nsCString appCacheGroupId;
@@ -1490,6 +1532,10 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   bool allRedirectsSameOrigin = false;
   chan->GetAllRedirectsSameOrigin(&allRedirectsSameOrigin);
 
+  nsILoadInfo::CrossOriginOpenerPolicy openerPolicy =
+      nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
+  chan->GetCrossOriginOpenerPolicy(&openerPolicy);
+
   rv = NS_OK;
   if (mIPCClosed ||
       !SendOnStartRequest(
@@ -1501,10 +1547,22 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
           chan->GetPeerAddr(), redirectCount, cacheKey, altDataType, altDataLen,
           deliveringAltData, applyConversion, isResolvedByTRR,
           GetTimingAttributes(mChannel), allRedirectsSameOrigin, multiPartID,
-          isLastPartOfMultiPart)) {
+          isLastPartOfMultiPart, openerPolicy)) {
     rv = NS_ERROR_UNEXPECTED;
   }
   requestHead->Exit();
+
+  // OnStartRequest is sent to content process successfully.
+  // Notify PHttpBackgroundChannelChild that all following IPC mesasges
+  // should be run after OnStartRequest is handled.
+  // We don't send this if it's multipart, since we don't use the
+  // background channel in that case.
+  if (NS_SUCCEEDED(rv) && !multiPartID) {
+    MOZ_ASSERT(mBgParent);
+    if (!mBgParent->OnStartRequestSent()) {
+      rv = NS_ERROR_UNEXPECTED;
+    }
+  }
 
   return rv;
 }
@@ -1849,37 +1907,6 @@ HttpChannelParent::SetParentListener(ParentChannelListener* aListener) {
              "new HttpChannelParents after a redirect, when "
              "mParentListener is null.");
   mParentListener = aListener;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HttpChannelParent::NotifyChannelClassifierProtectionDisabled(
-    uint32_t aAcceptedReason) {
-  LOG(
-      ("HttpChannelParent::NotifyChannelClassifierProtectionDisabled [this=%p "
-       "aAcceptedReason=%" PRIu32 "]\n",
-       this, aAcceptedReason));
-  if (!mIPCClosed) {
-    Unused << SendNotifyChannelClassifierProtectionDisabled(aAcceptedReason);
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HttpChannelParent::NotifyCookieAllowed() {
-  LOG(("HttpChannelParent::NotifyCookieAllowed [this=%p]\n", this));
-  if (!mIPCClosed) {
-    Unused << SendNotifyCookieAllowed();
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HttpChannelParent::NotifyCookieBlocked(uint32_t aRejectedReason) {
-  LOG(("HttpChannelParent::NotifyCookieBlocked [this=%p]\n", this));
-  if (!mIPCClosed) {
-    Unused << SendNotifyCookieBlocked(aRejectedReason);
-  }
   return NS_OK;
 }
 
@@ -2300,7 +2327,7 @@ void HttpChannelParent::StartDiversion() {
   Unused << mChannel->DoApplyContentConversions(
       mDivertListener, getter_AddRefs(converterListener));
   if (converterListener) {
-    mDivertListener = converterListener.forget();
+    mDivertListener = std::move(converterListener);
   }
 
   // Now mParentListener can be diverted to mDivertListener.

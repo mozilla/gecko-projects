@@ -38,6 +38,11 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
+  "RecommendationProviderSwitcher",
+  "resource://activity-stream/lib/RecommendationProviderSwitcher.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
   "PlacesFeed",
   "resource://activity-stream/lib/PlacesFeed.jsm"
 );
@@ -126,13 +131,25 @@ const DEFAULT_SITES = new Map([
     "FR",
     "https://www.youtube.com/,https://www.facebook.com/,https://www.wikipedia.org/,https://www.amazon.fr/,https://www.leboncoin.fr/,https://twitter.com/",
   ],
+  [
+    "CN",
+    "https://www.baidu.com/,https://www.zhihu.com/,https://www.ifeng.com/,https://weibo.com/,https://www.ctrip.com/,https://www.iqiyi.com/",
+  ],
 ]);
 const GEO_PREF = "browser.search.region";
-const SPOCS_GEOS = ["US"];
+const REGION_STORIES_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.region-stories-config";
+const REGION_SPOCS_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.region-spocs-config";
+const REGION_LAYOUT_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.region-layout-config";
 
 // Determine if spocs should be shown for a geo/locale
 function showSpocs({ geo }) {
-  return SPOCS_GEOS.includes(geo);
+  const spocsGeoString =
+    Services.prefs.getStringPref(REGION_SPOCS_CONFIG) || "";
+  const spocsGeo = spocsGeoString.split(",").map(s => s.trim());
+  return spocsGeo.includes(geo);
 }
 
 // Configure default Activity Stream prefs with a plain `value` or a `getValue`
@@ -451,6 +468,7 @@ const PREFS_CONFIG = new Map([
         type: "remote-settings",
         bucket: "cfr-fxa",
         frequency: { custom: [{ period: "daily", cap: 1 }] },
+        updateCycleInMs: 3600000,
       }),
     },
   ],
@@ -468,22 +486,10 @@ const PREFS_CONFIG = new Map([
     {
       title: "Configuration for the new pocket new tab",
       getValue: ({ geo, locale }) => {
-        // PLEASE NOTE:
-        // hardcoded_layout in `lib/DiscoveryStreamFeed.jsm` only works for en-* and DE and requires refactoring for other locales
-        const dsEnablementMatrix = {
-          US: ["en-CA", "en-GB", "en-US"],
-          CA: ["en-CA", "en-GB", "en-US"],
-          DE: ["de", "de-DE", "de-AT", "de-CH"],
-        };
-
-        // Verify that the current geo & locale combination is enabled
-        const isEnabled =
-          !!dsEnablementMatrix[geo] && dsEnablementMatrix[geo].includes(locale);
-
         return JSON.stringify({
           api_key_pref: "extensions.pocket.oAuthConsumerKey",
           collapsible: true,
-          enabled: isEnabled,
+          enabled: true,
           show_spocs: showSpocs({ geo }),
           hardcoded_layout: true,
           personalized: true,
@@ -508,6 +514,21 @@ const PREFS_CONFIG = new Map([
       title:
         "Allow the display of engagement labels for discovery stream components (eg: Trending, Popular, etc)",
       value: false,
+    },
+  ],
+  [
+    "discoverystream.region-basic-layout",
+    {
+      title: "Decision to use basic layout based on region.",
+      getValue: ({ geo }) => {
+        const preffedRegionsString =
+          Services.prefs.getStringPref(REGION_LAYOUT_CONFIG) || "";
+        const preffedRegions = preffedRegionsString
+          .split(",")
+          .map(s => s.trim());
+
+        return !preffedRegions.includes(geo);
+      },
     },
   ],
   [
@@ -582,12 +603,19 @@ const FEEDS_DATA = [
       "Fetches content recommendations from a configurable content provider",
     // Dynamically determine if Pocket should be shown for a geo / locale
     getValue: ({ geo, locale }) => {
+      const preffedRegionsString =
+        Services.prefs.getStringPref(REGION_STORIES_CONFIG) || "";
+      const preffedRegions = preffedRegionsString.split(",").map(s => s.trim());
       const locales = {
         US: ["en-CA", "en-GB", "en-US", "en-ZA"],
         CA: ["en-CA", "en-GB", "en-US", "en-ZA"],
+        GB: ["en-CA", "en-GB", "en-US", "en-ZA"],
         DE: ["de", "de-DE", "de-AT", "de-CH"],
+        JP: ["ja", "ja-JP"],
       }[geo];
-      return !!locales && locales.includes(locale);
+      return (
+        preffedRegions.includes(geo) && !!locales && locales.includes(locale)
+      );
     },
   },
   {
@@ -618,6 +646,12 @@ const FEEDS_DATA = [
     name: "asrouterfeed",
     factory: () => new ASRouterFeed(),
     title: "Handles AS Router messages, such as snippets and onboaridng",
+    value: true,
+  },
+  {
+    name: "recommendationproviderswitcher",
+    factory: () => new RecommendationProviderSwitcher(),
+    title: "Handles switching between two types of personality providers",
     value: true,
   },
   {
@@ -675,7 +709,9 @@ this.ActivityStream = class ActivityStream {
         this.feeds,
         ac.BroadcastToContent({
           type: at.INIT,
-          data: {},
+          data: {
+            locale: this.locale,
+          },
         }),
         { type: at.UNINIT }
       );
@@ -745,7 +781,7 @@ this.ActivityStream = class ActivityStream {
       this.geo = "";
     }
 
-    this.locale = Services.locale.appLocaleAsLangTag;
+    this.locale = Services.locale.appLocaleAsBCP47;
 
     // Update the pref config of those with dynamic values
     for (const pref of PREFS_CONFIG.keys()) {

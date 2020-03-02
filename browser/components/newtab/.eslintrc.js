@@ -15,8 +15,6 @@ module.exports = {
     "import", // require("eslint-plugin-import")
     "react", // require("eslint-plugin-react")
     "jsx-a11y", // require("eslint-plugin-jsx-a11y")
-    // Temporarily disabled since they aren't vendored into in mozilla central yet
-    // "react-hooks", // require("react-hooks")
   ],
   "settings": {
     "react": {
@@ -33,15 +31,11 @@ module.exports = {
     "plugin:prettier/recommended", // require("eslint-plugin-prettier")
     "prettier/react", // require("eslint-config-prettier")
   ],
-  "globals": {
-    // Remove this when m-c updates their eslint: See https://github.com/mozilla/activity-stream/pull/4219
-    "RPMSendAsyncMessage": true,
-    "NewTabPagePreloading": true,
-  },
   "overrides": [
     {
       // These files use fluent-dom to insert content
       "files": [
+        "content-src/aboutwelcome/components/HeroText.jsx",
         "content-src/asrouter/templates/OnboardingMessage/**",
         "content-src/asrouter/templates/FirstRun/**",
         "content-src/asrouter/templates/Trailhead/**",
@@ -73,8 +67,6 @@ module.exports = {
     }
   ],
   "rules": {
-    // "react-hooks/rules-of-hooks": 2,
-
     "fetch-options/no-fetch-credentials": 2,
 
     "react/jsx-boolean-value": [2, "always"],

@@ -41,8 +41,7 @@ from mozharness.mozilla.testing.codecoverage import (
 )
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 
-SUITE_CATEGORIES = ['gtest', 'cppunittest', 'jittest', 'mochitest', 'reftest', 'xpcshell',
-                    'mozmill']
+SUITE_CATEGORIES = ['gtest', 'cppunittest', 'jittest', 'mochitest', 'reftest', 'xpcshell']
 SUITE_DEFAULT_E10S = ['mochitest', 'reftest']
 SUITE_NO_E10S = ['xpcshell']
 SUITE_REPEATABLE = ['mochitest', 'reftest']
@@ -100,14 +99,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                     "Suites are defined in the config file\n."
                     "Examples: 'jittest'"}
          ],
-        [['--mozmill-suite', ], {
-            "action": "extend",
-            "dest": "specified_mozmill_suites",
-            "type": "string",
-            "help": "Specify which mozmill suite to run. "
-                    "Suites are defined in the config file\n."
-                    "Examples: 'mozmill'"}
-         ],
         [['--run-all-suites', ], {
             "action": "store_true",
             "dest": "run_all_suites",
@@ -150,12 +141,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
             "default": False,
             "help": "Permits a software GL implementation (such as LLVMPipe) to use "
                     "the GL compositor."}
-         ],
-        [["--single-stylo-traversal"], {
-            "action": "store_true",
-            "dest": "single_stylo_traversal",
-            "default": False,
-            "help": "Forcibly enable single thread traversal in Stylo with STYLO_THREADS=1"}
          ],
         [["--enable-webrender"], {
             "action": "store_true",
@@ -229,7 +214,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
             ('specified_cppunittest_suites', 'cppunit'),
             ('specified_gtest_suites', 'gtest'),
             ('specified_jittest_suites', 'jittest'),
-            ('specified_mozmill_suites', 'mozmill'),
         )
         for s, prefix in suites:
             if s in c:
@@ -285,7 +269,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                                                    'blobber_upload_dir')
         dirs['abs_jittest_dir'] = os.path.join(dirs['abs_test_install_dir'],
                                                "jit-test", "jit-test")
-        dirs['abs_mozmill_dir'] = os.path.join(dirs['abs_test_install_dir'], "mozmill")
 
         if os.path.isabs(c['virtualenv_path']):
             dirs['abs_virtualenv_dir'] = c['virtualenv_path']
@@ -699,15 +682,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
         self.copytree(os.path.join(abs_gtest_dir, 'gtest_bin'),
                       os.path.join(abs_app_dir))
 
-    def _stage_mozmill(self, suites):
-        self._stage_files()
-        dirs = self.query_abs_dirs()
-        modules = ['jsbridge', 'mozmill']
-        for module in modules:
-            self.install_module(module=os.path.join(dirs['abs_mozmill_dir'],
-                                                    'resources',
-                                                    module))
-
     def _kill_proc_tree(self, pid):
         # Kill a process tree (including grandchildren) with signal.SIGTERM
         try:
@@ -909,10 +883,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                 if self.config['allow_software_gl_layers']:
                     env['MOZ_LAYERS_ALLOW_SOFTWARE_GL'] = '1'
 
-                if self.config['single_stylo_traversal']:
-                    env['STYLO_THREADS'] = '1'
-                else:
-                    env['STYLO_THREADS'] = '4'
+                env['STYLO_THREADS'] = '4'
 
                 env = self.query_env(partial_env=env, log_level=INFO)
                 cmd_timeout = self.get_timeout_for_category(suite_category)

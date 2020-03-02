@@ -9,9 +9,7 @@ loadScripts({ name: "role.js", dir: MOCHITESTS_DIR });
 
 const NESTED_IFRAME_DOC_BODY_ID = "nested-iframe-body";
 const NESTED_IFRAME_ID = "nested-iframe";
-const nestedURL = new URL(
-  `http://example.net${CURRENT_FILE_DIR}fission_document_builder.sjs`
-);
+const nestedURL = new URL(`http://example.com/document-builder.sjs`);
 nestedURL.searchParams.append(
   "html",
   `<html>
@@ -60,35 +58,35 @@ addAccessibleTask(
     if (gIsRemoteIframe) {
       isnot(
         getOsPid(browser.browsingContext),
-        getOsPid(browser.browsingContext.getChildren()[0]),
+        getOsPid(browser.browsingContext.children[0]),
         `Content and IFRAME documents are in separate processes.`
       );
       isnot(
         getOsPid(browser.browsingContext),
-        getOsPid(browser.browsingContext.getChildren()[0].getChildren()[0]),
+        getOsPid(browser.browsingContext.children[0].children[0]),
         `Content and nested IFRAME documents are in separate processes.`
       );
       isnot(
-        getOsPid(browser.browsingContext.getChildren()[0]),
-        getOsPid(browser.browsingContext.getChildren()[0].getChildren()[0]),
+        getOsPid(browser.browsingContext.children[0]),
+        getOsPid(browser.browsingContext.children[0].children[0]),
         `IFRAME and nested IFRAME documents are in separate processes.`
       );
     } else {
       is(
         getOsPid(browser.browsingContext),
-        getOsPid(browser.browsingContext.getChildren()[0]),
+        getOsPid(browser.browsingContext.children[0]),
         `Content and IFRAME documents are in same processes.`
       );
       if (gFissionBrowser) {
         isnot(
-          getOsPid(browser.browsingContext.getChildren()[0]),
-          getOsPid(browser.browsingContext.getChildren()[0].getChildren()[0]),
+          getOsPid(browser.browsingContext.children[0]),
+          getOsPid(browser.browsingContext.children[0].children[0]),
           `IFRAME and nested IFRAME documents are in separate processes.`
         );
       } else {
         is(
           getOsPid(browser.browsingContext),
-          getOsPid(browser.browsingContext.getChildren()[0].getChildren()[0]),
+          getOsPid(browser.browsingContext.children[0].children[0]),
           `Content and nested IFRAME documents are in same processes.`
         );
       }

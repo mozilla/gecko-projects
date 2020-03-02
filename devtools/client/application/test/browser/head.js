@@ -33,6 +33,14 @@ async function enableServiceWorkerDebugging() {
 }
 
 async function enableApplicationPanel() {
+  // FIXME bug 1575427 this rejection is very common.
+  const { PromiseTestUtils } = ChromeUtils.import(
+    "resource://testing-common/PromiseTestUtils.jsm"
+  );
+  PromiseTestUtils.whitelistRejectionsGlobally(
+    /this._frontCreationListeners is null/
+  );
+
   // Enable all preferences related to service worker debugging.
   await enableServiceWorkerDebugging();
 
@@ -42,11 +50,6 @@ async function enableApplicationPanel() {
 
 function getWorkerContainers(doc) {
   return doc.querySelectorAll(".js-sw-container");
-}
-
-function navigate(target, url, waitForTargetEvent = "navigate") {
-  executeSoon(() => target.navigateTo({ url }));
-  return once(target, waitForTargetEvent);
 }
 
 async function openNewTabAndApplicationPanel(url) {

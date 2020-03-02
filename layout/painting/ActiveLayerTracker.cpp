@@ -8,6 +8,7 @@
 
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/MotionPathUtils.h"
@@ -194,13 +195,13 @@ void LayerActivityTracker::NotifyExpired(LayerActivity* aObject) {
   if (f) {
     // The pres context might have been detached during the delay -
     // that's fine, just skip the paint.
-    if (f->PresContext()->GetContainerWeak()) {
+    if (f->PresContext()->GetContainerWeak() && !gfxVars::UseWebRender()) {
       f->SchedulePaint(nsIFrame::PAINT_DEFAULT, false);
     }
     f->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
-    f->DeleteProperty(LayerActivityProperty());
+    f->RemoveProperty(LayerActivityProperty());
   } else {
-    c->DeleteProperty(nsGkAtoms::LayerActivity);
+    c->RemoveProperty(nsGkAtoms::LayerActivity);
   }
 }
 
@@ -238,8 +239,7 @@ void ActiveLayerTracker::TransferActivityToContent(nsIFrame* aFrame,
   if (!aFrame->HasAnyStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY)) {
     return;
   }
-  LayerActivity* layerActivity =
-      aFrame->RemoveProperty(LayerActivityProperty());
+  LayerActivity* layerActivity = aFrame->TakeProperty(LayerActivityProperty());
   aFrame->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
   if (!layerActivity) {
     return;
@@ -253,8 +253,8 @@ void ActiveLayerTracker::TransferActivityToContent(nsIFrame* aFrame,
 /* static */
 void ActiveLayerTracker::TransferActivityToFrame(nsIContent* aContent,
                                                  nsIFrame* aFrame) {
-  LayerActivity* layerActivity = static_cast<LayerActivity*>(
-      aContent->UnsetProperty(nsGkAtoms::LayerActivity));
+  auto* layerActivity = static_cast<LayerActivity*>(
+      aContent->TakeProperty(nsGkAtoms::LayerActivity));
   if (!layerActivity) {
     return;
   }
@@ -330,14 +330,14 @@ void ActiveLayerTracker::NotifyOffsetRestyle(nsIFrame* aFrame) {
 /* static */
 void ActiveLayerTracker::NotifyAnimated(nsIFrame* aFrame,
                                         nsCSSPropertyID aProperty,
-                                        const nsAString& aNewValue,
+                                        const nsACString& aNewValue,
                                         nsDOMCSSDeclaration* aDOMCSSDecl) {
   LayerActivity* layerActivity = GetLayerActivityForUpdate(aFrame);
   uint8_t& mutationCount = layerActivity->RestyleCountForProperty(aProperty);
   if (mutationCount != 0xFF) {
     nsAutoString oldValue;
     aDOMCSSDecl->GetPropertyValue(aProperty, oldValue);
-    if (aNewValue != oldValue) {
+    if (NS_ConvertUTF16toUTF8(oldValue) != aNewValue) {
       // We know this is animated, so just hack the mutation count.
       mutationCount = 0xFF;
     }
@@ -378,7 +378,7 @@ static bool IsPresContextInScriptAnimationCallback(
 
 /* static */
 void ActiveLayerTracker::NotifyInlineStyleRuleModified(
-    nsIFrame* aFrame, nsCSSPropertyID aProperty, const nsAString& aNewValue,
+    nsIFrame* aFrame, nsCSSPropertyID aProperty, const nsACString& aNewValue,
     nsDOMCSSDeclaration* aDOMCSSDecl) {
   if (IsPresContextInScriptAnimationCallback(aFrame->PresContext())) {
     NotifyAnimated(aFrame, aProperty, aNewValue, aDOMCSSDecl);
@@ -535,11 +535,20 @@ bool ActiveLayerTracker::IsStyleAnimated(
       return true;
     }
   }
-  if (aPropertySet.Intersects(transformSet) &&
-      aFrame->Combines3DTransformWithAncestors()) {
-    return IsStyleAnimated(aBuilder, aFrame->GetParent(), aPropertySet);
+
+  if (nsLayoutUtils::HasEffectiveAnimation(aFrame, aPropertySet)) {
+    return true;
   }
-  return nsLayoutUtils::HasEffectiveAnimation(aFrame, aPropertySet);
+
+  if (!aPropertySet.Intersects(transformSet) ||
+      !aFrame->Combines3DTransformWithAncestors()) {
+    return false;
+  }
+
+  // For preserve-3d, we check if there is any transform animation on its parent
+  // frames in the 3d rendering context. If there is one, this function will
+  // return true.
+  return IsStyleAnimated(aBuilder, aFrame->GetParent(), aPropertySet);
 }
 
 /* static */

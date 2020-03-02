@@ -13,9 +13,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 
-import android.support.test.filters.MediumTest
-import android.support.test.InstrumentationRegistry
-import android.support.test.runner.AndroidJUnit4
+import androidx.test.filters.MediumTest
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.ext.junit.runners.AndroidJUnit4
+
 import android.text.InputType
 import android.util.SparseLongArray
 
@@ -47,8 +48,7 @@ const val DISPLAY_HEIGHT = 640
 @RunWith(AndroidJUnit4::class)
 @MediumTest
 @WithDisplay(width = DISPLAY_WIDTH, height = DISPLAY_HEIGHT)
-// TODO: Bug 1564507, to work around it we run AccessibilityTest at the end
-class ZZAccessibilityTest : BaseSessionTest() {
+class AccessibilityTest : BaseSessionTest() {
     lateinit var view: View
     val screenRect = Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT)
     val provider: AccessibilityNodeProvider get() = view.accessibilityNodeProvider
@@ -111,9 +111,10 @@ class ZZAccessibilityTest : BaseSessionTest() {
     @Before fun setup() {
         // We initialize a view with a parent and grandparent so that the
         // accessibility events propagate up at least to the parent.
-        view = FrameLayout(InstrumentationRegistry.getTargetContext())
-        FrameLayout(InstrumentationRegistry.getTargetContext()).addView(view)
-        FrameLayout(InstrumentationRegistry.getTargetContext()).addView(view.parent as View)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        view = FrameLayout(context)
+        FrameLayout(context).addView(view)
+        FrameLayout(context).addView(view.parent as View)
 
         // Force on accessibility and assign the session's accessibility
         // object a view.
@@ -301,6 +302,24 @@ class ZZAccessibilityTest : BaseSessionTest() {
             override fun onAccessibilityFocused(event: AccessibilityEvent) {
                 val node = createNodeInfo(getSourceId(event))
                 assertThat("Text node should match text", node.text as String, equalTo("world"))
+            }
+        })
+
+        mainSession.finder.find("sweet", 0)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                val node = createNodeInfo(getSourceId(event))
+                assertThat("Text node should match text", node.contentDescription as String, equalTo("sweet"))
+            }
+        })
+
+        mainSession.finder.find("Hell", 0)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                val node = createNodeInfo(getSourceId(event))
+                assertThat("Text node should match text", node.text as String, equalTo("Hello "))
             }
         })
     }
@@ -529,6 +548,147 @@ class ZZAccessibilityTest : BaseSessionTest() {
         waitUntilTextTraversed(0, 18, nodeId) // "Lorem ipsum dolor "
     }
 
+    @Test fun testMoveByCharacterAtEdges() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
+        sessionRule.session.loadTestPath(LOREM_IPSUM_HTML_PATH)
+        waitForInitialFocus()
+
+        // Move to the first link containing "anim id".
+        val bundle = Bundle()
+        bundle.putString(AccessibilityNodeInfo.ACTION_ARGUMENT_HTML_ELEMENT_STRING, "LINK")
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, bundle)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on link", node.contentDescription as String, startsWith("anim id"))
+            }
+        })
+
+        var success: Boolean
+        // Navigate forward through "anim id" character by character.
+        for (start in 0..6) {
+            success = provider.performAction(nodeId,
+                    AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                    moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+            assertThat("Next char should succeed", success, equalTo(true))
+            waitUntilTextTraversed(start, start + 1, nodeId)
+        }
+
+        // Try to navigate forward past end.
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        assertThat("Next char should fail at end", success, equalTo(false))
+
+        // We're already on "d". Navigate backward through "anim i".
+        for (start in 5 downTo 0) {
+            success = provider.performAction(nodeId,
+                    AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                    moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+            assertThat("Prev char should succeed", success, equalTo(true))
+            waitUntilTextTraversed(start, start + 1, nodeId)
+        }
+
+        // Try to navigate backward past start.
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        assertThat("Prev char should fail at start", success, equalTo(false))
+    }
+
+    @Test fun testMoveByWordAtEdges() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
+        sessionRule.session.loadTestPath(LOREM_IPSUM_HTML_PATH)
+        waitForInitialFocus()
+
+        // Move to the first link containing "anim id".
+        val bundle = Bundle()
+        bundle.putString(AccessibilityNodeInfo.ACTION_ARGUMENT_HTML_ELEMENT_STRING, "LINK")
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, bundle)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on link", node.contentDescription as String, startsWith("anim id"))
+            }
+        })
+
+        var success: Boolean
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Next word should succeed", success, equalTo(true))
+        waitUntilTextTraversed(0, 4, nodeId) // "anim"
+
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Next word should succeed", success, equalTo(true))
+        waitUntilTextTraversed(5, 7, nodeId) // "id"
+
+        // Try to navigate forward past end.
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Next word should fail at end", success, equalTo(false))
+
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Prev word should succeed", success, equalTo(true))
+        waitUntilTextTraversed(0, 4, nodeId) // "anim"
+
+        // Try to navigate backward past start.
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Prev word should fail at start", success, equalTo(false))
+    }
+
+    @Test fun testMoveAtEndOfTextTrailingWhitespace() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
+        sessionRule.session.loadTestPath(LOREM_IPSUM_HTML_PATH)
+        waitForInitialFocus(true)
+
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on first text leaf", node.text as String, startsWith("Lorem ipsum"))
+            }
+        })
+
+        // Initial move backward to move to last word.
+        var success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Prev word should succeed", success, equalTo(true))
+        waitUntilTextTraversed(418, 424, nodeId) // "mollit"
+
+        // Try to move forward past last word.
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        assertThat("Next word should fail at last word", success, equalTo(false))
+
+        // Move forward by character (onto trailing space).
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        assertThat("Next char should succeed", success, equalTo(true))
+        waitUntilTextTraversed(424, 425, nodeId) // " "
+
+        // Try to move forward past last character.
+        success = provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        assertThat("Next char should fail at last char", success, equalTo(false))
+    }
+
     @Test fun testHeadings() {
         var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID;
         loadTestPage("test-headings")
@@ -543,7 +703,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
             override fun onAccessibilityFocused(event: AccessibilityEvent) {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
-                assertThat("Accessibility focus on first heading", node.text as String, startsWith("Fried cheese"))
+                assertThat("Accessibility focus on first heading", node.contentDescription as String, startsWith("Fried cheese"))
                 if (Build.VERSION.SDK_INT >= 19) {
                     assertThat("First heading is level 1",
                             node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
@@ -558,7 +718,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
             override fun onAccessibilityFocused(event: AccessibilityEvent) {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
-                assertThat("Accessibility focus on second heading", node.text as String, startsWith("Popcorn shrimp"))
+                assertThat("Accessibility focus on second heading", node.contentDescription as String, startsWith("Popcorn shrimp"))
                 if (Build.VERSION.SDK_INT >= 19) {
                     assertThat("Second heading is level 2",
                             node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
@@ -573,7 +733,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
             override fun onAccessibilityFocused(event: AccessibilityEvent) {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
-                assertThat("Accessibility focus on second heading", node.text as String, startsWith("Chicken fingers"))
+                assertThat("Accessibility focus on second heading", node.contentDescription as String, startsWith("Chicken fingers"))
                 if (Build.VERSION.SDK_INT >= 19) {
                     assertThat("Third heading is level 3",
                             node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
@@ -611,6 +771,50 @@ class ZZAccessibilityTest : BaseSessionTest() {
 
         provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_CLICK, null)
         waitUntilClick(false)
+    }
+
+    @Test fun testExpandable() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID;
+        loadTestPage("test-expandable")
+        waitForInitialFocus(true)
+
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                if (Build.VERSION.SDK_INT >= 21) {
+                    val node = createNodeInfo(nodeId)
+                    assertThat("button is expandable", node.actionList, hasItem(AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND))
+                    assertThat("button is not collapsable", node.actionList, not(hasItem(AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE)))
+                }
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_EXPAND, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onClicked(event: AccessibilityEvent) {
+                assertThat("Clicked event is from same node", getSourceId(event), equalTo(nodeId))
+                if (Build.VERSION.SDK_INT >= 21) {
+                    val node = createNodeInfo(nodeId)
+                    assertThat("button is collapsable", node.actionList, hasItem(AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE))
+                    assertThat("button is not expandable", node.actionList, not(hasItem(AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND)))
+                }
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_COLLAPSE, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onClicked(event: AccessibilityEvent) {
+                assertThat("Clicked event is from same node", getSourceId(event), equalTo(nodeId))
+                if (Build.VERSION.SDK_INT >= 21) {
+                    val node = createNodeInfo(nodeId)
+                    assertThat("button is expandable", node.actionList, hasItem(AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND))
+                    assertThat("button is not collapsable", node.actionList, not(hasItem(AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE)))
+                }
+            }
+        })
     }
 
     @Test fun testSelectable() {
@@ -1105,7 +1309,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
                 assertThat("Accessibility focus on a with href",
-                    node.text as String, startsWith("a with href"))
+                    node.contentDescription as String, startsWith("a with href"))
                 if (Build.VERSION.SDK_INT >= 19) {
                     assertThat("a with href is a link",
                             node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
@@ -1153,7 +1357,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
                 assertThat("Accessibility focus on a with onclick",
-                    node.text as String, startsWith("a with onclick"))
+                    node.contentDescription as String, startsWith("a with onclick"))
                 if (Build.VERSION.SDK_INT >= 19) {
                     assertThat("a with onclick is a link",
                             node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
@@ -1169,7 +1373,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
                 assertThat("Accessibility focus on span with role link",
-                    node.text as String, startsWith("span with role link"))
+                    node.contentDescription as String, startsWith("span with role link"))
                 if (Build.VERSION.SDK_INT >= 19) {
                     assertThat("span with role link is a link",
                             node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
@@ -1194,7 +1398,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
                 assertThat("Accessibility focus on a with href",
-                    node.text as String, startsWith("a with href"))
+                    node.contentDescription as String, startsWith("a with href"))
             }
         })
 
@@ -1205,7 +1409,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
                 assertThat("Accessibility focus on a with onclick",
-                    node.text as String, startsWith("a with onclick"))
+                    node.contentDescription as String, startsWith("a with onclick"))
             }
         })
 
@@ -1216,7 +1420,7 @@ class ZZAccessibilityTest : BaseSessionTest() {
                 nodeId = getSourceId(event)
                 val node = createNodeInfo(nodeId)
                 assertThat("Accessibility focus on span with role link",
-                    node.text as String, startsWith("span with role link"))
+                    node.contentDescription as String, startsWith("span with role link"))
             }
         })
     }
@@ -1303,4 +1507,126 @@ class ZZAccessibilityTest : BaseSessionTest() {
             }
         })
     }
+
+    @Test fun testAccessibilityFocusBoundaries() {
+        loadTestPage("test-links")
+        waitForInitialFocus()
+        var nodeId = View.NO_ID
+        var performedAction: Boolean
+
+        performedAction = provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        assertThat("Successfully moved a11y focus to first node", performedAction, equalTo(true))
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on a with href",
+                        node.contentDescription as String, startsWith("a with href"))
+            }
+        })
+
+        performedAction = provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT, null)
+        assertThat("Successfully moved a11y focus past first node", performedAction, equalTo(true))
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                assertThat("Accessibility focus on web view", getSourceId(event), equalTo(View.NO_ID))
+            }
+        })
+
+        performedAction = provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        assertThat("Successfully moved a11y focus to second node", performedAction, equalTo(true))
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on a with no attributes",
+                        node.text as String, startsWith("a with no attributes"))
+            }
+        })
+
+        // hide first and last link
+        mainSession.evaluateJS("document.querySelectorAll('body > :first-child, body > :last-child').forEach(e => e.style.display = 'none');")
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onWinContentChanged(event: AccessibilityEvent) { }
+        })
+
+        performedAction = provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT, null)
+        assertThat("Successfully moved a11y focus past first visible node", performedAction, equalTo(true))
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                assertThat("Accessibility focus on web view", getSourceId(event), equalTo(View.NO_ID))
+            }
+        })
+
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on a with name",
+                        node.text as String, startsWith("a with name"))
+                if (Build.VERSION.SDK_INT >= 19) {
+                    assertThat("a with name is not a link",
+                            node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
+                            equalTo(""))
+                }
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on a with onclick",
+                        node.contentDescription as String, startsWith("a with onclick"))
+                if (Build.VERSION.SDK_INT >= 19) {
+                    assertThat("a with onclick is a link",
+                            node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
+                            equalTo("link"))
+                }
+            }
+        })
+
+        performedAction = provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        assertThat("Should fail to move a11y focus to last hidden node", performedAction, equalTo(false))
+
+        // show last link
+        mainSession.evaluateJS("document.querySelector('body > :last-child').style.display = 'initial';")
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onWinContentChanged(event: AccessibilityEvent) { }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = createNodeInfo(nodeId)
+                assertThat("Accessibility focus on span with role link",
+                        node.contentDescription as String, startsWith("span with role link"))
+                if (Build.VERSION.SDK_INT >= 19) {
+                    assertThat("span with role link is a link",
+                            node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")!!.toString(),
+                            equalTo("link"))
+                }
+            }
+        })
+
+        performedAction = provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT, null)
+        assertThat("Should fail to move a11y focus beyond last node", performedAction, equalTo(false))
+
+        performedAction = provider.performAction(View.NO_ID, AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT, null)
+        assertThat("Should fail to move a11y focus before web content", performedAction, equalTo(false))
+    }
+
 }

@@ -13,8 +13,10 @@
 namespace mozilla {
 
 namespace layers {
+class NativeLayerRootSnapshotter;
 class NativeLayerRoot;
 class NativeLayer;
+class SurfacePoolHandle;
 }  // namespace layers
 
 namespace wr {
@@ -29,7 +31,7 @@ class RenderCompositorOGL : public RenderCompositor {
   virtual ~RenderCompositorOGL();
 
   bool BeginFrame() override;
-  RenderedFrameId EndFrame(const FfiVec<DeviceIntRect>& aDirtyRects) final;
+  RenderedFrameId EndFrame(const nsTArray<DeviceIntRect>& aDirtyRects) final;
   bool WaitForGPU() override;
   void Pause() override;
   bool Resume() override;
@@ -43,17 +45,22 @@ class RenderCompositorOGL : public RenderCompositor {
   bool ShouldUseNativeCompositor() override;
   uint32_t GetMaxUpdateRects() override;
 
+  // Does the readback for the ShouldUseNativeCompositor() case.
+  bool MaybeReadback(const gfx::IntSize& aReadbackSize,
+                     const wr::ImageFormat& aReadbackFormat,
+                     const Range<uint8_t>& aReadbackBuffer) override;
+
   // Interface for wr::Compositor
   void CompositorBeginFrame() override;
   void CompositorEndFrame() override;
   void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-            wr::DeviceIntRect aDirtyRect) override;
+            wr::DeviceIntRect aDirtyRect,
+            wr::DeviceIntRect aValidRect) override;
   void Unbind() override;
-  void CreateSurface(wr::NativeSurfaceId aId,
-                     wr::DeviceIntSize aTileSize) override;
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aTileSize,
+                     bool aIsOpaque) override;
   void DestroySurface(NativeSurfaceId aId) override;
-  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY,
-                  bool aIsOpaque) override;
+  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void DestroyTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
                   wr::DeviceIntRect aClipRect) override;
@@ -72,7 +79,9 @@ class RenderCompositorOGL : public RenderCompositor {
 
   // Can be null.
   RefPtr<layers::NativeLayerRoot> mNativeLayerRoot;
+  UniquePtr<layers::NativeLayerRootSnapshotter> mNativeLayerRootSnapshotter;
   RefPtr<layers::NativeLayer> mNativeLayerForEntireWindow;
+  RefPtr<layers::SurfacePoolHandle> mSurfacePoolHandle;
 
   struct TileKeyHashFn {
     std::size_t operator()(const TileKey& aId) const {
@@ -80,11 +89,13 @@ class RenderCompositorOGL : public RenderCompositor {
     }
   };
 
-  class Surface {
-   public:
-    explicit Surface(wr::DeviceIntSize aTileSize) : mTileSize(aTileSize) {}
+  struct Surface {
+    explicit Surface(wr::DeviceIntSize aTileSize, bool aIsOpaque)
+        : mTileSize(aTileSize), mIsOpaque(aIsOpaque) {}
+    IntSize TileSize() { return IntSize(mTileSize.width, mTileSize.height); }
 
     wr::DeviceIntSize mTileSize;
+    bool mIsOpaque;
     std::unordered_map<TileKey, RefPtr<layers::NativeLayer>, TileKeyHashFn>
         mNativeLayers;
   };

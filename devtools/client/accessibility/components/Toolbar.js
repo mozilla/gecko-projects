@@ -13,28 +13,37 @@ const {
   span,
 } = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
-const { L10N } = require("../utils/l10n");
-const Button = createFactory(require("./Button").Button);
-const AccessibilityTreeFilter = createFactory(
-  require("./AccessibilityTreeFilter")
+const { L10N } = require("devtools/client/accessibility/utils/l10n");
+const Button = createFactory(
+  require("devtools/client/accessibility/components/Button").Button
 );
-const AccessibilityPrefs = createFactory(require("./AccessibilityPrefs"));
+const AccessibilityTreeFilter = createFactory(
+  require("devtools/client/accessibility/components/AccessibilityTreeFilter")
+);
+const AccessibilityPrefs = createFactory(
+  require("devtools/client/accessibility/components/AccessibilityPrefs")
+);
 loader.lazyGetter(this, "SimulationMenuButton", function() {
-  return createFactory(require("./SimulationMenuButton"));
+  return createFactory(
+    require("devtools/client/accessibility/components/SimulationMenuButton")
+  );
 });
 
 const { connect } = require("devtools/client/shared/vendor/react-redux");
-const { disable, updateCanBeDisabled } = require("../actions/ui");
+const {
+  disable,
+  updateCanBeDisabled,
+} = require("devtools/client/accessibility/actions/ui");
 
 class Toolbar extends Component {
   static get propTypes() {
     return {
-      accessibilityWalker: PropTypes.object.isRequired,
       dispatch: PropTypes.func.isRequired,
       accessibility: PropTypes.object.isRequired,
       canBeDisabled: PropTypes.bool.isRequired,
-      simulator: PropTypes.object,
       toolboxDoc: PropTypes.object.isRequired,
+      audit: PropTypes.func.isRequired,
+      simulate: PropTypes.func,
     };
   }
 
@@ -77,12 +86,7 @@ class Toolbar extends Component {
   }
 
   render() {
-    const {
-      canBeDisabled,
-      accessibilityWalker,
-      simulator,
-      toolboxDoc,
-    } = this.props;
+    const { canBeDisabled, simulate, toolboxDoc, audit } = this.props;
     const { disabling } = this.state;
     const disableButtonStr = disabling
       ? "accessibility.disabling"
@@ -98,13 +102,13 @@ class Toolbar extends Component {
       title = L10N.getStr("accessibility.disable.disabledTitle");
     }
 
-    const optionalSimulationSection = simulator
+    const optionalSimulationSection = simulate
       ? [
           div({
             role: "separator",
             className: "devtools-separator",
           }),
-          SimulationMenuButton({ simulator, toolboxDoc }),
+          SimulationMenuButton({ simulate, toolboxDoc }),
         ]
       : [];
 
@@ -138,7 +142,7 @@ class Toolbar extends Component {
         L10N.getStr("accessibility.beta")
       ),
       AccessibilityTreeFilter({
-        accessibilityWalker,
+        audit,
         describedby: betaID,
         toolboxDoc,
       }),

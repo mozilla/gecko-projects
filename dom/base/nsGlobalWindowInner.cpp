@@ -44,6 +44,7 @@
 #include "mozilla/dom/VisualViewport.h"
 #include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Result.h"
 #if defined(MOZ_WIDGET_ANDROID)
 #  include "mozilla/dom/WindowOrientationObserver.h"
 #endif
@@ -75,6 +76,7 @@
 // Helper Classes
 #include "nsJSUtils.h"
 #include "jsapi.h"
+#include "jsfriendapi.h"
 #include "js/Warnings.h"  // JS::WarnASCII
 #include "js/Wrapper.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -414,7 +416,7 @@ class IdleRequestExecutorTimeoutHandler final : public TimeoutHandler {
   bool Call(const char* /* unused */) override;
 
  private:
-  ~IdleRequestExecutorTimeoutHandler() override {}
+  ~IdleRequestExecutorTimeoutHandler() override = default;
   RefPtr<IdleRequestExecutor> mExecutor;
 };
 
@@ -473,7 +475,7 @@ class IdleRequestExecutor final : public nsIRunnable,
 
   void DelayedDispatch(uint32_t aDelay);
 
-  ~IdleRequestExecutor() override {}
+  ~IdleRequestExecutor() override = default;
 
   bool mDispatched;
   TimeStamp mDeadline;
@@ -714,7 +716,7 @@ class IdleRequestTimeoutHandler final : public TimeoutHandler {
   }
 
  private:
-  ~IdleRequestTimeoutHandler() override {}
+  ~IdleRequestTimeoutHandler() override = default;
 
   RefPtr<IdleRequest> mIdleRequest;
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
@@ -807,7 +809,7 @@ class PromiseDocumentFlushedResolver final {
     mCallback->Call(&returnVal, error);
 
     if (error.Failed()) {
-      mPromise->MaybeReject(error);
+      mPromise->MaybeReject(std::move(error));
     } else if (guard.Mutated(0)) {
       // Something within the callback mutated the DOM.
       mPromise->MaybeReject(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
@@ -839,12 +841,14 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
       mFocusByKeyOccurred(false),
       mDidFireDocElemInserted(false),
       mHasGamepad(false),
-      mHasVREvents(false),
+      mHasXRSession(false),
       mHasVRDisplayActivateEvents(false),
+      mXRRuntimeDetectionInFlight(false),
       mXRPermissionRequestInFlight(false),
       mXRPermissionGranted(false),
       mWasCurrentInnerWindow(false),
       mHasSeenGamepadInput(false),
+      mHintedWasLoading(false),
       mSuspendDepth(0),
       mFreezeDepth(0),
 #ifdef DEBUG
@@ -954,6 +958,7 @@ void nsGlobalWindowInner::Init() {
 
 nsGlobalWindowInner::~nsGlobalWindowInner() {
   AssertIsOnMainThread();
+  MOZ_ASSERT(!mHintedWasLoading);
 
   if (IsChromeWindow()) {
     MOZ_ASSERT(mCleanMessageManager,
@@ -974,8 +979,6 @@ nsGlobalWindowInner::~nsGlobalWindowInner() {
   FreeInnerObjects();
 
   if (sInnerWindowsById) {
-    MOZ_ASSERT(sInnerWindowsById->Get(mWindowID),
-               "This window should be in the hash table");
     sInnerWindowsById->Remove(mWindowID);
   }
 
@@ -1077,6 +1080,7 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   mChromeEventHandler = nullptr;
 
   if (mListenerManager) {
+    mListenerManager->RemoveAllListeners();
     mListenerManager->Disconnect();
     mListenerManager = nullptr;
   }
@@ -1101,6 +1105,8 @@ void nsGlobalWindowInner::FreeInnerObjects() {
     mDocumentStoragePrincipal = mDoc->EffectiveStoragePrincipal();
     mDocumentURI = mDoc->GetDocumentURI();
     mDocBaseURI = mDoc->GetDocBaseURI();
+    mDocContentBlockingAllowListPrincipal =
+        mDoc->GetContentBlockingAllowListPrincipal();
     mDocumentCsp = mDoc->GetCsp();
 
     while (mDoc->EventHandlingSuppressed()) {
@@ -1142,8 +1148,9 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   mHasGamepad = false;
   mGamepads.Clear();
   DisableVRUpdates();
-  mHasVREvents = false;
+  mHasXRSession = false;
   mHasVRDisplayActivateEvents = false;
+  mXRRuntimeDetectionInFlight = false;
   mXRPermissionRequestInFlight = false;
   mXRPermissionGranted = false;
   mVRDisplays.Clear();
@@ -1225,6 +1232,8 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   mWindowGlobalChild = nullptr;
 
   mIntlUtils = nullptr;
+
+  HintIsLoading(false);
 }
 
 //*****************************************************************************
@@ -1374,6 +1383,11 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
+  if (sInnerWindowsById) {
+    sInnerWindowsById->Remove(tmp->mWindowID);
+  }
+
   JSObject* wrapper = tmp->GetWrapperPreserveColor();
   if (wrapper) {
     // Mark our realm as dead, so the JS engine won't hand out our
@@ -1533,18 +1547,16 @@ void nsGlobalWindowInner::TraceGlobalJSObject(JSTracer* aTrc) {
   TraceWrapper(aTrc, "active window global");
 }
 
-void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
-                                              Document* aDocument) {
-  MOZ_ASSERT(aDocument);
+void nsGlobalWindowInner::InitDocumentDependentState(JSContext* aCx) {
+  MOZ_ASSERT(mDoc);
 
   if (MOZ_LOG_TEST(gDOMLeakPRLogInner, LogLevel::Debug)) {
-    nsIURI* uri = aDocument->GetDocumentURI();
+    nsIURI* uri = mDoc->GetDocumentURI();
     MOZ_LOG(gDOMLeakPRLogInner, LogLevel::Debug,
             ("DOMWINDOW %p SetNewDocument %s", this,
              uri ? uri->GetSpecOrDefault().get() : ""));
   }
 
-  mDoc = aDocument;
   mFocusedElement = nullptr;
   mLocalStorage = nullptr;
   mSessionStorage = nullptr;
@@ -1578,7 +1590,7 @@ void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
 #endif
 
 #ifdef DEBUG
-  mLastOpenedURI = aDocument->GetDocumentURI();
+  mLastOpenedURI = mDoc->GetDocumentURI();
 #endif
 
   Telemetry::Accumulate(Telemetry::INNERWINDOWS_WITH_MUTATION_LISTENERS,
@@ -2262,8 +2274,7 @@ bool nsGlobalWindowInner::HasOpenerForInitialContentBrowser() {
   FORWARD_TO_OUTER(HasOpenerForInitialContentBrowser, (), false);
 }
 
-nsGlobalWindowInner::CallState
-nsGlobalWindowInner::ShouldReportForServiceWorkerScopeInternal(
+CallState nsGlobalWindowInner::ShouldReportForServiceWorkerScopeInternal(
     const nsACString& aScope, bool* aResultOut) {
   MOZ_DIAGNOSTIC_ASSERT(aResultOut);
 
@@ -2329,7 +2340,7 @@ nsGlobalWindowInner::ShouldReportForServiceWorkerScopeInternal(
 
   // The current window doesn't care about this service worker, but maybe
   // one of our child frames does.
-  return CallOnChildren(
+  return CallOnInProcessChildren(
       &nsGlobalWindowInner::ShouldReportForServiceWorkerScopeInternal, aScope,
       aResultOut);
 }
@@ -2388,9 +2399,6 @@ bool nsGlobalWindowInner::CrossOriginIsolated() const {
   if (!cc ||
       !StringBeginsWith(cc->GetRemoteType(),
                         NS_LITERAL_STRING(WITH_COOP_COEP_REMOTE_TYPE_PREFIX))) {
-#if !defined(ANDROID)
-    MOZ_DIAGNOSTIC_ASSERT(false, "COOP+COEP not in webCOOP+COEP process");
-#endif
     return false;
   }
 
@@ -2466,16 +2474,6 @@ void nsPIDOMWindowInner::TryToCacheTopInnerWindow() {
   }
 }
 
-void nsPIDOMWindowInner::UpdateActiveIndexedDBTransactionCount(int32_t aDelta) {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (aDelta == 0) {
-    return;
-  }
-
-  TabGroup()->IndexedDBTransactionCounter() += aDelta;
-}
-
 void nsPIDOMWindowInner::UpdateActiveIndexedDBDatabaseCount(int32_t aDelta) {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -2490,8 +2488,6 @@ void nsPIDOMWindowInner::UpdateActiveIndexedDBDatabaseCount(int32_t aDelta) {
                           : mNumOfIndexedDBDatabases;
 
   counter += aDelta;
-
-  TabGroup()->IndexedDBDatabaseCounter() += aDelta;
 }
 
 bool nsPIDOMWindowInner::HasActiveIndexedDBDatabases() {
@@ -2556,6 +2552,19 @@ void nsGlobalWindowInner::SetActiveLoadingState(bool aIsLoading) {
 
   if (!nsGlobalWindowInner::Cast(this)->IsChromeWindow()) {
     mTimeoutManager->SetLoading(aIsLoading);
+  }
+
+  HintIsLoading(aIsLoading);
+}
+
+void nsGlobalWindowInner::HintIsLoading(bool aIsLoading) {
+  // Hint to tell the JS GC to use modified triggers during pageload.
+  if (mHintedWasLoading != aIsLoading) {
+    using namespace js::gc;
+    SetPerformanceHint(danger::GetJSContext(), aIsLoading
+                                                   ? PerformanceHint::InPageLoad
+                                                   : PerformanceHint::Normal);
+    mHintedWasLoading = aIsLoading;
   }
 }
 
@@ -2701,7 +2710,6 @@ const InterfaceShimEntry kInterfaceShimMap[] = {
     {"nsIDOMUIEvent", "UIEvent"},
     {"nsIDOMHTMLMediaElement", "HTMLMediaElement"},
     {"nsIDOMRange", "Range"},
-    {"nsIDOMSVGLength", "SVGLength"},
     // Think about whether Ci.nsINodeFilter can just go away for websites!
     {"nsIDOMNodeFilter", "NodeFilter"},
     {"nsIDOMXPathResult", "XPathResult"}};
@@ -3461,13 +3469,13 @@ void nsGlobalWindowInner::Prompt(const nsAString& aMessage,
       aError, );
 }
 
-void nsGlobalWindowInner::Focus(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(FocusOuter, (), aError, );
+void nsGlobalWindowInner::Focus(CallerType aCallerType, ErrorResult& aError) {
+  FORWARD_TO_OUTER_OR_THROW(FocusOuter, (aCallerType), aError, );
 }
 
-nsresult nsGlobalWindowInner::Focus() {
+nsresult nsGlobalWindowInner::Focus(CallerType aCallerType) {
   ErrorResult rv;
-  Focus(rv);
+  Focus(aCallerType, rv);
 
   return rv.StealNSResult();
 }
@@ -3652,8 +3660,7 @@ void nsGlobalWindowInner::ScrollByLines(int32_t numLines,
                                 ? ScrollMode::SmoothMsd
                                 : ScrollMode::Instant;
 
-    sf->ScrollBy(nsIntPoint(0, numLines), nsIScrollableFrame::LINES,
-                 scrollMode);
+    sf->ScrollBy(nsIntPoint(0, numLines), ScrollUnit::LINES, scrollMode);
   }
 }
 
@@ -3669,8 +3676,7 @@ void nsGlobalWindowInner::ScrollByPages(int32_t numPages,
                                 ? ScrollMode::SmoothMsd
                                 : ScrollMode::Instant;
 
-    sf->ScrollBy(nsIntPoint(0, numPages), nsIScrollableFrame::PAGES,
-                 scrollMode);
+    sf->ScrollBy(nsIntPoint(0, numPages), ScrollUnit::PAGES, scrollMode);
   }
 }
 
@@ -3836,20 +3842,12 @@ void nsGlobalWindowInner::NotifyDOMWindowThawed(nsGlobalWindowInner* aWindow) {
 
 Element* nsGlobalWindowInner::GetFrameElement(nsIPrincipal& aSubjectPrincipal,
                                               ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(GetFrameElementOuter, (aSubjectPrincipal), aError,
+  FORWARD_TO_OUTER_OR_THROW(GetFrameElement, (aSubjectPrincipal), aError,
                             nullptr);
 }
 
 Element* nsGlobalWindowInner::GetRealFrameElement(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(GetRealFrameElementOuter, (), aError, nullptr);
-}
-
-/**
- * nsIGlobalWindow::GetFrameElement (when called from C++) is just a wrapper
- * around GetRealFrameElement.
- */
-Element* nsGlobalWindowInner::GetFrameElement() {
-  return GetRealFrameElement(IgnoreErrors());
+  FORWARD_TO_OUTER_OR_THROW(GetFrameElement, (), aError, nullptr);
 }
 
 void nsGlobalWindowInner::UpdateCommands(const nsAString& anAction,
@@ -3998,12 +3996,23 @@ void nsGlobalWindowInner::DisableGamepadUpdates() {
 }
 
 void nsGlobalWindowInner::EnableVRUpdates() {
-  if (mHasVREvents && !mVREventObserver) {
-    MOZ_ASSERT(!IsDying());
+  // We need to create a VREventObserver before we can either detect XR runtimes
+  // or start an XR session
+  if (!mVREventObserver && (mHasXRSession || mXRRuntimeDetectionInFlight)) {
+    // Assert that we are not creating the observer while IsDying() as
+    // that would result in a leak.  VREventObserver holds a RefPtr to
+    // this nsGlobalWindowInner and would prevent it from being deallocated.
+    MOZ_ASSERT(!IsDying(),
+               "Creating a VREventObserver for an nsGlobalWindow that is "
+               "dying would cause it to leak.");
     mVREventObserver = new VREventObserver(this);
+  }
+  // If the content has an XR session, then we need to tell
+  // VREventObserver that there is VR activity.
+  if (mHasXRSession) {
     nsPIDOMWindowOuter* outer = GetOuterWindow();
     if (outer && !outer->IsBackground()) {
-      mVREventObserver->StartActivity();
+      StartVRActivity();
     }
   }
 }
@@ -4022,13 +4031,36 @@ void nsGlobalWindowInner::ResetVRTelemetry(bool aUpdate) {
 }
 
 void nsGlobalWindowInner::StartVRActivity() {
-  if (mVREventObserver) {
+  /**
+   * If the content has an XR session, tell
+   * the VREventObserver that the window is accessing
+   * VR devices.
+   *
+   * It's possible to have a VREventObserver without
+   * and XR session, if we are using it to get updates
+   * about XR runtime enumeration.  In this case,
+   * we would not tell the VREventObserver that
+   * we are accessing VR devices.
+   */
+  if (mVREventObserver && mHasXRSession) {
     mVREventObserver->StartActivity();
   }
 }
 
 void nsGlobalWindowInner::StopVRActivity() {
-  if (mVREventObserver) {
+  /**
+   * If the content has an XR session, tell
+   * the VReventObserver that the window is no longer
+   * accessing VR devices.  This does not stop the
+   * XR session itself, which may be resumed with
+   * EnableVRUpdates.
+   * It's possible to have a VREventObserver without
+   * and XR session, if we are using it to get updates
+   * about XR runtime enumeration.  In this case,
+   * we would not tell the VREventObserver that
+   * we ending an activity that accesses VR devices.
+   */
+  if (mVREventObserver && mHasXRSession) {
     mVREventObserver->StopActivity();
   }
 }
@@ -5126,7 +5158,7 @@ void nsGlobalWindowInner::Suspend() {
 
   // All children are also suspended.  This ensure mSuspendDepth is
   // set properly and the timers are properly canceled for each child.
-  CallOnChildren(&nsGlobalWindowInner::Suspend);
+  CallOnInProcessChildren(&nsGlobalWindowInner::Suspend);
 
   mSuspendDepth += 1;
   if (mSuspendDepth != 1) {
@@ -5174,10 +5206,15 @@ void nsGlobalWindowInner::Resume() {
 
   // Resume all children.  This restores timers recursively canceled
   // in Suspend() and ensures all children have the correct mSuspendDepth.
-  CallOnChildren(&nsGlobalWindowInner::Resume);
+  CallOnInProcessChildren(&nsGlobalWindowInner::Resume);
 
-  MOZ_ASSERT(mSuspendDepth != 0);
+  if (mSuspendDepth == 0) {
+    // Ignore if the window is not suspended.
+    return;
+  }
+
   mSuspendDepth -= 1;
+
   if (mSuspendDepth != 0) {
     return;
   }
@@ -5231,7 +5268,9 @@ void nsGlobalWindowInner::FreezeInternal() {
   MOZ_DIAGNOSTIC_ASSERT(IsCurrentInnerWindow());
   MOZ_DIAGNOSTIC_ASSERT(IsSuspended());
 
-  CallOnChildren(&nsGlobalWindowInner::FreezeInternal);
+  HintIsLoading(false);
+
+  CallOnInProcessChildren(&nsGlobalWindowInner::FreezeInternal);
 
   mFreezeDepth += 1;
   MOZ_ASSERT(mSuspendDepth >= mFreezeDepth);
@@ -5266,7 +5305,7 @@ void nsGlobalWindowInner::ThawInternal() {
   MOZ_DIAGNOSTIC_ASSERT(IsCurrentInnerWindow());
   MOZ_DIAGNOSTIC_ASSERT(IsSuspended());
 
-  CallOnChildren(&nsGlobalWindowInner::ThawInternal);
+  CallOnInProcessChildren(&nsGlobalWindowInner::ThawInternal);
 
   MOZ_ASSERT(mFreezeDepth != 0);
   mFreezeDepth -= 1;
@@ -5342,8 +5381,8 @@ void nsGlobalWindowInner::SyncStateFromParentWindow() {
 }
 
 template <typename Method, typename... Args>
-nsGlobalWindowInner::CallState nsGlobalWindowInner::CallOnChildren(
-    Method aMethod, Args&... aArgs) {
+CallState nsGlobalWindowInner::CallOnInProcessChildren(Method aMethod,
+                                                       Args&... aArgs) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(IsCurrentInnerWindow());
 
@@ -5354,22 +5393,11 @@ nsGlobalWindowInner::CallState nsGlobalWindowInner::CallOnChildren(
     return state;
   }
 
-  int32_t childCount = 0;
-  docShell->GetInProcessChildCount(&childCount);
+  BrowsingContext::Children children;
+  GetBrowsingContext()->GetChildren(children);
 
-  // Take a copy of the current children so that modifications to
-  // the child list don't affect to the iteration.
-  AutoTArray<nsCOMPtr<nsIDocShellTreeItem>, 8> children;
-  for (int32_t i = 0; i < childCount; ++i) {
-    nsCOMPtr<nsIDocShellTreeItem> childShell;
-    docShell->GetInProcessChildAt(i, getter_AddRefs(childShell));
-    if (childShell) {
-      children.AppendElement(childShell);
-    }
-  }
-
-  for (nsCOMPtr<nsIDocShellTreeItem> childShell : children) {
-    nsCOMPtr<nsPIDOMWindowOuter> pWin = childShell->GetWindow();
+  for (const RefPtr<BrowsingContext>& bc : children) {
+    nsCOMPtr<nsPIDOMWindowOuter> pWin = bc->GetDOMWindow();
     if (!pWin) {
       continue;
     }
@@ -5412,10 +5440,11 @@ Maybe<ClientState> nsGlobalWindowInner::GetClientState() const {
   MOZ_ASSERT(NS_IsMainThread());
   Maybe<ClientState> clientState;
   if (mClientSource) {
-    ClientState state;
-    nsresult rv = mClientSource->SnapshotState(&state);
-    if (NS_SUCCEEDED(rv)) {
-      clientState.emplace(state);
+    Result<ClientState, ErrorResult> res = mClientSource->SnapshotState();
+    if (res.isOk()) {
+      clientState.emplace(res.unwrap());
+    } else {
+      res.unwrapErr().SuppressException();
     }
   }
   return clientState;
@@ -5471,7 +5500,7 @@ RefPtr<ServiceWorker> nsGlobalWindowInner::GetOrCreateServiceWorker(
       return;
     }
 
-    ref = sw.forget();
+    ref = std::move(sw);
     *aDoneOut = true;
   });
 
@@ -5479,7 +5508,7 @@ RefPtr<ServiceWorker> nsGlobalWindowInner::GetOrCreateServiceWorker(
     ref = ServiceWorker::Create(this, aDescriptor);
   }
 
-  return ref.forget();
+  return ref;
 }
 
 RefPtr<mozilla::dom::ServiceWorkerRegistration>
@@ -5494,10 +5523,10 @@ nsGlobalWindowInner::GetServiceWorkerRegistration(
       return;
     }
 
-    ref = swr.forget();
+    ref = std::move(swr);
     *aDoneOut = true;
   });
-  return ref.forget();
+  return ref;
 }
 
 RefPtr<ServiceWorkerRegistration>
@@ -5509,7 +5538,7 @@ nsGlobalWindowInner::GetOrCreateServiceWorkerRegistration(
   if (!ref) {
     ref = ServiceWorkerRegistration::CreateForMainThread(this, aDescriptor);
   }
-  return ref.forget();
+  return ref;
 }
 
 nsresult nsGlobalWindowInner::FireDelayedDOMEvents() {
@@ -5644,7 +5673,7 @@ class WindowScriptTimeoutHandler final : public ScriptTimeoutHandler {
   MOZ_CAN_RUN_SCRIPT virtual bool Call(const char* aExecutionReason) override;
 
  private:
-  virtual ~WindowScriptTimeoutHandler() {}
+  virtual ~WindowScriptTimeoutHandler() = default;
 
   // Initiating script for use when evaluating mExpr on the main thread.
   RefPtr<LoadedScript> mInitiatingScript;
@@ -5862,9 +5891,8 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
   const char* reason = GetTimeoutReasonString(timeout);
 
 #ifdef MOZ_GECKO_PROFILER
+  nsCString str;
   if (profiler_can_accept_markers()) {
-    nsCOMPtr<nsIDocShell> docShell = GetDocShell();
-    nsCString str;
     TimeDuration originalInterval = timeout->When() - timeout->SubmitTime();
     str.Append(reason);
     str.Append(" with interval ");
@@ -5873,10 +5901,10 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
     nsCString handlerDescription;
     timeout->mScriptHandler->GetDescription(handlerDescription);
     str.Append(handlerDescription);
-    AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE("setTimeout callback", str, JS,
-                                             docShell,
-                                             timeout->TakeProfilerBacktrace());
   }
+  AUTO_PROFILER_TEXT_MARKER_CAUSE("setTimeout callback", str, JS,
+                                  Some(mWindowID),
+                                  timeout->TakeProfilerBacktrace());
 #endif
 
   bool abortIntervalHandler;
@@ -6018,28 +6046,70 @@ void nsGlobalWindowInner::SetHasGamepadEventListener(
   }
 }
 
-void nsGlobalWindowInner::RequestXRPermission() {
-  if (mXRPermissionGranted) {
-    // Don't prompt redundantly once permission to
-    // access XR devices has been granted.
-    OnXRPermissionRequestAllow();
+void nsGlobalWindowInner::NotifyDetectXRRuntimesCompleted() {
+  if (!mXRRuntimeDetectionInFlight) {
     return;
   }
+  mXRRuntimeDetectionInFlight = false;
   if (mXRPermissionRequestInFlight) {
-    // Don't allow multiple simultaneous permissions requests;
     return;
   }
+  gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
+  bool supported = vm->RuntimeSupportsVR();
+  if (!supported) {
+    // A VR runtime was not installed; we can suppress
+    // the permission prompt
+    OnXRPermissionRequestCancel();
+    return;
+  }
+  // A VR runtime was found.  Display a permission prompt before
+  // allowing it to be accessed.
+  // Connect to the VRManager in order to receive the runtime
+  // detection results.
   mXRPermissionRequestInFlight = true;
   RefPtr<XRPermissionRequest> request =
       new XRPermissionRequest(this, WindowID());
   Unused << NS_WARN_IF(NS_FAILED(request->Start()));
 }
 
+void nsGlobalWindowInner::RequestXRPermission() {
+  if (IsDying()) {
+    // Do not proceed if the window is dying, as that will result
+    // in leaks of objects that get re-allocated after FreeInnerObjects
+    // has been called, including mVREventObserver.
+    return;
+  }
+  if (mXRPermissionGranted) {
+    // Don't prompt redundantly once permission to
+    // access XR devices has been granted.
+    OnXRPermissionRequestAllow();
+    return;
+  }
+  if (mXRRuntimeDetectionInFlight || mXRPermissionRequestInFlight) {
+    // Don't allow multiple simultaneous permissions requests;
+    return;
+  }
+  // Before displaying a permission prompt, detect
+  // if there is any VR runtime installed.
+  gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
+  mXRRuntimeDetectionInFlight = true;
+  EnableVRUpdates();
+  vm->DetectRuntimes();
+}
+
 void nsGlobalWindowInner::OnXRPermissionRequestAllow() {
   mXRPermissionRequestInFlight = false;
+  if (IsDying()) {
+    // The window may have started dying while the permission request
+    // is in flight.
+    // Do not proceed if the window is dying, as that will result
+    // in leaks of objects that get re-allocated after FreeInnerObjects
+    // has been called, including mNavigator.
+    return;
+  }
   mXRPermissionGranted = true;
 
-  NotifyVREventListenerAdded();
+  NotifyHasXRSession();
 
   dom::Navigator* nav = Navigator();
   MOZ_ASSERT(nav != nullptr);
@@ -6048,6 +6118,14 @@ void nsGlobalWindowInner::OnXRPermissionRequestAllow() {
 
 void nsGlobalWindowInner::OnXRPermissionRequestCancel() {
   mXRPermissionRequestInFlight = false;
+  if (IsDying()) {
+    // The window may have started dying while the permission request
+    // is in flight.
+    // Do not proceed if the window is dying, as that will result
+    // in leaks of objects that get re-allocated after FreeInnerObjects
+    // has been called, including mNavigator.
+    return;
+  }
   dom::Navigator* nav = Navigator();
   MOZ_ASSERT(nav != nullptr);
   nav->OnXRPermissionRequestCancel();
@@ -6108,15 +6186,22 @@ void nsGlobalWindowInner::EventListenerRemoved(nsAtom* aType) {
   }
 }
 
-void nsGlobalWindowInner::NotifyVREventListenerAdded() {
-  mHasVREvents = true;
+void nsGlobalWindowInner::NotifyHasXRSession() {
+  if (IsDying()) {
+    // Do not proceed if the window is dying, as that will result
+    // in leaks of objects that get re-allocated after FreeInnerObjects
+    // has been called, including mVREventObserver.
+    return;
+  }
+  mHasXRSession = true;
   EnableVRUpdates();
 }
 
 bool nsGlobalWindowInner::HasUsedVR() const {
-  // Returns true only if any WebVR API call or related event
-  // has been used
-  return mHasVREvents;
+  // Returns true only if content has enumerated and activated
+  // XR devices.  Detection of XR runtimes without activation
+  // will not cause true to be returned.
+  return mHasXRSession;
 }
 
 bool nsGlobalWindowInner::IsVRContentDetected() const {
@@ -6193,7 +6278,7 @@ void nsGlobalWindowInner::AddGamepad(uint32_t aIndex, Gamepad* aGamepad) {
   }
   mGamepadIndexSet.Put(index);
   aGamepad->SetIndex(index);
-  mGamepads.Put(aIndex, aGamepad);
+  mGamepads.Put(aIndex, RefPtr{aGamepad});
 }
 
 void nsGlobalWindowInner::RemoveGamepad(uint32_t aIndex) {
@@ -6485,6 +6570,24 @@ void nsGlobalWindowInner::Restore() {
   }
 }
 
+int32_t nsGlobalWindowInner::GetWorkspaceID() {
+  nsCOMPtr<nsIWidget> widget = GetMainWidget();
+
+  if (widget) {
+    return widget->GetWorkspaceID();
+  }
+
+  return 0;
+}
+
+void nsGlobalWindowInner::MoveToWorkspace(int32_t workspaceID) {
+  nsCOMPtr<nsIWidget> widget = GetMainWidget();
+
+  if (widget) {
+    widget->MoveToWorkspace(workspaceID);
+  }
+}
+
 void nsGlobalWindowInner::GetAttention(ErrorResult& aResult) {
   return GetAttentionWithCycleCount(-1, aResult);
 }
@@ -6653,7 +6756,7 @@ already_AddRefed<nsWindowRoot> nsGlobalWindowInner::GetWindowRoot(
   FORWARD_TO_OUTER_OR_THROW(GetWindowRootOuter, (), aError, nullptr);
 }
 
-void nsGlobalWindowInner::SetCursor(const nsAString& aCursor,
+void nsGlobalWindowInner::SetCursor(const nsACString& aCursor,
                                     ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(SetCursorOuter, (aCursor, aError), aError, );
 }
@@ -6794,7 +6897,7 @@ void nsGlobalWindowInner::GetSidebar(OwningExternalOrWindowProxy& aResult,
   RefPtr<BrowsingContext> domWindow =
       GetChildWindow(NS_LITERAL_STRING("sidebar"));
   if (domWindow) {
-    aResult.SetAsWindowProxy() = domWindow.forget();
+    aResult.SetAsWindowProxy() = std::move(domWindow);
     return;
   }
 
@@ -6981,24 +7084,19 @@ already_AddRefed<Promise> nsGlobalWindowInner::CreateImageBitmap(
                              Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aRv);
 }
 
-mozilla::dom::TabGroup* nsGlobalWindowInner::TabGroupInner() {
+mozilla::dom::TabGroup* nsGlobalWindowInner::MaybeTabGroupInner() {
   // If we don't have a TabGroup yet, try to get it from the outer window and
   // cache it.
   if (!mTabGroup) {
     nsGlobalWindowOuter* outer = GetOuterWindowInternal();
-    // This will never be called without either an outer window, or a cached tab
-    // group. This is because of the following:
-    // * This method is only called on inner windows
-    // * This method is called as a document is attached to it's script global
-    //   by the document
-    // * Inner windows are created in nsGlobalWindowInner::SetNewDocument, which
-    //   immediately sets a document, which will call this method, causing
-    //   the TabGroup to be cached.
-    MOZ_RELEASE_ASSERT(
-        outer, "Inner window without outer window has no cached tab group!");
-    mTabGroup = outer->TabGroup();
+    if (!outer) {
+      return nullptr;
+    }
+    mTabGroup = outer->MaybeTabGroup();
+    if (!mTabGroup) {
+      return nullptr;
+    }
   }
-  MOZ_ASSERT(mTabGroup);
 
 #ifdef DEBUG
   nsGlobalWindowOuter* outer = GetOuterWindowInternal();
@@ -7006,6 +7104,24 @@ mozilla::dom::TabGroup* nsGlobalWindowInner::TabGroupInner() {
 #endif
 
   return mTabGroup;
+}
+
+mozilla::dom::TabGroup* nsGlobalWindowInner::TabGroupInner() {
+  // This will never be called without either an outer window, or a cached tab
+  // group. This is because of the following:
+  // * This method is only called on inner windows
+  // * This method is called as a document is attached to its script global
+  //   by the document
+  // * Inner windows are created in nsGlobalWindowInner::SetNewDocument, which
+  //   immediately sets a document, which will call this method, causing
+  //   the TabGroup to be cached.
+  MOZ_RELEASE_ASSERT(
+      mTabGroup || GetOuterWindowInternal(),
+      "Inner window without outer window has no cached tab group!");
+
+  mozilla::dom::TabGroup* tabGroup = MaybeTabGroupInner();
+  MOZ_RELEASE_ASSERT(tabGroup);
+  return tabGroup;
 }
 
 nsresult nsGlobalWindowInner::Dispatch(
@@ -7135,6 +7251,10 @@ mozilla::dom::TabGroup* nsPIDOMWindowInner::TabGroup() {
   return nsGlobalWindowInner::Cast(this)->TabGroupInner();
 }
 
+mozilla::dom::TabGroup* nsPIDOMWindowInner::MaybeTabGroup() {
+  return nsGlobalWindowInner::Cast(this)->MaybeTabGroupInner();
+}
+
 /* static */
 already_AddRefed<nsGlobalWindowInner> nsGlobalWindowInner::Create(
     nsGlobalWindowOuter* aOuterWindow, bool aIsChrome,
@@ -7162,6 +7282,12 @@ nsIURI* nsPIDOMWindowInner::GetDocBaseURI() const {
   return mDoc ? mDoc->GetDocBaseURI() : mDocBaseURI.get();
 }
 
+nsIPrincipal* nsPIDOMWindowInner::GetDocumentContentBlockingAllowListPrincipal()
+    const {
+  return mDoc ? mDoc->GetContentBlockingAllowListPrincipal()
+              : mDocContentBlockingAllowListPrincipal.get();
+}
+
 void nsPIDOMWindowInner::MaybeCreateDoc() {
   // XXX: Forward to outer?
   MOZ_ASSERT(!mDoc);
@@ -7180,6 +7306,11 @@ mozilla::dom::DocGroup* nsPIDOMWindowInner::GetDocGroup() const {
     return doc->GetDocGroup();
   }
   return nullptr;
+}
+
+mozilla::dom::BrowsingContextGroup*
+nsPIDOMWindowInner::GetBrowsingContextGroup() const {
+  return mBrowsingContext ? mBrowsingContext->Group() : nullptr;
 }
 
 nsIGlobalObject* nsPIDOMWindowInner::AsGlobal() {
@@ -7205,7 +7336,7 @@ void nsGlobalWindowInner::ClearActiveStoragePrincipal() {
     doc->ClearActiveStoragePrincipal();
   }
 
-  CallOnChildren(&nsGlobalWindowInner::ClearActiveStoragePrincipal);
+  CallOnInProcessChildren(&nsGlobalWindowInner::ClearActiveStoragePrincipal);
 }
 
 bool nsPIDOMWindowInner::HasStorageAccessGranted(
@@ -7296,7 +7427,7 @@ void nsPIDOMWindowInner::NotifyReportingObservers() {
   }
 }
 
-nsPIDOMWindowInner::~nsPIDOMWindowInner() {}
+nsPIDOMWindowInner::~nsPIDOMWindowInner() = default;
 
 #undef FORWARD_TO_OUTER
 #undef FORWARD_TO_OUTER_OR_THROW

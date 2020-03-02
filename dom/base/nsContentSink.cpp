@@ -84,6 +84,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsContentSink)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCSSLoader)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNodeInfoManager)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mScriptLoader)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsContentSink)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
@@ -681,6 +682,8 @@ nsresult nsContentSink::ProcessStyleLinkFromHeader(
       CORS_NONE,
       aTitle,
       aMedia,
+      /* integrity = */ EmptyString(),
+      /* nonce = */ EmptyString(),
       aAlternate ? Loader::HasAlternateRel::Yes : Loader::HasAlternateRel::No,
       Loader::IsInline::No,
       Loader::IsExplicitlyEnabled::No,
@@ -817,7 +820,8 @@ void nsContentSink::PrefetchDNS(const nsAString& aHref) {
 
   if (!hostname.IsEmpty() && nsHTMLDNSPrefetch::IsAllowed(mDocument)) {
     nsHTMLDNSPrefetch::PrefetchLow(
-        hostname, isHttps, mDocument->NodePrincipal()->OriginAttributesRef());
+        hostname, isHttps, mDocument->NodePrincipal()->OriginAttributesRef(),
+        mDocument->GetChannel()->GetTRRMode());
   }
 }
 
@@ -1409,7 +1413,8 @@ void nsContentSink::DropParserAndPerfHint(void) {
   // actually broken.
   // Drop our reference to the parser to get rid of a circular
   // reference.
-  RefPtr<nsParserBase> kungFuDeathGrip(mParser.forget());
+  RefPtr<nsParserBase> kungFuDeathGrip = std::move(mParser);
+  mozilla::Unused << kungFuDeathGrip;
 
   if (mDynamicLowerValue) {
     // Reset the performance hint which was set to FALSE

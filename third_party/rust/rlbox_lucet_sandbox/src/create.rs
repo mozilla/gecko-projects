@@ -17,7 +17,7 @@ pub extern "C" fn lucet_ensure_linked() {
 }
 
 #[no_mangle]
-pub extern "C" fn lucet_load_module(lucet_module_path: *const c_char) -> *mut c_void {
+pub extern "C" fn lucet_load_module(lucet_module_path: *const c_char, allow_stdio: bool) -> *mut c_void {
     let module_path;
     unsafe {
         module_path = CStr::from_ptr(lucet_module_path)
@@ -25,7 +25,7 @@ pub extern "C" fn lucet_load_module(lucet_module_path: *const c_char) -> *mut c_
             .into_owned();
     }
 
-    let result = lucet_load_module_helper(&module_path);
+    let result = lucet_load_module_helper(&module_path, allow_stdio);
 
     let r = match result {
         Ok(inst) => Box::into_raw(Box::new(inst)) as *mut c_void,
@@ -40,13 +40,14 @@ pub extern "C" fn lucet_load_module(lucet_module_path: *const c_char) -> *mut c_
 
 #[no_mangle]
 pub extern "C" fn lucet_drop_module(inst_ptr: *mut c_void) {
-    unsafe {
-        let inst = inst_ptr as *mut LucetSandboxInstance;
-        inst.drop_in_place();
-    }
+    // Need to invoke the destructor
+    let _inst = unsafe {
+        Box::from_raw(inst_ptr as *mut LucetSandboxInstance)
+    };
+
 }
 
-fn lucet_load_module_helper(module_path: &String) -> Result<LucetSandboxInstance, Error> {
+fn lucet_load_module_helper(module_path: &String, allow_stdio: bool) -> Result<LucetSandboxInstance, Error> {
     let module = DlModule::load(module_path)?;
 
     //Replicating calculations used in lucet examples
@@ -61,6 +62,7 @@ fn lucet_load_module_helper(module_path: &String) -> Result<LucetSandboxInstance
             heap_address_space_size: 8 * 1024 * 1024 * 1024, // 8GB
             stack_size: 8 * 1024 * 1024,                     // 8MB - pthread default
             globals_size: globals_size,
+            ..Limits::default()
         },
         4 * 1024 * 1024 * 1024,                              // 4GB heap alignment
     )?;
@@ -68,10 +70,14 @@ fn lucet_load_module_helper(module_path: &String) -> Result<LucetSandboxInstance
     let sig = module.get_signatures().to_vec();
 
     // put the path to the module on the front for argv[0]
-    let ctx = WasiCtxBuilder::new()
-        .args(&[&module_path])
-        .inherit_stdio()
-        .build()?;
+    let mut builder = WasiCtxBuilder::new()
+        .args(&[&module_path]);
+
+    if allow_stdio {
+        builder = builder.inherit_stdio_no_syscall();
+    }
+
+    let ctx = builder.build()?;
 
     let instance_handle = region
         .new_instance_builder(module as Arc<dyn Module>)

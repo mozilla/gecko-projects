@@ -20,23 +20,6 @@
 namespace mozilla {
 namespace wr {
 
-class MOZ_STACK_CLASS AutoWrRenderResult {
- public:
-  explicit AutoWrRenderResult(WrRenderResult&& aResult) : mResult(aResult) {}
-
-  ~AutoWrRenderResult() { wr_render_result_delete(mResult); }
-
-  bool Result() const { return mResult.result; }
-
-  FfiVec<DeviceIntRect> DirtyRects() const { return mResult.dirty_rects; }
-
- private:
-  const WrRenderResult mResult;
-
-  AutoWrRenderResult(const AutoWrRenderResult&) = delete;
-  AutoWrRenderResult& operator=(const AutoWrRenderResult&) = delete;
-};
-
 wr::WrExternalImage wr_renderer_lock_external_image(
     void* aObj, wr::ExternalImageId aId, uint8_t aChannelIndex,
     wr::ImageRendering aRendering) {
@@ -44,8 +27,8 @@ wr::WrExternalImage wr_renderer_lock_external_image(
   RenderTextureHost* texture = renderer->GetRenderTexture(aId);
   MOZ_ASSERT(texture);
   if (!texture) {
-    gfxCriticalNote << "Failed to lock ExternalImage for extId:"
-                    << AsUint64(aId);
+    gfxCriticalNoteOnce << "Failed to lock ExternalImage for extId:"
+                        << AsUint64(aId);
     return InvalidToWrExternalImage();
   }
   return texture->Lock(aChannelIndex, renderer->gl(), aRendering);
@@ -70,7 +53,8 @@ RendererOGL::RendererOGL(RefPtr<RenderThread>&& aThread,
       mCompositor(std::move(aCompositor)),
       mRenderer(aRenderer),
       mBridge(aBridge),
-      mWindowId(aWindowId) {
+      mWindowId(aWindowId),
+      mDisableNativeCompositor(false) {
   MOZ_ASSERT(mThread);
   MOZ_ASSERT(mCompositor);
   MOZ_ASSERT(mRenderer);
@@ -105,6 +89,11 @@ void RendererOGL::Update() {
 static void DoNotifyWebRenderContextPurge(
     layers::CompositorBridgeParent* aBridge) {
   aBridge->NotifyWebRenderContextPurge();
+}
+
+static void DoWebRenderDisableNativeCompositor(
+    layers::CompositorBridgeParent* aBridge) {
+  aBridge->NotifyWebRenderDisableNativeCompositor();
 }
 
 RenderedFrameId RendererOGL::UpdateAndRender(
@@ -148,9 +137,9 @@ RenderedFrameId RendererOGL::UpdateAndRender(
 
   auto size = mCompositor->GetBufferSize();
 
-  AutoWrRenderResult result(wr_renderer_render(
-      mRenderer, size.width, size.height, aHadSlowFrame, aOutStats));
-  if (!result.Result()) {
+  nsTArray<DeviceIntRect> dirtyRects;
+  if (!wr_renderer_render(mRenderer, size.width, size.height, aHadSlowFrame,
+                          aOutStats, &dirtyRects)) {
     RenderThread::Get()->HandleWebRenderError(WebRenderError::RENDER);
     mCompositor->GetWidget()->PostRender(&widgetContext);
     return RenderedFrameId();
@@ -168,9 +157,9 @@ RenderedFrameId RendererOGL::UpdateAndRender(
     }
   }
 
-  mScreenshotGrabber.MaybeGrabScreenshot(mRenderer, size.ToUnknownSize());
+  mScreenshotGrabber.MaybeGrabScreenshot(this, size.ToUnknownSize());
 
-  RenderedFrameId frameId = mCompositor->EndFrame(result.DirtyRects());
+  RenderedFrameId frameId = mCompositor->EndFrame(dirtyRects);
 
   mCompositor->GetWidget()->PostRender(&widgetContext);
 
@@ -184,12 +173,27 @@ RenderedFrameId RendererOGL::UpdateAndRender(
   mFrameStartTime = TimeStamp();
 #endif
 
-  mScreenshotGrabber.MaybeProcessQueue(mRenderer);
+  mScreenshotGrabber.MaybeProcessQueue(this);
 
   // TODO: Flush pending actions such as texture deletions/unlocks and
   //       textureHosts recycling.
 
   return frameId;
+}
+
+bool RendererOGL::EnsureAsyncScreenshot() {
+  if (mCompositor->SupportAsyncScreenshot()) {
+    return true;
+  }
+  if (!mDisableNativeCompositor) {
+    layers::CompositorThreadHolder::Loop()->PostTask(
+        NewRunnableFunction("DoWebRenderDisableNativeCompositorRunnable",
+                            &DoWebRenderDisableNativeCompositor, mBridge));
+
+    mDisableNativeCompositor = true;
+    gfxCriticalNote << "Disable native compositor for async screenshot";
+  }
+  return false;
 }
 
 void RendererOGL::CheckGraphicsResetStatus() {
@@ -244,8 +248,9 @@ void RendererOGL::SetFrameStartTime(const TimeStamp& aTime) {
 }
 
 RefPtr<WebRenderPipelineInfo> RendererOGL::FlushPipelineInfo() {
-  auto info = wr_renderer_flush_pipeline_info(mRenderer);
-  return new WebRenderPipelineInfo(info);
+  RefPtr<WebRenderPipelineInfo> info = new WebRenderPipelineInfo();
+  wr_renderer_flush_pipeline_info(mRenderer, &info->Raw());
+  return info;
 }
 
 RenderTextureHost* RendererOGL::GetRenderTexture(

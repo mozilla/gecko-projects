@@ -12,6 +12,7 @@
 #include "jsnum.h"
 
 #include "frontend/Parser.h"
+#include "vm/BigIntType.h"
 #include "vm/RegExpObject.h"
 
 #include "vm/JSContext-inl.h"
@@ -399,14 +400,35 @@ ObjectBox::ObjectBox(JSObject* obj, TraceListNode* traceLink,
                      TraceListNode::NodeType type)
     : TraceListNode(obj, traceLink, type), emitLink(nullptr) {}
 
+BigInt* BigIntLiteral::getOrCreate(JSContext* cx) {
+  if (data_.is<BigIntBox*>()) {
+    return value();
+  }
+  Deferred& deferred = data_.as<Deferred>();
+  return deferred.compilationInfo.bigIntData[deferred.index].createBigInt(cx);
+}
+
 bool BigIntLiteral::isZero() {
   if (data_.is<BigIntBox*>()) {
     return box()->value()->isZero();
   }
-  return data_.as<BigIntCreationData>().isZero();
+  Deferred& deferred = data_.as<Deferred>();
+  return deferred.compilationInfo.bigIntData[deferred.index].isZero();
 }
 
 BigInt* BigIntLiteral::value() { return box()->value(); }
+
+JSAtom* BigIntLiteral::toAtom(JSContext* cx) {
+  RootedBigInt bi(cx, getOrCreate(cx));
+  if (!bi) {
+    return nullptr;
+  }
+  return BigIntToAtom<CanGC>(cx, bi);
+}
+
+JSAtom* NumericLiteral::toAtom(JSContext* cx) const {
+  return NumberToAtom(cx, value());
+}
 
 RegExpObject* RegExpCreationData::createRegExp(JSContext* cx) const {
   MOZ_ASSERT(buf_);
@@ -414,11 +436,12 @@ RegExpObject* RegExpCreationData::createRegExp(JSContext* cx) const {
                                            TenuredObject);
 }
 
-RegExpObject* RegExpLiteral::getOrCreate(JSContext* cx) const {
+RegExpObject* RegExpLiteral::getOrCreate(
+    JSContext* cx, CompilationInfo& compilationInfo) const {
   if (data_.is<ObjectBox*>()) {
     return &objbox()->object()->as<RegExpObject>();
   }
-  return data_.as<RegExpCreationData>().createRegExp(cx);
+  return compilationInfo.regExpData[data_.as<RegExpIndex>()].createRegExp(cx);
 }
 
 FunctionBox* ObjectBox::asFunctionBox() {
@@ -447,9 +470,6 @@ void FunctionBox::trace(JSTracer* trc) {
   }
   if (explicitName_) {
     TraceRoot(trc, &explicitName_, "funbox-explicitName");
-  }
-  if (functionCreationData_) {
-    functionCreationData_->trace(trc);
   }
 }
 

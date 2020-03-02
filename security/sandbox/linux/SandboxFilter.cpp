@@ -5,19 +5,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SandboxFilter.h"
-#include "SandboxFilterUtil.h"
-
-#include "Sandbox.h"  // for ContentProcessSandboxParams
-#include "SandboxBrokerClient.h"
-#include "SandboxInfo.h"
-#include "SandboxInternal.h"
-#include "SandboxLogging.h"
-#include "SandboxOpenedFiles.h"
-#include "mozilla/Move.h"
-#include "mozilla/PodOperations.h"
-#include "mozilla/TemplateLib.h"
-#include "mozilla/UniquePtr.h"
-#include "prenv.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -35,9 +22,22 @@
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
-#include <vector>
-#include <algorithm>
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
+#include "Sandbox.h"  // for ContentProcessSandboxParams
+#include "SandboxBrokerClient.h"
+#include "SandboxFilterUtil.h"
+#include "SandboxInfo.h"
+#include "SandboxInternal.h"
+#include "SandboxLogging.h"
+#include "SandboxOpenedFiles.h"
+#include "mozilla/PodOperations.h"
+#include "mozilla/TemplateLib.h"
+#include "mozilla/UniquePtr.h"
+#include "prenv.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/system_headers/linux_seccomp.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
@@ -516,6 +516,7 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
         return Allow();
 
         // Simple I/O
+      case __NR_pread64:
       case __NR_write:
       case __NR_read:
       case __NR_readv:
@@ -908,7 +909,7 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
         if (mUsingRenderDoc) {
           return Some(Allow());
         }
-        MOZ_FALLTHROUGH;
+        [[fallthrough]];
 #endif
       default:
         return SandboxPolicyCommon::EvaluateSocketCall(aCall, aHasArgs);
@@ -1041,7 +1042,6 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
 
       CASES_FOR_getdents:
       case __NR_writev:
-      case __NR_pread64:
 #ifdef DESKTOP
       case __NR_pwrite64:
       case __NR_readahead:
@@ -1160,6 +1160,8 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
 
       case __NR_getpriority:
       case __NR_setpriority:
+      case __NR_sched_getattr:
+      case __NR_sched_setattr:
       case __NR_sched_get_priority_min:
       case __NR_sched_get_priority_max:
       case __NR_sched_getscheduler:

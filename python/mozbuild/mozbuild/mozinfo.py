@@ -5,11 +5,12 @@
 # This module produces a JSON file that provides basic build info and
 # configuration metadata.
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import, print_function, unicode_literals
 
+import json
 import os
 import re
-import json
+import six
 
 
 def build_dict(config, env=os.environ):
@@ -92,7 +93,6 @@ def build_dict(config, env=os.environ):
     d['tests_enabled'] = substs.get('ENABLE_TESTS') == "1"
     d['bin_suffix'] = substs.get('BIN_SUFFIX', '')
     d['require_signing'] = substs.get('MOZ_REQUIRE_SIGNING') == '1'
-    d['allow_legacy_extensions'] = substs.get('MOZ_ALLOW_LEGACY_EXTENSIONS') == '1'
     d['official'] = bool(substs.get('MOZILLA_OFFICIAL'))
     d['updater'] = substs.get('MOZ_UPDATER') == '1'
     d['artifact'] = substs.get('MOZ_ARTIFACT_BUILDS') == '1'
@@ -150,7 +150,7 @@ def write_mozinfo(file, config, env=os.environ):
     and what keys are produced.
     """
     build_conf = build_dict(config, env)
-    if isinstance(file, basestring):
-        file = open(file, 'wb')
+    if isinstance(file, six.text_type):
+        file = open(file, 'wt')
 
     json.dump(build_conf, file, sort_keys=True, indent=4)

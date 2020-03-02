@@ -8,12 +8,18 @@ add_task(async () => {
     url: gHttpsTestRoot + "test_page.html",
   });
 
-  let ssb = await openSSBFromBrowserWindow();
+  let ssbwin = await openSSBFromBrowserWindow();
   Assert.equal(
-    getBrowser(ssb).currentURI.spec,
+    getBrowser(ssbwin).currentURI.spec,
     gHttpsTestRoot + "test_page.html"
   );
 
   Assert.equal(tab.parentNode, null, "The tab should have been closed");
-  await BrowserTestUtils.closeWindow(ssb);
+  let ssb = getSSB(ssbwin);
+
+  // This title comes from the test_page.html title tag as there is no manifest.
+  Assert.equal(ssb.name, "Test site", "The name should be correct.");
+
+  await ssb.uninstall();
+  await BrowserTestUtils.closeWindow(ssbwin);
 });

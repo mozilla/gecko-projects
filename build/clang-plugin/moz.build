@@ -29,9 +29,12 @@ HOST_SOURCES += [
     'NoAutoTypeChecker.cpp',
     'NoDuplicateRefCntMemberChecker.cpp',
     'NoExplicitMoveConstructorChecker.cpp',
+    'NoNewThreadsChecker.cpp',
     'NonMemMovableMemberChecker.cpp',
     'NonMemMovableTemplateArgChecker.cpp',
     'NonParamInsideFunctionDeclChecker.cpp',
+    'NonTrivialTypeInFfiChecker.cpp',
+    'NoUsingNamespaceMozillaJavaChecker.cpp',
     'OverrideBaseCallChecker.cpp',
     'OverrideBaseCallUsageChecker.cpp',
     'ParamTraitsEnumChecker.cpp',
@@ -39,13 +42,17 @@ HOST_SOURCES += [
     'RefCountedInsideLambdaChecker.cpp',
     'ScopeChecker.cpp',
     'SprintfLiteralChecker.cpp',
+    'TempRefPtrChecker.cpp',
     'TrivialCtorDtorChecker.cpp',
     'TrivialDtorChecker.cpp',
     'VariableUsageHelpers.cpp',
 ]
 
+# Ideally, we wouldn't have compile-time choices wrt checkes. bug 1617153.
 if CONFIG['OS_ARCH'] == 'WINNT':
+    HOST_DEFINES['TARGET_IS_WINDOWS'] = True
     HOST_SOURCES += [
+        'FopenUsageChecker.cpp',
         'LoadLibraryUsageChecker.cpp',
     ]
 
@@ -61,6 +68,12 @@ GeneratedFile('ThirdPartyPaths.cpp', script="ThirdPartyPaths.py",
               entry_point="generate", inputs=[
                   '/tools/rewriting/ThirdPartyPaths.txt',
                   '/tools/rewriting/Generated.txt',
+              ])
+
+GeneratedFile('ThreadAllows.h', script="ThreadAllows.py",
+              entry_point="generate_file", inputs=[
+              '/build/clang-plugin/ThreadAllows.txt',
+              '/build/clang-plugin/ThreadFileAllows.txt'
               ])
 
 HOST_COMPILE_FLAGS['STL'] = []

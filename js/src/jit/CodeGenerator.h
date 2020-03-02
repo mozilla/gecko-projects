@@ -95,7 +95,7 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   MOZ_MUST_USE bool generate();
   MOZ_MUST_USE bool generateWasm(wasm::FuncTypeIdDesc funcTypeId,
                                  wasm::BytecodeOffset trapOffset,
-                                 const wasm::ValTypeVector& argTys,
+                                 const wasm::ArgTypeVector& argTys,
                                  const MachineState& trapExitLayout,
                                  size_t trapExitLayoutNumWords,
                                  wasm::FuncOffsets* offsets,
@@ -160,10 +160,6 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   void emitCallInvokeFunction(LInstruction* call, Register callereg,
                               bool isConstructing, bool ignoresReturnValue,
                               uint32_t argc, uint32_t unusedStack);
-  void emitCallInvokeFunctionShuffleNewTarget(LCallKnown* call,
-                                              Register calleeReg,
-                                              uint32_t numFormals,
-                                              uint32_t unusedStack);
   template <typename T>
   void emitApplyGeneric(T* apply);
   template <typename T>
@@ -223,10 +219,8 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   void loadOutermostJSScript(Register reg);
 
 #ifdef DEBUG
-  void emitAssertResultV(const ValueOperand output,
-                         const TemporaryTypeSet* typeset);
-  void emitAssertGCThingResult(Register input, MIRType type,
-                               const TemporaryTypeSet* typeset);
+  void emitAssertResultV(const ValueOperand output, const MDefinition* mir);
+  void emitAssertGCThingResult(Register input, const MDefinition* mir);
 #endif
 
 #ifdef DEBUG
@@ -265,9 +259,6 @@ class CodeGenerator final : public CodeGeneratorSpecific {
 
   template <class OrderedHashTable>
   void emitLoadIteratorValues(Register result, Register temp, Register front);
-
-  template <size_t Defs>
-  void emitWasmCallBase(LWasmCallBase<Defs>* lir);
 
   template <size_t NumDefs>
   void emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir);

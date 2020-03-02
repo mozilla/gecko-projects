@@ -12,8 +12,8 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { editableItem } = require("devtools/client/shared/inplace-editor");
 
-const { getStr } = require("../utils/l10n");
-const Types = require("../types");
+const { getStr } = require("devtools/client/inspector/rules/utils/l10n");
+const Types = require("devtools/client/inspector/rules/types");
 
 class Declaration extends PureComponent {
   static get propTypes() {
@@ -214,6 +214,7 @@ class Declaration extends PureComponent {
 
   render() {
     const {
+      id,
       isEnabled,
       isKnownProperty,
       isOverridden,
@@ -233,25 +234,28 @@ class Declaration extends PureComponent {
     }
 
     return dom.li(
-      { className: declarationClassName },
+      {
+        className: declarationClassName,
+        "data-declaration-id": id,
+      },
       dom.div(
         { className: "ruleview-propertycontainer" },
         dom.input({
-          type: "checkbox",
+          "aria-labelledby": id,
           className: "ruleview-enableproperty",
           checked: isEnabled,
           onChange: this.onToggleDeclarationChange,
-          "aria-labelledby": this.props.declaration.id,
-          tabindex: "-1",
+          tabIndex: "-1",
+          type: "checkbox",
         }),
         dom.span(
           { className: "ruleview-namecontainer" },
           dom.span(
             {
+              id,
               className: "ruleview-propertyname theme-fg-color3",
               ref: this.nameSpanRef,
               tabIndex: 0,
-              id: this.props.declaration.id,
             },
             name
           ),

@@ -58,7 +58,8 @@ class nsThreadManager : public nsIThreadManager {
   nsresult DispatchToBackgroundThread(nsIRunnable* aEvent,
                                       uint32_t aDispatchFlags);
 
-  already_AddRefed<nsISerialEventTarget> CreateBackgroundTaskQueue(const char* aName);
+  already_AddRefed<nsISerialEventTarget> CreateBackgroundTaskQueue(
+      const char* aName);
 
   // Returns the maximal number of threads that have been in existence
   // simultaneously during the execution of the thread manager.
@@ -84,9 +85,7 @@ class nsThreadManager : public nsIThreadManager {
   unsigned mCurThreadIndex;  // thread-local-storage index
   RefPtr<nsThread> mMainThread;
   PRThread* mMainPRThread;
-  mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      mInitialized;
+  mozilla::Atomic<bool, mozilla::SequentiallyConsistent> mInitialized;
 
   // Shared event target used for background runnables.
   RefPtr<BackgroundEventTarget> mBackgroundEventTarget;

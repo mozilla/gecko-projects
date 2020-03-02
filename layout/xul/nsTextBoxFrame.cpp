@@ -246,7 +246,7 @@ class nsDisplayXULTextBox final : public nsPaintedDisplayItem {
     MOZ_COUNT_CTOR(nsDisplayXULTextBox);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayXULTextBox() { MOZ_COUNT_DTOR(nsDisplayXULTextBox); }
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayXULTextBox)
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
@@ -592,7 +592,7 @@ nscoord nsTextBoxFrame::CalculateTitleForWidth(gfxContext& aRenderingContext,
   if (titleWidth <= aWidth) {
     mCroppedTitle = mTitle;
     if (HasRTLChars(mTitle) ||
-        StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL) {
+        StyleVisibility()->mDirection == StyleDirection::Rtl) {
       AddStateBits(NS_FRAME_IS_BIDI);
     }
     return titleWidth;  // fits, done.
@@ -990,7 +990,7 @@ void nsTextBoxFrame::CalcTextSize(nsBoxLayoutState& aBoxLayoutState) {
     if (rendContext) {
       GetTextSize(*rendContext, mTitle, size, mAscent);
       if (GetWritingMode().IsVertical()) {
-        Swap(size.width, size.height);
+        std::swap(size.width, size.height);
       }
       mTextSize = size;
       mNeedsRecalc = false;
@@ -1031,12 +1031,12 @@ void nsTextBoxFrame::CalcDrawRect(gfxContext& aRenderingContext) {
 
   // Align our text within the overall rect by checking our text-align property.
   const nsStyleText* textStyle = StyleText();
-  if (textStyle->mTextAlign == NS_STYLE_TEXT_ALIGN_CENTER) {
+  if (textStyle->mTextAlign == StyleTextAlign::Center) {
     textRect.IStart(wm) += (outerISize - textRect.ISize(wm)) / 2;
-  } else if (textStyle->mTextAlign == NS_STYLE_TEXT_ALIGN_END ||
-             (textStyle->mTextAlign == NS_STYLE_TEXT_ALIGN_LEFT &&
+  } else if (textStyle->mTextAlign == StyleTextAlign::End ||
+             (textStyle->mTextAlign == StyleTextAlign::Left &&
               wm.IsBidiRTL()) ||
-             (textStyle->mTextAlign == NS_STYLE_TEXT_ALIGN_RIGHT &&
+             (textStyle->mTextAlign == StyleTextAlign::Right &&
               wm.IsBidiLTR())) {
     textRect.IStart(wm) += (outerISize - textRect.ISize(wm));
   }

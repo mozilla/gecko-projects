@@ -52,7 +52,7 @@ nsGeoPositionCoords::nsGeoPositionCoords(double aLat, double aLong, double aAlt,
   MOZ_ASSERT(EqualOrBothNaN(mSpeed, aSpeed));
 }
 
-nsGeoPositionCoords::~nsGeoPositionCoords() {}
+nsGeoPositionCoords::~nsGeoPositionCoords() = default;
 
 NS_INTERFACE_MAP_BEGIN(nsGeoPositionCoords)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMGeoPositionCoords)
@@ -120,7 +120,7 @@ nsGeoPosition::nsGeoPosition(nsIDOMGeoPositionCoords* aCoords,
                              DOMTimeStamp aTimestamp)
     : mTimestamp(aTimestamp), mCoords(aCoords) {}
 
-nsGeoPosition::~nsGeoPosition() {}
+nsGeoPosition::~nsGeoPosition() = default;
 
 NS_INTERFACE_MAP_BEGIN(nsGeoPosition)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMGeoPosition)
@@ -142,8 +142,7 @@ nsGeoPosition::GetCoords(nsIDOMGeoPositionCoords** aCoords) {
   return NS_OK;
 }
 
-namespace mozilla {
-namespace dom {
+namespace mozilla::dom {
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(GeolocationPosition, mParent,
                                       mCoordinates)
@@ -158,7 +157,7 @@ GeolocationPosition::GeolocationPosition(nsISupports* aParent,
                                          nsIDOMGeoPosition* aGeoPosition)
     : mParent(aParent), mGeoPosition(aGeoPosition) {}
 
-GeolocationPosition::~GeolocationPosition() {}
+GeolocationPosition::~GeolocationPosition() = default;
 
 nsISupports* GeolocationPosition::GetParentObject() const { return mParent; }
 
@@ -186,5 +185,4 @@ uint64_t GeolocationPosition::Timestamp() const {
   return rv;
 }
 
-}  // namespace dom
-}  // namespace mozilla
+}  // namespace mozilla::dom

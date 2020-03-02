@@ -45,8 +45,7 @@ bool IsValidPutRequestURL(const nsAString& aUrl, ErrorResult& aRv) {
   }
 
   if (!validScheme) {
-    aRv.ThrowTypeError<MSG_INVALID_URL_SCHEME>(NS_LITERAL_STRING("Request"),
-                                               aUrl);
+    aRv.ThrowTypeError<MSG_INVALID_URL_SCHEME>(u"Request", aUrl);
     return false;
   }
 
@@ -177,7 +176,7 @@ class Cache::FetchHandler final : public PromiseNativeHandler {
       if (!IsValidPutResponseStatus(*response, PutStatusPolicy::RequireOK,
                                     errorResult)) {
         // TODO: abort the fetch requests we have running (bug 1157434)
-        mPromise->MaybeReject(errorResult);
+        mPromise->MaybeReject(std::move(errorResult));
         return;
       }
 
@@ -196,7 +195,7 @@ class Cache::FetchHandler final : public PromiseNativeHandler {
     result.WouldReportJSException();
     if (NS_WARN_IF(result.Failed())) {
       // TODO: abort the fetch requests we have running (bug 1157434)
-      mPromise->MaybeReject(result);
+      mPromise->MaybeReject(std::move(result));
       return;
     }
 
@@ -212,7 +211,7 @@ class Cache::FetchHandler final : public PromiseNativeHandler {
   }
 
  private:
-  ~FetchHandler() {}
+  ~FetchHandler() = default;
 
   void Fail() { mPromise->MaybeRejectWithTypeError<MSG_FETCH_FAILED>(); }
 

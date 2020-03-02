@@ -58,6 +58,7 @@ class nsExtProtocolChannel : public nsIChannel,
   nsresult mStatus;
   nsLoadFlags mLoadFlags;
   bool mWasOpened;
+  bool mCanceled;
   // Set true (as a result of ConnectParent invoked from child process)
   // when this channel is on the parent process and is being used as
   // a redirect target channel.  It turns AsyncOpen into a no-op since
@@ -89,6 +90,7 @@ nsExtProtocolChannel::nsExtProtocolChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo)
       mStatus(NS_OK),
       mLoadFlags(nsIRequest::LOAD_NORMAL),
       mWasOpened(false),
+      mCanceled(false),
       mConnectedParent(false),
       mLoadInfo(aLoadInfo) {}
 
@@ -234,6 +236,14 @@ NS_IMETHODIMP nsExtProtocolChannel::SetLoadFlags(nsLoadFlags aLoadFlags) {
   return NS_OK;
 }
 
+NS_IMETHODIMP nsExtProtocolChannel::GetTRRMode(nsIRequest::TRRMode* aTRRMode) {
+  return GetTRRModeImpl(aTRRMode);
+}
+
+NS_IMETHODIMP nsExtProtocolChannel::SetTRRMode(nsIRequest::TRRMode aTRRMode) {
+  return SetTRRModeImpl(aTRRMode);
+}
+
 NS_IMETHODIMP nsExtProtocolChannel::GetIsDocument(bool* aIsDocument) {
   return NS_GetIsDocumentChannel(this, aIsDocument);
 }
@@ -334,6 +344,12 @@ NS_IMETHODIMP nsExtProtocolChannel::Cancel(nsresult status) {
   if (NS_SUCCEEDED(mStatus)) {
     mStatus = status;
   }
+  mCanceled = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsExtProtocolChannel::GetCanceled(bool* aCanceled) {
+  *aCanceled = mCanceled;
   return NS_OK;
 }
 
@@ -377,23 +393,6 @@ NS_IMETHODIMP nsExtProtocolChannel::SetParentListener(
   // just no-op.  Actual operation will happen from the child process
   // via CompleteRedirectSetup call on the child channel.
   mConnectedParent = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsExtProtocolChannel::NotifyChannelClassifierProtectionDisabled(
-    uint32_t aAcceptedReason) {
-  // nothing to do
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsExtProtocolChannel::NotifyCookieAllowed() {
-  // nothing to do
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsExtProtocolChannel::NotifyCookieBlocked(
-    uint32_t aRejectedReason) {
-  // nothing to do
   return NS_OK;
 }
 

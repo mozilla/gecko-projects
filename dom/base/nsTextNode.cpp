@@ -79,7 +79,7 @@ class nsAttributeTextNode final : public nsTextNode,
   RefPtr<nsAtom> mAttrName;
 };
 
-nsTextNode::~nsTextNode() {}
+nsTextNode::~nsTextNode() = default;
 
 // Use the CC variant of this, even though this class does not define
 // a new CC participant, to make QIing to the CC interfaces faster.
@@ -133,8 +133,9 @@ void nsTextNode::List(FILE* out, int32_t aIndent) const {
 
   fprintf(out, "Text@%p", static_cast<const void*>(this));
   fprintf(out, " flags=[%08x]", static_cast<unsigned int>(GetFlags()));
-  if (IsCommonAncestorForRangeInSelection()) {
-    const LinkedList<nsRange>* ranges = GetExistingCommonAncestorRanges();
+  if (IsClosestCommonInclusiveAncestorForRangeInSelection()) {
+    const LinkedList<nsRange>* ranges =
+        GetExistingClosestCommonInclusiveAncestorRanges();
     int32_t count = 0;
     if (ranges) {
       // Can't use range-based iteration on a const LinkedList, unfortunately.

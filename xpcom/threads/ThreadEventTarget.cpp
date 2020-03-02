@@ -45,7 +45,7 @@ class DelayedRunnable : public Runnable, public nsITimerCallback {
   }
 
   nsresult DoRun() {
-    nsCOMPtr<nsIRunnable> r = mWrappedRunnable.forget();
+    nsCOMPtr<nsIRunnable> r = std::move(mWrappedRunnable);
     return r->Run();
   }
 
@@ -73,7 +73,7 @@ class DelayedRunnable : public Runnable, public nsITimerCallback {
   }
 
  private:
-  ~DelayedRunnable() {}
+  ~DelayedRunnable() = default;
 
   nsCOMPtr<nsIEventTarget> mTarget;
   nsCOMPtr<nsIRunnable> mWrappedRunnable;
@@ -185,6 +185,8 @@ ThreadEventTarget::IsOnCurrentThread(bool* aIsOnCurrentThread) {
 
 NS_IMETHODIMP_(bool)
 ThreadEventTarget::IsOnCurrentThreadInfallible() {
-  // Rely on mThread being correct.
-  MOZ_CRASH("IsOnCurrentThreadInfallible should never be called on nsIThread");
+  // This method is only going to be called if `mThread` is null, which
+  // only happens when the thread has exited the event loop.  Therefore, when
+  // we are called, we can never be on this thread.
+  return false;
 }

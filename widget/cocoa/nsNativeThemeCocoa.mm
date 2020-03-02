@@ -26,6 +26,7 @@
 #include "nsGkAtoms.h"
 #include "nsCocoaFeatures.h"
 #include "nsCocoaWindow.h"
+#include "nsNativeBasicTheme.h"
 #include "nsNativeThemeColors.h"
 #include "nsIScrollableFrame.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -36,6 +37,7 @@
 #include "mozilla/dom/HTMLMeterElement.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_widget.h"
 #include "nsLookAndFeel.h"
 #include "VibrancyManager.h"
 
@@ -2664,11 +2666,6 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
     nsIFrame* aFrame, StyleAppearance aAppearance, const nsRect& aRect) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
-  if (aAppearance == StyleAppearance::MenulistButton &&
-      StaticPrefs::layout_css_webkit_appearance_enabled()) {
-    aAppearance = StyleAppearance::Menulist;
-  }
-
   // setup to draw into the correct port
   int32_t p2a = aFrame->PresContext()->AppUnitsPerDevPixel();
 
@@ -2690,6 +2687,15 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
   EventStates eventState = GetContentState(aFrame, aAppearance);
 
   switch (aAppearance) {
+    case StyleAppearance::Dialog:
+      if (IsWindowSheet(aFrame)) {
+        if (VibrancyManager::SystemSupportsVibrancy()) {
+          return Nothing();
+        }
+        return Some(WidgetInfo::SheetBackground());
+      }
+      return Some(WidgetInfo::DialogBackground());
+
     case StyleAppearance::Menupopup:
       if (VibrancyManager::SystemSupportsVibrancy()) {
         return Nothing();
@@ -2890,6 +2896,7 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
     case StyleAppearance::Statusbar:
       return Some(WidgetInfo::StatusBar(IsActive(aFrame, YES)));
 
+    case StyleAppearance::MenulistButton:
     case StyleAppearance::Menulist: {
       ControlParams controlParams = ComputeControlParams(aFrame, eventState);
       controlParams.focused = controlParams.focused || IsFocused(aFrame);
@@ -2901,7 +2908,6 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
       return Some(WidgetInfo::Dropdown(params));
     }
 
-    case StyleAppearance::MenulistButton:
     case StyleAppearance::MozMenulistButton:
       return Some(WidgetInfo::Button(
           ButtonParams{ComputeControlParams(aFrame, eventState), ButtonType::eArrowButton}));
@@ -3030,8 +3036,11 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
 
     case StyleAppearance::MozMacSourceListSelection:
     case StyleAppearance::MozMacActiveSourceListSelection: {
-      // We only support vibrancy for source list selections if we're inside
-      // a source list.
+      // If we're in XUL tree, we need to rely on the source list's clear
+      // background display item. If we cleared the background behind the
+      // selections, the source list would not pick up the right font
+      // smoothing background. So, to simplify a bit, we only support vibrancy
+      // if we're in a source list.
       if (VibrancyManager::SystemSupportsVibrancy() && IsInSourceList(aFrame)) {
         return Nothing();
       }
@@ -3359,6 +3368,12 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
   //  - If the case in DrawWidgetBackground draws something complicated for the
   //    given widget type, return false here.
   switch (aAppearance) {
+    case StyleAppearance::Dialog:
+      if (IsWindowSheet(aFrame) && VibrancyManager::SystemSupportsVibrancy()) {
+        return true;
+      }
+      return false;
+
     case StyleAppearance::Menupopup:
       if (VibrancyManager::SystemSupportsVibrancy()) {
         return true;
@@ -3397,8 +3412,6 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
     case StyleAppearance::Toolbar:
     case StyleAppearance::MozWindowTitlebar:
     case StyleAppearance::Statusbar:
-    // NOTE: if you change Menulist and MenulistButton to behave differently,
-    // be sure to handle StaticPrefs::layout_css_webkit_appearance_enabled.
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistTextfield:
     case StyleAppearance::MenulistButton:
@@ -3544,8 +3557,6 @@ LayoutDeviceIntMargin nsNativeThemeCocoa::GetWidgetBorder(nsDeviceContext* aCont
       break;
     }
 
-    // NOTE: if you change Menulist and MenulistButton to behave differently,
-    // be sure to handle StaticPrefs::layout_css_webkit_appearance_enabled.
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
     case StyleAppearance::MozMenulistButton:
@@ -3663,8 +3674,6 @@ bool nsNativeThemeCocoa::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* 
     case StyleAppearance::Textarea:
     case StyleAppearance::Searchfield:
     case StyleAppearance::Listbox:
-    // NOTE: if you change Menulist and MenulistButton to behave differently,
-    // be sure to handle StaticPrefs::layout_css_webkit_appearance_enabled.
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
     case StyleAppearance::MozMenulistButton:
@@ -3779,8 +3788,6 @@ nsNativeThemeCocoa::GetMinimumWidgetSize(nsPresContext* aPresContext, nsIFrame* 
       break;
     }
 
-    // NOTE: if you change Menulist and MenulistButton to behave differently,
-    // be sure to handle StaticPrefs::layout_css_webkit_appearance_enabled.
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
     case StyleAppearance::MozMenulistButton: {
@@ -4046,14 +4053,8 @@ nsNativeThemeCocoa::ThemeChanged() {
 
 bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* aFrame,
                                              StyleAppearance aAppearance) {
-  if (aAppearance == StyleAppearance::MenulistButton &&
-      StaticPrefs::layout_css_webkit_appearance_enabled()) {
-    aAppearance = StyleAppearance::Menulist;
-  }
-
   // if this is a dropdown button in a combobox the answer is always no
-  if (aAppearance == StyleAppearance::MenulistButton ||
-      aAppearance == StyleAppearance::MozMenulistButton) {
+  if (aAppearance == StyleAppearance::MozMenulistButton) {
     nsIFrame* parentFrame = aFrame->GetParent();
     if (parentFrame && parentFrame->IsComboboxControlFrame()) return false;
   }
@@ -4067,10 +4068,9 @@ bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFra
       if (aFrame && aFrame->GetWritingMode().IsVertical()) {
         return false;
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case StyleAppearance::Listbox:
-
     case StyleAppearance::Dialog:
     case StyleAppearance::Window:
     case StyleAppearance::MozWindowButtonBox:
@@ -4184,14 +4184,8 @@ bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFra
 }
 
 bool nsNativeThemeCocoa::WidgetIsContainer(StyleAppearance aAppearance) {
-  if (aAppearance == StyleAppearance::MenulistButton &&
-      StaticPrefs::layout_css_webkit_appearance_enabled()) {
-    aAppearance = StyleAppearance::Menulist;
-  }
-
   // flesh this out at some point
   switch (aAppearance) {
-    case StyleAppearance::MenulistButton:
     case StyleAppearance::MozMenulistButton:
     case StyleAppearance::Radio:
     case StyleAppearance::Checkbox:
@@ -4209,12 +4203,7 @@ bool nsNativeThemeCocoa::WidgetIsContainer(StyleAppearance aAppearance) {
 }
 
 bool nsNativeThemeCocoa::ThemeDrawsFocusForWidget(StyleAppearance aAppearance) {
-  if (aAppearance == StyleAppearance::MenulistButton &&
-      StaticPrefs::layout_css_webkit_appearance_enabled()) {
-    aAppearance = StyleAppearance::Menulist;
-  }
-
-  if (aAppearance == StyleAppearance::Menulist || aAppearance == StyleAppearance::Button ||
+  if (aAppearance == StyleAppearance::MenulistButton || aAppearance == StyleAppearance::Button ||
       aAppearance == StyleAppearance::MozMacHelpButton ||
       aAppearance == StyleAppearance::MozMacDisclosureButtonOpen ||
       aAppearance == StyleAppearance::MozMacDisclosureButtonClosed ||
@@ -4260,6 +4249,42 @@ bool nsNativeThemeCocoa::WidgetAppearanceDependsOnWindowFocus(StyleAppearance aA
   }
 }
 
+bool nsNativeThemeCocoa::IsWindowSheet(nsIFrame* aFrame) {
+  NSWindow* win = NativeWindowForFrame(aFrame);
+  id winDelegate = [win delegate];
+  nsIWidget* widget = [(WindowDelegate*)winDelegate geckoWidget];
+  if (!widget) {
+    return false;
+  }
+  return (widget->WindowType() == eWindowType_sheet);
+}
+
+bool nsNativeThemeCocoa::NeedToClearBackgroundBehindWidget(nsIFrame* aFrame,
+                                                           StyleAppearance aAppearance) {
+  switch (aAppearance) {
+    case StyleAppearance::MozMacSourceList:
+    // If we're in a XUL tree, we don't want to clear the background behind the
+    // selections below, since that would make our source list to not pick up
+    // the right font smoothing background. But since we don't call this method
+    // in nsTreeBodyFrame::BuildDisplayList, we never get here.
+    case StyleAppearance::MozMacSourceListSelection:
+    case StyleAppearance::MozMacActiveSourceListSelection:
+    case StyleAppearance::MozMacVibrancyLight:
+    case StyleAppearance::MozMacVibrancyDark:
+    case StyleAppearance::MozMacVibrantTitlebarLight:
+    case StyleAppearance::MozMacVibrantTitlebarDark:
+    case StyleAppearance::Tooltip:
+    case StyleAppearance::Menupopup:
+    case StyleAppearance::Menuitem:
+    case StyleAppearance::Checkmenuitem:
+      return true;
+    case StyleAppearance::Dialog:
+      return IsWindowSheet(aFrame);
+    default:
+      return false;
+  }
+}
+
 nsITheme::ThemeGeometryType nsNativeThemeCocoa::ThemeGeometryTypeForWidget(
     nsIFrame* aFrame, StyleAppearance aAppearance) {
   switch (aAppearance) {
@@ -4292,6 +4317,8 @@ nsITheme::ThemeGeometryType nsNativeThemeCocoa::ThemeGeometryTypeForWidget(
       bool isSelected = !isDisabled && CheckBooleanAttr(aFrame, nsGkAtoms::menuactive);
       return isSelected ? eThemeGeometryTypeHighlightedMenuItem : eThemeGeometryTypeMenu;
     }
+    case StyleAppearance::Dialog:
+      return IsWindowSheet(aFrame) ? eThemeGeometryTypeSheet : eThemeGeometryTypeUnknown;
     case StyleAppearance::MozMacSourceList:
       return eThemeGeometryTypeSourceList;
     case StyleAppearance::MozMacSourceListSelection:
@@ -4310,8 +4337,10 @@ nsITheme::Transparency nsNativeThemeCocoa::GetWidgetTransparency(nsIFrame* aFram
   switch (aAppearance) {
     case StyleAppearance::Menupopup:
     case StyleAppearance::Tooltip:
-    case StyleAppearance::Dialog:
       return eTransparent;
+
+    case StyleAppearance::Dialog:
+      return IsWindowSheet(aFrame) ? eTransparent : eOpaque;
 
     case StyleAppearance::ScrollbarSmall:
     case StyleAppearance::Scrollbar:
@@ -4345,7 +4374,11 @@ already_AddRefed<nsITheme> do_GetNativeTheme() {
   static nsCOMPtr<nsITheme> inst;
 
   if (!inst) {
-    inst = new nsNativeThemeCocoa();
+    if (XRE_IsContentProcess() && StaticPrefs::widget_disable_native_theme_for_content()) {
+      inst = new nsNativeBasicTheme();
+    } else {
+      inst = new nsNativeThemeCocoa();
+    }
     ClearOnShutdown(&inst);
   }
 

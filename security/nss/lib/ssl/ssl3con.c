@@ -394,12 +394,12 @@ static const SSLCipher2Mech alg2Mech[] = {
     { ssl_calg_chacha20, CKM_NSS_CHACHA20_POLY1305 },
 };
 
-const PRUint8 tls13_downgrade_random[] = { 0x44, 0x4F, 0x57, 0x4E,
-                                           0x47, 0x52, 0x44, 0x01 };
 const PRUint8 tls12_downgrade_random[] = { 0x44, 0x4F, 0x57, 0x4E,
-                                           0x47, 0x52, 0x44, 0x00 };
-PR_STATIC_ASSERT(sizeof(tls13_downgrade_random) ==
-                 sizeof(tls13_downgrade_random));
+                                           0x47, 0x52, 0x44, 0x01 };
+const PRUint8 tls1_downgrade_random[] = { 0x44, 0x4F, 0x57, 0x4E,
+                                          0x47, 0x52, 0x44, 0x00 };
+PR_STATIC_ASSERT(sizeof(tls12_downgrade_random) ==
+                 sizeof(tls1_downgrade_random));
 
 /* The ECCWrappedKeyInfo structure defines how various pieces of
  * information are laid out within wrappedSymmetricWrappingkey
@@ -2406,7 +2406,6 @@ ssl_ProtectRecord(sslSocket *ss, ssl3CipherSpec *cwSpec, SSLContentType ct,
     PORT_Assert(cwSpec->cipherDef->max_records <= RECORD_SEQ_MAX);
 
     if (cwSpec->nextSeqNum >= cwSpec->cipherDef->max_records) {
-        /* We should have automatically updated before here in TLS 1.3. */
         PORT_Assert(cwSpec->version < SSL_LIBRARY_VERSION_TLS_1_3);
         SSL_TRC(3, ("%d: SSL[-]: write sequence number at limit 0x%0llx",
                     SSL_GETPID(), cwSpec->nextSeqNum));
@@ -2438,7 +2437,18 @@ ssl_ProtectRecord(sslSocket *ss, ssl3CipherSpec *cwSpec, SSLContentType ct,
     }
 #else
     if (cwSpec->version >= SSL_LIBRARY_VERSION_TLS_1_3) {
+        PRUint8 *cipherText = SSL_BUFFER_NEXT(wrBuf);
+        unsigned int bufLen = SSL_BUFFER_LEN(wrBuf);
         rv = tls13_ProtectRecord(ss, cwSpec, ct, pIn, contentLen, wrBuf);
+        if (rv != SECSuccess) {
+            return SECFailure;
+        }
+        if (IS_DTLS(ss)) {
+            bufLen = SSL_BUFFER_LEN(wrBuf) - bufLen;
+            rv = dtls13_MaskSequenceNumber(ss, cwSpec,
+                                           SSL_BUFFER_BASE(wrBuf),
+                                           cipherText, bufLen);
+        }
     } else {
         rv = ssl3_MACEncryptRecord(cwSpec, ss->sec.isServer, IS_DTLS(ss), ct,
                                    pIn, contentLen, wrBuf);
@@ -6713,13 +6723,13 @@ ssl_CheckServerRandom(sslSocket *ss)
         /* Both sections use the same sentinel region. */
         PRUint8 *downgrade_sentinel =
             ss->ssl3.hs.server_random +
-            SSL3_RANDOM_LENGTH - sizeof(tls13_downgrade_random);
+            SSL3_RANDOM_LENGTH - sizeof(tls12_downgrade_random);
         if (!PORT_Memcmp(downgrade_sentinel,
-                         tls13_downgrade_random,
-                         sizeof(tls13_downgrade_random)) ||
-            !PORT_Memcmp(downgrade_sentinel,
                          tls12_downgrade_random,
-                         sizeof(tls12_downgrade_random))) {
+                         sizeof(tls12_downgrade_random)) ||
+            !PORT_Memcmp(downgrade_sentinel,
+                         tls1_downgrade_random,
+                         sizeof(tls1_downgrade_random))) {
             return SECFailure;
         }
     }
@@ -8491,20 +8501,24 @@ ssl_GenerateServerRandom(sslSocket *ss)
      */
     PRUint8 *downgradeSentinel =
         ss->ssl3.hs.server_random +
-        SSL3_RANDOM_LENGTH - sizeof(tls13_downgrade_random);
+        SSL3_RANDOM_LENGTH - sizeof(tls12_downgrade_random);
 
-    switch (ss->vrange.max) {
-        case SSL_LIBRARY_VERSION_TLS_1_3:
-            PORT_Memcpy(downgradeSentinel,
-                        tls13_downgrade_random, sizeof(tls13_downgrade_random));
-            break;
-        case SSL_LIBRARY_VERSION_TLS_1_2:
-            PORT_Memcpy(downgradeSentinel,
-                        tls12_downgrade_random, sizeof(tls12_downgrade_random));
-            break;
-        default:
-            /* Do not change random. */
-            break;
+    if (ss->vrange.max >= SSL_LIBRARY_VERSION_TLS_1_2) {
+        switch (ss->version) {
+            case SSL_LIBRARY_VERSION_TLS_1_2:
+                /* vrange.max > 1.2, since we didn't early exit above. */
+                PORT_Memcpy(downgradeSentinel,
+                            tls12_downgrade_random, sizeof(tls12_downgrade_random));
+                break;
+            case SSL_LIBRARY_VERSION_TLS_1_1:
+            case SSL_LIBRARY_VERSION_TLS_1_0:
+                PORT_Memcpy(downgradeSentinel,
+                            tls1_downgrade_random, sizeof(tls1_downgrade_random));
+                break;
+            default:
+                /* Do not change random. */
+                break;
+        }
     }
 
     return SECSuccess;
@@ -8607,14 +8621,11 @@ ssl3_HandleClientHello(sslSocket *ss, PRUint8 *b, PRUint32 length)
         goto loser; /* malformed */
     }
 
-    /* Grab the client's cookie, if present. */
+    /* Grab the client's cookie, if present. It is checked after version negotiation. */
     if (IS_DTLS(ss)) {
         rv = ssl3_ConsumeHandshakeVariable(ss, &cookieBytes, 1, &b, &length);
         if (rv != SECSuccess) {
             goto loser; /* malformed */
-        }
-        if (cookieBytes.len != 0) {
-            goto loser; /* We never send cookies in DTLS 1.2. */
         }
     }
 
@@ -8721,6 +8732,13 @@ ssl3_HandleClientHello(sslSocket *ss, PRUint8 *b, PRUint32 length)
             errCode = SSL_ERROR_RX_UNEXPECTED_CHANGE_CIPHER;
             goto alert_loser;
         }
+
+        /* A DTLS 1.3-only client MUST set the legacy_cookie field to zero length.
+         * If a DTLS 1.3 ClientHello is received with any other value in this field,
+         * the server MUST abort the handshake with an "illegal_parameter" alert. */
+        if (IS_DTLS(ss) && cookieBytes.len != 0) {
+            goto alert_loser;
+        }
     } else {
         /* HRR is TLS1.3-only. We ignore the Cookie extension here. */
         if (ss->ssl3.hs.helloRetry) {
@@ -8740,6 +8758,11 @@ ssl3_HandleClientHello(sslSocket *ss, PRUint8 *b, PRUint32 length)
         if (comps.len < 1 ||
             !memchr(comps.data, ssl_compression_null, comps.len)) {
             goto alert_loser;
+        }
+
+        /* We never send cookies in DTLS 1.2. */
+        if (IS_DTLS(ss) && cookieBytes.len != 0) {
+            goto loser;
         }
     }
 
@@ -12895,6 +12918,12 @@ ssl3_HandleRecord(sslSocket *ss, SSL3Ciphertext *cText)
     }
     isTLS = (PRBool)(spec->version > SSL_LIBRARY_VERSION_3_0);
     if (IS_DTLS(ss)) {
+        if (dtls13_MaskSequenceNumber(ss, spec, cText->hdr,
+                                      SSL_BUFFER_BASE(cText->buf), SSL_BUFFER_LEN(cText->buf)) != SECSuccess) {
+            ssl_ReleaseSpecReadLock(ss); /*****************************/
+            /* code already set. */
+            return SECFailure;
+        }
         if (!dtls_IsRelevant(ss, spec, cText, &cText->seqNum)) {
             ssl_ReleaseSpecReadLock(ss); /*****************************/
             return SECSuccess;
@@ -12936,7 +12965,10 @@ ssl3_HandleRecord(sslSocket *ss, SSL3Ciphertext *cText)
     /* Encrypted application data records could arrive before the handshake
      * completes in DTLS 1.3. These can look like valid TLS 1.2 application_data
      * records in epoch 0, which is never valid. Pretend they didn't decrypt. */
-    if (spec->epoch == 0 && rType == ssl_ct_application_data) {
+
+    if (spec->epoch == 0 && ((IS_DTLS(ss) &&
+                              dtls_IsDtls13Ciphertext(0, rType)) ||
+                             rType == ssl_ct_application_data)) {
         PORT_SetError(SSL_ERROR_RX_UNEXPECTED_APPLICATION_DATA);
         alert = unexpected_message;
         rv = SECFailure;

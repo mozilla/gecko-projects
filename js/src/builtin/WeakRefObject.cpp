@@ -55,6 +55,18 @@ bool WeakRefObject::construct(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  // Wrap the weakRef into the target's compartment.
+  RootedObject wrappedWeakRef(cx, weakRef);
+  AutoRealm ar(cx, target);
+  if (!JS_WrapObject(cx, &wrappedWeakRef)) {
+    return false;
+  }
+
+  if (JS_IsDeadWrapper(wrappedWeakRef)) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+    return false;
+  }
+
   // 4. Perfom ! KeepDuringJob(target).
   if (!target->zone()->keepDuringJob(target)) {
     return false;
@@ -62,13 +74,6 @@ bool WeakRefObject::construct(JSContext* cx, unsigned argc, Value* vp) {
 
   // 5. Set weakRef.[[Target]] to target.
   weakRef->setPrivateGCThing(target);
-
-  // Wrap the weakRef into the target's compartment.
-  RootedObject wrappedWeakRef(cx, weakRef);
-  AutoRealm ar(cx, target);
-  if (!JS_WrapObject(cx, &wrappedWeakRef)) {
-    return false;
-  }
 
   // Add an entry to the per-zone maps from target JS object to a list of weak
   // ref objects.
@@ -84,19 +89,15 @@ bool WeakRefObject::construct(JSContext* cx, unsigned argc, Value* vp) {
 
 /* static */
 void WeakRefObject::trace(JSTracer* trc, JSObject* obj) {
-  if (trc->isMarkingTracer()) {
-    return;
-  }
-
   WeakRefObject* weakRef = &obj->as<WeakRefObject>();
-  JSObject* target = weakRef->target();
-  if (!target) {
-    return;
-  }
 
-  MOZ_ALWAYS_TRUE(
-      TraceManuallyBarrieredWeakEdge(trc, &target, "WeakRefObject::target"));
-  weakRef->setPrivate(target);
+  if (trc->traceWeakEdges()) {
+    JSObject* target = weakRef->target();
+    if (target) {
+      TraceManuallyBarrieredEdge(trc, &target, "WeakRefObject::target");
+    }
+    weakRef->setPrivate(target);
+  }
 }
 
 /* static */
@@ -115,21 +116,21 @@ void WeakRefObject::finalize(JSFreeOp* fop, JSObject* obj) {
 }
 
 const JSClassOps WeakRefObject::classOps_ = {
-    nullptr,  /* addProperty */
-    nullptr,  /* delProperty */
-    nullptr,  /* enumerate */
-    nullptr,  /* newEnumerate */
-    nullptr,  /* resolve */
-    nullptr,  /* mayResolve */
-    finalize, /* finalize */
-    nullptr,  /* call */
-    nullptr,  /* hasInstance */
-    nullptr,  /* construct */
-    trace     /* trace */
+    nullptr,   // addProperty
+    nullptr,   // delProperty
+    nullptr,   // enumerate
+    nullptr,   // newEnumerate
+    nullptr,   // resolve
+    nullptr,   // mayResolve
+    finalize,  // finalize
+    nullptr,   // call
+    nullptr,   // hasInstance
+    nullptr,   // construct
+    trace,     // trace
 };
 
 const ClassSpec WeakRefObject::classSpec_ = {
-    GenericCreateConstructor<WeakRefObject::construct, 0,
+    GenericCreateConstructor<WeakRefObject::construct, 1,
                              gc::AllocKind::FUNCTION>,
     GenericCreatePrototype<WeakRefObject>,
     nullptr,
@@ -153,7 +154,7 @@ const JSClass WeakRefObject::protoClass_ = {
 const JSPropertySpec WeakRefObject::properties[] = {
     JS_STRING_SYM_PS(toStringTag, "WeakRef", JSPROP_READONLY), JS_PS_END};
 
-const JSFunctionSpec WeakRefObject::methods[] = {JS_FN("deref", deref, 2, 0),
+const JSFunctionSpec WeakRefObject::methods[] = {JS_FN("deref", deref, 0, 0),
                                                  JS_FS_END};
 
 /* static */
@@ -252,7 +253,7 @@ void WeakRefMap::sweep() {
     // If target is dying, clear the target field of all weakRefs, and remove
     // the entry from the map.
     if (JS::GCPolicy<HeapPtrObject>::needsSweep(&e.front().mutableKey())) {
-      for (HeapPtrObject& obj : e.front().value()) {
+      for (JSObject* obj : e.front().value()) {
         obj = UncheckedUnwrapWithoutExpose(obj);
         if (!obj->is<WeakRefObject>()) {
           MOZ_ASSERT(JS_IsDeadWrapper(obj));

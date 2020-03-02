@@ -40,6 +40,15 @@
   direction: rtl;
 }
 
+/*
+ * Native anonymous popups and tooltips in html are document-level, which means
+ * that they don't inherit from the root, so this is needed.
+ */
+popupgroup:-moz-native-anonymous:-moz-locale-dir(rtl),
+tooltip:-moz-native-anonymous:-moz-locale-dir(rtl) {
+  direction: rtl;
+}
+
 /* ::::::::::
    :: Rules for 'hiding' portions of the chrome for special
    :: kinds of windows (not JUST browser windows) with toolbars
@@ -110,17 +119,13 @@ label html|span.accesskey {
 
 /********** toolbarbutton **********/
 
-.toolbarbutton-badge:not([value]),
-.toolbarbutton-badge[value=""] {
-  display: none;
-}
-
 toolbarbutton:not([type="menu"]) > .toolbarbutton-menu-dropmarker,
 toolbar[mode="icons"] .toolbarbutton-text,
 toolbar[mode="icons"] .toolbarbutton-multiline-text,
 toolbar[mode="text"] .toolbarbutton-icon,
 .toolbarbutton-multiline-text:not([wrap="true"]),
-.toolbarbutton-text[wrap="true"] {
+.toolbarbutton-text[wrap="true"],
+html|label.toolbarbutton-badge:empty {
   display: none;
 }
 
@@ -378,7 +383,8 @@ stack {
   position: relative;
 }
 
-stack > *|* {
+/* We shouldn't style native anonymous children like scrollbars or what not */
+stack > *|*:not(:-moz-native-anonymous) {
   grid-area: 1 / 1;
   z-index: 0;
 
@@ -390,6 +396,10 @@ stack > *|* {
     by adding scrollbars if it's scrollable).
   */
   min-height: 0;
+}
+
+legacy-stack {
+  display: -moz-stack;
 }
 
 /********** tabbox *********/
@@ -567,6 +577,11 @@ tabmodalprompt {
   text-shadow: none;
 }
 
+/* Some elements that in HTML blocks should be inline-level by default */
+label, button, image {
+  display: -moz-inline-box;
+}
+
 .menulist-highlightable-label:not([highlightable="true"]),
 .menulist-label[highlightable="true"],
 .menu-iconic-highlightable-text:not([highlightable="true"]),
@@ -605,15 +620,4 @@ tabmodalprompt {
   [flex="400"] { -moz-box-flex: 400; }
   [flex="1000"] { -moz-box-flex: 1000; }
   [flex="10000"] { -moz-box-flex: 10000; }
-
-  [ordinal="1"] { -moz-box-ordinal-group: 1; }
-  [ordinal="2"] { -moz-box-ordinal-group: 2; }
-  [ordinal="3"] { -moz-box-ordinal-group: 3; }
-  [ordinal="4"] { -moz-box-ordinal-group: 4; }
-  [ordinal="5"] { -moz-box-ordinal-group: 5; }
-  [ordinal="6"] { -moz-box-ordinal-group: 6; }
-  [ordinal="7"] { -moz-box-ordinal-group: 7; }
-  [ordinal="8"] { -moz-box-ordinal-group: 8; }
-  [ordinal="9"] { -moz-box-ordinal-group: 9; }
-  [ordinal="1000"] { -moz-box-ordinal-group: 1000; }
 }

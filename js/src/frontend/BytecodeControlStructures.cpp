@@ -9,7 +9,7 @@
 #include "frontend/BytecodeEmitter.h"  // BytecodeEmitter
 #include "frontend/EmitterScope.h"     // EmitterScope
 #include "frontend/SourceNotes.h"      // SRC_*
-#include "vm/Opcodes.h"                // JSOP_*
+#include "vm/Opcodes.h"                // JSOp
 
 using namespace js;
 using namespace js::frontend;
@@ -52,26 +52,13 @@ bool LoopControl::emitContinueTarget(BytecodeEmitter* bce) {
   return bce->emitJumpTargetAndPatch(continues);
 }
 
-bool LoopControl::emitSpecialBreakForDone(BytecodeEmitter* bce) {
-  // This doesn't pop stack values, nor handle any other controls.
-  // Should be called on the toplevel of the loop.
-  MOZ_ASSERT(bce->bytecodeSection().stackDepth() == stackDepth_);
-  MOZ_ASSERT(bce->innermostNestableControl == this);
-
-  if (!bce->emitJump(JSOP_GOTO, &breaks)) {
-    return false;
-  }
-
-  return true;
-}
-
 bool LoopControl::emitLoopHead(BytecodeEmitter* bce,
                                const Maybe<uint32_t>& nextPos) {
-  // Insert a NOP if needed to ensure the script does not start with a
-  // JSOP_LOOPHEAD. This avoids JIT issues with prologue code + try notes
+  // Insert a Nop if needed to ensure the script does not start with a
+  // JSOp::LoopHead. This avoids JIT issues with prologue code + try notes
   // or OSR. See bug 1602390 and bug 1602681.
   if (bce->bytecodeSection().offset().toUint32() == 0) {
-    if (!bce->emit1(JSOP_NOP)) {
+    if (!bce->emit1(JSOp::Nop)) {
       return false;
     }
   }
@@ -87,7 +74,7 @@ bool LoopControl::emitLoopHead(BytecodeEmitter* bce,
   head_ = {bce->bytecodeSection().offset()};
 
   BytecodeOffset off;
-  if (!bce->emitJumpTargetOp(JSOP_LOOPHEAD, &off)) {
+  if (!bce->emitJumpTargetOp(JSOp::LoopHead, &off)) {
     return false;
   }
   SetLoopHeadDepthHint(bce->bytecodeSection().code(off), loopDepth_);

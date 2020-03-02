@@ -15,12 +15,22 @@ rev = "6a866fdad2ca880df9b87fcbc9921abac1e91914"
 [source."https://github.com/mozilla/neqo"]
 git = "https://github.com/mozilla/neqo"
 replace-with = "vendored-sources"
-tag = "v0.1.7"
+tag = "v0.1.14"
+
+[source."https://github.com/mozilla-spidermonkey/jsparagus"]
+git = "https://github.com/mozilla-spidermonkey/jsparagus"
+replace-with = "vendored-sources"
+rev = "0b248045fda0cc9b7323c73b81cfbcab71f4a9ef"
 
 [source."https://github.com/kvark/spirv_cross"]
 branch = "wgpu"
 git = "https://github.com/kvark/spirv_cross"
 replace-with = "vendored-sources"
+
+[source."https://github.com/kvark/peek-poke"]
+git = "https://github.com/kvark/peek-poke"
+replace-with = "vendored-sources"
+rev = "969bd7fe2be1a83f87916dc8b388c63cfd457075"
 
 [source."https://github.com/jfkthame/mapped_hyph.git"]
 git = "https://github.com/jfkthame/mapped_hyph.git"
@@ -28,9 +38,9 @@ replace-with = "vendored-sources"
 tag = "v0.3.0"
 
 [source."https://github.com/hsivonen/packed_simd"]
-branch = "rust_1_32"
 git = "https://github.com/hsivonen/packed_simd"
 replace-with = "vendored-sources"
+rev = "3541e3818fdc7c2a24f87e3459151a4ce955a67a"
 
 [source."https://github.com/djg/cubeb-pulse-rs"]
 git = "https://github.com/djg/cubeb-pulse-rs"
@@ -40,7 +50,12 @@ rev = "8069f8f4189982e0b38fa6dc8993dd4fab41f728"
 [source."https://github.com/bytecodealliance/cranelift"]
 git = "https://github.com/bytecodealliance/cranelift"
 replace-with = "vendored-sources"
-rev = "ec787eb281bb2e18e191508c17abe694e91f0677"
+rev = "98c818c129979e98a3db150f8f9698f6451b7ef7"
+
+[source."https://github.com/badboy/failure"]
+git = "https://github.com/badboy/failure"
+replace-with = "vendored-sources"
+rev = "64af847bc5fdcb6d2438bec8a6030812a80519a5"
 
 [source."https://github.com/alexcrichton/mio-named-pipes"]
 branch = "master"
@@ -50,22 +65,17 @@ replace-with = "vendored-sources"
 [source."https://github.com/PLSysSec/rlbox_lucet_sandbox/"]
 git = "https://github.com/PLSysSec/rlbox_lucet_sandbox/"
 replace-with = "vendored-sources"
-rev = "9068928a00f54db2a060704e972007b0b5247ca9"
+rev = "d510da5999a744c563b0acd18056069d1698273f"
 
 [source."https://github.com/PLSysSec/lucet_sandbox_compiler"]
 git = "https://github.com/PLSysSec/lucet_sandbox_compiler"
 replace-with = "vendored-sources"
-rev = "36f0e4deb5b080dfee73042fec655d3723c7a12b"
-
-[source."https://github.com/NikVolf/tokio-named-pipes"]
-branch = "stable"
-git = "https://github.com/NikVolf/tokio-named-pipes"
-replace-with = "vendored-sources"
+rev = "5e870faf6f95d79d11efc813e56370ad124bbed5"
 
 [source."https://github.com/ChunMinChang/cubeb-coreaudio-rs"]
 git = "https://github.com/ChunMinChang/cubeb-coreaudio-rs"
 replace-with = "vendored-sources"
-rev = "868d847c2e95096b6eec629dfed77ef363363ecb"
+rev = "4acd80233efa645ac79769f37b07d495c1b42070"
 
 [source.crates-io]
 replace-with = "vendored-sources"

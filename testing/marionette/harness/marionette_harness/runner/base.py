@@ -357,11 +357,6 @@ class BaseMarionetteArguments(ArgumentParser):
         self.add_argument('--pydebugger',
                           help='Enable python post-mortem debugger when a test fails.'
                                ' Pass in the debugger you want to use, eg pdb or ipdb.')
-        self.add_argument('--disable-e10s',
-                          action='store_false',
-                          dest='e10s',
-                          default=True,
-                          help='Disable e10s when running marionette tests.')
         self.add_argument('--enable-fission',
                           action='store_true',
                           dest='enable_fission',
@@ -531,7 +526,7 @@ class BaseMarionetteTestRunner(object):
                  socket_timeout=None,
                  startup_timeout=None,
                  addons=None, workspace=None,
-                 verbose=0, e10s=True, emulator=False, headless=False,
+                 verbose=0, emulator=False, headless=False,
                  enable_webrender=False, enable_fission=False, **kwargs):
         self._appName = None
         self._capabilities = None
@@ -580,16 +575,6 @@ class BaseMarionetteTestRunner(object):
         if self.enable_fission:
             self.prefs.update({
                 'fission.autostart': True,
-            })
-
-        # self.e10s stores the desired configuration, whereas
-        # self._e10s_from_browser is the cached value from querying e10s
-        # in self.is_e10s
-        self.e10s = e10s
-        self._e10s_from_browser = None
-        if self.e10s:
-            self.prefs.update({
-                'browser.tabs.remote.autostart': True,
             })
 
         # If no repeat has been set, default to 30 extra runs
@@ -834,39 +819,26 @@ class BaseMarionetteTestRunner(object):
             "tests{}".format(os.path.sep),
         ]
 
+        path = os.path.relpath(path)
         for prefix in test_path_prefixes:
             if path.startswith(prefix):
                 path = path[len(prefix):]
                 break
+        path = path.replace('\\', '/')
+
         return path
 
     def _log_skipped_tests(self):
         for test in self.manifest_skipped_tests:
             rel_path = None
             if os.path.exists(test['path']):
-                rel_path = self._fix_test_path(os.path.relpath(test['path']))
+                rel_path = self._fix_test_path(test['path'])
 
             self.logger.test_start(rel_path)
             self.logger.test_end(rel_path,
                                  'SKIP',
                                  message=test['disabled'])
             self.todo += 1
-
-    @property
-    def is_e10s(self):
-        """Query the browser on whether E10s (Electrolysis) is enabled."""
-        if self.marionette is None or self.marionette.session is None:
-            self._e10s_from_browser = None
-            raise Exception("No Marionette session to query e10s state")
-
-        if self._e10s_from_browser is not None:
-            return self._e10s_from_browser
-
-        with self.marionette.using_context("chrome"):
-            self._e10s_from_browser = self.marionette.execute_script(
-                "return Services.appinfo.browserTabsRemoteAutostart")
-
-        return self._e10s_from_browser
 
     def run_tests(self, tests):
         start_time = time.time()
@@ -895,17 +867,11 @@ class BaseMarionetteTestRunner(object):
             except Exception:
                 self.logger.warning('Could not get device info', exc_info=True)
 
-        self.marionette.start_session()
-        self.logger.info("e10s is {}".format("enabled" if self.is_e10s else "disabled"))
-        if self.e10s != self.is_e10s:
-            self.cleanup()
-            raise AssertionError("BaseMarionetteTestRunner configuration (self.e10s) "
-                                 "does not match browser appinfo (self.is_e10s)")
-        self.marionette.delete_session()
-
         tests_by_group = defaultdict(list)
         for test in self.tests:
-            tests_by_group[test['group']].append(test['filepath'])
+            group = self._fix_test_path(test['group'])
+            filepath = self._fix_test_path(test['filepath'])
+            tests_by_group[group].append(filepath)
 
         self.logger.suite_start(tests_by_group,
                                 name='marionette-test',
@@ -1020,7 +986,6 @@ class BaseMarionetteTestRunner(object):
 
             values = {
                 "appname": self.appName,
-                "e10s": self.e10s,
                 "manage_instance": self.marionette.instance is not None,
                 "headless": self.headless
             }
@@ -1136,6 +1101,13 @@ class BaseMarionetteTestRunner(object):
 
         if hasattr(self, 'marionette') and self.marionette:
             if self.marionette.instance is not None:
+                if self.marionette.instance.runner.is_running():
+                    # Force a clean shutdown of the application process first if
+                    # it is still running. If that fails, kill the process.
+                    # Therefore a new session needs to be started.
+                    self.marionette.start_session()
+                    self.marionette.quit(in_app=True)
+
                 self.marionette.instance.close(clean=True)
                 self.marionette.instance = None
 

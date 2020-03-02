@@ -9,6 +9,7 @@
 #include "GLContext.h"
 #include "GLContextProvider.h"
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/layers/SurfacePool.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
@@ -44,12 +45,22 @@ RenderCompositorOGL::RenderCompositorOGL(
       mPreviousFrameDoneSync(nullptr),
       mThisFrameDoneSync(nullptr) {
   MOZ_ASSERT(mGL);
+  if (mNativeLayerRoot) {
+#ifdef XP_MACOSX
+    auto pool = RenderThread::Get()->SharedSurfacePool();
+    if (pool) {
+      mSurfacePoolHandle = pool->GetHandleForGL(mGL);
+    }
+#endif
+    MOZ_RELEASE_ASSERT(mSurfacePoolHandle);
+  }
 }
 
 RenderCompositorOGL::~RenderCompositorOGL() {
   if (mNativeLayerRoot) {
     mNativeLayerRoot->SetLayers({});
     mNativeLayerForEntireWindow = nullptr;
+    mNativeLayerRootSnapshotter = nullptr;
     mNativeLayerRoot = nullptr;
   }
 
@@ -85,9 +96,8 @@ bool RenderCompositorOGL::BeginFrame() {
     }
     if (!mNativeLayerForEntireWindow) {
       mNativeLayerForEntireWindow =
-          mNativeLayerRoot->CreateLayer(bufferSize, false);
+          mNativeLayerRoot->CreateLayer(bufferSize, false, mSurfacePoolHandle);
       mNativeLayerForEntireWindow->SetSurfaceIsFlipped(true);
-      mNativeLayerForEntireWindow->SetGLContext(mGL);
       mNativeLayerRoot->AppendLayer(mNativeLayerForEntireWindow);
     }
   }
@@ -107,13 +117,19 @@ bool RenderCompositorOGL::BeginFrame() {
 }
 
 RenderedFrameId RenderCompositorOGL::EndFrame(
-    const FfiVec<DeviceIntRect>& aDirtyRects) {
+    const nsTArray<DeviceIntRect>& aDirtyRects) {
   RenderedFrameId frameId = GetNextRenderFrameId();
   InsertFrameDoneSync();
-  mGL->SwapBuffers();
+
+  if (!mNativeLayerRoot) {
+    mGL->SwapBuffers();
+    return frameId;
+  }
 
   if (mNativeLayerForEntireWindow) {
+    mGL->fFlush();
     mNativeLayerForEntireWindow->NotifySurfaceReady();
+    mNativeLayerRoot->CommitToScreen();
   }
 
   return frameId;
@@ -156,6 +172,27 @@ bool RenderCompositorOGL::ShouldUseNativeCompositor() {
   return mNativeLayerRoot && gfx::gfxVars::UseWebRenderCompositor();
 }
 
+bool RenderCompositorOGL::MaybeReadback(const gfx::IntSize& aReadbackSize,
+                                        const wr::ImageFormat& aReadbackFormat,
+                                        const Range<uint8_t>& aReadbackBuffer) {
+  if (!ShouldUseNativeCompositor()) {
+    return false;
+  }
+
+  MOZ_RELEASE_ASSERT(aReadbackFormat == wr::ImageFormat::BGRA8);
+  if (!mNativeLayerRootSnapshotter) {
+    mNativeLayerRootSnapshotter = mNativeLayerRoot->CreateSnapshotter();
+  }
+  bool success = mNativeLayerRootSnapshotter->ReadbackPixels(
+      aReadbackSize, gfx::SurfaceFormat::B8G8R8A8, aReadbackBuffer);
+
+  // ReadbackPixels might have changed the current context. Make sure mGL is
+  // current again.
+  mGL->MakeCurrent();
+
+  return success;
+}
+
 uint32_t RenderCompositorOGL::GetMaxUpdateRects() {
   if (ShouldUseNativeCompositor() &&
       StaticPrefs::gfx_webrender_compositor_max_update_rects_AtStartup() > 0) {
@@ -169,6 +206,7 @@ void RenderCompositorOGL::CompositorBeginFrame() {
   mAddedPixelCount = 0;
   mAddedClippedPixelCount = 0;
   mBeginFrameTimeStamp = TimeStamp::NowUnfuzzed();
+  mSurfacePoolHandle->OnBeginFrame();
 }
 
 void RenderCompositorOGL::CompositorEndFrame() {
@@ -198,11 +236,15 @@ void RenderCompositorOGL::CompositorEndFrame() {
   mDrawnPixelCount = 0;
 
   mNativeLayerRoot->SetLayers(mAddedLayers);
+  mGL->fFlush();
+  mNativeLayerRoot->CommitToScreen();
+  mSurfacePoolHandle->OnEndFrame();
 }
 
 void RenderCompositorOGL::Bind(wr::NativeTileId aId,
                                wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-                               wr::DeviceIntRect aDirtyRect) {
+                               wr::DeviceIntRect aDirtyRect,
+                               wr::DeviceIntRect aValidRect) {
   MOZ_RELEASE_ASSERT(!mCurrentlyBoundNativeLayer);
 
   auto surfaceCursor = mSurfaces.find(aId.surface_id);
@@ -212,6 +254,10 @@ void RenderCompositorOGL::Bind(wr::NativeTileId aId,
   auto layerCursor = surface.mNativeLayers.find(TileKey(aId.x, aId.y));
   MOZ_RELEASE_ASSERT(layerCursor != surface.mNativeLayers.end());
   RefPtr<layers::NativeLayer> layer = layerCursor->second;
+
+  gfx::IntRect validRect(aValidRect.origin.x, aValidRect.origin.y,
+                         aValidRect.size.width, aValidRect.size.height);
+  layer->SetValidRect(validRect);
 
   gfx::IntRect dirtyRect(aDirtyRect.origin.x, aDirtyRect.origin.y,
                          aDirtyRect.size.width, aDirtyRect.size.height);
@@ -235,24 +281,31 @@ void RenderCompositorOGL::Unbind() {
 }
 
 void RenderCompositorOGL::CreateSurface(wr::NativeSurfaceId aId,
-                                        wr::DeviceIntSize aTileSize) {
-  Surface surface(aTileSize);
-  mSurfaces.insert({aId, surface});
+                                        wr::DeviceIntSize aTileSize,
+                                        bool aIsOpaque) {
+  MOZ_RELEASE_ASSERT(mSurfaces.find(aId) == mSurfaces.end());
+  mSurfaces.insert({aId, Surface{aTileSize, aIsOpaque}});
 }
 
 void RenderCompositorOGL::DestroySurface(NativeSurfaceId aId) {
-  mSurfaces.erase(aId);
+  auto surfaceCursor = mSurfaces.find(aId);
+  MOZ_RELEASE_ASSERT(surfaceCursor != mSurfaces.end());
+
+  Surface& surface = surfaceCursor->second;
+  for (const auto& iter : surface.mNativeLayers) {
+    mTotalPixelCount -= gfx::IntRect({}, iter.second->GetSize()).Area();
+  }
+
+  mSurfaces.erase(surfaceCursor);
 }
 
-void RenderCompositorOGL::CreateTile(wr::NativeSurfaceId aId, int aX, int aY,
-                                     bool aIsOpaque) {
+void RenderCompositorOGL::CreateTile(wr::NativeSurfaceId aId, int aX, int aY) {
   auto surfaceCursor = mSurfaces.find(aId);
   MOZ_RELEASE_ASSERT(surfaceCursor != mSurfaces.end());
   Surface& surface = surfaceCursor->second;
 
   RefPtr<layers::NativeLayer> layer = mNativeLayerRoot->CreateLayer(
-      IntSize(surface.mTileSize.width, surface.mTileSize.height), aIsOpaque);
-  layer->SetGLContext(mGL);
+      surface.TileSize(), surface.mIsOpaque, mSurfacePoolHandle);
   surface.mNativeLayers.insert({TileKey(aX, aY), layer});
   mTotalPixelCount += gfx::IntRect({}, layer->GetSize()).Area();
 }
@@ -267,9 +320,16 @@ void RenderCompositorOGL::DestroyTile(wr::NativeSurfaceId aId, int aX, int aY) {
   RefPtr<layers::NativeLayer> layer = std::move(layerCursor->second);
   surface.mNativeLayers.erase(layerCursor);
   mTotalPixelCount -= gfx::IntRect({}, layer->GetSize()).Area();
+
   // If the layer is currently present in mNativeLayerRoot, it will be destroyed
   // once CompositorEndFrame() replaces mNativeLayerRoot's layers and drops that
-  // reference.
+  // reference. So until that happens, the layer still needs to hold on to its
+  // front buffer. However, we can tell it to drop its back buffers now, because
+  // we know that we will never draw to it again.
+  // Dropping the back buffers now puts them back in the surface pool, so those
+  // surfaces can be immediately re-used for drawing in other layers in the
+  // current frame.
+  layer->DiscardBackbuffers();
 }
 
 void RenderCompositorOGL::AddSurface(wr::NativeSurfaceId aId,
@@ -289,14 +349,16 @@ void RenderCompositorOGL::AddSurface(wr::NativeSurfaceId aId,
         aPosition.x + surface.mTileSize.width * it->first.mX,
         aPosition.y + surface.mTileSize.height * it->first.mY, layerSize.width,
         layerSize.height);
+    gfx::IntRect validRect = layer->GetValidRect() + layerRect.TopLeft();
     gfx::IntRect clipRect(aClipRect.origin.x, aClipRect.origin.y,
                           aClipRect.size.width, aClipRect.size.height);
+    gfx::IntRect realClip = clipRect.Intersect(validRect);
     layer->SetPosition(layerRect.TopLeft());
-    layer->SetClipRect(Some(clipRect));
+    layer->SetClipRect(Some(realClip));
     mAddedLayers.AppendElement(layer);
 
     mAddedPixelCount += layerRect.Area();
-    mAddedClippedPixelCount += clipRect.Intersect(layerRect).Area();
+    mAddedClippedPixelCount += realClip.Intersect(layerRect).Area();
   }
 }
 

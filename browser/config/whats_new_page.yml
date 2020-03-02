@@ -20,35 +20,32 @@
       locales:
           - be
           - cak
-          - cs
           - cy
+          - da
           - de
           - dsb
           - en-CA
           - en-GB
           - en-US
           - es-AR
+          - es-CL
           - es-ES
-          - es-MX
-          - eu
-          - fi
           - fr
           - fy-NL
           - gn
-          - hr
           - hsb
           - hu
           - ia
           - id
           - it
           - ka
-          - kab
-          - nb-NO
           - nl
           - nn-NO
+          - pa-IN
           - pl
           - pt-BR
-          - ru
+          - pt-PT
+          - ro
           - sk
           - sl
           - sq

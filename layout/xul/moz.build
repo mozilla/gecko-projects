@@ -34,6 +34,7 @@ UNIFIED_SOURCES += [
     'nsScrollbarFrame.cpp',
     'nsSliderFrame.cpp',
     'nsSprocketLayout.cpp',
+    'nsStackFrame.cpp',
     'nsStackLayout.cpp',
     'nsXULTooltipListener.cpp',
 ]
@@ -42,7 +43,6 @@ if CONFIG['MOZ_XUL']:
     UNIFIED_SOURCES += [
         'nsDeckFrame.cpp',
         'nsDocElementBoxFrame.cpp',
-        'nsGroupBoxFrame.cpp',
         'nsImageBoxFrame.cpp',
         'nsLeafBoxFrame.cpp',
         'nsMenuBarFrame.cpp',

@@ -236,7 +236,7 @@ nsChildView::nsChildView()
       mDrawing(false),
       mIsDispatchPaint(false),
       mPluginFocused{false},
-      mCompositingState("nsChildView::mCompositingState"),
+      mOpaqueRegion("nsChildView::mOpaqueRegion"),
       mCurrentPanGestureBelongsToSwipe{false} {}
 
 nsChildView::~nsChildView() {
@@ -498,6 +498,8 @@ void nsChildView::SetTransparencyMode(nsTransparencyMode aMode) {
     windowWidget->SetTransparencyMode(aMode);
   }
 
+  UpdateInternalOpaqueRegion();
+
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
@@ -634,7 +636,7 @@ void nsChildView::Enable(bool aState) {}
 
 bool nsChildView::IsEnabled() const { return true; }
 
-void nsChildView::SetFocus(Raise) {
+void nsChildView::SetFocus(Raise, mozilla::dom::CallerType aCallerType) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
   NSWindow* window = [mView window];
@@ -849,13 +851,12 @@ void nsChildView::SuspendAsyncCATransactions() {
   // accidentally stay suspended indefinitely.
   [mView markLayerForDisplay];
 
-  auto compositingState = mCompositingState.Lock();
-  compositingState->mAsyncCATransactionsSuspended = true;
+  mNativeLayerRoot->SuspendOffMainThreadCommits();
 }
 
 void nsChildView::MaybeScheduleUnsuspendAsyncCATransactions() {
-  auto compositingState = mCompositingState.Lock();
-  if (compositingState->mAsyncCATransactionsSuspended && !mUnsuspendAsyncCATransactionsRunnable) {
+  if (mNativeLayerRoot->AreOffMainThreadCommitsSuspended() &&
+      !mUnsuspendAsyncCATransactionsRunnable) {
     mUnsuspendAsyncCATransactionsRunnable =
         NewCancelableRunnableMethod("nsChildView::MaybeScheduleUnsuspendAsyncCATransactions", this,
                                     &nsChildView::UnsuspendAsyncCATransactions);
@@ -866,14 +867,12 @@ void nsChildView::MaybeScheduleUnsuspendAsyncCATransactions() {
 void nsChildView::UnsuspendAsyncCATransactions() {
   mUnsuspendAsyncCATransactionsRunnable = nullptr;
 
-  auto compositingState = mCompositingState.Lock();
-  compositingState->mAsyncCATransactionsSuspended = false;
-  if (compositingState->mNativeLayerChangesPending) {
-    // We need to call mNativeLayerRoot->ApplyChanges() at the next available
-    // opportunity, and it needs to happen during a CoreAnimation transaction.
+  if (mNativeLayerRoot->UnsuspendOffMainThreadCommits()) {
+    // We need to call mNativeLayerRoot->CommitToScreen() at the next available
+    // opportunity.
     // The easiest way to handle this request is to mark the layer as needing
     // display, because this will schedule a main thread CATransaction, during
-    // which HandleMainThreadCATransaction will call ApplyChanges().
+    // which HandleMainThreadCATransaction will call CommitToScreen().
     [mView markLayerForDisplay];
   }
 }
@@ -1336,16 +1335,18 @@ void nsChildView::EnsureContentLayerForMainThreadPainting() {
     mContentLayer = nullptr;
   }
   if (!mContentLayer) {
-    RefPtr<NativeLayer> contentLayer = mNativeLayerRoot->CreateLayer(size, false);
+    mPoolHandle = SurfacePool::Create(0)->GetHandleForGL(nullptr);
+    RefPtr<NativeLayer> contentLayer = mNativeLayerRoot->CreateLayer(size, false, mPoolHandle);
     mNativeLayerRoot->AppendLayer(contentLayer);
     mContentLayer = contentLayer->AsNativeLayerCA();
+    mContentLayer->SetSurfaceIsFlipped(false);
     mContentLayerInvalidRegion = GetBounds();
   }
 }
 
 void nsChildView::PaintWindowInContentLayer() {
   EnsureContentLayerForMainThreadPainting();
-  mContentLayer->SetSurfaceIsFlipped(false);
+  mPoolHandle->OnBeginFrame();
   RefPtr<DrawTarget> dt = mContentLayer->NextSurfaceAsDrawTarget(
       mContentLayerInvalidRegion.ToUnknownRegion(), gfx::BackendType::SKIA);
   if (!dt) {
@@ -1355,6 +1356,7 @@ void nsChildView::PaintWindowInContentLayer() {
   PaintWindowInDrawTarget(dt, mContentLayerInvalidRegion, dt->GetSize());
   mContentLayer->NotifySurfaceReady();
   mContentLayerInvalidRegion.SetEmpty();
+  mPoolHandle->OnEndFrame();
 }
 
 void nsChildView::HandleMainThreadCATransaction() {
@@ -1375,11 +1377,7 @@ void nsChildView::HandleMainThreadCATransaction() {
   // Apply the changes inside mNativeLayerRoot to the underlying CALayers. Now is a
   // good time to call this because we know we're currently inside a main thread
   // CATransaction.
-  {
-    auto compositingState = mCompositingState.Lock();
-    mNativeLayerRoot->ApplyChanges();
-    compositingState->mNativeLayerChangesPending = false;
-  }
+  mNativeLayerRoot->CommitToScreen();
 
   MaybeScheduleUnsuspendAsyncCATransactions();
 }
@@ -1426,6 +1424,11 @@ LayoutDeviceIntPoint nsChildView::WidgetToScreenOffset() {
   return CocoaPointsToDevPixels(origin);
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntPoint(0, 0));
+}
+
+LayoutDeviceIntRegion nsChildView::GetOpaqueWidgetRegion() {
+  auto opaqueRegion = mOpaqueRegion.Lock();
+  return *opaqueRegion;
 }
 
 nsresult nsChildView::SetTitle(const nsAString& title) {
@@ -1558,7 +1561,7 @@ InputContext nsChildView::GetInputContext() {
         break;
       }
       // If mTextInputHandler is null, set CLOSED instead...
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     default:
       mInputContext.mIMEState.mOpen = IMEState::CLOSED;
       break;
@@ -1713,23 +1716,7 @@ bool nsChildView::PreRender(WidgetRenderingContext* aContext) {
   return true;
 }
 
-void nsChildView::PostRender(WidgetRenderingContext* aContext) {
-  {  // scope for lock
-    auto compositingState = mCompositingState.Lock();
-    if (compositingState->mAsyncCATransactionsSuspended) {
-      // We should not trigger a CATransactions on this thread. Instead, let the
-      // main thread take care of calling ApplyChanges at an appropriate time.
-      compositingState->mNativeLayerChangesPending = true;
-    } else {
-      // Force a CoreAnimation layer tree update from this thread.
-      [NSAnimationContext beginGrouping];
-      mNativeLayerRoot->ApplyChanges();
-      compositingState->mNativeLayerChangesPending = false;
-      [NSAnimationContext endGrouping];
-    }
-  }
-  mViewTearDownLock.Unlock();
-}
+void nsChildView::PostRender(WidgetRenderingContext* aContext) { mViewTearDownLock.Unlock(); }
 
 RefPtr<layers::NativeLayerRoot> nsChildView::GetNativeLayerRoot() { return mNativeLayerRoot; }
 
@@ -1816,6 +1803,8 @@ static Maybe<VibrancyType> ThemeGeometryTypeToVibrancyType(
     case nsNativeThemeCocoa::eThemeGeometryTypeVibrancyDark:
     case nsNativeThemeCocoa::eThemeGeometryTypeVibrantTitlebarDark:
       return Some(VibrancyType::DARK);
+    case nsNativeThemeCocoa::eThemeGeometryTypeSheet:
+      return Some(VibrancyType::SHEET);
     case nsNativeThemeCocoa::eThemeGeometryTypeTooltip:
       return Some(VibrancyType::TOOLTIP);
     case nsNativeThemeCocoa::eThemeGeometryTypeMenu:
@@ -1869,6 +1858,7 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
     return;
   }
 
+  LayoutDeviceIntRegion sheetRegion = GatherVibrantRegion(aThemeGeometries, VibrancyType::SHEET);
   LayoutDeviceIntRegion vibrantLightRegion =
       GatherVibrantRegion(aThemeGeometries, VibrancyType::LIGHT);
   LayoutDeviceIntRegion vibrantDarkRegion =
@@ -1885,9 +1875,9 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
   LayoutDeviceIntRegion activeSourceListSelectionRegion =
       GatherVibrantRegion(aThemeGeometries, VibrancyType::ACTIVE_SOURCE_LIST_SELECTION);
 
-  MakeRegionsNonOverlapping(vibrantLightRegion, vibrantDarkRegion, menuRegion, tooltipRegion,
-                            highlightedMenuItemRegion, sourceListRegion, sourceListSelectionRegion,
-                            activeSourceListSelectionRegion);
+  MakeRegionsNonOverlapping(sheetRegion, vibrantLightRegion, vibrantDarkRegion, menuRegion,
+                            tooltipRegion, highlightedMenuItemRegion, sourceListRegion,
+                            sourceListSelectionRegion, activeSourceListSelectionRegion);
 
   auto& vm = EnsureVibrancyManager();
   bool changed = false;
@@ -1896,10 +1886,13 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
   changed |= vm.UpdateVibrantRegion(VibrancyType::MENU, menuRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::TOOLTIP, tooltipRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::HIGHLIGHTED_MENUITEM, highlightedMenuItemRegion);
+  changed |= vm.UpdateVibrantRegion(VibrancyType::SHEET, sheetRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::SOURCE_LIST, sourceListRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::SOURCE_LIST_SELECTION, sourceListSelectionRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::ACTIVE_SOURCE_LIST_SELECTION,
                                     activeSourceListSelectionRegion);
+
+  UpdateInternalOpaqueRegion();
 
   if (changed) {
     SuspendAsyncCATransactions();
@@ -1912,6 +1905,19 @@ mozilla::VibrancyManager& nsChildView::EnsureVibrancyManager() {
     mVibrancyManager = MakeUnique<VibrancyManager>(*this, [mView vibrancyViewsContainer]);
   }
   return *mVibrancyManager;
+}
+
+void nsChildView::UpdateInternalOpaqueRegion() {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread(), "This should only be called on the main thread.");
+  auto opaqueRegion = mOpaqueRegion.Lock();
+  bool widgetIsOpaque = GetTransparencyMode() == eTransparencyOpaque;
+  if (!widgetIsOpaque) {
+    opaqueRegion->SetEmpty();
+  } else if (VibrancyManager::SystemSupportsVibrancy()) {
+    opaqueRegion->Sub(mBounds, EnsureVibrancyManager().GetUnionOfVibrantRegions());
+  } else {
+    *opaqueRegion = mBounds;
+  }
 }
 
 nsChildView::SwipeInfo nsChildView::SendMayStartSwipe(
@@ -2211,24 +2217,7 @@ void nsChildView::LookUpDictionary(const nsAString& aText,
 }
 
 nsresult nsChildView::SetPrefersReducedMotionOverrideForTest(bool aValue) {
-  // Tell that the cache value we are going to set isn't cleared via
-  // nsPresContext::ThemeChangedInternal which is called right before
-  // we queue the media feature value change for this prefers-reduced-motion
-  // change.
-  LookAndFeel::SetShouldRetainCacheForTest(true);
-
-  LookAndFeelInt prefersReducedMotion;
-  prefersReducedMotion.id = LookAndFeel::eIntID_PrefersReducedMotion;
-  prefersReducedMotion.value = aValue ? 1 : 0;
-
-  AutoTArray<LookAndFeelInt, 1> lookAndFeelCache;
-  lookAndFeelCache.AppendElement(prefersReducedMotion);
-
-  // If we could have a way to modify
-  // NSWorkspace.accessibilityDisplayShouldReduceMotion, we could use it, but
-  // unfortunately there is no way, so we change the cache value instead as if
-  // it's set in the parent process.
-  LookAndFeel::SetIntCache(lookAndFeelCache);
+  LookAndFeel::SetPrefersReducedMotionOverrideForTest(aValue);
 
   if (nsCocoaFeatures::OnMojaveOrLater() &&
       NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification) {
@@ -2248,7 +2237,7 @@ nsresult nsChildView::SetPrefersReducedMotionOverrideForTest(bool aValue) {
 }
 
 nsresult nsChildView::ResetPrefersReducedMotionOverrideForTest() {
-  LookAndFeel::SetShouldRetainCacheForTest(false);
+  LookAndFeel::ResetPrefersReducedMotionOverrideForTest();
   return NS_OK;
 }
 

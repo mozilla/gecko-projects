@@ -50,11 +50,13 @@ struct Epoch(u64);
 
 /// A list of updates to be applied to the data store,
 /// provided by the interning structure.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct UpdateList<S> {
     /// The additions and removals to apply.
-    updates: Vec<Update>,
+    pub updates: Vec<Update>,
     /// Actual new data to insert.
-    data: Vec<S>,
+    pub data: Vec<S>,
 }
 
 lazy_static! {
@@ -122,8 +124,9 @@ pub enum UpdateKind {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[derive(MallocSizeOf)]
 pub struct Update {
-    index: usize,
-    kind: UpdateKind,
+    pub index: usize,
+    pub uid: ItemUid,
+    pub kind: UpdateKind,
 }
 
 pub trait InternDebug {
@@ -259,9 +262,12 @@ impl<I: Internable> Interner<I> {
             None => self.local_data.len(),
         };
 
+        let uid = ItemUid::next_uid();
+
         // Add a pending update to insert the new data.
         self.updates.push(Update {
             index,
+            uid,
             kind: UpdateKind::Insert,
         });
         self.update_data.alloc().init(data.clone());
@@ -270,7 +276,7 @@ impl<I: Internable> Interner<I> {
         let handle = Handle {
             index: index as u32,
             epoch: self.current_epoch,
-            uid: ItemUid::next_uid(),
+            uid,
             _marker: PhantomData,
         };
 
@@ -314,6 +320,7 @@ impl<I: Internable> Interner<I> {
                 free_list.push(handle.index as usize);
                 updates.push(Update {
                     index: handle.index as usize,
+                    uid: handle.uid,
                     kind: UpdateKind::Remove,
                 });
                 return false;

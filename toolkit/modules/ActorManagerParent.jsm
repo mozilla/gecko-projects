@@ -90,6 +90,21 @@ let ACTORS = {
     allFrames: true,
   },
 
+  AutoScroll: {
+    parent: {
+      moduleURI: "resource://gre/actors/AutoScrollParent.jsm",
+    },
+
+    child: {
+      moduleURI: "resource://gre/actors/AutoScrollChild.jsm",
+      events: {
+        mousedown: { capture: true, mozSystemGroup: true },
+      },
+    },
+
+    allFrames: true,
+  },
+
   BrowserElement: {
     parent: {
       moduleURI: "resource://gre/actors/BrowserElementParent.jsm",
@@ -248,6 +263,19 @@ let ACTORS = {
     allFrames: true,
   },
 
+  PopupBlocking: {
+    parent: {
+      moduleURI: "resource://gre/actors/PopupBlockingParent.jsm",
+    },
+    child: {
+      moduleURI: "resource://gre/actors/PopupBlockingChild.jsm",
+      events: {
+        DOMPopupBlocked: { capture: true },
+      },
+    },
+    allFrames: true,
+  },
+
   PurgeSessionHistory: {
     child: {
       moduleURI: "resource://gre/actors/PurgeSessionHistoryChild.jsm",
@@ -269,6 +297,43 @@ let ACTORS = {
       },
     },
 
+    allFrames: true,
+  },
+
+  SidebarSearch: {
+    parent: {
+      moduleURI: "resource://gre/actors/SidebarSearchParent.jsm",
+    },
+
+    allFrames: true,
+  },
+
+  // This actor is available for all pages that one can
+  // view the source of, however it won't be created until a
+  // request to view the source is made via the message
+  // 'ViewSource:LoadSource' or 'ViewSource:LoadSourceWithSelection'.
+  ViewSource: {
+    child: {
+      moduleURI: "resource://gre/actors/ViewSourceChild.jsm",
+    },
+
+    allFrames: true,
+  },
+
+  // This actor is for the view-source page itself.
+  ViewSourcePage: {
+    parent: {
+      moduleURI: "resource://gre/actors/ViewSourcePageParent.jsm",
+    },
+    child: {
+      moduleURI: "resource://gre/actors/ViewSourcePageChild.jsm",
+      events: {
+        pageshow: { capture: true },
+        click: {},
+      },
+    },
+
+    matches: ["view-source:*"],
     allFrames: true,
   },
 
@@ -320,7 +385,14 @@ let ACTORS = {
         PreFullZoomChange: {},
         FullZoomChange: {},
         TextZoomChange: {},
-        ZoomChangeUsingMouseWheel: {},
+        DoZoomEnlargeBy10: {
+          capture: true,
+          mozSystemGroup: true,
+        },
+        DoZoomReduceBy10: {
+          capture: true,
+          mozSystemGroup: true,
+        },
         mozupdatedremoteframedimensions: {
           capture: true,
           mozSystemGroup: true,
@@ -440,15 +512,6 @@ let LEGACY_ACTORS = {
     },
   },
 
-  PopupBlocking: {
-    child: {
-      module: "resource://gre/actors/PopupBlockingChild.jsm",
-      events: {
-        DOMPopupBlocked: { capture: true },
-      },
-    },
-  },
-
   Printing: {
     child: {
       module: "resource://gre/actors/PrintingChild.jsm",
@@ -463,13 +526,6 @@ let LEGACY_ACTORS = {
         "Printing:Preview:ParseDocument",
         "Printing:Print",
       ],
-    },
-  },
-
-  SelectionSource: {
-    child: {
-      module: "resource://gre/actors/SelectionSourceChild.jsm",
-      messages: ["ViewSource:GetSelection"],
     },
   },
 

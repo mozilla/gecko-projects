@@ -21,7 +21,6 @@ XPCOMUtils.defineLazyServiceGetter(
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   RemoteSettings: "resource://services-settings/remote-settings.js",
-  FeatureGate: "resource://featuregates/FeatureGate.jsm",
   Storage: "resource://normandy/lib/Storage.jsm",
   FilterExpressions:
     "resource://gre/modules/components-utils/FilterExpressions.jsm",
@@ -30,6 +29,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   CleanupManager: "resource://normandy/lib/CleanupManager.jsm",
   Uptake: "resource://normandy/lib/Uptake.jsm",
   ActionsManager: "resource://normandy/lib/ActionsManager.jsm",
+  BaseAction: "resource://normandy/actions/BaseAction.jsm",
   Kinto: "resource://services-common/kinto-offline-client.js",
   clearTimeout: "resource://gre/modules/Timer.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
@@ -59,14 +59,7 @@ const TIMER_LAST_UPDATE_PREF = `app.update.lastUpdateTime.${TIMER_NAME}`;
 const PREFS_TO_WATCH = [RUN_INTERVAL_PREF, SHIELD_ENABLED_PREF, API_URL_PREF];
 
 XPCOMUtils.defineLazyGetter(this, "gRemoteSettingsClient", () => {
-  return RemoteSettings(REMOTE_SETTINGS_COLLECTION, {
-    filterFunc: async entry =>
-      (await RecipeRunner.shouldRunRecipe(entry.recipe)) ? entry : null,
-  });
-});
-
-XPCOMUtils.defineLazyGetter(this, "gRemoteSettingsGate", () => {
-  return FeatureGate.fromId("normandy-remote-settings");
+  return RemoteSettings(REMOTE_SETTINGS_COLLECTION);
 });
 
 /**
@@ -100,7 +93,7 @@ var RecipeRunner = {
 
     this.checkPrefs(); // sets this.enabled
     this.watchPrefs();
-    await this.setUpRemoteSettings();
+    this.setUpRemoteSettings();
 
     // Here "first run" means the first run this profile has ever done. This
     // preference is set to true at the end of this function, and never reset to
@@ -131,10 +124,7 @@ var RecipeRunner = {
       // This is not needed for the first run case, because remote settings
       // already handles empty collections well.
       if (devMode) {
-        let remoteSettingsGate = await gRemoteSettingsGate;
-        if (await remoteSettingsGate.isEnabled()) {
-          await gRemoteSettingsClient.sync();
-        }
+        await gRemoteSettingsClient.sync();
       }
       let trigger;
       if (devMode) {
@@ -252,70 +242,52 @@ var RecipeRunner = {
     timerManager.unregisterTimer(TIMER_NAME);
   },
 
-  async setUpRemoteSettings() {
-    const remoteSettingsGate = await gRemoteSettingsGate;
-    if (await remoteSettingsGate.isEnabled()) {
-      this.attachRemoteSettings();
+  setUpRemoteSettings() {
+    if (this._alreadySetUpRemoteSettings) {
+      return;
     }
-    const observer = {
-      onEnable: this.attachRemoteSettings.bind(this),
-      onDisable: this.detachRemoteSettings.bind(this),
-    };
-    remoteSettingsGate.addObserver(observer);
-    CleanupManager.addCleanupHandler(() =>
-      remoteSettingsGate.removeObserver(observer)
-    );
-  },
+    this._alreadySetUpRemoteSettings = true;
 
-  attachRemoteSettings() {
-    this.loadFromRemoteSettings = true;
     if (!this._onSync) {
-      this._onSync = async () => {
-        if (!this.enabled) {
-          return;
-        }
-
-        // Delay the Normandy run by a random amount, determined by preference.
-        // This helps alleviate server load, since we don't have a thundering
-        // herd of users trying to update all at once.
-        if (this._syncSkewTimeout) {
-          clearTimeout(this._syncSkewTimeout);
-        }
-        let minSkewSec = 1; // this is primarily is to avoid race conditions in tests
-        let maxSkewSec = Services.prefs.getIntPref(ONSYNC_SKEW_SEC_PREF, 0);
-        if (maxSkewSec >= minSkewSec) {
-          let skewMillis =
-            (minSkewSec + Math.random() * (maxSkewSec - minSkewSec)) * 1000;
-          log.debug(
-            `Delaying on-sync Normandy run for ${Math.floor(
-              skewMillis / 1000
-            )} seconds`
-          );
-          this._syncSkewTimeout = setTimeout(
-            () => this.run({ trigger: "sync" }),
-            skewMillis
-          );
-        } else {
-          log.debug(`Not skewing on-sync Normandy run`);
-          await this.run({ trigger: "sync" });
-        }
-      };
-
-      gRemoteSettingsClient.on("sync", this._onSync);
+      this._onSync = this.onSync.bind(this);
     }
+    gRemoteSettingsClient.on("sync", this._onSync);
+
+    CleanupManager.addCleanupHandler(() => {
+      gRemoteSettingsClient.off("sync", this._onSync);
+      this._alreadySetUpRemoteSettings = false;
+    });
   },
 
-  detachRemoteSettings() {
-    this.loadFromRemoteSettings = false;
-    if (this._onSync) {
-      // Ignore if no event listener was setup or was already removed (ie. pref changed while enabled).
-      gRemoteSettingsClient.off("sync", this._onSync);
-      this._onSync = null;
+  /** Called when our Remote Settings collection is updated */
+  async onSync() {
+    if (!this.enabled) {
+      return;
     }
 
+    // Delay the Normandy run by a random amount, determined by preference.
+    // This helps alleviate server load, since we don't have a thundering
+    // herd of users trying to update all at once.
     if (this._syncSkewTimeout) {
       clearTimeout(this._syncSkewTimeout);
-      this._syncSkewTimeout = null;
+    }
+    let minSkewSec = 1; // this is primarily is to avoid race conditions in tests
+    let maxSkewSec = Services.prefs.getIntPref(ONSYNC_SKEW_SEC_PREF, 0);
+    if (maxSkewSec >= minSkewSec) {
+      let skewMillis =
+        (minSkewSec + Math.random() * (maxSkewSec - minSkewSec)) * 1000;
+      log.debug(
+        `Delaying on-sync Normandy run for ${Math.floor(
+          skewMillis / 1000
+        )} seconds`
+      );
+      this._syncSkewTimeout = setTimeout(
+        () => this.run({ trigger: "sync" }),
+        skewMillis
+      );
+    } else {
+      log.debug(`Not skewing on-sync Normandy run`);
+      await this.run({ trigger: "sync" });
     }
   },
 
@@ -353,30 +325,23 @@ var RecipeRunner = {
       }
 
       // Fetch recipes before execution in case we fail and exit early.
-      let recipesToRun;
+      let recipesAndSignatures;
       try {
-        recipesToRun = await this.loadRecipes();
+        recipesAndSignatures = await gRemoteSettingsClient.get();
       } catch (e) {
-        // Either we failed at fetching the recipes from server (legacy),
-        // or the recipes signature verification failed.
-        let status = Uptake.RUNNER_SERVER_ERROR;
-        if (/NetworkError/.test(e)) {
-          status = Uptake.RUNNER_NETWORK_ERROR;
-        } else if (e instanceof NormandyApi.InvalidSignatureError) {
-          status = Uptake.RUNNER_INVALID_SIGNATURE;
-        }
-        await Uptake.reportRunner(status);
+        await Uptake.reportRunner(Uptake.RUNNER_SERVER_ERROR);
         return;
       }
 
       const actionsManager = new ActionsManager();
 
       // Execute recipes, if we have any.
-      if (recipesToRun.length === 0) {
+      if (recipesAndSignatures.length === 0) {
         log.debug("No recipes to execute");
       } else {
-        for (const recipe of recipesToRun) {
-          await actionsManager.runRecipe(recipe);
+        for (const { recipe, signature } of recipesAndSignatures) {
+          let suitability = await this.getRecipeSuitability(recipe, signature);
+          await actionsManager.processRecipe(recipe, suitability);
         }
       }
 
@@ -393,50 +358,6 @@ var RecipeRunner = {
         Services.prefs.setIntPref(TIMER_LAST_UPDATE_PREF, lastUpdateTime);
       }
     }
-  },
-
-  /**
-   * Return the list of recipes to run, filtered for the current environment.
-   */
-  async loadRecipes() {
-    // If RemoteSettings is enabled, we read the list of recipes from there.
-    // The recipe filtering is done via the provided callback (see `gRemoteSettingsClient`).
-    if (this.loadFromRemoteSettings) {
-      // First, fetch recipes that should run on this client.
-      const entries = await gRemoteSettingsClient.get();
-      // Then, verify the signature of each recipe. It will throw if invalid.
-      return Promise.all(
-        entries.map(async ({ recipe, signature }) => {
-          await NormandyApi.verifyObjectSignature(recipe, signature, "recipe");
-          return recipe;
-        })
-      );
-    }
-
-    // Obtain the recipes from the Normandy server (legacy).
-    let recipes;
-    try {
-      recipes = await NormandyApi.fetchRecipes();
-      log.debug(
-        `Fetched ${recipes.length} recipes from the server: ` +
-          recipes.map(r => r.name).join(", ")
-      );
-    } catch (e) {
-      const apiUrl = Services.prefs.getCharPref(API_URL_PREF);
-      log.error(`Could not fetch recipes from ${apiUrl}: "${e}"`);
-      throw e;
-    }
-
-    // Check if each recipe should be run, according to `shouldRunRecipe`. This
-    // can't be a simple call to `Array.filter` because checking if a recipe
-    // should run is an async operation.
-    const recipesToRun = [];
-    for (const recipe of recipes) {
-      if (await this.shouldRunRecipe(recipe)) {
-        recipesToRun.push(recipe);
-      }
-    }
-    return recipesToRun;
   },
 
   getFilterContext(recipe) {
@@ -504,27 +425,46 @@ var RecipeRunner = {
   },
 
   /**
-   * Decide if a recipe should be run.
+   * Decide if a recipe is suitable to run, and returns a value from
+   * `BaseAction.suitability`.
    *
-   * This checks two things in order: capabilities, and filter expression.
+   * This checks several things in order:
+   *  - recipe signature
+   *  - capabilities
+   *  - filter expression
+   *
+   * If the provided signature does not match the provided recipe, then
+   * `SIGNATURE_ERROR` is returned. Recipes with this suitability should not be
+   * trusted. These recipes are included so that temporary signature errors on
+   * the server can be handled intelligently by actions.
    *
    * Capabilities are a simple set of strings in the recipe. If the Normandy
-   * client has all of the capabilities listed, then execution continues. If not,
-   * `false` is returned.
+   * client has all of the capabilities listed, then execution continues. If
+   * not, then `CAPABILITY_MISMATCH` is returned. Recipes with this suitability
+   * should be considered incompatible and treated with caution.
    *
    * If the capabilities check passes, then the filter expression is evaluated
    * against the current environment. The result of the expression is cast to a
-   * boolean and returned.
+   * boolean. If it is true, then `FILTER_MATCH` is returned. If not, then
+   * `FILTER_MISMATCH` is returned.
+   *
+   * If there is an error while evaluating the recipe's filter, `FILTER_ERROR`
+   * is returned instead.
    *
    * @param {object} recipe
-   * @param {Array<string>} recipe.capabilities The list of capabilities
-   *                        required to evaluate this recipe.
+   * @param {object} signature
    * @param {string} recipe.filter_expression The expression to evaluate against the environment.
    * @param {Set<String>} runnerCapabilities The capabilities provided by this runner.
-   * @return {boolean} The result of evaluating the filter, cast to a bool, or false
-   *                   if an error occurred during evaluation.
+   * @return {Promise<BaseAction.suitability>} The recipe's suitability
    */
-  async shouldRunRecipe(recipe) {
+  async getRecipeSuitability(recipe, signature) {
+    try {
+      await NormandyApi.verifyObjectSignature(recipe, signature, "recipe");
+    } catch (e) {
+      await Uptake.reportRecipe(recipe, Uptake.RECIPE_INVALID_SIGNATURE);
+      return BaseAction.suitability.SIGNATURE_ERROR;
+    }
+
     const runnerCapabilities = this.getCapabilities();
     if (Array.isArray(recipe.capabilities)) {
       for (const recipeCapability of recipe.capabilities) {
@@ -540,7 +480,7 @@ var RecipeRunner = {
             recipe,
             Uptake.RECIPE_INCOMPATIBLE_CAPABILITIES
           );
-          return false;
+          return BaseAction.suitability.CAPABILITES_MISMATCH;
         }
       }
     }
@@ -556,7 +496,7 @@ var RecipeRunner = {
         }]. Error: "${err}"`
       );
       await Uptake.reportRecipe(recipe, Uptake.RECIPE_FILTER_BROKEN);
-      return false;
+      return BaseAction.suitability.FILTER_ERROR;
     }
 
     if (!result) {
@@ -564,10 +504,10 @@ var RecipeRunner = {
       // report its outcome. Others are reported when executed in
       // ActionsManager.
       await Uptake.reportRecipe(recipe, Uptake.RECIPE_DIDNT_MATCH_FILTER);
-      return false;
+      return BaseAction.suitability.FILTER_MISMATCH;
     }
 
-    return true;
+    return BaseAction.suitability.FILTER_MATCH;
   },
 
   /**

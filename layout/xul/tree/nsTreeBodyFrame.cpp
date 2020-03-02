@@ -914,7 +914,7 @@ nsresult nsTreeBodyFrame::GetCoordsForCellItem(int32_t aRow, nsTreeColumn* aCol,
   *aWidth = 0;
   *aHeight = 0;
 
-  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool isRTL = StyleVisibility()->mDirection == StyleDirection::Rtl;
   nscoord currX = mInnerBox.x - mHorzPosition;
 
   // The Rect for the requested item.
@@ -1263,12 +1263,14 @@ void nsTreeBodyFrame::AdjustForCellText(nsAutoString& aText, int32_t aRowIndex,
                                                   aRenderingContext);
 
   switch (aColumn->GetTextAlignment()) {
-    case NS_STYLE_TEXT_ALIGN_RIGHT: {
+    case mozilla::StyleTextAlign::Right:
       aTextRect.x += aTextRect.width - width;
-    } break;
-    case NS_STYLE_TEXT_ALIGN_CENTER: {
+      break;
+    case mozilla::StyleTextAlign::Center:
       aTextRect.x += (aTextRect.width - width) / 2;
-    } break;
+      break;
+    default:
+      break;
   }
 
   aTextRect.width = width;
@@ -1309,7 +1311,7 @@ nsCSSAnonBoxPseudoStaticAtom* nsTreeBodyFrame::GetItemWithinCellAt(
   nscoord remainingWidth = cellRect.width;
 
   // Handle right alignment hit testing.
-  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool isRTL = StyleVisibility()->mDirection == StyleDirection::Rtl;
 
   nsPresContext* presContext = PresContext();
   RefPtr<gfxContext> rc =
@@ -2244,7 +2246,7 @@ Maybe<nsIFrame::Cursor> nsTreeBodyFrame::GetCursor(const nsPoint& aPoint) {
     if (child) {
       // Our scratch array is already prefilled.
       RefPtr<ComputedStyle> childContext = GetPseudoComputedStyle(child);
-      StyleCursorKind kind = childContext->StyleUI()->mCursor;
+      StyleCursorKind kind = childContext->StyleUI()->mCursor.keyword;
       if (kind == StyleCursorKind::Auto) {
         kind = StyleCursorKind::Default;
       }
@@ -2475,9 +2477,7 @@ class nsDisplayTreeBody final : public nsPaintedDisplayItem {
       : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayTreeBody);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayTreeBody() { MOZ_COUNT_DTOR(nsDisplayTreeBody); }
-#endif
+  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayTreeBody)
 
   nsDisplayItemGeometry* AllocateGeometry(
       nsDisplayListBuilder* aBuilder) override {
@@ -2949,7 +2949,7 @@ ImgDrawResult nsTreeBodyFrame::PaintCell(
   ComputedStyle* cellContext =
       GetPseudoComputedStyle(nsCSSAnonBoxes::mozTreeCell());
 
-  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool isRTL = StyleVisibility()->mDirection == StyleDirection::Rtl;
 
   // Obtain the margins for the cell and then deflate our rect by that
   // amount.  The cell is assumed to be contained within the deflated rect.
@@ -2970,8 +2970,8 @@ ImgDrawResult nsTreeBodyFrame::PaintCell(
 
   // Now we paint the contents of the cells.
   // Directionality of the tree determines the order in which we paint.
-  // NS_STYLE_DIRECTION_LTR means paint from left to right.
-  // NS_STYLE_DIRECTION_RTL means paint from right to left.
+  // StyleDirection::Ltr means paint from left to right.
+  // StyleDirection::Rtl means paint from right to left.
 
   if (aColumn->IsPrimary()) {
     // If we're the primary column, we need to indent and paint the twisty and
@@ -3117,7 +3117,7 @@ ImgDrawResult nsTreeBodyFrame::PaintTwisty(
     const nsRect& aDirtyRect, nscoord& aRemainingWidth, nscoord& aCurrX) {
   MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
-  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool isRTL = StyleVisibility()->mDirection == StyleDirection::Rtl;
   nscoord rightEdge = aCurrX + aRemainingWidth;
   // Paint the twisty, but only if we are a non-empty container.
   bool shouldPaint = false;
@@ -3214,7 +3214,7 @@ ImgDrawResult nsTreeBodyFrame::PaintImage(
     nsDisplayListBuilder* aBuilder) {
   MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
-  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool isRTL = StyleVisibility()->mDirection == StyleDirection::Rtl;
   nscoord rightEdge = aCurrX + aRemainingWidth;
   // Resolve style for the image.
   ComputedStyle* imageContext =
@@ -3384,7 +3384,7 @@ ImgDrawResult nsTreeBodyFrame::PaintText(
     const nsRect& aDirtyRect, nscoord& aCurrX) {
   MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
-  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool isRTL = StyleVisibility()->mDirection == StyleDirection::Rtl;
 
   // Now obtain the text for our cell.
   nsAutoString text;
@@ -3526,13 +3526,16 @@ ImgDrawResult nsTreeBodyFrame::PaintCheckbox(int32_t aRowIndex,
 
   nsRect imageSize = GetImageSize(aRowIndex, aColumn, true, checkboxContext);
 
-  if (imageSize.height > checkboxRect.height)
+  if (imageSize.height > checkboxRect.height) {
     imageSize.height = checkboxRect.height;
-  if (imageSize.width > checkboxRect.width)
+  }
+  if (imageSize.width > checkboxRect.width) {
     imageSize.width = checkboxRect.width;
+  }
 
-  if (StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL)
+  if (StyleVisibility()->mDirection == StyleDirection::Rtl) {
     checkboxRect.x = rightEdge - checkboxRect.width;
+  }
 
   // Paint our borders and background for our image rect.
   ImgDrawResult result =

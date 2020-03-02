@@ -14,7 +14,7 @@ import time
 
 from condprof import check_install  # NOQA
 from condprof import progress
-from condprof.util import download_file, TASK_CLUSTER, LOG, ERROR, ArchiveNotFound
+from condprof.util import download_file, TASK_CLUSTER, logger, ArchiveNotFound
 from condprof.changelog import Changelog
 
 
@@ -58,12 +58,14 @@ def get_profile(
         "task_id": task_id,
         "repo": repo,
     }
+    logger.info("Getting conditioned profile with arguments: %s" % params)
     filename = ARTIFACT_NAME % params
     if task_id is None:
         url = TC_LINK % params + filename
     else:
         url = DIRECT_LINK % params + filename
 
+    logger.info("preparing download dir")
     if not download_cache:
         download_dir = tempfile.mkdtemp()
     else:
@@ -73,11 +75,12 @@ def get_profile(
             os.makedirs(download_dir)
 
     downloaded_archive = os.path.join(download_dir, filename)
+    logger.info("Downloaded archive path: %s" % downloaded_archive)
     retries = 0
 
     while retries < RETRIES:
         try:
-            LOG("Getting %s" % url)
+            logger.info("Getting %s" % url)
             try:
                 archive = download_file(url, target=downloaded_archive)
             except ArchiveNotFound:
@@ -85,7 +88,7 @@ def get_profile(
 
             try:
                 with tarfile.open(archive, "r:gz") as tar:
-                    LOG("Extracting the tarball content in %s" % target_dir)
+                    logger.info("Extracting the tarball content in %s" % target_dir)
                     size = len(list(tar))
                     with progress.Bar(expected_size=size) as bar:
 
@@ -98,31 +101,35 @@ def get_profile(
                         tar.extract = functools.partial(_extract, tar)
                         tar.extractall(target_dir)
             except (OSError, tarfile.ReadError) as e:
+                logger.info("Failed to extract the tarball")
+                if download_cache and os.path.exists(archive):
+                    logger.info("Removing cached file to attempt a new download")
+                    os.remove(archive)
                 raise ProfileNotFoundError(str(e))
             finally:
                 if not download_cache:
                     shutil.rmtree(download_dir)
-            LOG("Success, we have a profile to work with")
+            logger.info("Success, we have a profile to work with")
             return target_dir
         except Exception:
-            ERROR("Failed to get the profile.")
+            logger.info("Failed to get the profile.")
             retries += 1
             if os.path.exists(downloaded_archive):
                 try:
                     os.remove(downloaded_archive)
                 except Exception:
-                    ERROR("Could not remove the file")
+                    logger.error("Could not remove the file")
             time.sleep(RETRY_PAUSE)
 
     # If we reach that point, it means all attempts failed
-    ERROR("All attempt failed")
+    logger.error("All attempt failed")
     raise ProfileNotFoundError(url)
 
 
 def read_changelog(platform, repo="mozilla-central"):
     params = {"platform": platform, "repo": repo}
     changelog_url = CHANGELOG_LINK % params
-    LOG("Getting %s" % changelog_url)
+    logger.info("Getting %s" % changelog_url)
     download_dir = tempfile.mkdtemp()
     downloaded_changelog = os.path.join(download_dir, "changelog.json")
     try:

@@ -11,12 +11,12 @@ job-defaults:
             raptor-tp6m-.*-cold:
                 by-test-platform:
                     android-hw-.*/opt: []
-                    android-hw-p2-.*-api-16/pgo: ['trunk']
+                    android-hw-p2-.*api-16/pgo: []
                     android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
                     default: ['trunk', 'mozilla-beta']
             default:
                 by-test-platform:
-                    .*: ['mozilla-central']
+                    android-hw-p2-.*api-16/.*: []
                     default: ['mozilla-central']
     target: geckoview_example.apk
     tier: 1
@@ -140,7 +140,7 @@ raptor-speedometer-geckoview:
         by-test-platform:
             android-hw-.*-api-16/opt: []
             android-hw-.*-aarch64/opt: ['mozilla-central']
-            android-hw-p2-.*-api-16/pgo: ['mozilla-central']
+            android-hw-p2-.*api-16/pgo: []
             android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
             android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['mozilla-central', 'mozilla-beta']
@@ -166,7 +166,6 @@ raptor-speedometer-geckoview-power:
             - --binary=org.mozilla.geckoview_example
             - --power-test
             - --page-cycles 5
-            - --host HOST_IP
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-speedometer-geckoview-cpu-memory:
@@ -202,7 +201,6 @@ raptor-speedometer-geckoview-cpu-memory-power:
             - --memory-test
             - --power-test
             - --page-cycles 5
-            - --host HOST_IP
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-scn-power-idle-geckoview:
@@ -216,7 +214,6 @@ raptor-scn-power-idle-geckoview:
             - --app=geckoview
             - --binary=org.mozilla.geckoview_example
             - --power-test
-            - --host HOST_IP
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-scn-cpu-memory-idle-geckoview:
@@ -246,7 +243,6 @@ raptor-scn-cpu-memory-power-idle-geckoview:
             - --cpu-test
             - --memory-test
             - --power-test
-            - --host HOST_IP
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-scn-power-idle-bg-geckoview:
@@ -260,7 +256,6 @@ raptor-scn-power-idle-bg-geckoview:
             - --app=geckoview
             - --binary=org.mozilla.geckoview_example
             - --power-test
-            - --host HOST_IP
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-scn-cpu-memory-idle-bg-geckoview:
@@ -290,7 +285,6 @@ raptor-scn-cpu-memory-power-idle-bg-geckoview:
             - --cpu-test
             - --memory-test
             - --power-test
-            - --host HOST_IP
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-unity-webgl-geckoview:
@@ -300,7 +294,8 @@ raptor-unity-webgl-geckoview:
     run-on-projects:
         by-test-platform:
             android-hw-.*-api-16/opt: []
-            android-hw-.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-p2-.*api-16/pgo: []
+            android-hw-(?!p2-.*api-16)/pgo: ['trunk', 'mozilla-beta']
             default: ['mozilla-central', 'mozilla-beta']
     max-run-time: 900
     mozharness:
@@ -535,8 +530,8 @@ raptor-tp6m-16-geckoview-cold:
     treeherder-symbol: Rap(tp6m-c-16)
     run-on-projects:
         by-test-platform:
-            android-hw-.*/opt: ['mozilla-central']
-            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-(?!p2-.*api-16).*/opt: ['mozilla-central']
+            android-hw-p2-.*api-16/.*: []
             android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true

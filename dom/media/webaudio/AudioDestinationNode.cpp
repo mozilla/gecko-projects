@@ -342,7 +342,15 @@ AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
   mTrack->AddAudioOutput(nullptr);
 
   if (aAllowedToStart) {
-    graph->NotifyWhenGraphStarted(mTrack);
+    graph->NotifyWhenGraphStarted(mTrack)->Then(
+        aContext->GetMainThread(), "AudioDestinationNode OnRunning",
+        [context = RefPtr<AudioContext>(aContext)] {
+          context->OnStateChanged(nullptr, AudioContextState::Running);
+        },
+        [] {
+          NS_WARNING(
+              "AudioDestinationNode's graph never started processing audio");
+        });
   }
 }
 
@@ -444,7 +452,8 @@ uint32_t AudioDestinationNode::MaxChannelCount() const {
 void AudioDestinationNode::SetChannelCount(uint32_t aChannelCount,
                                            ErrorResult& aRv) {
   if (aChannelCount > MaxChannelCount()) {
-    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    aRv.ThrowIndexSizeError(
+        nsPrintfCString("%u is larger than maxChannelCount", aChannelCount));
     return;
   }
 

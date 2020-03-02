@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -213,7 +214,7 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   // them.
   const int r = kill(handle, 0);
   if (r < 0 && errno == ESRCH) {
-      if (child_exited) *child_exited = true;
+    if (child_exited) *child_exited = true;
   } else {
     if (child_exited) *child_exited = false;
   }
@@ -261,7 +262,7 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   if (WIFEXITED(status)) return WEXITSTATUS(status) != 0;
 
   return false;
-#endif // MOZ_ENABLE_FORKSERVER
+#endif  // MOZ_ENABLE_FORKSERVER
 }
 
 void FreeEnvVarsArray::operator()(char** array) {
@@ -300,3 +301,33 @@ EnvironmentArray BuildEnvironmentArray(const environment_map& env_vars_to_set) {
 }
 
 }  // namespace base
+
+namespace mozilla {
+
+EnvironmentLog::EnvironmentLog(const char* varname, size_t len) {
+  const char* e = getenv(varname);
+  if (e && *e) {
+    fname_ = e;
+  }
+}
+
+void EnvironmentLog::print(const char* format, ...) {
+  if (!fname_.size()) return;
+
+  FILE* f;
+  if (fname_.compare("-") == 0) {
+    f = fdopen(dup(STDOUT_FILENO), "a");
+  } else {
+    f = fopen(fname_.c_str(), "a");
+  }
+
+  if (!f) return;
+
+  va_list a;
+  va_start(a, format);
+  vfprintf(f, format, a);
+  va_end(a);
+  fclose(f);
+}
+
+}  // namespace mozilla

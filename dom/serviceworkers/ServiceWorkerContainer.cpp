@@ -180,7 +180,7 @@ void ServiceWorkerContainer::ReceiveMessage(
     const ClientPostMessageArgs& aArgs) {
   RefPtr<ReceivedMessage> message = new ReceivedMessage(aArgs);
   if (mMessagesStarted) {
-    EnqueueReceivedMessageDispatch(message.forget());
+    EnqueueReceivedMessageDispatch(std::move(message));
   } else {
     mPendingMessages.AppendElement(message.forget());
   }
@@ -287,16 +287,16 @@ already_AddRefed<Promise> ServiceWorkerContainer::Register(
   if (aRv.Failed()) {
     return nullptr;
   }
-  scriptURI = cloneWithoutRef.forget();
+  scriptURI = std::move(cloneWithoutRef);
 
   aRv = NS_GetURIWithoutRef(scopeURI, getter_AddRefs(cloneWithoutRef));
   if (aRv.Failed()) {
     return nullptr;
   }
-  scopeURI = cloneWithoutRef.forget();
+  scopeURI = std::move(cloneWithoutRef);
 
-  aRv = ServiceWorkerScopeAndScriptAreValid(clientInfo.ref(), scopeURI,
-                                            scriptURI);
+  ServiceWorkerScopeAndScriptAreValid(clientInfo.ref(), scopeURI, scriptURI,
+                                      aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -383,14 +383,14 @@ already_AddRefed<Promise> ServiceWorkerContainer::Register(
         ErrorResult rv;
         nsIGlobalObject* global = self->GetGlobalIfValid(rv);
         if (rv.Failed()) {
-          outer->MaybeReject(rv);
+          outer->MaybeReject(std::move(rv));
           return;
         }
         RefPtr<ServiceWorkerRegistration> reg =
             global->GetOrCreateServiceWorkerRegistration(aDesc);
         outer->MaybeResolve(reg);
       },
-      [outer](ErrorResult& aRv) { outer->MaybeReject(aRv); });
+      [outer](ErrorResult&& aRv) { outer->MaybeReject(std::move(aRv)); });
 
   return outer.forget();
 }
@@ -433,7 +433,7 @@ already_AddRefed<Promise> ServiceWorkerContainer::GetRegistrations(
         ErrorResult rv;
         nsIGlobalObject* global = self->GetGlobalIfValid(rv);
         if (rv.Failed()) {
-          outer->MaybeReject(rv);
+          outer->MaybeReject(std::move(rv));
           return;
         }
         nsTArray<RefPtr<ServiceWorkerRegistration>> regList;
@@ -446,7 +446,7 @@ already_AddRefed<Promise> ServiceWorkerContainer::GetRegistrations(
         }
         outer->MaybeResolve(regList);
       },
-      [self, outer](ErrorResult& aRv) { outer->MaybeReject(aRv); });
+      [self, outer](ErrorResult&& aRv) { outer->MaybeReject(std::move(aRv)); });
 
   return outer.forget();
 }
@@ -508,14 +508,14 @@ already_AddRefed<Promise> ServiceWorkerContainer::GetRegistration(
         ErrorResult rv;
         nsIGlobalObject* global = self->GetGlobalIfValid(rv);
         if (rv.Failed()) {
-          outer->MaybeReject(rv);
+          outer->MaybeReject(std::move(rv));
           return;
         }
         RefPtr<ServiceWorkerRegistration> reg =
             global->GetOrCreateServiceWorkerRegistration(aDescriptor);
         outer->MaybeResolve(reg);
       },
-      [self, outer](ErrorResult& aRv) {
+      [self, outer](ErrorResult&& aRv) {
         if (!aRv.Failed()) {
           Unused << self->GetGlobalIfValid(aRv);
           if (!aRv.Failed()) {
@@ -523,7 +523,7 @@ already_AddRefed<Promise> ServiceWorkerContainer::GetRegistration(
             return;
           }
         }
-        outer->MaybeReject(aRv);
+        outer->MaybeReject(std::move(aRv));
       });
 
   return outer.forget();
@@ -561,7 +561,7 @@ Promise* ServiceWorkerContainer::GetReady(ErrorResult& aRv) {
         ErrorResult rv;
         nsIGlobalObject* global = self->GetGlobalIfValid(rv);
         if (rv.Failed()) {
-          outer->MaybeReject(rv);
+          outer->MaybeReject(std::move(rv));
           return;
         }
         RefPtr<ServiceWorkerRegistration> reg =
@@ -575,7 +575,7 @@ Promise* ServiceWorkerContainer::GetReady(ErrorResult& aRv) {
             aDescriptor.Version(),
             [outer, reg](bool aResult) { outer->MaybeResolve(reg); });
       },
-      [self, outer](ErrorResult& aRv) { outer->MaybeReject(aRv); });
+      [self, outer](ErrorResult&& aRv) { outer->MaybeReject(std::move(aRv)); });
 
   return mReadyPromise;
 }
@@ -687,12 +687,14 @@ void ServiceWorkerContainer::DispatchMessage(RefPtr<ReceivedMessage> aMessage) {
     ErrorResult result;
     bool deserializationFailed = false;
     RootedDictionary<MessageEventInit> init(aCx);
-    if (!FillInMessageEventInit(aCx, aGlobal, *message, init, result)) {
-      deserializationFailed = result.ErrorCodeIs(NS_ERROR_DOM_DATA_CLONE_ERR);
+    auto res = FillInMessageEventInit(aCx, aGlobal, *message, init, result);
+    if (res.isErr()) {
+      deserializationFailed = res.unwrapErr();
       MOZ_ASSERT_IF(deserializationFailed, init.mData.isNull());
       MOZ_ASSERT_IF(deserializationFailed, init.mPorts.IsEmpty());
       MOZ_ASSERT_IF(deserializationFailed, !init.mOrigin.IsEmpty());
       MOZ_ASSERT_IF(deserializationFailed, !init.mSource.IsNull());
+      result.SuppressException();
 
       if (!deserializationFailed && result.MaybeSetPendingException(aCx)) {
         return;
@@ -766,7 +768,7 @@ already_AddRefed<ServiceWorker> GetOrCreateServiceWorkerWithoutWarnings(
 
 }  // namespace
 
-bool ServiceWorkerContainer::FillInMessageEventInit(
+Result<Ok, bool> ServiceWorkerContainer::FillInMessageEventInit(
     JSContext* const aCx, nsIGlobalObject* const aGlobal,
     ReceivedMessage& aMessage, MessageEventInit& aInit, ErrorResult& aRv) {
   // Determining the source and origin should preceed attempting deserialization
@@ -787,23 +789,23 @@ bool ServiceWorkerContainer::FillInMessageEventInit(
   const nsresult rv =
       FillInOriginNoSuffix(aMessage.mServiceWorker, aInit.mOrigin);
   if (NS_FAILED(rv)) {
-    return false;
+    return Err(false);
   }
 
   JS::Rooted<JS::Value> messageData(aCx);
   aMessage.mClonedData.Read(aCx, &messageData, aRv);
   if (aRv.Failed()) {
-    return false;
+    return Err(true);
   }
 
   aInit.mData = messageData;
 
   if (!aMessage.mClonedData.TakeTransferredPortsAsSequence(aInit.mPorts)) {
     xpc::Throw(aCx, NS_ERROR_OUT_OF_MEMORY);
-    return false;
+    return Err(false);
   }
 
-  return true;
+  return Ok();
 }
 
 }  // namespace dom

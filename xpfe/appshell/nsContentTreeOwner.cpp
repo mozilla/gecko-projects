@@ -33,6 +33,7 @@
 #include "mozilla/NullPrincipal.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
+#include "nsQueryActor.h"
 
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIURI.h"
@@ -70,6 +71,28 @@ class nsSiteWindow : public nsIEmbeddingSiteWindow {
   virtual ~nsSiteWindow();
   nsContentTreeOwner* mAggregator;
 };
+
+already_AddRefed<nsIWebBrowserChrome3>
+nsContentTreeOwner::GetWebBrowserChrome() {
+  if (!mAppWindow) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIDocShell> docShell;
+  mAppWindow->GetDocShell(getter_AddRefs(docShell));
+
+  if (!docShell) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsPIDOMWindowOuter> outer(docShell->GetWindow());
+  if (nsCOMPtr<nsIWebBrowserChrome3> chrome =
+          do_QueryActor(u"WebBrowserChrome", outer)) {
+    return chrome.forget();
+  }
+
+  return nullptr;
+}
 
 //*****************************************************************************
 //***    nsContentTreeOwner: Object Management
@@ -149,6 +172,13 @@ NS_IMETHODIMP nsContentTreeOwner::GetInterface(const nsIID& aIID,
   if (aIID.Equals(NS_GET_IID(nsIAppWindow))) {
     NS_ENSURE_STATE(mAppWindow);
     return mAppWindow->QueryInterface(aIID, aSink);
+  }
+
+  if (aIID.Equals(NS_GET_IID(nsIWebBrowserChrome3))) {
+    if (nsCOMPtr<nsIWebBrowserChrome3> chrome = GetWebBrowserChrome()) {
+      chrome.forget(aSink);
+      return NS_OK;
+    }
   }
 
   return QueryInterface(aIID, aSink);
@@ -233,7 +263,7 @@ nsContentTreeOwner::SetPersistence(bool aPersistPosition, bool aPersistSize,
   if (!docShellElement) return NS_ERROR_FAILURE;
 
   nsAutoString persistString;
-  docShellElement->GetAttribute(NS_LITERAL_STRING("persist"), persistString);
+  docShellElement->GetAttr(nsGkAtoms::persist, persistString);
 
   bool saveString = false;
   int32_t index;
@@ -301,7 +331,7 @@ nsContentTreeOwner::GetPersistence(bool* aPersistPosition, bool* aPersistSize,
   if (!docShellElement) return NS_ERROR_FAILURE;
 
   nsAutoString persistString;
-  docShellElement->GetAttribute(NS_LITERAL_STRING("persist"), persistString);
+  docShellElement->GetAttr(nsGkAtoms::persist, persistString);
 
   // data structure doesn't quite match the question, but it's close enough
   // for what we want (since this method is never actually called...)
@@ -824,7 +854,7 @@ nsSiteWindow::Blur(void) {
     }
 
     nsCOMPtr<nsPIDOMWindowOuter> domWindow = docshell->GetWindow();
-    if (domWindow) domWindow->Focus();
+    if (domWindow) domWindow->Focus(mozilla::dom::CallerType::System);
   }
   return NS_OK;
 }

@@ -100,12 +100,13 @@ add_task(async function() {
     const requestsListStatus = requestItem.querySelector(".status-code");
     EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
     await waitUntil(() => requestsListStatus.title);
+    await waitForDOMIfNeeded(requestItem, ".requests-list-timings-total");
 
     info("Verifying request #" + index);
     await verifyRequestItemTarget(
       document,
       getDisplayedRequests(store.getState()),
-      getSortedRequests(store.getState()).get(index),
+      getSortedRequests(store.getState())[index],
       request.method,
       request.uri,
       request.details

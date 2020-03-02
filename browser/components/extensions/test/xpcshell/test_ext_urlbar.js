@@ -22,6 +22,9 @@ AddonTestUtils.createAppInfo(
   "1",
   "42"
 );
+// Override ExtensionXPCShellUtils.jsm's overriding of the pref as the
+// search service needs it.
+Services.prefs.clearUserPref("services.settings.default_bucket");
 
 function promiseUninstallCompleted(extensionId) {
   return new Promise(resolve => {
@@ -135,7 +138,7 @@ add_task(async function test_registerProvider() {
   );
 
   // Run a query, this should execute the above listeners and checks, plus it
-  // will set the provider's isActive and isRestricting.
+  // will set the provider's isActive and priority.
   let queryContext = new UrlbarQueryContext({
     allowAutofill: false,
     isPrivate: false,
@@ -158,11 +161,19 @@ add_task(async function test_registerProvider() {
       provider.isActive(queryContext),
       "Check active callback"
     );
-    Assert.equal(
-      restricting,
-      provider.isRestricting(queryContext),
-      "Check restrict callback"
-    );
+    if (restricting) {
+      Assert.notEqual(
+        provider.getPriority(queryContext),
+        0,
+        "Check provider priority"
+      );
+    } else {
+      Assert.equal(
+        provider.getPriority(queryContext),
+        0,
+        "Check provider priority"
+      );
+    }
   }
 
   await ext.unload();
@@ -257,9 +268,9 @@ add_task(async function test_onProviderResultsRequested() {
   let controller = UrlbarTestUtils.newMockController();
   await controller.startQuery(context);
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // Check the results.
   let expectedResults = [
@@ -586,11 +597,11 @@ add_task(async function test_activeAndInactiveProviders() {
   let controller = UrlbarTestUtils.newMockController();
   await controller.startQuery(context);
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(active.isActive(context));
   Assert.ok(!inactive.isActive(context));
-  Assert.ok(!active.isRestricting(context));
-  Assert.ok(!inactive.isRestricting(context));
+  Assert.equal(active.getPriority(context), 0);
+  Assert.equal(inactive.getPriority(context), 0);
 
   // Check the results.
   Assert.equal(context.results.length, 2);
@@ -650,10 +661,10 @@ add_task(async function test_threeActiveProviders() {
   let controller = UrlbarTestUtils.newMockController();
   await controller.startQuery(context);
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   for (let provider of providers) {
     Assert.ok(provider.isActive(context));
-    Assert.ok(!provider.isRestricting(context));
+    Assert.equal(provider.getPriority(context), 0);
   }
 
   // Check the results.
@@ -708,10 +719,10 @@ add_task(async function test_threeInactiveProviders() {
   let controller = UrlbarTestUtils.newMockController();
   await controller.startQuery(context);
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   for (let provider of providers) {
     Assert.ok(!provider.isActive(context));
-    Assert.ok(!provider.isRestricting(context));
+    Assert.equal(provider.getPriority(context), 0);
   }
 
   // Check the results.
@@ -777,11 +788,11 @@ add_task(async function test_activeInactiveAndRestrictingProviders() {
 
   // Check isActive and isRestricting.
   Assert.ok(providers.active.isActive(context));
-  Assert.ok(!providers.active.isRestricting(context));
+  Assert.equal(providers.active.getPriority(context), 0);
   Assert.ok(!providers.inactive.isActive(context));
-  Assert.ok(!providers.inactive.isRestricting(context));
+  Assert.equal(providers.inactive.getPriority(context), 0);
   Assert.ok(providers.restricting.isActive(context));
-  Assert.ok(providers.restricting.isRestricting(context));
+  Assert.notEqual(providers.restricting.getPriority(context), 0);
 
   // Check the results.
   Assert.equal(context.results.length, 1);
@@ -934,7 +945,7 @@ add_task(async function test_onResultsRequestedNotImplemented() {
 
   // Check isActive and isRestricting.
   Assert.ok(provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // Check the results.
   Assert.equal(context.results.length, 1);
@@ -1082,9 +1093,9 @@ add_task(async function test_onBehaviorRequestedTimeout() {
   await controller.startQuery(context);
   UrlbarProviderExtension.notificationTimeout = currentTimeout;
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(!provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // Check the results.
   Assert.equal(context.results.length, 1);
@@ -1147,9 +1158,9 @@ add_task(async function test_onResultsRequestedTimeout() {
   await controller.startQuery(context);
   UrlbarProviderExtension.notificationTimeout = currentTimeout;
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // Check the results.
   Assert.equal(context.results.length, 1);
@@ -1186,7 +1197,7 @@ add_task(async function test_privateBrowsing_not_allowed() {
   await ext.startup();
 
   // Run a query, this should execute the above listeners and checks, plus it
-  // will set the provider's isActive and isRestricting.
+  // will set the provider's isActive and priority.
   let queryContext = new UrlbarQueryContext({
     allowAutofill: false,
     isPrivate: true,
@@ -1242,9 +1253,9 @@ add_task(async function test_privateBrowsing_not_allowed_onQueryCanceled() {
   controller.cancelQuery();
   await startPromise;
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(!provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   await ext.unload();
 });
@@ -1289,9 +1300,9 @@ add_task(async function test_privateBrowsing_allowed() {
   let controller = UrlbarTestUtils.newMockController();
   await controller.startQuery(context);
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // The events should have been fired.
   await Promise.all(
@@ -1344,9 +1355,9 @@ add_task(async function test_privateBrowsing_allowed_onQueryCanceled() {
   controller.cancelQuery();
   await startPromise;
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // The events should have been fired.
   await Promise.all(
@@ -1401,9 +1412,9 @@ add_task(async function test_nonPrivateBrowsing() {
   let controller = UrlbarTestUtils.newMockController();
   await controller.startQuery(context);
 
-  // Check isActive and isRestricting.
+  // Check isActive and priority.
   Assert.ok(provider.isActive(context));
-  Assert.ok(!provider.isRestricting(context));
+  Assert.equal(provider.getPriority(context), 0);
 
   // Check the results.
   Assert.equal(context.results.length, 2);
@@ -1412,48 +1423,6 @@ add_task(async function test_nonPrivateBrowsing() {
   Assert.equal(context.results[1].suggestedIndex, 1);
 
   await ext.unload();
-});
-
-// Tests the openViewOnFocus property.
-add_task(async function test_setOpenViewOnFocus() {
-  let getPrefValue = () => UrlbarPrefs.get("openViewOnFocus");
-
-  Assert.equal(
-    getPrefValue(),
-    false,
-    "Open-view-on-focus mode should be disabled by default"
-  );
-
-  let ext = ExtensionTestUtils.loadExtension({
-    manifest: {
-      permissions: ["urlbar"],
-    },
-    isPrivileged: true,
-    incognitoOverride: "spanning",
-    useAddonManager: "temporary",
-    async background() {
-      await browser.urlbar.openViewOnFocus.set({ value: true });
-      browser.test.sendMessage("ready");
-    },
-  });
-  await ext.startup();
-  await ext.awaitMessage("ready");
-
-  Assert.equal(
-    getPrefValue(),
-    true,
-    "Successfully enabled the open-view-on-focus mode"
-  );
-
-  let completed = promiseUninstallCompleted(ext.id);
-  await ext.unload();
-  await completed;
-
-  Assert.equal(
-    getPrefValue(),
-    false,
-    "Open-view-on-focus mode should be reset after unloading the add-on"
-  );
 });
 
 // Tests the engagementTelemetry property.
@@ -1473,11 +1442,13 @@ add_task(async function test_engagementTelemetry() {
     isPrivileged: true,
     incognitoOverride: "spanning",
     useAddonManager: "temporary",
-    background() {
-      browser.urlbar.engagementTelemetry.set({ value: true });
+    async background() {
+      await browser.urlbar.engagementTelemetry.set({ value: true });
+      browser.test.sendMessage("ready");
     },
   });
   await ext.startup();
+  await ext.awaitMessage("ready");
 
   Assert.equal(
     getPrefValue(),

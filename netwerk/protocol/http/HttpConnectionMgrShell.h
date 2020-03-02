@@ -8,6 +8,7 @@
 #include "nsISupports.h"
 
 class nsIEventTarget;
+class nsIHttpUpgradeListener;
 class nsIInterfaceRequestor;
 
 namespace mozilla {
@@ -17,7 +18,7 @@ class ARefBase;
 class EventTokenBucket;
 class HttpTransactionShell;
 class nsHttpConnectionInfo;
-class nsHttpConnection;
+class HttpConnectionBase;
 class nsHttpConnectionMgr;
 class NullHttpTransaction;
 
@@ -119,7 +120,7 @@ class HttpConnectionMgrShell : public nsISupports {
   // called when a connection is done processing a transaction.  if the
   // connection can be reused then it will be added to the idle list, else
   // it will be closed.
-  MOZ_MUST_USE virtual nsresult ReclaimConnection(nsHttpConnection* conn) = 0;
+  MOZ_MUST_USE virtual nsresult ReclaimConnection(HttpConnectionBase* conn) = 0;
 
   // called to force the transaction queue to be processed once more, giving
   // preference to the specified connection.
@@ -151,6 +152,16 @@ class HttpConnectionMgrShell : public nsISupports {
 
   // clears the connection history mCT
   MOZ_MUST_USE virtual nsresult ClearConnectionHistory() = 0;
+
+  // called by the main thread to execute the taketransport() logic on the
+  // socket thread after a 101 response has been received and the socket
+  // needs to be transferred to an expectant upgrade listener such as
+  // websockets.
+  // @param aTrans: a transaction that contains a sticky connection. We'll
+  //                take the transport of this connection.
+  MOZ_MUST_USE virtual nsresult CompleteUpgrade(
+      HttpTransactionShell* aTrans,
+      nsIHttpUpgradeListener* aUpgradeListener) = 0;
 
   virtual nsHttpConnectionMgr* AsHttpConnectionMgr() = 0;
 };
@@ -190,7 +201,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(HttpConnectionMgrShell,
       HttpTransactionShell*, uint32_t classOfService) override;              \
   virtual nsresult CancelTransaction(HttpTransactionShell*, nsresult reason) \
       override;                                                              \
-  virtual nsresult ReclaimConnection(nsHttpConnection* conn) override;       \
+  virtual nsresult ReclaimConnection(HttpConnectionBase* conn) override;     \
   virtual nsresult ProcessPendingQ(nsHttpConnectionInfo*) override;          \
   virtual nsresult ProcessPendingQ() override;                               \
   virtual nsresult GetSocketThreadTarget(nsIEventTarget**) override;         \
@@ -200,6 +211,9 @@ NS_DEFINE_STATIC_IID_ACCESSOR(HttpConnectionMgrShell,
   virtual nsresult VerifyTraffic() override;                                 \
   virtual void BlacklistSpdy(const nsHttpConnectionInfo* ci) override;       \
   virtual nsresult ClearConnectionHistory() override;                        \
+  virtual nsresult CompleteUpgrade(HttpTransactionShell* aTrans,             \
+                                   nsIHttpUpgradeListener* aUpgradeListener) \
+      override;                                                              \
   nsHttpConnectionMgr* AsHttpConnectionMgr() override;
 
 }  // namespace net

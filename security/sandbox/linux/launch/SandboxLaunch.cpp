@@ -14,6 +14,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <utility>
+
 #include "LinuxCapabilities.h"
 #include "LinuxSched.h"
 #include "SandboxChrootProto.h"
@@ -25,11 +27,11 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SandboxReporter.h"
 #include "mozilla/SandboxSettings.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_media.h"
 #include "mozilla/Unused.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
@@ -38,8 +40,6 @@
 #include "nsThreadUtils.h"
 #include "prenv.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
-
-#include "mozilla/StaticPrefs_media.h"
 
 #ifdef MOZ_X11
 #  ifndef MOZ_WIDGET_GTK
@@ -209,8 +209,7 @@ static void AttachSandboxReporter(base::file_handle_mapping_vector* aFdMap) {
 
 class SandboxFork : public base::LaunchOptions::ForkDelegate {
  public:
-  explicit SandboxFork(int aFlags, bool aChroot,
-                       int aServerFd = -1,
+  explicit SandboxFork(int aFlags, bool aChroot, int aServerFd = -1,
                        int aClientFd = -1);
   virtual ~SandboxFork();
 
@@ -236,6 +235,12 @@ static int GetEffectiveSandboxLevel(GeckoProcessType aType) {
       }
       return 0;
     case GeckoProcessType_Content:
+#ifdef MOZ_ENABLE_FORKSERVER
+      // With this env MOZ_SANDBOXED will be set, and mozsandbox will
+      // be preloaded for the fork server.  The content processes rely
+      // on wrappers defined by mozsandbox to work properly.
+    case GeckoProcessType_ForkServer:
+#endif
       // GetEffectiveContentSandboxLevel is main-thread-only due to prefs.
       MOZ_ASSERT(NS_IsMainThread());
       if (info.Test(SandboxInfo::kEnabledForContent)) {
@@ -327,9 +332,9 @@ void SandboxLaunchPrepare(GeckoProcessType aType,
     auto forker = MakeUnique<SandboxFork>(flags, canChroot);
     forker->PrepareMapping(&aOptions->fds_to_remap);
     aOptions->fork_delegate = std::move(forker);
-    if (canChroot) {
-      aOptions->env_map[kSandboxChrootEnvFlag] = std::to_string(flags);
-    }
+    // Pass to |SandboxLaunchForkServerPrepare()| in the fork server.
+    aOptions->env_map[kSandboxChrootEnvFlag] =
+        std::to_string(canChroot ? 1 : 0) + std::to_string(flags);
   }
 }
 
@@ -343,26 +348,21 @@ void SandboxLaunchPrepare(GeckoProcessType aType,
  */
 void SandboxLaunchForkServerPrepare(const std::vector<std::string>& aArgv,
                                     base::LaunchOptions& aOptions) {
-  auto chroot = std::find_if(aOptions.env_map.begin(),
-                             aOptions.env_map.end(),
-                             [](auto& elt) {
-                               return elt.first == kSandboxChrootEnvFlag;
-                             });
+  auto chroot = std::find_if(
+      aOptions.env_map.begin(), aOptions.env_map.end(),
+      [](auto& elt) { return elt.first == kSandboxChrootEnvFlag; });
   if (chroot == aOptions.env_map.end()) {
     return;
   }
-  int flags = atoi(chroot->second.c_str());
-  if (flags == 0) {
-    return;
-  }
+  bool canChroot = chroot->second.c_str()[0] == '1';
+  int flags = atoi(chroot->second.c_str() + 1);
+  MOZ_ASSERT(flags || canChroot);
 
   // Find chroot server fd.  It is supposed to be map to
   // kSandboxChrootServerFd so that we find it out from the mapping.
-  auto fdmap = std::find_if(aOptions.fds_to_remap.begin(),
-                            aOptions.fds_to_remap.end(),
-                            [](auto& elt) {
-                              return elt.second == kSandboxChrootServerFd;
-                            });
+  auto fdmap = std::find_if(
+      aOptions.fds_to_remap.begin(), aOptions.fds_to_remap.end(),
+      [](auto& elt) { return elt.second == kSandboxChrootServerFd; });
   MOZ_ASSERT(fdmap != aOptions.fds_to_remap.end(),
              "ChrootServerFd is not found with sandbox chroot");
   int chrootserverfd = fdmap->first;
@@ -373,7 +373,7 @@ void SandboxLaunchForkServerPrepare(const std::vector<std::string>& aArgv,
   // to do it again.  And, the forker need only the server fd, that
   // chroot server uses it to sync with the client (content).  See
   // |SandboxFox::StartChrootServer()|.
-  auto forker = MakeUnique<SandboxFork>(flags, true, chrootserverfd);
+  auto forker = MakeUnique<SandboxFork>(flags, canChroot, chrootserverfd);
   aOptions.fork_delegate = std::move(forker);
 }
 #endif

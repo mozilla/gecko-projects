@@ -6,79 +6,77 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "mozilla/net/HttpBaseChannel.h"
 
+#include <algorithm>
+#include <utility>
+
+#include "HttpBaseChannel.h"
+#include "HttpLog.h"
+#include "LoadInfo.h"
+#include "mozIThirdPartyUtil.h"
+#include "mozilla/AntiTrackingCommon.h"
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/BinarySearch.h"
+#include "mozilla/ConsoleReportCollector.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/InputStreamLengthHelper.h"
+#include "mozilla/NullPrincipal.h"
+#include "mozilla/Services.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/Tokenizer.h"
+#include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/Performance.h"
+#include "mozilla/dom/PerformanceStorage.h"
+#include "mozilla/net/PartiallySeekableInputStream.h"
+#include "mozilla/net/UrlClassifierCommon.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
+#include "nsCRT.h"
+#include "nsContentSecurityManager.h"
+#include "nsContentUtils.h"
+#include "nsEscape.h"
 #include "nsGlobalWindowOuter.h"
+#include "nsHttpChannel.h"
 #include "nsHttpHandler.h"
+#include "nsIApplicationCacheChannel.h"
+#include "nsICacheInfoChannel.h"
+#include "nsICachingChannel.h"
+#include "nsIChannelEventSink.h"
+#include "nsIConsoleService.h"
+#include "nsIContentPolicy.h"
+#include "nsICookieService.h"
+#include "nsIDOMWindowUtils.h"
+#include "nsIDocShell.h"
+#include "nsIEncodedChannel.h"
+#include "nsIHttpHeaderVisitor.h"
+#include "nsILoadGroupChild.h"
+#include "nsIMIMEInputStream.h"
+#include "nsIMutableArray.h"
+#include "nsINetworkInterceptController.h"
+#include "nsIObserverService.h"
+#include "nsIPrincipal.h"
+#include "nsIProtocolProxyService.h"
+#include "nsISSLSocketControl.h"
+#include "nsIScriptError.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsISecurityConsoleMessage.h"
+#include "nsISeekableStream.h"
+#include "nsIStorageStream.h"
+#include "nsIStreamConverterService.h"
+#include "nsITimedChannel.h"
+#include "nsIURIMutator.h"
 #include "nsMimeTypes.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
-#include "nsReadableUtils.h"
-
-#include "mozilla/BasePrincipal.h"
-#include "nsICachingChannel.h"
-#include "nsIPrincipal.h"
-#include "nsIScriptError.h"
-#include "nsISeekableStream.h"
-#include "nsIStorageStream.h"
-#include "nsITimedChannel.h"
-#include "nsIEncodedChannel.h"
-#include "nsIApplicationCacheChannel.h"
-#include "nsIMutableArray.h"
-#include "nsEscape.h"
-#include "nsStreamListenerWrapper.h"
-#include "nsISecurityConsoleMessage.h"
-#include "nsURLHelper.h"
-#include "nsICookieService.h"
-#include "nsIStreamConverterService.h"
-#include "nsCRT.h"
-#include "nsContentUtils.h"
-#include "nsIMutableArray.h"
-#include "nsIURIMutator.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsIObserverService.h"
-#include "nsIProtocolProxyService.h"
-#include "nsProxyRelease.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDocShell.h"
-#include "nsINetworkInterceptController.h"
-#include "mozilla/AntiTrackingCommon.h"
-#include "mozilla/dom/Performance.h"
-#include "mozilla/dom/PerformanceStorage.h"
-#include "mozilla/net/UrlClassifierFeatureFactory.h"
-#include "mozilla/NullPrincipal.h"
-#include "mozilla/Services.h"
-#include "mozIThirdPartyUtil.h"
-#include "nsStreamUtils.h"
-#include "nsThreadUtils.h"
-#include "nsContentSecurityManager.h"
-#include "nsIChannelEventSink.h"
-#include "nsILoadGroupChild.h"
-#include "mozilla/ConsoleReportCollector.h"
-#include "LoadInfo.h"
-#include "nsISSLSocketControl.h"
-#include "mozilla/Telemetry.h"
-#include "nsIConsoleService.h"
-#include "mozilla/BinarySearch.h"
-#include "mozilla/DebugOnly.h"
-#include "mozilla/Move.h"
-#include "mozilla/net/PartiallySeekableInputStream.h"
-#include "mozilla/net/UrlClassifierCommon.h"
-#include "mozilla/InputStreamLengthHelper.h"
-#include "mozilla/Tokenizer.h"
-#include "nsIHttpHeaderVisitor.h"
-#include "nsIMIMEInputStream.h"
-#include "nsICacheInfoChannel.h"
-#include "nsIDOMWindowUtils.h"
-#include "nsHttpChannel.h"
+#include "nsProxyRelease.h"
+#include "nsReadableUtils.h"
 #include "nsRedirectHistoryEntry.h"
 #include "nsServerTiming.h"
-#include "mozilla/Tokenizer.h"
-
-#include <algorithm>
-#include "HttpBaseChannel.h"
+#include "nsStreamListenerWrapper.h"
+#include "nsStreamUtils.h"
+#include "nsThreadUtils.h"
+#include "nsURLHelper.h"
 
 namespace mozilla {
 namespace net {
@@ -158,6 +156,7 @@ HttpBaseChannel::HttpBaseChannel()
     : mReportCollector(new ConsoleReportCollector()),
       mHttpHandler(gHttpHandler),
       mChannelCreationTime(0),
+      mComputedCrossOriginOpenerPolicy(nsILoadInfo::OPENER_POLICY_UNSAFE_NONE),
       mStartPos(UINT64_MAX),
       mTransferSize(0),
       mRequestSize(0),
@@ -286,18 +285,12 @@ void HttpBaseChannel::ReleaseMainThreadOnlyReferences() {
   }
 
   nsTArray<nsCOMPtr<nsISupports>> arrayToRelease;
-  arrayToRelease.AppendElement(mURI.forget());
-  arrayToRelease.AppendElement(mOriginalURI.forget());
-  arrayToRelease.AppendElement(mDocumentURI.forget());
   arrayToRelease.AppendElement(mLoadGroup.forget());
   arrayToRelease.AppendElement(mLoadInfo.forget());
   arrayToRelease.AppendElement(mCallbacks.forget());
   arrayToRelease.AppendElement(mProgressSink.forget());
   arrayToRelease.AppendElement(mApplicationCache.forget());
-  arrayToRelease.AppendElement(mAPIRedirectToURI.forget());
-  arrayToRelease.AppendElement(mProxyURI.forget());
   arrayToRelease.AppendElement(mPrincipal.forget());
-  arrayToRelease.AppendElement(mTopWindowURI.forget());
   arrayToRelease.AppendElement(mContentBlockingAllowListPrincipal.forget());
   arrayToRelease.AppendElement(mListener.forget());
   arrayToRelease.AppendElement(mCompressListener.forget());
@@ -483,36 +476,31 @@ HttpBaseChannel::SetLoadFlags(nsLoadFlags aLoadFlags) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::GetTRRMode(nsIRequest::TRRMode* aTRRMode) {
+  return GetTRRModeImpl(aTRRMode);
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetTRRMode(nsIRequest::TRRMode aTRRMode) {
+  return SetTRRModeImpl(aTRRMode);
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::SetDocshellUserAgentOverride() {
-  // This sets the docshell specific user agent override
-  nsresult rv;
-  nsCOMPtr<nsILoadContext> loadContext;
-  NS_QueryNotificationCallbacks(this, loadContext);
-  if (!loadContext) {
+  RefPtr<dom::BrowsingContext> bc;
+  MOZ_ALWAYS_SUCCEEDS(mLoadInfo->GetBrowsingContext(getter_AddRefs(bc)));
+  if (!bc) {
     return NS_OK;
   }
 
-  nsCOMPtr<mozIDOMWindowProxy> domWindow;
-  loadContext->GetAssociatedWindow(getter_AddRefs(domWindow));
-  if (!domWindow) {
-    return NS_OK;
-  }
-
-  auto* pDomWindow = nsPIDOMWindowOuter::From(domWindow);
-  nsIDocShell* docshell = pDomWindow->GetDocShell();
-  if (!docshell) {
-    return NS_OK;
-  }
-
-  nsString customUserAgent;
-  docshell->GetCustomUserAgent(customUserAgent);
-  if (customUserAgent.IsEmpty()) {
+  const nsString& customUserAgent = bc->GetUserAgentOverride();
+  if (customUserAgent.IsEmpty() || customUserAgent.IsVoid()) {
     return NS_OK;
   }
 
   NS_ConvertUTF16toUTF8 utf8CustomUserAgent(customUserAgent);
-  rv = SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"), utf8CustomUserAgent,
-                        false);
+  nsresult rv = SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"),
+                                 utf8CustomUserAgent, false);
   if (NS_FAILED(rv)) return rv;
 
   return NS_OK;
@@ -707,7 +695,8 @@ HttpBaseChannel::GetContentDispositionFilename(
 NS_IMETHODIMP
 HttpBaseChannel::SetContentDispositionFilename(
     const nsAString& aContentDispositionFilename) {
-  mContentDispositionFilename = new nsString(aContentDispositionFilename);
+  mContentDispositionFilename =
+      MakeUnique<nsString>(aContentDispositionFilename);
   return NS_OK;
 }
 
@@ -1473,17 +1462,6 @@ NS_IMETHODIMP HttpBaseChannel::SetTopLevelContentWindowId(uint64_t aWindowId) {
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::IsTrackingResource(bool* aIsTrackingResource) {
-  MOZ_ASSERT(!mFirstPartyClassificationFlags ||
-             !mThirdPartyClassificationFlags);
-  *aIsTrackingResource = UrlClassifierCommon::IsTrackingClassificationFlag(
-                             mThirdPartyClassificationFlags) ||
-                         UrlClassifierCommon::IsTrackingClassificationFlag(
-                             mFirstPartyClassificationFlags);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 HttpBaseChannel::IsThirdPartyTrackingResource(bool* aIsTrackingResource) {
   MOZ_ASSERT(
       !(mFirstPartyClassificationFlags && mThirdPartyClassificationFlags));
@@ -1493,14 +1471,13 @@ HttpBaseChannel::IsThirdPartyTrackingResource(bool* aIsTrackingResource) {
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::IsSocialTrackingResource(bool* aIsSocialTrackingResource) {
+HttpBaseChannel::IsThirdPartySocialTrackingResource(
+    bool* aIsThirdPartySocialTrackingResource) {
   MOZ_ASSERT(!mFirstPartyClassificationFlags ||
              !mThirdPartyClassificationFlags);
-  *aIsSocialTrackingResource =
+  *aIsThirdPartySocialTrackingResource =
       UrlClassifierCommon::IsSocialTrackingClassificationFlag(
-          mThirdPartyClassificationFlags) ||
-      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
-          mFirstPartyClassificationFlags);
+          mThirdPartyClassificationFlags);
   return NS_OK;
 }
 
@@ -2233,7 +2210,7 @@ HttpBaseChannel::SetChannelIsForDownload(bool aChannelIsForDownload) {
 
 NS_IMETHODIMP
 HttpBaseChannel::SetCacheKeysRedirectChain(nsTArray<nsCString>* cacheKeys) {
-  mRedirectedCachekeys = cacheKeys;
+  mRedirectedCachekeys = WrapUnique(cacheKeys);
   return NS_OK;
 }
 
@@ -3541,6 +3518,21 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
     }
   }
 
+  // convey the User-Agent header value
+  // since we might be setting custom user agent from DevTools.
+  if (httpInternal &&
+      mCorsMode == CORS_MODE_NO_CORS &&
+      redirectType == ReplacementReason::Redirect) {
+    nsAutoCString oldUserAgent;
+    nsresult hasHeader =
+      mRequestHead.GetHeader(nsHttp::User_Agent, oldUserAgent);
+    if (NS_SUCCEEDED(hasHeader)) {
+      rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"),
+                                         oldUserAgent, false);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
+    }
+  }
+
   // share the request context - see bug 1236650
   rv = httpChannel->SetRequestContextID(mRequestContextID);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -3609,7 +3601,7 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
            "[this=%p] transferring chain of redirect cache-keys",
            this));
       rv = httpInternal->SetCacheKeysRedirectChain(
-          mRedirectedCachekeys.forget());
+          mRedirectedCachekeys.release());
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
 
@@ -4194,7 +4186,9 @@ HttpBaseChannel::SetThrottleQueue(nsIInputChannelThrottleQueue* aQueue) {
 
 NS_IMETHODIMP
 HttpBaseChannel::GetThrottleQueue(nsIInputChannelThrottleQueue** aQueue) {
-  *aQueue = mThrottleQueue;
+  NS_ENSURE_ARG_POINTER(aQueue);
+  nsCOMPtr<nsIInputChannelThrottleQueue> queue = mThrottleQueue;
+  queue.forget(aQueue);
   return NS_OK;
 }
 
@@ -4380,7 +4374,7 @@ void HttpBaseChannel::CallTypeSniffers(void* aClosure, const uint8_t* aData,
 
 template <class T>
 static void ParseServerTimingHeader(
-    const nsAutoPtr<T>& aHeader, nsTArray<nsCOMPtr<nsIServerTiming>>& aOutput) {
+    const UniquePtr<T>& aHeader, nsTArray<nsCOMPtr<nsIServerTiming>>& aOutput) {
   if (!aHeader) {
     return;
   }
@@ -4463,32 +4457,6 @@ nsresult HttpBaseChannel::GetResponseEmbedderPolicy(
   return NS_OK;
 }
 
-namespace {
-
-nsILoadInfo::CrossOriginOpenerPolicy GetSameness(
-    nsILoadInfo::CrossOriginOpenerPolicy aPolicy) {
-  uint8_t sameness = aPolicy & nsILoadInfo::OPENER_POLICY_SAMENESS_MASK;
-  return nsILoadInfo::CrossOriginOpenerPolicy(sameness);
-}
-
-nsILoadInfo::CrossOriginOpenerPolicy CreateCrossOriginOpenerPolicy(
-    nsILoadInfo::CrossOriginOpenerPolicy aSameness, bool aUnsafeAllowOutgoing,
-    bool aEmbedderPolicy) {
-  uint8_t policy = aSameness;
-
-  if (aUnsafeAllowOutgoing) {
-    policy |= nsILoadInfo::OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG;
-  }
-
-  if (aEmbedderPolicy) {
-    policy |= nsILoadInfo::OPENER_POLICY_EMBEDDER_POLICY_REQUIRE_CORP_FLAG;
-  }
-
-  return nsILoadInfo::CrossOriginOpenerPolicy(policy);
-}
-
-}  // anonymous namespace
-
 // Obtain a cross-origin opener-policy from a response response and a
 // cross-origin opener policy initiator.
 // https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
@@ -4496,7 +4464,7 @@ NS_IMETHODIMP HttpBaseChannel::ComputeCrossOriginOpenerPolicy(
     nsILoadInfo::CrossOriginOpenerPolicy aInitiatorPolicy,
     nsILoadInfo::CrossOriginOpenerPolicy* aOutPolicy) {
   MOZ_ASSERT(aOutPolicy);
-  *aOutPolicy = nsILoadInfo::OPENER_POLICY_NULL;
+  *aOutPolicy = nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
 
   if (!mResponseHead) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -4511,67 +4479,47 @@ NS_IMETHODIMP HttpBaseChannel::ComputeCrossOriginOpenerPolicy(
   Unused << mResponseHead->GetHeader(nsHttp::Cross_Origin_Opener_Policy,
                                      openerPolicy);
 
-  // Cross-Origin-Opener-Policy = sameness [ RWS outgoing ] / inherit
-  // sameness = %s"same-origin" / %s"same-site" ; case-sensitive
-  // outgoing = %s"unsafe-allow-outgoing" ; case-sensitive
-  // inherit  = %s"unsafe-inherit" ; case-sensitive
+  // Cross-Origin-Opener-Policy = %s"same-origin" /
+  //                              %s"same-origin-allow-popups" /
+  //                              %s"unsafe-none"; case-sensitive
 
-  nsILoadInfo::CrossOriginOpenerPolicy sameness =
-      nsILoadInfo::OPENER_POLICY_NULL;
-  bool unsafeAllowOutgoing = false;
-  bool embedderPolicy = false;
-  if (openerPolicy.EqualsLiteral("unsafe-inherit")) {
-    // Step 6
-    sameness = GetSameness(aInitiatorPolicy);
-    unsafeAllowOutgoing =
-        !!(aInitiatorPolicy &
-           nsILoadInfo::OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG);
-  } else {
-    // Step 7
-    Tokenizer t(openerPolicy);
-    nsAutoCString samenessString;
-    nsAutoCString outgoingString;
+  nsILoadInfo::CrossOriginOpenerPolicy policy =
+      nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
 
-    // The return value will be true if we find any whitespace. If there is
-    // whitespace, then it must be followed by "unsafe-allow-outgoing" otherwise
-    // this is a malformed header value.
-    unsafeAllowOutgoing =
-        t.ReadUntil(Tokenizer::Token::Whitespace(), samenessString);
-    if (unsafeAllowOutgoing) {
-      t.SkipWhites();
-      bool foundEOF =
-          t.ReadUntil(Tokenizer::Token::EndOfFile(), outgoingString);
-      if (!foundEOF) {
-        // Malformed response. There should be no text after the second token.
-        return NS_OK;
-      }
-      if (!outgoingString.EqualsLiteral("unsafe-allow-outgoing")) {
-        // Malformed response. Only one allowed value for the second token.
-        return NS_OK;
-      }
-    }
-
-    if (samenessString.EqualsLiteral("same-origin")) {
-      sameness = nsILoadInfo::OPENER_POLICY_SAME_ORIGIN;
-    } else if (samenessString.EqualsLiteral("same-site")) {
-      sameness = nsILoadInfo::OPENER_POLICY_SAME_SITE;
-    }
+  if (openerPolicy.EqualsLiteral("same-origin")) {
+    policy = nsILoadInfo::OPENER_POLICY_SAME_ORIGIN;
+  } else if (openerPolicy.EqualsLiteral("same-origin-allow-popups")) {
+    policy = nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_ALLOW_POPUPS;
   }
 
-  // Step 9 in obtain a cross-origin opener-policy
-  // https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
-  if (sameness == nsILoadInfo::OPENER_POLICY_SAME_ORIGIN &&
-      !unsafeAllowOutgoing) {
+  if (policy == nsILoadInfo::OPENER_POLICY_SAME_ORIGIN) {
     nsILoadInfo::CrossOriginEmbedderPolicy coep =
         nsILoadInfo::EMBEDDER_POLICY_NULL;
     if (NS_SUCCEEDED(GetResponseEmbedderPolicy(&coep)) &&
         coep == nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
-      embedderPolicy = true;
+      policy =
+          nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_EMBEDDER_POLICY_REQUIRE_CORP;
     }
   }
 
-  *aOutPolicy = CreateCrossOriginOpenerPolicy(sameness, unsafeAllowOutgoing,
-                                              embedderPolicy);
+  *aOutPolicy = policy;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetCrossOriginOpenerPolicy(
+    nsILoadInfo::CrossOriginOpenerPolicy* aPolicy) {
+  MOZ_ASSERT(aPolicy);
+  if (!aPolicy) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  // If this method is called before OnStartRequest (ie. before we call
+  // ComputeCrossOriginOpenerPolicy) or if we were unable to compute the
+  // policy we'll throw an error.
+  if (!mOnStartRequestCalled) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *aPolicy = mComputedCrossOriginOpenerPolicy;
   return NS_OK;
 }
 

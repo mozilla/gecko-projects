@@ -13,18 +13,19 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, qtrace};
 
+use crate::cc::CongestionControl;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::send_stream::StreamRecoveryToken;
-use crate::tracking::{AckToken, PNSpace};
+use crate::tracking::{AckToken, PNSpace, SentPacket};
+use crate::LOCAL_IDLE_TIMEOUT;
 
 const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT
 // caching. See https://github.com/mozilla/neqo/issues/79
 const INITIAL_RTT: Duration = Duration::from_millis(100);
-
 const PACKET_THRESHOLD: u64 = 3;
 
 #[derive(Debug, Clone)]
@@ -33,17 +34,7 @@ pub enum RecoveryToken {
     Stream(StreamRecoveryToken),
     Crypto(CryptoRecoveryToken),
     Flow(FlowControlRecoveryToken),
-}
-
-#[derive(Debug, Clone)]
-pub struct SentPacket {
-    ack_eliciting: bool,
-    //in_flight: bool, // TODO needed only for cc
-    //size: u64, // TODO needed only for cc
-    time_sent: Instant,
-    pub(crate) tokens: Vec<RecoveryToken>,
-
-    time_declared_lost: Option<Instant>,
+    HandshakeDone,
 }
 
 #[derive(Debug, Default)]
@@ -89,8 +80,14 @@ impl RttVals {
         self.smoothed_rtt.unwrap_or(self.latest_rtt)
     }
 
-    fn pto(&self) -> Duration {
-        self.rtt() + max(4 * self.rttvar, GRANULARITY) + self.max_ack_delay
+    fn pto(&self, pn_space: PNSpace) -> Duration {
+        self.rtt()
+            + max(4 * self.rttvar, GRANULARITY)
+            + if pn_space != PNSpace::ApplicationData {
+                Duration::from_millis(0)
+            } else {
+                self.max_ack_delay
+            }
     }
 }
 
@@ -101,8 +98,8 @@ pub(crate) struct LossRecoveryState {
 }
 
 impl LossRecoveryState {
-    fn new(mode: LossRecoveryMode, callback_time: Option<Instant>) -> LossRecoveryState {
-        LossRecoveryState {
+    fn new(mode: LossRecoveryMode, callback_time: Option<Instant>) -> Self {
+        Self {
             mode,
             callback_time,
         }
@@ -115,11 +112,28 @@ impl LossRecoveryState {
     pub fn mode(&self) -> LossRecoveryMode {
         self.mode
     }
+
+    pub fn get_pto_state(&mut self) -> Option<(PNSpace, bool)> {
+        if let LossRecoveryMode::PtoExpired {
+            dgram_available,
+            min_pn_space,
+        } = &mut self.mode
+        {
+            if *dgram_available > 0 {
+                *dgram_available -= 1;
+                Some((*min_pn_space, true))
+            } else {
+                Some((*min_pn_space, false))
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for LossRecoveryState {
-    fn default() -> LossRecoveryState {
-        LossRecoveryState {
+    fn default() -> Self {
+        Self {
             mode: LossRecoveryMode::None,
             callback_time: None,
         }
@@ -129,14 +143,20 @@ impl Default for LossRecoveryState {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum LossRecoveryMode {
     None,
-    LostPackets,
-    PTO,
+    LostPacketsTimer, // lost packet timer is armed.
+    PtoTimer,         // pto timer is armed
+    PtoExpired {
+        dgram_available: usize,
+        min_pn_space: PNSpace,
+    }, // pto expired, in this state we should send pto packets.
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct LossRecoverySpace {
-    tx_pn: u64,
     largest_acked: Option<u64>,
+    largest_acked_sent_time: Option<Instant>,
+    time_of_last_sent_ack_eliciting_packet: Option<Instant>,
+    ack_eliciting_outstanding: u64,
     sent_packets: BTreeMap<u64, SentPacket>,
 }
 
@@ -154,29 +174,69 @@ impl LossRecoverySpace {
         earliest
     }
 
-    // Remove all the acked packets.
-    fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> (BTreeMap<u64, SentPacket>, bool) {
+    pub fn get_largest_acked(&self) -> Option<u64> {
+        self.largest_acked
+    }
+
+    pub fn ack_eliciting_outstanding(&self) -> bool {
+        self.ack_eliciting_outstanding > 0
+    }
+
+    pub fn time_of_last_sent_ack_eliciting_packet(&self) -> Option<Instant> {
+        if self.ack_eliciting_outstanding() {
+            debug_assert!(self.time_of_last_sent_ack_eliciting_packet.is_some());
+            self.time_of_last_sent_ack_eliciting_packet
+        } else {
+            None
+        }
+    }
+
+    pub fn on_packet_sent(&mut self, packet_number: u64, sent_packet: SentPacket) {
+        if sent_packet.ack_eliciting {
+            self.time_of_last_sent_ack_eliciting_packet = Some(sent_packet.time_sent);
+            self.ack_eliciting_outstanding += 1;
+        }
+        self.sent_packets.insert(packet_number, sent_packet);
+    }
+
+    pub fn remove_packet(&mut self, pn: u64) -> Option<SentPacket> {
+        if let Some(sent) = self.sent_packets.remove(&pn) {
+            if sent.ack_eliciting {
+                debug_assert!(self.ack_eliciting_outstanding > 0);
+                self.ack_eliciting_outstanding -= 1;
+            }
+            Some(sent)
+        } else {
+            None
+        }
+    }
+
+    // Remove all the acked packets. Returns them in ascending order -- largest
+    // (i.e. highest PN) acked packet is last.
+    fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> (Vec<SentPacket>, bool) {
         let mut acked_packets = BTreeMap::new();
         let mut eliciting = false;
         for (end, start) in acked_ranges {
             // ^^ Notabug: see Frame::decode_ack_frame()
             for pn in start..=end {
-                if let Some(sent) = self.sent_packets.remove(&pn) {
+                if let Some(sent) = self.remove_packet(pn) {
                     qdebug!("acked={}", pn);
                     eliciting |= sent.ack_eliciting;
                     acked_packets.insert(pn, sent);
                 }
             }
         }
-        (acked_packets, eliciting)
+        (
+            acked_packets.into_iter().map(|(_k, v)| v).collect(),
+            eliciting,
+        )
     }
 
     /// Remove all tracked packets from the space.
-    /// This is called by a client when 0-RTT packets are dropped and when a Retry is received.
+    /// This is called by a client when 0-RTT packets are dropped, when a Retry is received
+    /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
-        // The largest acknowledged or loss_time should still be unset.
-        // The client should not have received any ACK frames when it drops 0-RTT.
-        assert!(self.largest_acked.is_none());
+        self.ack_eliciting_outstanding = 0;
         std::mem::replace(&mut self.sent_packets, BTreeMap::default())
             .into_iter()
             .map(|(_, v)| v)
@@ -212,16 +272,17 @@ impl LossRecoverySpaces {
 #[derive(Debug, Default)]
 pub(crate) struct LossRecovery {
     pto_count: u32,
-    time_of_last_sent_ack_eliciting_packet: Option<Instant>,
     rtt_vals: RttVals,
+    cc: CongestionControl,
 
     enable_timed_loss_detection: bool,
     spaces: LossRecoverySpaces,
+    loss_recovery_state: LossRecoveryState,
 }
 
 impl LossRecovery {
-    pub fn new() -> LossRecovery {
-        LossRecovery {
+    pub fn new() -> Self {
+        Self {
             rtt_vals: RttVals {
                 min_rtt: Duration::from_secs(u64::max_value()),
                 max_ack_delay: Duration::from_millis(25),
@@ -229,18 +290,22 @@ impl LossRecovery {
                 ..RttVals::default()
             },
 
-            ..LossRecovery::default()
+            ..Self::default()
         }
     }
 
-    pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
-        let val = self.spaces[pn_space].tx_pn;
-        self.spaces[pn_space].tx_pn += 1;
-        val
+    #[cfg(test)]
+    pub fn cwnd(&self) -> usize {
+        self.cc.cwnd()
     }
 
-    pub fn increment_pto_count(&mut self) {
-        self.pto_count += 1;
+    #[cfg(test)]
+    pub fn ssthresh(&self) -> usize {
+        self.cc.ssthresh()
+    }
+
+    pub fn cwnd_avail(&self) -> usize {
+        self.cc.cwnd_avail()
     }
 
     pub fn largest_acknowledged_pn(&self, pn_space: PNSpace) -> Option<u64> {
@@ -248,36 +313,30 @@ impl LossRecovery {
     }
 
     pub fn pto(&self) -> Duration {
-        self.rtt_vals.pto()
+        self.rtt_vals.pto(PNSpace::ApplicationData)
     }
 
-    pub fn drop_0rtt(&mut self) -> impl Iterator<Item = SentPacket> {
-        self.spaces[PNSpace::ApplicationData].remove_ignored()
+    pub fn drop_0rtt(&mut self) -> Vec<SentPacket> {
+        // The largest acknowledged or loss_time should still be unset.
+        // The client should not have received any ACK frames when it drops 0-RTT.
+        assert!(self.spaces[PNSpace::ApplicationData]
+            .get_largest_acked()
+            .is_none());
+        self.spaces[PNSpace::ApplicationData]
+            .remove_ignored()
+            .inspect(|p| self.cc.discard(&p))
+            .collect()
     }
 
     pub fn on_packet_sent(
         &mut self,
         pn_space: PNSpace,
         packet_number: u64,
-        ack_eliciting: bool,
-        tokens: Vec<RecoveryToken>,
-        now: Instant,
+        sent_packet: SentPacket,
     ) {
         qdebug!([self], "packet {:?}-{} sent.", pn_space, packet_number);
-        self.spaces[pn_space].sent_packets.insert(
-            packet_number,
-            SentPacket {
-                time_sent: now,
-                ack_eliciting,
-                tokens,
-                time_declared_lost: None,
-            },
-        );
-        if ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = Some(now);
-            // TODO implement cc
-            //     cc.on_packet_sent(sent_bytes)
-        }
+        self.cc.on_packet_sent(&sent_packet);
+        self.spaces[pn_space].on_packet_sent(packet_number, sent_packet);
     }
 
     /// Returns (acked packets, lost packets)
@@ -304,12 +363,14 @@ impl LossRecovery {
 
         // Track largest PN acked per space
         let space = &mut self.spaces[pn_space];
+        let prev_largest_acked_sent_time = space.largest_acked_sent_time;
         if Some(largest_acked) > space.largest_acked {
             space.largest_acked = Some(largest_acked);
 
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
-            let largest_acked_pkt = acked_packets.get(&largest_acked).expect("must be there");
+            let largest_acked_pkt = acked_packets.last().expect("must be there");
+            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
                 let latest_rtt = now - largest_acked_pkt.time_sent;
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
@@ -322,10 +383,14 @@ impl LossRecovery {
 
         self.pto_count = 0;
 
-        let acked_packets = acked_packets
-            .into_iter()
-            .map(|(_k, v)| v)
-            .collect::<Vec<_>>();
+        self.cc.on_packets_acked(&acked_packets);
+
+        self.cc.on_packets_lost(
+            now,
+            prev_largest_acked_sent_time,
+            self.rtt_vals.pto(pn_space),
+            &lost_packets,
+        );
 
         (acked_packets, lost_packets)
     }
@@ -341,13 +406,30 @@ impl LossRecovery {
         max(rtt * 9 / 8, GRANULARITY)
     }
 
+    // Calculate PTO duration
+    fn pto_timeout(&self, pn_space: PNSpace) -> Duration {
+        self.rtt_vals
+            .pto(pn_space)
+            .checked_mul(1 << self.pto_count)
+            .unwrap_or(LOCAL_IDLE_TIMEOUT * 2)
+    }
+
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self) -> Vec<SentPacket> {
+        let cc = &mut self.cc;
         self.spaces
             .iter_mut()
             .flat_map(|spc| spc.remove_ignored())
+            .inspect(|p| cc.discard(&p))
             .collect()
+    }
+
+    /// Discard state for a given packet number space.
+    pub fn discard(&mut self, pn_space: PNSpace) {
+        for p in self.spaces[pn_space].remove_ignored() {
+            self.cc.discard(&p);
+        }
     }
 
     /// Detect packets whose contents may need to be retransmitted.
@@ -366,6 +448,7 @@ impl LossRecovery {
         );
 
         let packet_space = &mut self.spaces[pn_space];
+        let largest_acked = packet_space.largest_acked;
 
         // Lost for retrans/CC purposes
         let mut lost_pns = SmallVec::<[_; 8]>::new();
@@ -373,7 +456,6 @@ impl LossRecovery {
         // Lost for we-can-actually-forget-about-it purposes
         let mut really_lost_pns = SmallVec::<[_; 8]>::new();
 
-        let largest_acked = packet_space.largest_acked;
         let current_rtt = self.rtt_vals.rtt();
         for (pn, packet) in packet_space
             .sent_packets
@@ -402,9 +484,6 @@ impl LossRecovery {
             };
 
             if lost && packet.time_declared_lost.is_none() {
-                // TODO
-                // Inform the congestion controller of lost packets.
-
                 // Track declared-lost packets for a little while, maybe they
                 // will still show up?
                 packet.time_declared_lost = Some(now);
@@ -424,8 +503,7 @@ impl LossRecovery {
 
         for pn in really_lost_pns {
             packet_space
-                .sent_packets
-                .remove(&pn)
+                .remove_packet(pn)
                 .expect("PN must be in sent_packets");
         }
 
@@ -442,52 +520,55 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub fn get_timer(&mut self) -> LossRecoveryState {
-        qdebug!([self], "get_loss_detection_timer.");
+    pub fn callback_time(&mut self) -> Option<Instant> {
+        self.loss_recovery_state.callback_time()
+    }
 
-        let has_ack_eliciting_out = self
-            .spaces
-            .iter()
-            .flat_map(|spc| spc.sent_packets.values())
-            .any(|sp| sp.ack_eliciting);
+    #[cfg(test)]
+    pub fn state_mode(&self) -> LossRecoveryMode {
+        self.loss_recovery_state.mode()
+    }
+
+    pub fn calculate_timer(&mut self) -> Option<Instant> {
+        qtrace!([self], "get_loss_detection_timer.");
+
+        let has_ack_eliciting_out = self.spaces.iter().any(|sp| sp.ack_eliciting_outstanding());
 
         qdebug!([self], "has_ack_eliciting_out={}", has_ack_eliciting_out,);
 
         if !has_ack_eliciting_out {
-            return LossRecoveryState::new(LossRecoveryMode::None, None);
+            self.loss_recovery_state = LossRecoveryState::new(LossRecoveryMode::None, None);
+            return None;
         }
 
         qinfo!(
             [self],
-            "sent packets {} {} {}",
+            "sent packets init:({} ack_eliciting:{}), hs:({} ack_eliciting:{}), app:({} ack_eliciting:{})",
             self.spaces[PNSpace::Initial].sent_packets.len(),
+            self.spaces[PNSpace::Initial].ack_eliciting_outstanding(),
             self.spaces[PNSpace::Handshake].sent_packets.len(),
-            self.spaces[PNSpace::ApplicationData].sent_packets.len()
+            self.spaces[PNSpace::Handshake].ack_eliciting_outstanding(),
+            self.spaces[PNSpace::ApplicationData].sent_packets.len(),
+            self.spaces[PNSpace::ApplicationData].ack_eliciting_outstanding()
         );
 
         // QUIC only has one timer, but it does double duty because it falls
         // back to other uses if first use is not needed: first the loss
         // detection timer, and then the probe timeout (PTO).
 
-        let (mode, maybe_timer) = if let Some((_, earliest_time)) = self.get_earliest_loss_time() {
-            (LossRecoveryMode::LostPackets, Some(earliest_time))
+        self.loss_recovery_state = if let Some((_, earliest_time)) = self.get_earliest_loss_time() {
+            LossRecoveryState::new(LossRecoveryMode::LostPacketsTimer, Some(earliest_time))
         } else {
-            // Calculate PTO duration
-            let timeout = self.rtt_vals.pto() * 2_u32.pow(self.pto_count);
-            (
-                LossRecoveryMode::PTO,
-                self.time_of_last_sent_ack_eliciting_packet
-                    .map(|i| i + timeout),
-            )
+            LossRecoveryState::new(LossRecoveryMode::PtoTimer, self.get_min_pto())
         };
 
         qdebug!(
             [self],
             "loss_detection_timer mode={:?} timer={:?}",
-            mode,
-            maybe_timer
+            self.loss_recovery_state.mode(),
+            self.loss_recovery_state.callback_time()
         );
-        LossRecoveryState::new(mode, maybe_timer)
+        self.loss_recovery_state.callback_time()
     }
 
     /// Find when the earliest sent packet should be considered lost.
@@ -509,6 +590,87 @@ impl LossRecovery {
             .min_by_key(|&(_, time)| time)
             .map(|(spc, val)| (spc, val + self.loss_delay()))
     }
+
+    fn pto_time_for_pn(&self, pn_space: PNSpace) -> Option<Instant> {
+        if let Some(time) = self.spaces[pn_space].time_of_last_sent_ack_eliciting_packet() {
+            Some(time + self.pto_timeout(pn_space))
+        } else {
+            None
+        }
+    }
+
+    /// Find when the last ack eliciting packet was sent.
+    pub fn get_min_pto(&self) -> Option<Instant> {
+        // TODO ignore PNSpace::Application until handshake is done -> a server side problem.
+        PNSpace::iter()
+            .filter_map(|spc| self.pto_time_for_pn(*spc))
+            .min_by_key(|&time| time)
+    }
+
+    pub fn get_min_pto_pn_space(&self, now: Instant) -> Option<PNSpace> {
+        PNSpace::iter()
+            .filter_map(|spc| {
+                if let Some(time) = self.pto_time_for_pn(*spc) {
+                    if time <= now {
+                        Some(*spc)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .min_by_key(|&spc| spc)
+    }
+
+    pub fn check_loss_detection_timeout(&mut self, now: Instant) -> Option<Vec<SentPacket>> {
+        qdebug!([self], "check_loss_timeouts");
+
+        if self.loss_recovery_state.mode() == LossRecoveryMode::None {
+            // LR not the active timer
+            return None;
+        }
+
+        if self.callback_time() > Some(now) {
+            // LR timer, but hasn't expired.
+            return None;
+        }
+
+        // Timer expired and LR was active timer.
+        match self.loss_recovery_state.mode() {
+            LossRecoveryMode::None => unreachable!(),
+            LossRecoveryMode::LostPacketsTimer => {
+                // Time threshold loss detection
+                let (pn_space, _) = self
+                    .get_earliest_loss_time()
+                    .expect("must be sent packets if in LostPackets mode");
+                return Some(self.detect_lost_packets(pn_space, now));
+            }
+            LossRecoveryMode::PtoTimer => {
+                qinfo!(
+                    [self],
+                    "check_loss_detection_timeout -send_one_or_two_packets"
+                );
+
+                if let Some(min_pn_space) = self.get_min_pto_pn_space(now) {
+                    self.loss_recovery_state = LossRecoveryState::new(
+                        LossRecoveryMode::PtoExpired {
+                            dgram_available: 1,
+                            min_pn_space,
+                        },
+                        Some(now),
+                    );
+                    self.pto_count += 1;
+                }
+            }
+            _ => {} // We are already in PtoExpired state
+        }
+        None
+    }
+
+    pub fn get_pto_state(&mut self) -> Option<(PNSpace, bool)> {
+        self.loss_recovery_state.get_pto_state()
+    }
 }
 
 impl ::std::fmt::Display for LossRecovery {
@@ -522,6 +684,8 @@ mod tests {
     use super::*;
     use std::convert::TryInto;
     use std::time::{Duration, Instant};
+
+    const ON_SENT_SIZE: usize = 100;
 
     fn assert_rtts(
         lr: &LossRecovery,
@@ -595,20 +759,24 @@ mod tests {
 
     fn pace(lr: &mut LossRecovery, count: u64) {
         for pn in 0..count {
-            lr.on_packet_sent(PNSpace::ApplicationData, pn, true, Vec::new(), pn_time(pn));
+            lr.on_packet_sent(
+                PNSpace::ApplicationData,
+                pn,
+                SentPacket::new(pn_time(pn), true, Vec::new(), ON_SENT_SIZE, true),
+            );
         }
     }
 
     const ACK_DELAY: Duration = ms!(24);
     /// Acknowledge PN with the identified delay.
-    fn ack(lr: &mut LossRecovery, pn: u64, delay: Duration) -> (Vec<SentPacket>, Vec<SentPacket>) {
+    fn ack(lr: &mut LossRecovery, pn: u64, delay: Duration) {
         lr.on_ack_received(
             PNSpace::ApplicationData,
             pn,
             vec![(pn, pn)],
             ACK_DELAY,
             pn_time(pn) + delay,
-        )
+        );
     }
 
     #[test]
@@ -709,13 +877,21 @@ mod tests {
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
         // pn 0 should then be marked lost because it is then outstanding for 5RTT/4
         // the loss time for packets is 9RTT/8.
-        lr.on_packet_sent(PNSpace::ApplicationData, 0, true, Vec::new(), pn_time(0));
+        lr.on_packet_sent(
+            PNSpace::ApplicationData,
+            0,
+            SentPacket::new(pn_time(0), true, Vec::new(), ON_SENT_SIZE, true),
+        );
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             1,
-            true,
-            Vec::new(),
-            pn_time(0) + INITIAL_RTT / 4,
+            SentPacket::new(
+                pn_time(0) + INITIAL_RTT / 4,
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+                true,
+            ),
         );
         let (_, lost) = lr.on_ack_received(
             PNSpace::ApplicationData,
@@ -751,11 +927,11 @@ mod tests {
         assert_sent_times(&lr, None, None, Some(pn1_sent_time));
 
         // After time elapses, pn 1 is marked lost.
-        let lr_state = lr.get_timer();
+        let callback_time = lr.calculate_timer();
         let pn1_lost_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
-        assert_eq!(lr_state.callback_time, Some(pn1_lost_time));
-        match lr_state.mode {
-            LossRecoveryMode::LostPackets => {
+        assert_eq!(callback_time, Some(pn1_lost_time));
+        match lr.state_mode() {
+            LossRecoveryMode::LostPacketsTimer => {
                 let packets = lr.detect_lost_packets(PNSpace::ApplicationData, pn1_lost_time);
 
                 assert_eq!(packets.len(), 1)

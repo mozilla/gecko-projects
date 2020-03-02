@@ -131,6 +131,12 @@ nsPartChannel::Cancel(nsresult aStatus) {
 }
 
 NS_IMETHODIMP
+nsPartChannel::GetCanceled(bool* aCanceled) {
+  *aCanceled = NS_FAILED(mStatus);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsPartChannel::Suspend(void) {
   // Suspending an individual part must not suspend the underlying
   // multipart channel...
@@ -195,6 +201,16 @@ NS_IMETHODIMP
 nsPartChannel::SetLoadFlags(nsLoadFlags aLoadFlags) {
   mLoadFlags = aLoadFlags;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPartChannel::GetTRRMode(nsIRequest::TRRMode* aTRRMode) {
+  return GetTRRModeImpl(aTRRMode);
+}
+
+NS_IMETHODIMP
+nsPartChannel::SetTRRMode(nsIRequest::TRRMode aTRRMode) {
+  return SetTRRModeImpl(aTRRMode);
 }
 
 NS_IMETHODIMP
@@ -658,7 +674,7 @@ nsresult nsMultiMixedConv::ConsumeToken(Token const& token) {
         return rv;
       }
       mParserState = BODY;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case BODY: {
       if (!token.Equals(mLFToken) && !token.Equals(mCRLFToken)) {

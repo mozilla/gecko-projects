@@ -20,9 +20,6 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ISUPPORTS_INHERITED0(MediaControlKeysManager,
-                             MediaControlKeysEventSource)
-
 bool MediaControlKeysManager::IsOpened() const {
   // As MediaControlKeysManager represents a platform-indenpendent event source,
   // which we can use to add other listeners to moniter media key events, we
@@ -56,14 +53,14 @@ void MediaControlKeysManager::StartMonitoringControlKeys() {
     mEventSource = widget::CreateMediaControlKeysEventSource();
   }
 
-  // TODO : now we only have implemented the event source on OSX, so we won't
-  // get the event source on other platforms. Once we finish implementation on
-  // all platforms, remove this `if` checks and use `assertion` to make sure the
-  // source alway exists.
+  // When cross-compiling with MinGW, we cannot use the related WinAPI, thus
+  // mEventSource might be null there.
   if (mEventSource && !mEventSource->IsOpened()) {
     LOG("StartMonitoringControlKeys");
-    mEventSource->Open();
-    mEventSource->AddListener(this);
+    if (mEventSource->Open()) {
+      mEventSource->SetPlaybackState(mPlaybackState);
+      mEventSource->AddListener(this);
+    }
   }
 }
 
@@ -88,6 +85,22 @@ void MediaControlKeysManager::OnKeyPressed(MediaControlKeysEvent aKeyEvent) {
   for (auto listener : mListeners) {
     listener->OnKeyPressed(aKeyEvent);
   }
+}
+
+void MediaControlKeysManager::SetPlaybackState(PlaybackState aState) {
+  if (mEventSource && mEventSource->IsOpened()) {
+    mEventSource->SetPlaybackState(aState);
+  } else {
+    // If the event source hasn't been created or been opened yet, we would
+    // cache the state, and set it again when creating the event source.
+    mPlaybackState = aState;
+  }
+}
+
+PlaybackState MediaControlKeysManager::GetPlaybackState() const {
+  return (mEventSource && mEventSource->IsOpened())
+             ? mEventSource->GetPlaybackState()
+             : mPlaybackState;
 }
 
 }  // namespace dom

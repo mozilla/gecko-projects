@@ -55,28 +55,31 @@
 // traversed.
 
 #include "mozilla/CycleCollectedJSRuntime.h"
+
 #include <algorithm>
+#include <utility>
+
+#include "GeckoProfiler.h"
+#include "js/Debug.h"
+#include "js/GCAPI.h"
+#include "js/Warnings.h"  // JS::SetWarningReporter
+#include "jsfriendapi.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/CycleCollectedJSContext.h"
-#include "mozilla/Move.h"
+#include "mozilla/DebuggerOnGCRunnable.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/TimelineMarker.h"
 #include "mozilla/Unused.h"
-#include "mozilla/DebuggerOnGCRunnable.h"
 #include "mozilla/dom/DOMJSClass.h"
 #include "mozilla/dom/ProfileTimelineMarkerBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/PromiseDebugging.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "js/Debug.h"
-#include "js/GCAPI.h"
-#include "js/Warnings.h"  // JS::SetWarningReporter
-#include "jsfriendapi.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollectionParticipant.h"
@@ -84,9 +87,8 @@
 #include "nsDOMJSUtils.h"
 #include "nsExceptionHandler.h"
 #include "nsJSUtils.h"
-#include "nsWrapperCache.h"
 #include "nsStringBuffer.h"
-#include "GeckoProfiler.h"
+#include "nsWrapperCache.h"
 
 #ifdef MOZ_GECKO_PROFILER
 #  include "ProfilerMarkerPayload.h"
@@ -472,7 +474,8 @@ static void MozCrashWarningReporter(JSContext*, JSErrorReport*) {
 }
 
 CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSContext* aCx)
-    : mGCThingCycleCollectorGlobal(sGCThingCycleCollectorGlobal),
+    : mContext(nullptr),
+      mGCThingCycleCollectorGlobal(sGCThingCycleCollectorGlobal),
       mJSZoneCycleCollectorGlobal(sJSZoneCycleCollectorGlobal),
       mJSRuntime(JS_GetRuntime(aCx)),
       mHasPendingIdleGCTask(false),
@@ -573,12 +576,9 @@ CycleCollectedJSRuntime::~CycleCollectedJSRuntime() {
   MOZ_ASSERT(mShutdownCalled);
 }
 
-void CycleCollectedJSRuntime::AddContext(CycleCollectedJSContext* aContext) {
-  mContexts.insertBack(aContext);
-}
-
-void CycleCollectedJSRuntime::RemoveContext(CycleCollectedJSContext* aContext) {
-  aContext->removeFrom(mContexts);
+void CycleCollectedJSRuntime::SetContext(CycleCollectedJSContext* aContext) {
+  MOZ_ASSERT(!mContext || !aContext, "Don't replace the context!");
+  mContext = aContext;
 }
 
 size_t CycleCollectedJSRuntime::SizeOfExcludingThis(
@@ -594,10 +594,6 @@ size_t CycleCollectedJSRuntime::SizeOfExcludingThis(
 }
 
 void CycleCollectedJSRuntime::UnmarkSkippableJSHolders() {
-  // Prevent nsWrapperCaches accessed under CanSkip from adding recorded events
-  // which might not replay in the same order.
-  recordreplay::AutoDisallowThreadEvents disallow;
-
   for (auto iter = mJSHolders.Iter(); !iter.Done(); iter.Next()) {
     void* holder = iter.Get().mHolder;
     nsScriptObjectTracer* tracer = iter.Get().mTracer;
@@ -1161,7 +1157,7 @@ void CycleCollectedJSRuntime::JSObjectsTenured() {
   for (auto iter = mNurseryObjects.Iter(); !iter.Done(); iter.Next()) {
     nsWrapperCache* cache = iter.Get();
     JSObject* wrapper = cache->GetWrapperMaybeDead();
-    MOZ_DIAGNOSTIC_ASSERT(wrapper || recordreplay::IsReplaying());
+    MOZ_DIAGNOSTIC_ASSERT(wrapper);
     if (!JS::ObjectIsTenured(wrapper)) {
       MOZ_ASSERT(!cache->PreservingWrapper());
       js::gc::FinalizeDeadNurseryObject(cx, wrapper);
@@ -1252,9 +1248,6 @@ void IncrementalFinalizeRunnable::ReleaseNow(bool aLimited) {
                "We should have at least ReleaseSliceNow to run");
     MOZ_ASSERT(mFinalizeFunctionToRun < mDeferredFinalizeFunctions.Length(),
                "No more finalizers to run?");
-    if (recordreplay::IsRecordingOrReplaying()) {
-      aLimited = false;
-    }
 
     TimeDuration sliceTime = TimeDuration::FromMilliseconds(SliceMillis);
     TimeStamp started = aLimited ? TimeStamp::Now() : TimeStamp();

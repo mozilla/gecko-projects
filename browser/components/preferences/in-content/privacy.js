@@ -222,17 +222,8 @@ function dataCollectionCheckboxHandler({
       checkbox.removeAttribute("checked");
     }
 
-    // We can't use checkbox.disabled here because the XBL binding may not be present,
-    // in which case setting the property won't work properly.
-    if (
-      !collectionEnabled ||
-      Services.prefs.prefIsLocked(pref) ||
-      isDisabled()
-    ) {
-      checkbox.setAttribute("disabled", "true");
-    } else {
-      checkbox.removeAttribute("disabled");
-    }
+    checkbox.disabled =
+      !collectionEnabled || Services.prefs.prefIsLocked(pref) || isDisabled();
   }
 
   Preferences.get(PREF_UPLOAD_ENABLED).on("change", updateCheckbox);
@@ -1929,7 +1920,7 @@ var gPrivacyPane = {
    */
   showPasswords() {
     if (LoginHelper.managementURI) {
-      let loginManager = window.getWindowGlobalChild().getActor("LoginManager");
+      let loginManager = window.windowGlobalChild.getActor("LoginManager");
       loginManager.sendAsyncMessage("PasswordManager:OpenPreferences", {
         entryPoint: "preferences",
       });
@@ -2047,7 +2038,7 @@ var gPrivacyPane = {
           x =>
             x !== "goog-unwanted-proto" &&
             x !== "goog-unwanted-shavar" &&
-            x !== "test-unwanted-simple"
+            x !== "moztest-unwanted-simple"
         );
 
       if (blockUncommonUnwanted.checked) {
@@ -2057,7 +2048,7 @@ var gPrivacyPane = {
           malware.push("goog-unwanted-proto");
         }
 
-        malware.push("test-unwanted-simple");
+        malware.push("moztest-unwanted-simple");
       }
 
       // sort alphabetically to keep the pref consistent

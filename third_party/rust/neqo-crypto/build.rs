@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::pedantic)]
 
 use bindgen::Builder;
 use serde_derive::Deserialize;
@@ -62,18 +63,17 @@ fn setup_clang() {
     if env::var("LIBCLANG_PATH").is_ok() {
         return;
     }
-    let mozbuild_root = match env::var("MOZBUILD_STATE_PATH") {
-        Ok(dir) => PathBuf::from(dir.trim()),
-        _ => {
-            eprintln!("warning: Building without a gecko setup is not likely to work.");
-            eprintln!("         A working libclang is needed to build neqo.");
-            eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-            eprintln!("");
-            eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
-            eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
-            eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");
-            return;
-        }
+    let mozbuild_root = if let Ok(dir) = env::var("MOZBUILD_STATE_PATH") {
+        PathBuf::from(dir.trim())
+    } else {
+        eprintln!("warning: Building without a gecko setup is not likely to work.");
+        eprintln!("         A working libclang is needed to build neqo.");
+        eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
+        eprintln!("");
+        eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
+        eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
+        eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");
+        return;
     };
     let libclang_dir = mozbuild_root.join("clang").join("lib");
     if libclang_dir.is_dir() {
@@ -85,34 +85,33 @@ fn setup_clang() {
 }
 
 fn nss_dir() -> PathBuf {
-    let dir = match env::var("NSS_DIR") {
-        Ok(dir) => PathBuf::from(dir.trim()),
-        _ => {
-            let out_dir = env::var("OUT_DIR").unwrap();
-            let dir = Path::new(&out_dir).join("nss");
-            if !dir.exists() {
-                Command::new("hg")
-                    .args(&[
-                        "clone",
-                        "https://hg.mozilla.org/projects/nss",
-                        dir.to_str().unwrap(),
-                    ])
-                    .status()
-                    .expect("can't clone nss");
-            }
-            let nspr_dir = Path::new(&out_dir).join("nspr");
-            if !nspr_dir.exists() {
-                Command::new("hg")
-                    .args(&[
-                        "clone",
-                        "https://hg.mozilla.org/projects/nspr",
-                        nspr_dir.to_str().unwrap(),
-                    ])
-                    .status()
-                    .expect("can't clone nspr");
-            }
-            dir.to_path_buf()
+    let dir = if let Ok(dir) = env::var("NSS_DIR") {
+        PathBuf::from(dir.trim())
+    } else {
+        let out_dir = env::var("OUT_DIR").unwrap();
+        let dir = Path::new(&out_dir).join("nss");
+        if !dir.exists() {
+            Command::new("hg")
+                .args(&[
+                    "clone",
+                    "https://hg.mozilla.org/projects/nss",
+                    dir.to_str().unwrap(),
+                ])
+                .status()
+                .expect("can't clone nss");
         }
+        let nspr_dir = Path::new(&out_dir).join("nspr");
+        if !nspr_dir.exists() {
+            Command::new("hg")
+                .args(&[
+                    "clone",
+                    "https://hg.mozilla.org/projects/nspr",
+                    nspr_dir.to_str().unwrap(),
+                ])
+                .status()
+                .expect("can't clone nspr");
+        }
+        dir.to_path_buf()
     };
     assert!(dir.is_dir());
     // Note that this returns a relative path because UNC
@@ -130,18 +129,18 @@ fn get_bash() -> PathBuf {
 }
 
 fn build_nss(dir: PathBuf) {
-    let mut build_nss = vec![String::from("./build.sh")];
+    let mut build_nss = vec![
+        String::from("./build.sh"),
+        String::from("-Ddisable_tests=1"),
+    ];
     if is_debug() {
         build_nss.push(String::from("--static"));
     } else {
         build_nss.push(String::from("-o"));
     }
-    match env::var("NSS_JOBS") {
-        Ok(d) => {
-            build_nss.push(String::from("-j"));
-            build_nss.push(d);
-        }
-        _ => (),
+    if let Ok(d) = env::var("NSS_JOBS") {
+        build_nss.push(String::from("-j"));
+        build_nss.push(d);
     }
     let status = Command::new(get_bash())
         .args(build_nss)
@@ -171,17 +170,11 @@ fn dynamic_link_both(extra_libs: &[&str]) {
     }
 }
 
-fn static_link(nsstarget: &PathBuf) {
-    let lib_dir = nsstarget.join("lib");
-    println!(
-        "cargo:rustc-link-search=native={}",
-        lib_dir.to_str().unwrap()
-    );
+fn static_link() {
     let mut static_libs = vec![
         "certdb",
         "certhi",
         "cryptohi",
-        "dbm",
         "freebl",
         "nss_static",
         "nssb",
@@ -304,9 +297,8 @@ fn setup_standalone() -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-
     if is_debug() {
-        static_link(&nsstarget);
+        static_link();
     } else {
         dynamic_link();
     }
@@ -322,12 +314,15 @@ fn setup_standalone() -> Vec<String> {
 fn setup_for_gecko() -> Vec<String> {
     let mut flags: Vec<String> = Vec::new();
 
-    let libs = match env::var("CARGO_CFG_TARGET_OS").as_ref().map(|x| x.as_str()) {
+    let libs = match env::var("CARGO_CFG_TARGET_OS")
+        .as_ref()
+        .map(std::string::String::as_str)
+    {
         Ok("android") | Ok("macos") => vec!["nss3"],
         _ => vec!["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"],
     };
 
-    for lib in libs.iter() {
+    for lib in &libs {
         println!("cargo:rustc-link-lib=dylib={}", lib);
     }
 
@@ -361,7 +356,7 @@ fn setup_for_gecko() -> Vec<String> {
         flags = fs::read_to_string(flags_path)
             .expect("Failed to read extra-bindgen-flags file")
             .split_whitespace()
-            .map(|s| s.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
             .collect();
 
         flags.push(String::from("-include"));
@@ -374,7 +369,7 @@ fn setup_for_gecko() -> Vec<String> {
                 .to_string(),
         );
     } else {
-        println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
+        println!("cargo:warning=MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
     }
     flags
 }

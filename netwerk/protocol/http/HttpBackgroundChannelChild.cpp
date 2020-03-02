@@ -102,10 +102,19 @@ bool HttpBackgroundChannelChild::IsWaitingOnStartRequest() {
   MOZ_ASSERT(OnSocketThread());
   // Need to wait for OnStartRequest if it is sent by
   // parent process but not received by content process.
-  return !mStartReceived;
+  return (mStartSent && !mStartReceived);
 }
 
 // PHttpBackgroundChannelChild
+IPCResult HttpBackgroundChannelChild::RecvOnStartRequestSent() {
+  LOG(("HttpBackgroundChannelChild::RecvOnStartRequestSent [this=%p]\n", this));
+  MOZ_ASSERT(OnSocketThread());
+  MOZ_ASSERT(!mStartSent);  // Should only receive this message once.
+
+  mStartSent = true;
+  return IPC_OK();
+}
+
 IPCResult HttpBackgroundChannelChild::RecvOnTransportAndData(
     const nsresult& aChannelStatus, const nsresult& aTransportStatus,
     const uint64_t& aOffset, const uint32_t& aCount, const nsCString& aData) {
@@ -242,7 +251,8 @@ void HttpBackgroundChannelChild::ActorDestroy(ActorDestroyReason aWhy) {
     mQueuedRunnables.AppendElement(NS_NewRunnableFunction(
         "HttpBackgroundChannelChild::ActorDestroy", [self]() {
           MOZ_ASSERT(OnSocketThread());
-          RefPtr<HttpChannelChild> channelChild = self->mChannelChild.forget();
+          RefPtr<HttpChannelChild> channelChild =
+              std::move(self->mChannelChild);
 
           if (channelChild) {
             channelChild->OnBackgroundChildDestroyed(self);
@@ -252,7 +262,7 @@ void HttpBackgroundChannelChild::ActorDestroy(ActorDestroyReason aWhy) {
   }
 
   if (mChannelChild) {
-    RefPtr<HttpChannelChild> channelChild = mChannelChild.forget();
+    RefPtr<HttpChannelChild> channelChild = std::move(mChannelChild);
 
     channelChild->OnBackgroundChildDestroyed(this);
   }

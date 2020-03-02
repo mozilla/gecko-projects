@@ -44,7 +44,7 @@ fn test_switch_device_in_scope(scope: Scope) {
         scope
     );
 
-    let device_switcher = TestDeviceSwitcher::new(scope.clone());
+    let mut device_switcher = TestDeviceSwitcher::new(scope.clone());
 
     let count = Arc::new(Mutex::new(0));
     let also_count = Arc::clone(&count);
@@ -59,7 +59,7 @@ fn test_switch_device_in_scope(scope: Scope) {
     test_get_started_stream_in_scope(scope.clone(), move |_stream| loop {
         thread::sleep(Duration::from_millis(500));
         changed_watcher.prepare();
-        assert!(device_switcher.next().unwrap());
+        device_switcher.next();
         changed_watcher.wait_for_change();
         if changed_watcher.current_result() >= devices.len() {
             break;
@@ -337,6 +337,7 @@ fn test_register_device_changed_callback_to_check_default_device_changed(stm_typ
 
     if !run_available {
         println!("No enough devices to run the test!");
+        return;
     }
 
     let changed_count = Arc::new(Mutex::new(0u32));
@@ -354,8 +355,8 @@ fn test_register_device_changed_callback_to_check_default_device_changed(stm_typ
         0
     };
 
-    let input_device_switcher = TestDeviceSwitcher::new(Scope::Input);
-    let output_device_switcher = TestDeviceSwitcher::new(Scope::Output);
+    let mut input_device_switcher = TestDeviceSwitcher::new(Scope::Input);
+    let mut output_device_switcher = TestDeviceSwitcher::new(Scope::Output);
 
     test_get_stream_with_device_changed_callback(
         "stream: test callback for default device changed",
@@ -378,7 +379,7 @@ fn test_register_device_changed_callback_to_check_default_device_changed(stm_typ
                 // switching for the default device again will be ignored.
                 while stream.switching_device.load(atomic::Ordering::SeqCst) {}
                 changed_watcher.prepare();
-                assert!(input_device_switcher.next().unwrap());
+                input_device_switcher.next();
                 changed_watcher.wait_for_change();
             }
 
@@ -387,7 +388,7 @@ fn test_register_device_changed_callback_to_check_default_device_changed(stm_typ
                 // switching for the default device again will be ignored.
                 while stream.switching_device.load(atomic::Ordering::SeqCst) {}
                 changed_watcher.prepare();
-                assert!(output_device_switcher.next().unwrap());
+                output_device_switcher.next();
                 changed_watcher.wait_for_change();
             }
         },

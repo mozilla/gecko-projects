@@ -40,10 +40,16 @@ function TargetMixin(parentClass) {
 
       this.threadFront = null;
 
-      // By default, we close the DebuggerClient of local tabs which
+      // This promise is exposed to consumers that want to wait until the thread
+      // front is available and attached.
+      this.onThreadAttached = new Promise(
+        r => (this._resolveOnThreadAttached = r)
+      );
+
+      // By default, we close the DevToolsClient of local tabs which
       // are instanciated from TargetFactory module.
       // This flag will also be set on local targets opened from about:debugging,
-      // for which a dedicated DebuggerClient is also created.
+      // for which a dedicated DevToolsClient is also created.
       this.shouldCloseClient = this.isLocalTab;
 
       this._client = client;
@@ -308,14 +314,6 @@ function TargetMixin(parentClass) {
       return !this.window;
     }
 
-    get canRewind() {
-      return this.traits && this.traits.canRewind;
-    }
-
-    isReplayEnabled() {
-      return this.canRewind && this.isLocalTab;
-    }
-
     getExtensionPathName(url) {
       // Return the url if the target is not a webextension.
       if (!this.isWebExtension) {
@@ -366,6 +364,10 @@ function TargetMixin(parentClass) {
       const result = await this.threadFront.attach(options);
 
       this.threadFront.on("newSource", this._onNewSource);
+
+      // Resolve the onThreadAttached promise so that consumers that need to
+      // wait for the thread to be attached can resume.
+      this._resolveOnThreadAttached();
 
       return [result, this.threadFront];
     }
