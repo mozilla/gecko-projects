@@ -159,6 +159,15 @@
   ${EndIf}
 !endif
 
+!ifdef MOZ_UPDATE_AGENT
+  ${PushRegisterUpdateAgentTaskCommand}
+  Pop $0
+  ${If} "$0" != ""
+    nsExec::Exec $0
+    Pop $0
+  ${EndIf}
+!endif
+
 !ifdef MOZ_LAUNCHER_PROCESS
   ${ResetLauncherProcessDefaults}
 !endif
@@ -1377,6 +1386,7 @@
   Push "minidump-analyzer.exe"
   Push "pingsender.exe"
   Push "updater.exe"
+  Push "updateagent.exe"
   Push "${FileMainEXE}"
 !macroend
 !define PushFilesToCheck "!insertmacro PushFilesToCheck"
@@ -1640,4 +1650,41 @@ FunctionEnd
   DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Browser"
 !macroend
 !define ResetLauncherProcessDefaults "!insertmacro ResetLauncherProcessDefaults"
+!endif
+
+!ifdef MOZ_UPDATE_AGENT
+; Push, onto the stack, the command line used to register the update agent scheduled task.
+; InitHashAppModelId must have already been called to set $AppUserModelID; if that is
+; empty then an empty string will be pushed instead.
+; This uses the update-task command of updateagent.exe, rather than register-task, in
+; case the task already existed.
+!macro PushRegisterUpdateAgentTaskCommand
+  Push $0
+  Push $1
+
+  Call IsUserAdmin
+  Pop $0
+  ; Register the update agent to run as Local Service if the user is an admin...
+  ${If} $0 == "true"
+  ; ...and if we have HKLM write access
+  ${AndIf} $TmpVal == "HKLM"
+    StrCpy $1 "update-task-local-service"
+  ${Else}
+    ; Otherwise attempt to register the task for the current user.
+    ; If we had previously registered the task while elevated, then we won't
+    ; be able to replace it now with another task of the same name, so this
+    ; will fail harmlessly.
+    StrCpy $1 "update-task"
+  ${EndIf}
+
+  ${If} "$AppUserModelID" != ""
+    StrCpy $0 '"$INSTDIR\updateagent.exe" $1 "${UpdateAgentFullName} $AppUserModelID" "$AppUserModelID" "$INSTDIR"'
+  ${Else}
+    StrCpy $0 ''
+  ${EndIf}
+
+  Pop $1
+  Exch $0
+!macroend
+!define PushRegisterUpdateAgentTaskCommand "!insertmacro PushRegisterUpdateAgentTaskCommand"
 !endif
