@@ -2667,7 +2667,7 @@ static bool VerifyGlobalNames(JSContext* cx, Handle<GlobalObject*> shg) {
     if (base->isLazyScript()) {
       continue;
     }
-    JSScript* script = static_cast<JSScript*>(base.get());
+    JSScript* script = base->asJSScript();
 
     for (BytecodeLocation loc : AllBytecodesIterable(script)) {
       JSOp op = loc.getOp();
@@ -3063,7 +3063,7 @@ bool JSRuntime::createLazySelfHostedFunctionClone(
     funName = selfHostedFun->explicitName();
   }
 
-  fun.set(NewScriptedFunction(cx, nargs, FunctionFlags::INTERPRETED, funName,
+  fun.set(NewScriptedFunction(cx, nargs, FunctionFlags::BASESCRIPT, funName,
                               proto, gc::AllocKind::FUNCTION_EXTENDED,
                               newKind));
   if (!fun) {
@@ -3111,7 +3111,7 @@ bool JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx,
                                sourceObject)) {
     return false;
   }
-  MOZ_ASSERT(targetFun->hasScript());
+  MOZ_ASSERT(targetFun->hasBytecode());
 
   MOZ_ASSERT(sourceFun->nargs() == targetFun->nargs());
   MOZ_ASSERT(sourceScript->hasRest() == targetFun->baseScript()->hasRest());

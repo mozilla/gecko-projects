@@ -164,13 +164,12 @@
       "characterSet",
       "fullZoom",
       "textZoom",
+      "tabHasCustomZoom",
       "webProgress",
       "addProgressListener",
       "removeProgressListener",
       "audioPlaybackStarted",
       "audioPlaybackStopped",
-      "pauseMedia",
-      "stopMedia",
       "resumeMedia",
       "mute",
       "unmute",
@@ -2214,6 +2213,9 @@
           case "fullZoom":
           case "textZoom":
             getter = () => 1;
+            break;
+          case "tabHasCustomZoom":
+            getter = () => false;
             break;
           case "getTabBrowser":
             getter = () => () => this;
@@ -5959,8 +5961,8 @@
             this.mBrowser.userTypedValue = null;
 
             let isNavigating = this.mBrowser.isNavigating;
-            if (this.mTab.selected && gURLBar && !isNavigating) {
-              URLBarSetURI();
+            if (this.mTab.selected && !isNavigating) {
+              gURLBar.setURI();
             }
           } else if (isSuccessful) {
             this.mBrowser.urlbarChangeTracker.finishedLoad();

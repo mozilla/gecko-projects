@@ -12,6 +12,9 @@ const { XPCOMUtils } = ChromeUtils.import(
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   MigrationUtils: "resource:///modules/MigrationUtils.jsm",
+  FxAccounts: "resource://gre/modules/FxAccounts.jsm",
+  AboutWelcomeTelemetry:
+    "resource://activity-stream/aboutwelcome/lib/AboutWelcomeTelemetry.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
@@ -20,6 +23,12 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
   );
   return new AboutWelcomeLog("AboutWelcomeParent.jsm");
 });
+
+XPCOMUtils.defineLazyGetter(
+  this,
+  "Telemetry",
+  () => new AboutWelcomeTelemetry()
+);
 
 class AboutWelcomeParent extends JSWindowActorParent {
   /**
@@ -33,14 +42,27 @@ class AboutWelcomeParent extends JSWindowActorParent {
   onContentMessage(type, data, browser, window) {
     log.debug(`Received content event: ${type}`);
     switch (type) {
+      case "AWPage:OPEN_AWESOME_BAR":
+        window.gURLBar.search("");
+        break;
+      case "AWPage:OPEN_PRIVATE_BROWSER_WINDOW":
+        window.OpenBrowserWindow({ private: true });
+        break;
       case "AWPage:SHOW_MIGRATION_WIZARD":
         MigrationUtils.showMigrationWizard(window, [
           MigrationUtils.MIGRATION_ENTRYPOINT_NEWTAB,
         ]);
         break;
+      case "AWPage:FXA_METRICS_FLOW_URI":
+        return FxAccounts.config.promiseMetricsFlowURI("aboutwelcome");
+      case "AWPage:TELEMETRY_EVENT":
+        Telemetry.sendTelemetry(data);
+        break;
       default:
         log.debug(`Unexpected event ${type} was not handled.`);
     }
+
+    return undefined;
   }
 
   /**
@@ -55,9 +77,10 @@ class AboutWelcomeParent extends JSWindowActorParent {
     if (this.manager.rootFrameLoader) {
       browser = this.manager.rootFrameLoader.ownerElement;
       window = browser.ownerGlobal;
-      this.onContentMessage(name, data, browser, window);
-    } else {
-      log.warn(`Not handling ${name} because the browser doesn't exist.`);
+      return this.onContentMessage(name, data, browser, window);
     }
+
+    log.warn(`Not handling ${name} because the browser doesn't exist.`);
+    return null;
   }
 }

@@ -277,7 +277,6 @@ XDRResult LazyScript::XDRScriptData(XDRState<mode>* xdr,
         }
         MOZ_TRY(XDRInterpretedFunction(xdr, nullptr, sourceObject, &func));
         if (mode == XDR_DECODE) {
-          MOZ_ASSERT(func->isInterpretedLazy());
           func->setEnclosingLazyScript(lazy);
 
           elem = JS::GCCellPtr(func);
@@ -665,9 +664,9 @@ js::ScriptSource* js::BaseScript::maybeForwardedScriptSource() const {
       .source();
 }
 
-void js::BaseScript::setEnclosingLazyScript(LazyScript* enclosingLazyScript) {
-  MOZ_ASSERT(enclosingLazyScript);
-  warmUpData_.initEnclosingScript(enclosingLazyScript);
+void js::BaseScript::setEnclosingScript(BaseScript* enclosingScript) {
+  MOZ_ASSERT(enclosingScript);
+  warmUpData_.initEnclosingScript(enclosingScript);
 }
 
 void js::BaseScript::setEnclosingScope(Scope* enclosingScope) {
@@ -684,7 +683,7 @@ void js::BaseScript::finalize(JSFreeOp* fop) {
   // per-zone maps. Note that a failed compilation must not have entries since
   // the script itself will not be marked as having bytecode.
   if (hasBytecode()) {
-    JSScript* script = static_cast<JSScript*>(this);
+    JSScript* script = this->asJSScript();
 
     if (coverage::IsLCovEnabled()) {
       coverage::CollectScriptCoverage(script, true);
@@ -705,7 +704,7 @@ void js::BaseScript::finalize(JSFreeOp* fop) {
   }
 
   if (warmUpData_.isJitScript()) {
-    JSScript* script = static_cast<JSScript*>(this);
+    JSScript* script = this->asJSScript();
     script->releaseJitScriptOnFinalize(fop);
   }
 
@@ -4311,7 +4310,7 @@ JSScript* JSScript::Create(JSContext* cx, js::HandleObject functionOrGlobal,
 }
 
 /* static */ JSScript* JSScript::CreateFromLazy(JSContext* cx,
-                                                Handle<LazyScript*> lazy) {
+                                                Handle<BaseScript*> lazy) {
   RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
   RootedObject fun(cx, lazy->function());
   RootedScript script(cx, JSScript::New(cx, fun, sourceObject, lazy->extent()));
@@ -4454,11 +4453,10 @@ bool JSScript::fullyInitFromStencil(JSContext* cx, HandleScript script,
   // Link JSFunction to this JSScript.
   if (stencil.isFunction) {
     JSFunction* fun = stencil.functionBox->function();
-    if (fun->isInterpretedLazy()) {
-      fun->setUnlazifiedScript(script);
-    } else {
-      MOZ_ASSERT(fun->isIncomplete());
+    if (fun->isIncomplete()) {
       fun->initScript(script);
+    } else {
+      fun->setUnlazifiedScript(script);
     }
   }
 
@@ -4863,7 +4861,9 @@ static JSObject* CloneScriptObject(JSContext* cx, PrivateScriptData* srcData,
       return innerFun;
     }
 
-    if (innerFun->isInterpretedLazy()) {
+    if (!innerFun->hasBytecode()) {
+      MOZ_ASSERT(!innerFun->isSelfHostedOrIntrinsic(),
+                 "Cannot enter realm of self-hosted functions");
       AutoRealm ar(cx, innerFun);
       if (!JSFunction::getOrCreateScript(cx, innerFun)) {
         return nullptr;
@@ -5090,10 +5090,11 @@ JSScript* js::CloneScriptIntoFunction(
   }
 
   // Finally set the script after all the fallible operations.
-  if (fun->isInterpretedLazy()) {
-    fun->setUnlazifiedScript(dst);
-  } else {
+  if (fun->isIncomplete()) {
     fun->initScript(dst);
+  } else {
+    MOZ_ASSERT(fun->hasSelfHostedLazyScript());
+    fun->setUnlazifiedScript(dst);
   }
 
   if (coverage::IsLCovEnabled()) {
@@ -5194,7 +5195,7 @@ void ScriptWarmUpData::trace(JSTracer* trc) {
   uintptr_t tag = data_ & TagMask;
   switch (tag) {
     case EnclosingScriptTag: {
-      LazyScript* enclosingScript = toEnclosingScript();
+      BaseScript* enclosingScript = toEnclosingScript();
       TraceManuallyBarrieredEdge(trc, &enclosingScript, "enclosingScript");
       setTaggedPtr<EnclosingScriptTag>(enclosingScript);
       break;
@@ -5514,7 +5515,6 @@ LazyScript* LazyScript::Create(
     JSFunction* fun = funbox->function();
     *iter++ = JS::GCCellPtr(fun);
 
-    MOZ_ASSERT(fun->isInterpretedLazy());
     fun->setEnclosingLazyScript(lazy);
   }
 
@@ -5672,7 +5672,7 @@ JS::ubi::Base::Size JS::ubi::Concrete<BaseScript>::size(
 
   // Include any JIT data if it exists.
   if (base->hasJitScript()) {
-    JSScript* script = static_cast<JSScript*>(base);
+    JSScript* script = base->asJSScript();
 
     size_t jitScriptSize = 0;
     size_t fallbackStubSize = 0;

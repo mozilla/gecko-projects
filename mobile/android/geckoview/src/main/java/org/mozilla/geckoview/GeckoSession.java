@@ -276,6 +276,9 @@ public class GeckoSession implements Parcelable {
             GeckoSession.this.updateOverscrollOffset(x, y);
         }
 
+        @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
+        public native void onSafeAreaInsetsChanged(int top, int right, int bottom, int left);
+
         @Override
         protected void finalize() throws Throwable {
             disposeNative();
@@ -335,86 +338,7 @@ public class GeckoSession implements Parcelable {
             }
         };
 
-    private final WebExtension.Listener mWebExtensionListener;
-
-    /**
-     * Get the message delegate for <code>nativeApp</code>.
-     *
-     * @param webExtension {@link WebExtension} that this delegate receives messages from.
-     * @param nativeApp identifier for the native app
-     * @return The {@link WebExtension.MessageDelegate} attached to the
-     *         <code>nativeApp</code>.  <code>null</code> if no delegate is
-     *         present.
-     */
-    @AnyThread
-    public @Nullable WebExtension.MessageDelegate getMessageDelegate(
-            final @NonNull WebExtension webExtension,
-            final @NonNull String nativeApp) {
-        return mWebExtensionListener.getMessageDelegate(webExtension, nativeApp);
-    }
-
-    /**
-     * Defines a message delegate for a Native App.
-     *
-     * If a delegate is already present, this delegate will replace the
-     * existing one.
-     *
-     * This message delegate will be responsible for handling messaging between
-     * a WebExtension content script running on the {@link GeckoSession}.
-     *
-     * Note: To receive messages from content scripts, the WebExtension needs
-     * to explicitely allow it in {@link WebExtension#WebExtension} by setting
-     * {@link WebExtension.Flags#ALLOW_CONTENT_MESSAGING}.
-     *
-     * @param webExtension {@link WebExtension} that this delegate receives
-     *                     messages from.
-     *
-     * @param delegate {@link WebExtension.MessageDelegate} that will receive
-     *                 messages from this session.
-     * @param nativeApp which native app id this message delegate will handle
-     *                  messaging for.
-     * @see WebExtension#setMessageDelegate
-     */
-    @AnyThread
-    public void setMessageDelegate(final @NonNull WebExtension webExtension,
-                                   final @Nullable WebExtension.MessageDelegate delegate,
-                                   final @NonNull String nativeApp) {
-        mWebExtensionListener.setMessageDelegate(webExtension, delegate, nativeApp);
-    }
-
-    /**
-     * Set the Action delegate for this session.
-     *
-     * This delegate will receive page and browser action overrides specific to
-     * this session.  The default Action will be received by the delegate set
-     * by {@link WebExtension#setActionDelegate}.
-     *
-     * @param webExtension the {@link WebExtension} object this delegate will
-     *                     receive updates for
-     * @param delegate the {@link WebExtension.ActionDelegate} that will
-     *                 receive updates.
-     * @see WebExtension.Action
-     */
-    @AnyThread
-    public void setWebExtensionActionDelegate(final @NonNull WebExtension webExtension,
-                                              final @Nullable WebExtension.ActionDelegate delegate) {
-        mWebExtensionListener.setActionDelegate(webExtension, delegate);
-    }
-
-    /**
-     * Get the Action delegate for this session.
-     *
-     * @param webExtension {@link WebExtension} that this delegates receive
-     *                     updates for.
-     * @return {@link WebExtension.ActionDelegate} for this
-     *         session
-     */
-    @AnyThread
-    @Nullable
-    public WebExtension.ActionDelegate getWebExtensionActionDelegate(
-            final @NonNull WebExtension webExtension) {
-        return mWebExtensionListener.getActionDelegate(webExtension);
-    }
+    private final WebExtension.SessionController mWebExtensionController;
 
     private final GeckoSessionHandler<ContentDelegate> mContentHandler =
         new GeckoSessionHandler<ContentDelegate>(
@@ -1267,7 +1191,7 @@ public class GeckoSession implements Parcelable {
         mSettings = new GeckoSessionSettings(settings, this);
         mListener.registerListeners();
 
-        mWebExtensionListener = new WebExtension.Listener(this);
+        mWebExtensionController = new WebExtension.SessionController(this);
 
         mAutofillSupport = new Autofill.Support(this);
         mAutofillSupport.registerListeners();
@@ -1315,7 +1239,7 @@ public class GeckoSession implements Parcelable {
                     mEventDispatcher, mAccessibility != null ? mAccessibility.nativeProvider : null,
                     createInitData());
             onWindowChanged(WINDOW_TRANSFER_IN, /* inProgress */ false);
-            mWebExtensionListener.runtime = mWindow.runtime;
+            mWebExtensionController.setRuntime(mWindow.runtime);
         }
     }
 
@@ -1436,7 +1360,7 @@ public class GeckoSession implements Parcelable {
         final boolean isRemote = runtime.getSettings().getUseMultiprocess();
 
         mWindow = new Window(runtime, this, mNativeQueue);
-        mWebExtensionListener.runtime = runtime;
+        mWebExtensionController.setRuntime(runtime);
 
         onWindowChanged(WINDOW_OPEN, /* inProgress */ true);
 
@@ -1833,7 +1757,19 @@ public class GeckoSession implements Parcelable {
     */
     @AnyThread
     public void reload() {
-        mEventDispatcher.dispatch("GeckoView:Reload", null);
+        reload(LOAD_FLAGS_NONE);
+    }
+
+    /**
+    * Reload the current URI.
+    *
+    * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
+    */
+    @AnyThread
+    public void reload(final @LoadFlags int flags) {
+        final GeckoBundle msg = new GeckoBundle();
+        msg.putInt("flags", flags);
+        mEventDispatcher.dispatch("GeckoView:Reload", msg);
     }
 
     /**
@@ -1873,6 +1809,17 @@ public class GeckoSession implements Parcelable {
         final GeckoBundle msg = new GeckoBundle(1);
         msg.putInt("index", index);
         mEventDispatcher.dispatch("GeckoView:GotoHistoryIndex", msg);
+    }
+
+    /**
+     * Returns a WebExtensionController for this GeckoSession. Delegates attached
+     * to this controller will receive events specific to this session.
+     *
+     * @return an instance of {@link WebExtension.SessionController}.
+     */
+    @UiThread
+    public @NonNull WebExtension.SessionController getWebExtensionController() {
+        return mWebExtensionController;
     }
 
     /**
@@ -5789,6 +5736,14 @@ public class GeckoSession implements Parcelable {
 
         if (mOverscroll != null) {
             mOverscroll.setSize(mWidth, mClientHeight);
+        }
+    }
+
+    /* pacakge */ void onSafeAreaInsetsChanged(final int top, final int right, final int bottom, final int left) {
+        ThreadUtils.assertOnUiThread();
+
+        if (mAttachedCompositor) {
+            mCompositor.onSafeAreaInsetsChanged(top, right, bottom, left);
         }
     }
 

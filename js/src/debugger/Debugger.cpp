@@ -2549,7 +2549,7 @@ bool DebugAPI::onSingleStep(JSContext* cx) {
         // it had better be suspended.
         MOZ_ASSERT(genObj.isSuspended());
 
-        if (genObj.callee().hasScript() &&
+        if (genObj.callee().hasBaseScript() &&
             genObj.callee().baseScript() == trappingScript &&
             !frameObj.getReservedSlot(DebuggerFrame::ONSTEP_HANDLER_SLOT)
                  .isUndefined()) {
@@ -3113,7 +3113,7 @@ static bool UpdateExecutionObservabilityOfScriptsInZone(
         if (base->isLazyScript()) {
           continue;
         }
-        JSScript* script = static_cast<JSScript*>(base.get());
+        JSScript* script = base->asJSScript();
         if (obs.shouldRecompileOrInvalidate(script)) {
           if (!AppendAndInvalidateScript(cx, zone, script, scripts)) {
             return false;
@@ -5139,17 +5139,17 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery : public Debugger::QueryBase {
     return true;
   }
 
-  static void considerScript(JSRuntime* rt, void* data, JSScript* script,
+  static void considerScript(JSRuntime* rt, void* data, BaseScript* script,
                              const JS::AutoRequireNoGC& nogc) {
     ScriptQuery* self = static_cast<ScriptQuery*>(data);
-    self->consider(script, nogc);
+    self->consider(script->asJSScript(), nogc);
   }
 
-  static void considerLazyScript(JSRuntime* rt, void* data,
-                                 LazyScript* lazyScript,
+  static void considerLazyScript(JSRuntime* rt, void* data, BaseScript* script,
                                  const JS::AutoRequireNoGC& nogc) {
     ScriptQuery* self = static_cast<ScriptQuery*>(data);
-    self->consider(lazyScript, nogc);
+    LazyScript* lazy = static_cast<LazyScript*>(script);
+    self->consider(lazy, nogc);
   }
 
   bool needsDelazifyBeforeQuery() const {
@@ -5404,17 +5404,17 @@ class MOZ_STACK_CLASS Debugger::SourceQuery : public Debugger::QueryBase {
  private:
   Rooted<SourceSet> sources;
 
-  static void considerScript(JSRuntime* rt, void* data, JSScript* script,
+  static void considerScript(JSRuntime* rt, void* data, BaseScript* script,
                              const JS::AutoRequireNoGC& nogc) {
     SourceQuery* self = static_cast<SourceQuery*>(data);
-    self->consider(script, nogc);
+    self->consider(script->asJSScript(), nogc);
   }
 
-  static void considerLazyScript(JSRuntime* rt, void* data,
-                                 LazyScript* lazyScript,
+  static void considerLazyScript(JSRuntime* rt, void* data, BaseScript* script,
                                  const JS::AutoRequireNoGC& nogc) {
     SourceQuery* self = static_cast<SourceQuery*>(data);
-    self->consider(lazyScript, nogc);
+    LazyScript* lazy = static_cast<LazyScript*>(script);
+    self->consider(lazy, nogc);
   }
 
   void consider(JSScript* script, const JS::AutoRequireNoGC& nogc) {
@@ -6088,7 +6088,7 @@ DebuggerScript* Debugger::wrapVariantReferent(
   if (referent.is<BaseScript*>()) {
     Rooted<BaseScript*> base(cx, referent.as<BaseScript*>());
     if (!base->isLazyScript()) {
-      RootedScript untaggedReferent(cx, static_cast<JSScript*>(base.get()));
+      RootedScript untaggedReferent(cx, base->asJSScript());
       if (untaggedReferent->maybeLazyScript()) {
         // This JSScript has a LazyScript, so the LazyScript is canonical.
         Rooted<LazyScript*> lazyScript(cx, untaggedReferent->maybeLazyScript());

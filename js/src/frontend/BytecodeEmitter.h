@@ -46,7 +46,7 @@
 #include "vm/Interpreter.h"          // CheckIsObjectKind, CheckIsCallableKind
 #include "vm/Iteration.h"            // IteratorKind
 #include "vm/JSFunction.h"           // JSFunction, FunctionPrefixKind
-#include "vm/JSScript.h"  // JSScript, LazyScript, FieldInitializers, JSTryNoteKind
+#include "vm/JSScript.h"  // JSScript, BaseScript, FieldInitializers, JSTryNoteKind
 #include "vm/Runtime.h"     // ReportOutOfMemory
 #include "vm/StringType.h"  // JSAtom
 
@@ -70,6 +70,8 @@ class OptionalEmitter;
 class TDZCheckCache;
 class TryEmitter;
 
+enum class ValueIsOnStack { Yes, No };
+
 struct MOZ_STACK_CLASS BytecodeEmitter {
   // Context shared between parsing and bytecode generation.
   SharedContext* const sc = nullptr;
@@ -83,7 +85,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   JS::Rooted<JSScript*> script;
 
   // The lazy script if mode is LazyFunction, nullptr otherwise.
-  JS::Rooted<LazyScript*> lazyScript;
+  JS::Rooted<BaseScript*> lazyScript;
 
  private:
   BytecodeSection bytecodeSection_;
@@ -186,7 +188,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   // Internal constructor, for delegation use only.
   BytecodeEmitter(
       BytecodeEmitter* parent, SharedContext* sc, JS::Handle<JSScript*> script,
-      JS::Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
+      JS::Handle<BaseScript*> lazyScript, uint32_t line, uint32_t column,
       CompilationInfo& compilationInfo, EmitterMode emitterMode,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
@@ -204,14 +206,14 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
  public:
   BytecodeEmitter(
       BytecodeEmitter* parent, BCEParserHandle* parser, SharedContext* sc,
-      JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
+      JS::Handle<JSScript*> script, JS::Handle<BaseScript*> lazyScript,
       uint32_t line, uint32_t column, CompilationInfo& compilationInfo,
       EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
   BytecodeEmitter(
       BytecodeEmitter* parent, const EitherParser& parser, SharedContext* sc,
-      JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
+      JS::Handle<JSScript*> script, JS::Handle<BaseScript*> lazyScript,
       uint32_t line, uint32_t column, CompilationInfo& compilationInfo,
       EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
@@ -220,7 +222,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   BytecodeEmitter(
       BytecodeEmitter* parent, Parser<FullParseHandler, Unit>* parser,
       SharedContext* sc, JS::Handle<JSScript*> script,
-      JS::Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
+      JS::Handle<BaseScript*> lazyScript, uint32_t line, uint32_t column,
       CompilationInfo& compilationInfo, EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid())
       : BytecodeEmitter(parent, EitherParser(parser), sc, script, lazyScript,
@@ -480,7 +482,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   MOZ_MUST_USE bool emitInternedScopeOp(uint32_t index, JSOp op);
   MOZ_MUST_USE bool emitInternedObjectOp(uint32_t index, JSOp op);
-  MOZ_MUST_USE bool emitObjectOp(ObjectBox* objbox, JSOp op);
   MOZ_MUST_USE bool emitObjectPairOp(ObjectBox* objbox1, ObjectBox* objbox2,
                                      JSOp op);
   MOZ_MUST_USE bool emitRegExp(uint32_t index);
@@ -554,7 +555,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   MOZ_MUST_USE bool emitGetName(NameNode* name);
 
   MOZ_MUST_USE bool emitTDZCheckIfNeeded(HandleAtom name,
-                                         const NameLocation& loc);
+                                         const NameLocation& loc,
+                                         ValueIsOnStack isOnStack);
 
   MOZ_MUST_USE bool emitNameIncDec(UnaryNode* incDec);
 

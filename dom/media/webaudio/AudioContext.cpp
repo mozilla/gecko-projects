@@ -1160,6 +1160,10 @@ already_AddRefed<Promise> AudioContext::Close(ErrorResult& aRv) {
   return promise.forget();
 }
 
+void AudioContext::OfflineClose() {
+  CloseInternal(nullptr, AudioContextOperationFlags::None);
+}
+
 void AudioContext::CloseInternal(void* aPromise,
                                  AudioContextOperationFlags aFlags) {
   // This can be called when freeing a document, and the tracks are dead at
@@ -1312,7 +1316,7 @@ BasicWaveFormCache::BasicWaveFormCache(uint32_t aSampleRate)
     : mSampleRate(aSampleRate) {
   MOZ_ASSERT(NS_IsMainThread());
 }
-BasicWaveFormCache::~BasicWaveFormCache() {}
+BasicWaveFormCache::~BasicWaveFormCache() = default;
 
 WebCore::PeriodicWave* BasicWaveFormCache::GetBasicWaveForm(
     OscillatorType aType) {

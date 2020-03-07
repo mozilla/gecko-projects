@@ -77,6 +77,18 @@ var Policies = {
     },
   },
 
+  AppAutoUpdate: {
+    onBeforeUIStartup(manager, param) {
+      // Logic feels a bit reversed here, but it's correct. If AppAutoUpdate is
+      // true, we disallow turning off auto updating, and visa versa.
+      if (param) {
+        manager.disallowFeature("app-auto-updates-off");
+      } else {
+        manager.disallowFeature("app-auto-updates-on");
+      }
+    },
+  },
+
   AppUpdateURL: {
     onBeforeAddons(manager, param) {
       setDefaultPref("app.update.url", param.href);
@@ -1198,8 +1210,10 @@ var Policies = {
     onBeforeAddons(manager, param) {
       if (Array.isArray(param)) {
         Services.locale.requestedLocales = param;
-      } else {
+      } else if (param) {
         Services.locale.requestedLocales = param.split(",");
+      } else {
+        Services.locale.requestedLocales = [];
       }
     },
   },

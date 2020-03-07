@@ -538,15 +538,20 @@ function validateAuthenticatorAssertionResponse(assert) {
 function standardSetup(cb) {
     // Setup an automated testing environment if available.
     window.test_driver.add_virtual_authenticator({
-      protocol: "ctap1/u2f",
-      transport: "usb"
-    }).then(cb).catch(error => {
-        if (error === "error: Action add_virtual_authenticator not implemented") {
-          // The protocol is not available. Continue manually.
-          cb();
-          return;
+        protocol: "ctap1/u2f",
+        transport: "usb"
+    }).then(authenticator => {
+        cb();
+        // XXX add a subtest to clean up the virtual authenticator since
+        // testharness does not support waiting for promises on cleanup.
+        promise_test(() => window.test_driver.remove_virtual_authenticator(authenticator),
+                     "Clean up the test environment");
+    }).catch(error => {
+        if (error !== "error: Action add_virtual_authenticator not implemented") {
+            throw error;
         }
-        throw error;
+        // The protocol is not available. Continue manually.
+        cb();
     });
 }
 

@@ -786,7 +786,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       packet.why = reason;
 
       if (this.suspendedFrame) {
-        this.suspendedFrame.waitingOnStep = false;
+        this.suspendedFrame.onStep = undefined;
+        this.suspendedFrame.onPop = undefined;
         this.suspendedFrame = undefined;
       }
 
@@ -850,7 +851,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       // onPop is called when we temporarily leave an async/generator
       if (completion.await || completion.yield) {
         thread.suspendedFrame = this;
-        this.waitingOnStep = true;
         thread.dbg.onEnterFrame = undefined;
         return undefined;
       }
@@ -865,24 +865,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         );
       }
 
-      const parentFrame = thread._getNextStepFrame(this);
-      if (parentFrame && parentFrame.script) {
-        const { onStep, onPop } = thread._makeSteppingHooks({
-          steppingType: "next",
-          completion,
-        });
-
-        if (!thread.sources.isFrameBlackBoxed(parentFrame)) {
-          parentFrame.onStep = onStep;
-        }
-
-        // We need the onPop alongside the onStep because it is possible that
-        // the parent frame won't have any steppable offsets, and we want to
-        // make sure that we always pause in the parent _somewhere_.
-        parentFrame.onPop = onPop;
-        return undefined;
-      }
-
+      thread._attachSteppingHooks(this, "next", completion);
       return undefined;
     };
   },
@@ -916,16 +899,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   }) {
     const thread = this;
     return function() {
-      // onStep is called with 'this' set to the current frame.
-      // NOTE: we need to clear the stepping hooks when we are
-      // no longer waiting for an async step to occur.
-      if (this.hasOwnProperty("waitingOnStep") && !this.waitingOnStep) {
-        delete this.waitingOnStep;
-        this.onStep = undefined;
-        this.onPop = undefined;
-        return undefined;
-      }
-
       if (thread._validFrameStepOffset(this, startFrame, this.offset)) {
         return pauseAndRespond(this, packet =>
           thread.createCompletionGrip(packet, completion)
@@ -1015,7 +988,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    *          rejected with an error packet.
    */
   _handleResumeLimit: async function({ resumeLimit }) {
-    let steppingType = resumeLimit.type;
+    const steppingType = resumeLimit.type;
     if (!["break", "step", "next", "finish", "warp"].includes(steppingType)) {
       return Promise.reject({
         error: "badParameterType",
@@ -1028,32 +1001,45 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       return true;
     }
 
+    return this._attachSteppingHooks(
+      this.youngestFrame,
+      steppingType,
+      undefined
+    );
+  },
+
+  _attachSteppingHooks: function(frame, steppingType, completion) {
     // If we are stepping out of the onPop handler, we want to use "next" mode
     // so that the parent frame's handlers behave consistently.
-    if (steppingType === "finish" && this.youngestFrame.reportedPop) {
+    if (steppingType === "finish" && frame.reportedPop) {
       steppingType = "next";
+    }
+
+    // If there are no more frames on the stack, use "step" mode so that we will
+    // pause on the next script to execute.
+    const stepFrame = this._getNextStepFrame(frame);
+    if (!stepFrame) {
+      steppingType = "step";
     }
 
     const { onEnterFrame, onPop, onStep } = this._makeSteppingHooks({
       steppingType,
+      completion,
     });
 
-    // Make sure there is still a frame on the stack if we are to continue
-    // stepping.
-    const stepFrame = this._getNextStepFrame(this.youngestFrame);
+    if (steppingType === "step") {
+      this.dbg.onEnterFrame = onEnterFrame;
+    }
+
     if (stepFrame) {
       switch (steppingType) {
         case "step":
-          this.dbg.onEnterFrame = onEnterFrame;
-        // Fall through.
         case "break":
         case "next":
           if (stepFrame.script) {
-            stepFrame.waitingOnStep = true;
             if (!this.sources.isFrameBlackBoxed(stepFrame)) {
               stepFrame.onStep = onStep;
             }
-            stepFrame.onPop = onPop;
           }
         // Fall through.
         case "finish":

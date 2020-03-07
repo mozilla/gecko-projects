@@ -21,6 +21,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   ProfileAge: "resource://gre/modules/ProfileAge.jsm",
   Services: "resource://gre/modules/Services.jsm",
+  setTimeout: "resource://gre/modules/Timer.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
   UrlbarProviderTopSites: "resource:///modules/UrlbarProviderTopSites.jsm",
@@ -79,6 +80,10 @@ const SUPPORTED_ENGINES = new Map([
 
 // The maximum number of times we'll show a tip across all sessions.
 const MAX_SHOWN_COUNT = 4;
+
+// Amount of time to wait before showing a tip after selecting a tab or
+// navigating to a page where we should show a tip.
+const SHOW_TIP_DELAY_MS = 200;
 
 // We won't show a tip if the browser has been updated in the past
 // LAST_UPDATE_THRESHOLD_MS.
@@ -257,8 +262,8 @@ class ProviderSearchTips extends UrlbarProvider {
       // engaged with the urlbar while the tip was showing. We treat both as the
       // user's acknowledgment of the tip, and we don't show tips again in any
       // session. Set the shown count to the max.
-      Services.prefs.setIntPref(
-        `browser.urlbar.tipShownCount.${this.showedTipTypeInCurrentEngagement}`,
+      UrlbarPrefs.set(
+        `tipShownCount.${this.showedTipTypeInCurrentEngagement}`,
         MAX_SHOWN_COUNT
       );
     }
@@ -329,10 +334,6 @@ class ProviderSearchTips extends UrlbarProvider {
       return;
     }
 
-    if (this._maybeShowTipForUrlInstance != instance) {
-      return;
-    }
-
     // If we've shown this type of tip the maximum number of times over all
     // sessions, don't show it again.
     let shownCount = UrlbarPrefs.get(`tipShownCount.${tip}`);
@@ -340,20 +341,31 @@ class ProviderSearchTips extends UrlbarProvider {
       return;
     }
 
-    this.currentTip = tip;
-
     // At this point, we're showing a tip.
     this.disableTipsForCurrentSession = true;
 
     // Store the new shown count.
-    Services.prefs.setIntPref(
-      `browser.urlbar.tipShownCount.${tip}`,
-      shownCount + 1
-    );
+    UrlbarPrefs.set(`tipShownCount.${tip}`, shownCount + 1);
 
     // Start a search.
-    let window = BrowserWindowTracker.getTopWindow();
-    window.gURLBar.search("", { focus: tip == TIPS.ONBOARD });
+    setTimeout(() => {
+      if (this._maybeShowTipForUrlInstance != instance) {
+        return;
+      }
+
+      let window = BrowserWindowTracker.getTopWindow();
+      // We don't want to interrupt a user's typed query with a Search Tip.
+      // See bugs 1613662 and 1619547.
+      if (
+        window.gURLBar.getAttribute("pageproxystate") == "invalid" &&
+        window.gURLBar.value != ""
+      ) {
+        return;
+      }
+
+      this.currentTip = tip;
+      window.gURLBar.search("", { focus: tip == TIPS.ONBOARD });
+    }, SHOW_TIP_DELAY_MS);
   }
 }
 
@@ -363,6 +375,7 @@ function isBrowserShowingNotification() {
   // urlbar view and notification box (info bar)
   if (
     window.gURLBar.view.isOpen ||
+    window.gHighPriorityNotificationBox.currentNotification ||
     window.gBrowser.getNotificationBox().currentNotification
   ) {
     return true;

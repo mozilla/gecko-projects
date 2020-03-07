@@ -12,10 +12,13 @@ const TEST_URI = `data:text/html;charset=utf-8,
      * Object prototype properties.
      */
     var obj = props => Object.create(null, Object.getOwnPropertyDescriptors(props));
-    window.foo = obj({
+    let sideEffectVar;
+    var foo = obj({
       get bar() {
+        sideEffectVar = "from bar";
         return obj({
           get baz() {
+            sideEffectVar = "from baz";
             return obj({
               hello: 1,
               world: "",
@@ -51,9 +54,9 @@ add_task(async function() {
   info(
     "Check that hitting Tab does invoke the getter and return its properties"
   );
-  let onPopUpOpen = autocompletePopup.once("popup-opened");
+  let onAutocompleteUpdated = jsterm.once("autocomplete-updated");
   EventUtils.synthesizeKey("KEY_Tab");
-  await onPopUpOpen;
+  await onAutocompleteUpdated;
   ok(autocompletePopup.isOpen, "popup is open after Tab");
   ok(
     hasExactPopupLabels(autocompletePopup, ["baz", "bloop"]),
@@ -70,9 +73,10 @@ add_task(async function() {
   info(
     "Ctrl+Space again to ensure the autocomplete is shown, not the confirm dialog"
   );
-  onPopUpOpen = autocompletePopup.once("popup-opened");
+  onAutocompleteUpdated = jsterm.once("autocomplete-updated");
   EventUtils.synthesizeKey(" ", { ctrlKey: true });
-  await onPopUpOpen;
+  await onAutocompleteUpdated;
+  ok(autocompletePopup.isOpen, "popup is open after Ctrl + Space");
   ok(
     hasExactPopupLabels(autocompletePopup, ["baz", "bloop"]),
     "popup has expected items"
@@ -83,18 +87,18 @@ add_task(async function() {
   info(
     "Type a space, then backspace and ensure the autocomplete popup is displayed"
   );
-  let onAutocompleteUpdate = jsterm.once("autocomplete-updated");
+  onAutocompleteUpdated = jsterm.once("autocomplete-updated");
   EventUtils.synthesizeKey(" ");
-  await onAutocompleteUpdate;
+  await onAutocompleteUpdated;
   is(autocompletePopup.isOpen, true, "Autocomplete popup is still opened");
   ok(
     hasExactPopupLabels(autocompletePopup, ["baz", "bloop"]),
     "popup has expected items"
   );
 
-  onAutocompleteUpdate = jsterm.once("autocomplete-updated");
+  onAutocompleteUpdated = jsterm.once("autocomplete-updated");
   EventUtils.synthesizeKey("KEY_Backspace");
-  await onAutocompleteUpdate;
+  await onAutocompleteUpdated;
   is(autocompletePopup.isOpen, true, "Autocomplete popup is still opened");
   ok(
     hasExactPopupLabels(autocompletePopup, ["baz", "bloop"]),
@@ -105,9 +109,13 @@ add_task(async function() {
     "Reload the page to ensure asking for autocomplete again show the confirm dialog"
   );
   onPopupClose = autocompletePopup.once("popup-closed");
-  await refreshTab();
+  EventUtils.synthesizeKey("KEY_Escape");
   await onPopupClose;
 
+  await refreshTab();
+  info("tab reloaded, waiting for the popup to close");
+
+  info("Press Ctrl+Space to open the confirm dialog again");
   EventUtils.synthesizeKey(" ", { ctrlKey: true });
   await waitFor(() => isConfirmDialogOpened(toolbox));
   ok(true, "Confirm Dialog is shown after tab navigation");

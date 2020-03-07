@@ -83,6 +83,11 @@ var connect = async function() {
     "devtools.browsertoolbox.fission",
     env.get("MOZ_BROWSER_TOOLBOX_FISSION_PREF") === "1"
   );
+  // Similar, but for the WebConsole input context dropdown.
+  Services.prefs.setBoolPref(
+    "devtools.webconsole.input.context",
+    env.get("MOZ_BROWSER_TOOLBOX_INPUT_CONTEXT") === "1"
+  );
 
   const port = env.get("MOZ_BROWSER_TOOLBOX_PORT");
 
@@ -108,7 +113,8 @@ var connect = async function() {
   await gClient.connect();
 
   appendStatusMessage("Get root form for toolbox");
-  const mainProcessTargetFront = await gClient.mainRoot.getMainProcess();
+  const mainProcessDescriptor = await gClient.mainRoot.getMainProcess();
+  const mainProcessTargetFront = await mainProcessDescriptor.getTarget();
   await openToolbox(mainProcessTargetFront);
 };
 

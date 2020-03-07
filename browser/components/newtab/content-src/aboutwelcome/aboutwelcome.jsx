@@ -6,9 +6,35 @@ import React from "react";
 import ReactDOM from "react-dom";
 import { HeroText } from "./components/HeroText";
 import { FxCards } from "./components/FxCards";
-import { DEFAULT_WELCOME_CONTENT } from "../lib/aboutwelcome-utils";
+import {
+  AboutWelcomeUtils,
+  DEFAULT_WELCOME_CONTENT,
+} from "../lib/aboutwelcome-utils";
 
 class AboutWelcome extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    this.state = { metricsFlowUri: null };
+    this.fetchFxAFlowUri = this.fetchFxAFlowUri.bind(this);
+    this.handleStartBtnClick = this.handleStartBtnClick.bind(this);
+  }
+
+  async fetchFxAFlowUri() {
+    this.setState({ metricsFlowUri: await window.AWGetFxAMetricsFlowURI() });
+  }
+
+  componentDidMount() {
+    this.fetchFxAFlowUri();
+    window.AWSendEventTelemetry({
+      event: "IMPRESSION",
+      message_id: "SIMPLIFIED_ABOUT_WELCOME",
+    });
+  }
+
+  handleStartBtnClick() {
+    AboutWelcomeUtils.handleUserAction(this.props.startButton.action);
+  }
+
   render() {
     const { props } = this;
     return (
@@ -17,8 +43,16 @@ class AboutWelcome extends React.PureComponent {
           <HeroText title={props.title} subtitle={props.subtitle} />
           <FxCards
             cards={props.cards}
+            metricsFlowUri={this.state.metricsFlowUri}
             sendTelemetry={window.AWSendEventTelemetry}
           />
+          {props.startButton && props.startButton.string_id && (
+            <button
+              className="start-button"
+              data-l10n-id={props.startButton.string_id}
+              onClick={this.handleStartBtnClick}
+            />
+          )}
         </div>
       </div>
     );

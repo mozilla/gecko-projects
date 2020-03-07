@@ -106,7 +106,21 @@ already_AddRefed<StyleSheet> StyleSheet::Constructor(
       MakeRefPtr<StyleSheet>(css::SheetParsingMode::eAuthorSheetFeatures,
                              CORSMode::CORS_NONE, dom::SRIMetadata());
 
-  nsIURI* baseURI = constructorDocument->GetBaseURI();
+  // baseURL not yet in the spec. Implemented based on the following discussion:
+  // https://github.com/WICG/construct-stylesheets/issues/95#issuecomment-594217180
+  RefPtr<nsIURI> baseURI;
+  if (!aOptions.mBaseURL.WasPassed()) {
+    baseURI = constructorDocument->GetBaseURI();
+  } else {
+    nsresult rv = NS_NewURI(getter_AddRefs(baseURI), aOptions.mBaseURL.Value(),
+                            nullptr, constructorDocument->GetBaseURI());
+    if (NS_FAILED(rv)) {
+      aRv.ThrowNotAllowedError(
+          "Constructed style sheets must have a valid base URL");
+      return nullptr;
+    }
+  }
+
   nsIURI* sheetURI = constructorDocument->GetDocumentURI();
   nsIURI* originalURI = nullptr;
   sheet->SetURIs(sheetURI, originalURI, baseURI);
@@ -145,9 +159,16 @@ Document* StyleSheet::GetAssociatedDocument() const {
 
 dom::DocumentOrShadowRoot* StyleSheet::GetAssociatedDocumentOrShadowRoot()
     const {
-  // FIXME(nordzilla) This will not work for children of adtoped sheets.
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=1613748
-  return IsConstructed() ? mConstructorDocument : mDocumentOrShadowRoot;
+  if (mDocumentOrShadowRoot) {
+    return mDocumentOrShadowRoot;
+  }
+  for (auto* sheet = this; sheet; sheet = sheet->mParent) {
+    MOZ_ASSERT(!sheet->mDocumentOrShadowRoot);
+    if (sheet->IsConstructed()) {
+      return sheet->mConstructorDocument;
+    }
+  }
+  return nullptr;
 }
 
 Document* StyleSheet::GetComposedDoc() const {

@@ -16,6 +16,7 @@
 
 #include "debugger/DebugAPI.h"
 #include "gc/Marking.h"
+#include "gc/MaybeRooted.h"
 #include "jit/BaselineIC.h"
 #include "js/CharacterEncoding.h"
 #include "js/Result.h"
@@ -2326,14 +2327,11 @@ static MOZ_ALWAYS_INLINE bool GetExistingProperty(
     }
   }
 
-  if (!allowGC) {
+  if constexpr (!allowGC) {
     return false;
+  } else {
+    return CallGetter(cx, obj, receiver, shape, vp);
   }
-
-  return CallGetter(cx, MaybeRooted<JSObject*, allowGC>::toHandle(obj),
-                    MaybeRooted<Value, allowGC>::toHandle(receiver),
-                    MaybeRooted<Shape*, allowGC>::toHandle(shape),
-                    MaybeRooted<Value, allowGC>::toMutableHandle(vp));
 }
 
 bool js::NativeGetExistingProperty(JSContext* cx, HandleObject receiver,

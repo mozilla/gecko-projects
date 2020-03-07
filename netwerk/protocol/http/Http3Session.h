@@ -35,8 +35,7 @@ class QuicSocketControl;
 class Http3Session final : public nsAHttpTransaction,
                            public nsAHttpConnection,
                            public nsAHttpSegmentReader,
-                           public nsAHttpSegmentWriter,
-                           public nsITimerCallback {
+                           public nsAHttpSegmentWriter {
  public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTP3SESSION_IID)
 
@@ -45,7 +44,6 @@ class Http3Session final : public nsAHttpTransaction,
   NS_DECL_NSAHTTPCONNECTION(mConnection)
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
-  NS_DECL_NSITIMERCALLBACK
 
   Http3Session();
   nsresult Init(const nsACString& aOrigin, nsISocketTransport* aSocketTransport,
@@ -108,6 +106,8 @@ class Http3Session final : public nsAHttpTransaction,
   // verification is done.
   void Authenticated(int32_t aError);
 
+  nsresult ProcessOutputAndEvents();
+
  private:
   ~Http3Session();
 
@@ -120,11 +120,10 @@ class Http3Session final : public nsAHttpTransaction,
   nsresult ProcessOutput();
   nsresult ProcessInput();
   nsresult ProcessEvents(uint32_t count, uint32_t* countWritten, bool* again);
-  nsresult ProcessOutputAndEvents();
 
   void SetupTimer(uint64_t aTimeout);
 
-  void ResetRecvd(uint64_t aStreamId, Http3AppError aError);
+  void ResetRecvd(uint64_t aStreamId, uint64_t aError);
 
   void QueueStream(Http3Stream* stream);
   void RemoveStreamFromQueues(Http3Stream*);
@@ -133,6 +132,10 @@ class Http3Session final : public nsAHttpTransaction,
   void CallCertVerification();
   void SetSecInfo();
 
+  void MaybeResumeSend();
+
+  void CloseConnectionTelemetry(CloseError& aError, bool aClosing);
+
   RefPtr<NeqoHttp3Conn> mHttp3Connection;
   RefPtr<nsAHttpConnection> mConnection;
   nsRefPtrHashtable<nsUint64HashKey, Http3Stream> mStreamIdHash;
@@ -140,6 +143,7 @@ class Http3Session final : public nsAHttpTransaction,
       mStreamTransactionHash;
 
   nsDeque mReadyForWrite;
+  nsTArray<uint64_t> mReadyForWriteButBlocked;
   nsDeque mQueuedStreams;
 
   enum State { INITIALIZING, CONNECTED, CLOSING, CLOSED } mState;

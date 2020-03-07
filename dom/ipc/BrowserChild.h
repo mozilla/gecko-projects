@@ -136,7 +136,7 @@ class ContentListener final : public nsIDOMEventListener {
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
  protected:
-  ~ContentListener() {}
+  ~ContentListener() = default;
   BrowserChild* mBrowserChild;
 };
 
@@ -405,6 +405,9 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
                                            const ClonedMessageData& aData);
   mozilla::ipc::IPCResult RecvSwappedWithOtherRemoteLoader(
       const IPCTabContext& aContext);
+
+  mozilla::ipc::IPCResult RecvSafeAreaInsetsChanged(
+      const mozilla::ScreenIntMargin& aSafeAreaInsets);
 
 #ifdef ACCESSIBILITY
   PDocAccessibleChild* AllocPDocAccessibleChild(PDocAccessibleChild*,

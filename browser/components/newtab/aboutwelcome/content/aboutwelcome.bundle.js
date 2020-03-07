@@ -113,6 +113,33 @@ __webpack_require__.r(__webpack_exports__);
 
 
 class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.state = {
+      metricsFlowUri: null
+    };
+    this.fetchFxAFlowUri = this.fetchFxAFlowUri.bind(this);
+    this.handleStartBtnClick = this.handleStartBtnClick.bind(this);
+  }
+
+  async fetchFxAFlowUri() {
+    this.setState({
+      metricsFlowUri: await window.AWGetFxAMetricsFlowURI()
+    });
+  }
+
+  componentDidMount() {
+    this.fetchFxAFlowUri();
+    window.AWSendEventTelemetry({
+      event: "IMPRESSION",
+      message_id: "SIMPLIFIED_ABOUT_WELCOME"
+    });
+  }
+
+  handleStartBtnClick() {
+    _lib_aboutwelcome_utils__WEBPACK_IMPORTED_MODULE_4__["AboutWelcomeUtils"].handleUserAction(this.props.startButton.action);
+  }
+
   render() {
     const {
       props
@@ -126,7 +153,12 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
       subtitle: props.subtitle
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_components_FxCards__WEBPACK_IMPORTED_MODULE_3__["FxCards"], {
       cards: props.cards,
+      metricsFlowUri: this.state.metricsFlowUri,
       sendTelemetry: window.AWSendEventTelemetry
+    }), props.startButton && props.startButton.string_id && react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+      className: "start-button",
+      "data-l10n-id": props.startButton.string_id,
+      onClick: this.handleStartBtnClick
     })));
   }
 
@@ -200,16 +232,75 @@ function _extends() { _extends = Object.assign || function (target) { for (var i
 
 
 class FxCards extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.state = {
+      flowParams: null
+    };
+    this.fetchFxAFlowParams = this.fetchFxAFlowParams.bind(this);
+    this.onCardAction = this.onCardAction.bind(this);
+  }
+
+  componentDidUpdate() {
+    this.fetchFxAFlowParams();
+  }
+
+  componentDidMount() {
+    this.fetchFxAFlowParams();
+  }
+
+  async fetchFxAFlowParams() {
+    if (this.state.flowParams || !this.props.metricsFlowUri) {
+      return;
+    }
+
+    let flowParams;
+
+    try {
+      const response = await fetch(this.props.metricsFlowUri, {
+        credentials: "omit"
+      });
+
+      if (response.status === 200) {
+        const {
+          deviceId,
+          flowId,
+          flowBeginTime
+        } = await response.json();
+        flowParams = {
+          deviceId,
+          flowId,
+          flowBeginTime
+        };
+      } else {
+        console.error("Non-200 response", response); // eslint-disable-line no-console
+      }
+    } catch (e) {
+      flowParams = null;
+    }
+
+    this.setState({
+      flowParams
+    });
+  }
+
   onCardAction(action) {
     let {
       type,
       data
     } = action;
-    let UTMTerm = "utm_term_separate_welcome";
+    let UTMTerm = "about_welcome";
 
     if (action.type === "OPEN_URL") {
       let url = new URL(action.data.args);
       Object(_asrouter_templates_FirstRun_addUtmParams__WEBPACK_IMPORTED_MODULE_1__["addUtmParams"])(url, UTMTerm);
+
+      if (action.addFlowParams && this.state.flowParams) {
+        url.searchParams.append("device_id", this.state.flowParams.deviceId);
+        url.searchParams.append("flow_id", this.state.flowParams.flowId);
+        url.searchParams.append("flow_begin_time", this.state.flowParams.flowBeginTime);
+      }
+
       data = { ...data,
         args: url.toString()
       };
@@ -354,12 +445,14 @@ __webpack_require__.r(__webpack_exports__);
 const AboutWelcomeUtils = {
   handleUserAction(action) {
     switch (action.type) {
-      case "OPEN_URL":
-        window.open(action.data.args);
+      case "OPEN_AWESOME_BAR":
+      case "OPEN_PRIVATE_BROWSER_WINDOW":
+      case "SHOW_MIGRATION_WIZARD":
+        window.AWSendToParent(action.type);
         break;
 
-      case "SHOW_MIGRATION_WIZARD":
-        window.AWSendToParent("SHOW_MIGRATION_WIZARD");
+      case "OPEN_URL":
+        window.open(action.data.args);
         break;
     }
   },
@@ -376,8 +469,11 @@ const DEFAULT_WELCOME_CONTENT = {
   title: {
     string_id: "onboarding-welcome-header"
   },
-  subtitle: {
-    string_id: "onboarding-fullpage-welcome-subheader"
+  startButton: {
+    string_id: "onboarding-start-browsing-button-label",
+    action: {
+      type: "OPEN_AWESOME_BAR"
+    }
   },
   cards: [{
     content: {
@@ -431,31 +527,26 @@ const DEFAULT_WELCOME_CONTENT = {
     order: 2,
     blockOnClick: false
   }, {
-    id: "TRAILHEAD_CARD_11",
-    template: "onboarding",
-    bundled: 3,
-    order: 0,
     content: {
       title: {
-        string_id: "onboarding-import-browser-settings-title"
+        string_id: "onboarding-browse-privately-title"
       },
       text: {
-        string_id: "onboarding-import-browser-settings-text"
+        string_id: "onboarding-browse-privately-text"
       },
-      icon: "import",
+      icon: "private",
       primary_button: {
         label: {
-          string_id: "onboarding-import-browser-settings-button"
+          string_id: "onboarding-browse-privately-button"
         },
         action: {
-          type: "SHOW_MIGRATION_WIZARD"
+          type: "OPEN_PRIVATE_BROWSER_WINDOW"
         }
       }
     },
-    targeting: "trailheadTriplet == 'dynamic_chrome'",
-    trigger: {
-      id: "showOnboarding"
-    }
+    id: "TRAILHEAD_CARD_4",
+    order: 3,
+    blockOnClick: true
   }]
 };
 

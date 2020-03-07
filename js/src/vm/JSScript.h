@@ -1366,7 +1366,7 @@ enum class FunctionAsyncKind : bool { SyncFunction, AsyncFunction };
 // ScriptWarmUpData represents a pointer-sized field in BaseScript that stores
 // one of the following using low-bit tags:
 //
-// * The enclosing LazyScript. This is only used while this script is lazy and
+// * The enclosing BaseScript. This is only used while this script is lazy and
 //   its containing script is also lazy. This outer script must be compiled
 //   before the current script can in order to correctly build the scope chain.
 //
@@ -1436,10 +1436,10 @@ class ScriptWarmUpData {
   // NOTE: To change type safely, 'clear' the old tagged value and then 'init'
   //       the new one. This will notify the GC appropriately.
 
-  LazyScript* toEnclosingScript() const {
-    return getTaggedPtr<LazyScript*, EnclosingScriptTag>();
+  BaseScript* toEnclosingScript() const {
+    return getTaggedPtr<BaseScript*, EnclosingScriptTag>();
   }
-  inline void initEnclosingScript(LazyScript* enclosingScript);
+  inline void initEnclosingScript(BaseScript* enclosingScript);
   inline void clearEnclosingScript();
 
   Scope* toEnclosingScope() const {
@@ -2294,16 +2294,14 @@ setterLevel:                                                                  \
 
   void setArgumentsHasVarBinding();
 
-  bool hasEnclosingLazyScript() const {
-    return warmUpData_.isEnclosingScript();
-  }
-  LazyScript* enclosingLazyScript() const {
+  bool hasEnclosingScript() const { return warmUpData_.isEnclosingScript(); }
+  BaseScript* enclosingScript() const {
     return warmUpData_.toEnclosingScript();
   }
-  void setEnclosingLazyScript(LazyScript* enclosingLazyScript);
+  void setEnclosingScript(BaseScript* enclosingScript);
 
   // Returns true if the enclosing script has ever been compiled. Once the
-  // enclosing script is compiled, the scope chain is created. This LazyScript
+  // enclosing script is compiled, the scope chain is created. This BaseScript
   // is delazify-able as long as it has the enclosing scope, even if the
   // enclosing JSScript is GCed.
   bool enclosingScriptHasEverBeenCompiled() const {
@@ -2373,6 +2371,8 @@ setterLevel:                                                                  \
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
     return mallocSizeOf(data_);
   }
+
+  inline JSScript* asJSScript();
 
   // JIT accessors
   static constexpr size_t offsetOfJitCodeRaw() {
@@ -2495,7 +2495,7 @@ class JSScript : public js::BaseScript {
                           bool hideScriptFromDebugger, js::SourceExtent extent);
 
   static JSScript* CreateFromLazy(JSContext* cx,
-                                  js::Handle<js::LazyScript*> lazy);
+                                  js::Handle<js::BaseScript*> lazy);
 
   // NOTE: If you use createPrivateScriptData directly instead of via
   // fullyInitFromStencil, you are responsible for notifying the debugger
@@ -3083,11 +3083,6 @@ class JSScript : public js::BaseScript {
   };
 };
 
-/* If this fails, add/remove padding within JSScript. */
-static_assert(
-    sizeof(JSScript) % js::gc::CellAlignBytes == 0,
-    "Size of JSScript must be an integral multiple of js::gc::CellAlignBytes");
-
 namespace js {
 
 // Information about a script which may be (or has been) lazily compiled to
@@ -3230,11 +3225,6 @@ class LazyScript : public BaseScript {
   bool hasScript() const { return bool(u.script_); }
 };
 
-/* If this fails, add/remove padding within LazyScript. */
-static_assert(sizeof(LazyScript) % js::gc::CellAlignBytes == 0,
-              "Size of LazyScript must be an integral multiple of "
-              "js::gc::CellAlignBytes");
-
 struct ScriptAndCounts {
   /* This structure is stored and marked from the JSRuntime. */
   JSScript* script;
@@ -3317,8 +3307,6 @@ namespace ubi {
 
 template <>
 class Concrete<JSScript> : public Concrete<js::BaseScript> {};
-template <>
-class Concrete<js::LazyScript> : public Concrete<js::BaseScript> {};
 
 }  // namespace ubi
 }  // namespace JS

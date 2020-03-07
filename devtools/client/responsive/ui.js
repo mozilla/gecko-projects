@@ -100,7 +100,7 @@ class ResponsiveUI {
      *
      * TODO: we should remove this as part of Bug 1585096
      */
-    this.toolWindow = null;
+    this._toolWindow = null;
     // The iframe containing the RDM UI.
     this.rdmFrame = null;
 
@@ -117,12 +117,6 @@ class ResponsiveUI {
     EventEmitter.decorate(this);
   }
 
-  get docShell() {
-    return this.isBrowserUIEnabled
-      ? this.rdmFrame.contentWindow.docShell
-      : this.toolWindow.docShell;
-  }
-
   get isBrowserUIEnabled() {
     if (!this._isBrowserUIEnabled) {
       this._isBrowserUIEnabled = Services.prefs.getBoolPref(
@@ -131,6 +125,22 @@ class ResponsiveUI {
     }
 
     return this._isBrowserUIEnabled;
+  }
+
+  get toolWindow() {
+    return this.isBrowserUIEnabled
+      ? this.rdmFrame.contentWindow
+      : this._toolWindow;
+  }
+
+  get docShell() {
+    return this.toolWindow.docShell;
+  }
+
+  get viewportElement() {
+    return this.isBrowserUIEnabled
+      ? this.browserStackEl.querySelector("browser")
+      : this._toolWindow.document.querySelector(".viewport-content");
   }
 
   get currentTarget() {
@@ -164,7 +174,7 @@ class ResponsiveUI {
         tab: this.tab,
         containerURL: TOOL_URL,
         async getInnerBrowser(containerBrowser) {
-          const toolWindow = (ui.toolWindow = containerBrowser.contentWindow);
+          const toolWindow = (ui._toolWindow = containerBrowser.contentWindow);
           toolWindow.addEventListener("message", ui);
           debug("Wait until init from inner");
           await message.request(toolWindow, "init");
@@ -205,8 +215,8 @@ class ResponsiveUI {
     if (this.isBrowserUIEnabled) {
       this.browserWindow.addEventListener("FullZoomChange", this);
     } else {
-      this.docShell.contentViewer.fullZoom = 1;
-      this.docShell.contentViewer.textZoom = 1;
+      this._toolWindow.docShell.contentViewer.fullZoom = 1;
+      this._toolWindow.docShell.contentViewer.textZoom = 1;
 
       this.tab.linkedBrowser.addEventListener("FullZoomChange", this);
     }
@@ -216,7 +226,7 @@ class ResponsiveUI {
     if (!this.isBrowserUIEnabled) {
       // Notify the inner browser to start the frame script
       debug("Wait until start frame script");
-      await message.request(this.toolWindow, "start-frame-script");
+      await message.request(this._toolWindow, "start-frame-script");
     }
 
     // Get the protocol ready to speak with responsive emulation actor
@@ -230,7 +240,7 @@ class ResponsiveUI {
       // Force the newly created Zoom actor to cache its 1.0 zoom level. This
       // prevents it from sending out FullZoomChange events when the content
       // full zoom level is changed the first time.
-      const bc = this.toolWindow.docShell.browsingContext;
+      const bc = this._toolWindow.docShell.browsingContext;
       const zoomActor = bc.currentWindowGlobal.getActor("Zoom");
       zoomActor.sendAsyncMessage("FullZoom", { value: 1.0 });
 
@@ -241,11 +251,7 @@ class ResponsiveUI {
     }
 
     // Non-blocking message to tool UI to start any delayed init activities
-    if (!this.isBrowserUIEnabled) {
-      message.post(this.toolWindow, "post-init");
-    } else {
-      message.post(this.rdmFrame.contentWindow, "post-init");
-    }
+    message.post(this.toolWindow, "post-init");
 
     debug("Init done");
   }
@@ -380,11 +386,11 @@ class ResponsiveUI {
 
       // Restore screen orientation of physical device.
       await this.updateScreenOrientation("landscape-primary", 0);
-    }
 
-    if (this.isBrowserUIEnabled) {
-      await this.responsiveFront.setDocumentInRDMPane(false);
-      await this.responsiveFront.setFloatingScrollbars(false);
+      if (this.isBrowserUIEnabled) {
+        await this.responsiveFront.setDocumentInRDMPane(false);
+        await this.responsiveFront.setFloatingScrollbars(false);
+      }
     }
 
     this.tab.removeEventListener("TabClose", this);
@@ -393,7 +399,7 @@ class ResponsiveUI {
 
     if (!this.isBrowserUIEnabled) {
       this.tab.linkedBrowser.removeEventListener("FullZoomChange", this);
-      this.toolWindow.removeEventListener("message", this);
+      this._toolWindow.removeEventListener("message", this);
     } else {
       this.browserWindow.removeEventListener("FullZoomChange", this);
       this.rdmFrame.contentWindow.removeEventListener("message", this);
@@ -415,7 +421,7 @@ class ResponsiveUI {
 
     if (!this.isBrowserUIEnabled && !isTabContentDestroying) {
       // Notify the inner browser to stop the frame script
-      await message.request(this.toolWindow, "stop-frame-script");
+      await message.request(this._toolWindow, "stop-frame-script");
     }
 
     // Ensure the tab is reloaded if required when exiting RDM so that no emulated
@@ -445,7 +451,7 @@ class ResponsiveUI {
     this.resizeHandle = null;
     this.resizeHandleX = null;
     this.resizeHandleY = null;
-    this.toolWindow = null;
+    this._toolWindow = null;
     this.swap = null;
     this.resizeToolbarObserver = null;
 
@@ -513,10 +519,7 @@ class ResponsiveUI {
         if (this.isBrowserUIEnabled) {
           // Get the current device size and update to that size, which
           // will pick up changes to the zoom.
-          const {
-            width,
-            height,
-          } = this.rdmFrame.contentWindow.getViewportSize();
+          const { width, height } = this.getViewportSize();
           this.updateViewportSize(width, height);
         } else {
           const zoom = tab.linkedBrowser.fullZoom;
@@ -702,7 +705,7 @@ class ResponsiveUI {
       deltaY = 0;
     }
 
-    const viewportSize = this.rdmFrame.contentWindow.getViewportSize();
+    const viewportSize = this.getViewportSize();
 
     let width = Math.round(viewportSize.width + deltaX);
     let height = Math.round(viewportSize.height + deltaY);
@@ -759,6 +762,9 @@ class ResponsiveUI {
     this.lastScreenY = 0;
     this.ignoreX = false;
     this.ignoreY = false;
+
+    // Used by tests.
+    this.emit("viewport-resize-dragend");
   }
 
   onResizeViewport(event) {
@@ -1094,17 +1100,30 @@ class ResponsiveUI {
     // on the <browser> because we'll need to use this for the alert dialog as well.
     this.browserStackEl.style.setProperty("--rdm-width", `${scaledWidth}px`);
     this.browserStackEl.style.setProperty("--rdm-height", `${scaledHeight}px`);
+
+    // This is a bit premature, but we emit a content-resize event here. It
+    // would be preferrable to wait until the viewport is actually resized,
+    // but the "resize" event is not triggered by this style change. The
+    // content-resize message is only used by tests, and if needed those tests
+    // can use the testing function setViewportSizeAndAwaitReflow to ensure
+    // the viewport has had time to reach this size.
+    this.emit("content-resize", {
+      width,
+      height,
+    });
   }
 
   /**
    * Helper for tests. Assumes a single viewport for now.
    */
   getViewportSize() {
-    if (!this.isBrowserUIEnabled) {
+    // The getViewportSize function is loaded in index.js, and might not be
+    // available yet.
+    if (this.toolWindow.getViewportSize) {
       return this.toolWindow.getViewportSize();
     }
 
-    return this.rdmFrame.contentWindow.getViewportSize();
+    return { width: 0, height: 0 };
   }
 
   /**
@@ -1113,11 +1132,12 @@ class ResponsiveUI {
   async setViewportSize(size) {
     await this.inited;
     if (!this.isBrowserUIEnabled) {
-      this.toolWindow.setViewportSize(size);
+      this._toolWindow.setViewportSize(size);
       return;
     }
 
     const { width, height } = size;
+    this.rdmFrame.contentWindow.setViewportSize({ width, height });
     this.updateViewportSize(width, height);
   }
 
@@ -1126,7 +1146,7 @@ class ResponsiveUI {
    */
   getViewportBrowser() {
     if (!this.isBrowserUIEnabled) {
-      return this.toolWindow.getViewportBrowser();
+      return this._toolWindow.getViewportBrowser();
     }
 
     return this.tab.linkedBrowser;
@@ -1151,7 +1171,7 @@ class ResponsiveUI {
    */
   getBrowserWindow() {
     if (!this.isBrowserUIEnabled) {
-      return this.toolWindow;
+      return this._toolWindow;
     }
 
     return this.browserWindow;

@@ -17,6 +17,10 @@
       }
     },
 
+    "AppAutoUpdate": {
+      "type": "boolean"
+    },
+
     "AppUpdateURL": {
       "type": "URL"
     },
@@ -719,9 +723,6 @@
         "accessibility.force_disabled": {
           "type": "number",
           "enum": [-1, 0, 1]
-        },
-        "app.update.auto": {
-          "type": "boolean"
         },
         "browser.bookmarks.autoExportHTML": {
           "type": "boolean"

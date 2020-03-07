@@ -603,10 +603,9 @@ class BackgroundRequestChild final : public BackgroundRequestChildBase,
 
   void HandleResponse(const nsTArray<Key>& aResponse);
 
-  void HandleResponse(const SerializedStructuredCloneReadInfo& aResponse);
+  void HandleResponse(SerializedStructuredCloneReadInfo&& aResponse);
 
-  void HandleResponse(
-      const nsTArray<SerializedStructuredCloneReadInfo>& aResponse);
+  void HandleResponse(nsTArray<SerializedStructuredCloneReadInfo>&& aResponse);
 
   void HandleResponse(JS::Handle<JS::Value> aResponse);
 
@@ -623,7 +622,7 @@ class BackgroundRequestChild final : public BackgroundRequestChildBase,
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult Recv__delete__(const RequestResponse& aResponse);
+  mozilla::ipc::IPCResult Recv__delete__(RequestResponse&& aResponse);
 
   mozilla::ipc::IPCResult RecvPreprocess(const PreprocessParams& aParams);
 };
@@ -669,8 +668,7 @@ class BackgroundCursorChildBase : public PBackgroundIDBCursorChild {
 
   virtual void SendDeleteMeInternal() = 0;
 
-  virtual mozilla::ipc::IPCResult RecvResponse(
-      const CursorResponse& aResponse) = 0;
+  virtual mozilla::ipc::IPCResult RecvResponse(CursorResponse&& aResponse) = 0;
 };
 
 template <IDBCursorType CursorType>
@@ -719,17 +717,17 @@ class BackgroundCursorChild final : public BackgroundCursorChildBase {
 
   void HandleResponse(const void_t& aResponse);
 
-  void HandleResponse(const nsTArray<ObjectStoreCursorResponse>& aResponses);
+  void HandleResponse(nsTArray<ObjectStoreCursorResponse>&& aResponses);
 
-  void HandleResponse(const nsTArray<ObjectStoreKeyCursorResponse>& aResponses);
+  void HandleResponse(nsTArray<ObjectStoreKeyCursorResponse>&& aResponses);
 
-  void HandleResponse(const nsTArray<IndexCursorResponse>& aResponses);
+  void HandleResponse(nsTArray<IndexCursorResponse>&& aResponses);
+
+  void HandleResponse(nsTArray<IndexKeyCursorResponse>&& aResponses);
 
   template <typename T, typename Func>
-  void HandleMultipleCursorResponses(const nsTArray<T>& aResponses,
+  void HandleMultipleCursorResponses(nsTArray<T>&& aResponses,
                                      const Func& aHandleRecord);
-
-  void HandleResponse(const nsTArray<IndexKeyCursorResponse>& aResponses);
 
   template <typename... Args>
   MOZ_MUST_USE RefPtr<IDBCursor> HandleIndividualCursorResponse(
@@ -739,8 +737,7 @@ class BackgroundCursorChild final : public BackgroundCursorChildBase {
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult RecvResponse(
-      const CursorResponse& aResponse) override;
+  mozilla::ipc::IPCResult RecvResponse(CursorResponse&& aResponse) override;
 
   // Force callers to use SendContinueInternal.
   bool SendContinue(const CursorRequestParams& aParams, const Key& aCurrentKey,

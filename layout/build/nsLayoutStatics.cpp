@@ -348,7 +348,6 @@ void nsLayoutStatics::Shutdown() {
   nsCSSProps::ReleaseTable();
   nsRepeatService::Shutdown();
   nsStackLayout::Shutdown();
-  nsBox::Shutdown();
 
 #ifdef MOZ_XUL
   nsXULContentUtils::Finish();
@@ -417,6 +416,4 @@ void nsLayoutStatics::Shutdown() {
   css::ImageLoader::Shutdown();
 
   mozilla::net::UrlClassifierFeatureFactory::Shutdown();
-
-  gfxUserFontEntry::Shutdown();
 }

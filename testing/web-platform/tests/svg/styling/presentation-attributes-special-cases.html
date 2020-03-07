@@ -89,7 +89,7 @@ if (propertiesAreSupported(["rx", "ry"])) {
 
 if (CSS.supports("d", "initial")) {
   test(function() {
-    assertPresentationAttributeIsSupported("g", "d", "M0,0 L1,1", "d");
+    assertPresentationAttributeIsNotSupported("g", "d", "M0,0 L1,1", "d");
   }, `d presentation attribute not supported on other elements`);
 }
 
@@ -98,11 +98,11 @@ if (CSS.supports("d", "initial")) {
 // animation elements.
 
 if (CSS.supports("fill", "initial")) {
-  test(function() {
-    for (let e of ["animate", "animateMotion", "animateTransform", "discard", "set"]) {
+  for (let e of ["animate", "animateMotion", "animateTransform", "discard", "set"]) {
+    test(function() {
       assertPresentationAttributeIsNotSupported(e, "fill", "blue", "fill");
-    }
-  }, `fill presentation attribute not supported on animation elements`);
+    }, `fill presentation attribute not supported on ${e}`);
+  }
 }
 
 

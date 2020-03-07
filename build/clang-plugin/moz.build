@@ -34,6 +34,7 @@ HOST_SOURCES += [
     'NonMemMovableTemplateArgChecker.cpp',
     'NonParamInsideFunctionDeclChecker.cpp',
     'NonTrivialTypeInFfiChecker.cpp',
+    'NoPrincipalGetURI.cpp',
     'NoUsingNamespaceMozillaJavaChecker.cpp',
     'OverrideBaseCallChecker.cpp',
     'OverrideBaseCallUsageChecker.cpp',
@@ -92,6 +93,7 @@ DIRS += [
     'tests',
 ]
 
+include('external/sources.mozbuild')
 
 # In the current moz.build world, we need to override essentially every
 # variable to limit ourselves to what we need to build the clang plugin.

@@ -262,7 +262,7 @@ nsresult nsHttpTransaction::Init(
   MOZ_ASSERT(cinfo);
   MOZ_ASSERT(requestHead);
   MOZ_ASSERT(target);
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(target->IsOnCurrentThread());
 
   mChannelId = channelId;
   mTransactionObserver = std::move(transactionObserver);
@@ -731,7 +731,8 @@ nsresult nsHttpTransaction::Status() { return mStatus; }
 uint32_t nsHttpTransaction::Caps() { return mCaps & ~mCapsToClear; }
 
 void nsHttpTransaction::SetDNSWasRefreshed() {
-  MOZ_ASSERT(NS_IsMainThread(), "SetDNSWasRefreshed on main thread only!");
+  MOZ_ASSERT(mConsumerTarget->IsOnCurrentThread(),
+             "SetDNSWasRefreshed on target thread only!");
   mCapsToClear |= NS_HTTP_REFRESH_DNS;
 }
 
@@ -1016,7 +1017,7 @@ int64_t nsHttpTransaction::GetRequestSize() { return mRequestSize; }
 
 already_AddRefed<Http2PushedStreamWrapper>
 nsHttpTransaction::TakePushedStreamById(uint32_t aStreamId) {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mConsumerTarget->IsOnCurrentThread());
   MOZ_ASSERT(aStreamId);
 
   auto entry = mIDToStreamMap.Lookup(aStreamId);
@@ -1032,10 +1033,21 @@ nsHttpTransaction::TakePushedStreamById(uint32_t aStreamId) {
 void nsHttpTransaction::OnPush(Http2PushedStreamWrapper* aStream) {
   LOG(("nsHttpTransaction::OnPush %p aStream=%p", this, aStream));
   MOZ_ASSERT(aStream);
-  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mOnPushCallback);
+  MOZ_ASSERT(mConsumerTarget);
 
   RefPtr<Http2PushedStreamWrapper> stream = aStream;
+  if (!mConsumerTarget->IsOnCurrentThread()) {
+    RefPtr<nsHttpTransaction> self = this;
+    if (NS_FAILED(mConsumerTarget->Dispatch(
+            NS_NewRunnableFunction("nsHttpTransaction::OnPush",
+                                   [self, stream]() { self->OnPush(stream); }),
+            NS_DISPATCH_NORMAL))) {
+      stream->OnPushFailed();
+    }
+    return;
+  }
+
   auto entry = mIDToStreamMap.LookupForAdd(stream->StreamID());
   MOZ_ASSERT(!entry);
   if (!entry) {
@@ -1727,6 +1739,7 @@ nsresult nsHttpTransaction::HandleContentStart() {
       case 421:
         LOG(("Misdirected Request.\n"));
         gHttpHandler->AltServiceCache()->ClearHostMapping(mConnInfo);
+        mCaps |= NS_HTTP_REFRESH_DNS;
 
         // retry on a new connection - just in case
         if (!mRestartCount) {
@@ -2541,12 +2554,6 @@ int32_t nsHttpTransaction::GetProxyConnectResponseCode() {
   return mProxyConnectResponseCode;
 }
 
-void nsHttpTransaction::GetTransactionObserverResult(
-    TransactionObserverResult& aResult) {
-  MutexAutoLock lock(mLock);
-  aResult = mTransactionObserverResult;
-}
-
 void nsHttpTransaction::NotifyTransactionObserver(nsresult reason) {
   MOZ_ASSERT(OnSocketThread());
 
@@ -2579,16 +2586,14 @@ void nsHttpTransaction::NotifyTransactionObserver(nsresult reason) {
     }
   }
 
-  {
-    MutexAutoLock lock(mLock);
-    mTransactionObserverResult.versionOk() = versionOk;
-    mTransactionObserverResult.authOk() = authOk;
-    mTransactionObserverResult.closeReason() = reason;
-  }
+  TransactionObserverResult result;
+  result.versionOk() = versionOk;
+  result.authOk() = authOk;
+  result.closeReason() = reason;
 
   TransactionObserverFunc obs = nullptr;
   std::swap(obs, mTransactionObserver);
-  obs();
+  obs(std::move(result));
 }
 
 }  // namespace net

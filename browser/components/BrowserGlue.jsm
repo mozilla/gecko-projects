@@ -285,6 +285,20 @@ let ACTORS = {
     allFrames: true,
   },
 
+  SearchTelemetry: {
+    parent: {
+      moduleURI: "resource:///actors/SearchTelemetryParent.jsm",
+    },
+    child: {
+      moduleURI: "resource:///actors/SearchTelemetryChild.jsm",
+      events: {
+        DOMContentLoaded: {},
+        pageshow: { mozSystemGroup: true },
+        unload: {},
+      },
+    },
+  },
+
   ShieldFrame: {
     parent: {
       moduleURI: "resource://normandy-content/ShieldFrameParent.jsm",
@@ -373,26 +387,6 @@ let LEGACY_ACTORS = {
         ContentSearchClient: { capture: true, wantUntrusted: true },
       },
       messages: ["ContentSearch"],
-    },
-  },
-
-  OfflineApps: {
-    child: {
-      module: "resource:///actors/OfflineAppsChild.jsm",
-      events: {
-        MozApplicationManifest: {},
-      },
-      messages: ["OfflineApps:StartFetching"],
-    },
-  },
-
-  SearchTelemetry: {
-    child: {
-      module: "resource:///actors/SearchTelemetryChild.jsm",
-      events: {
-        DOMContentLoaded: {},
-        pageshow: { mozSystemGroup: true },
-      },
     },
   },
 

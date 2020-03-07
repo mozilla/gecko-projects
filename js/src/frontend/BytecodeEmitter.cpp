@@ -62,9 +62,9 @@
 #include "vm/JSAtom.h"           // JSAtom, js_*_str
 #include "vm/JSContext.h"        // JSContext
 #include "vm/JSFunction.h"       // FunctionPrefixKind, JSFunction,
-#include "vm/JSScript.h"  // JSScript, ScopeNote, ScriptSourceObject, FieldInitializers, JSScript, LazyScript
-#include "vm/Opcodes.h"   // JSOp, JSOpLength_*
-#include "wasm/AsmJS.h"   // IsAsmJSModule
+#include "vm/JSScript.h"  // JSScript, ScopeNote, ScriptSourceObject, FieldInitializers, BaseScript
+#include "vm/Opcodes.h"  // JSOp, JSOpLength_*
+#include "wasm/AsmJS.h"  // IsAsmJSModule
 
 #include "vm/JSObject-inl.h"  // JSObject
 
@@ -97,7 +97,7 @@ static bool ParseNodeRequiresSpecialLineNumberNotes(ParseNode* pn) {
 
 BytecodeEmitter::BytecodeEmitter(
     BytecodeEmitter* parent, SharedContext* sc, HandleScript script,
-    Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
+    Handle<BaseScript*> lazyScript, uint32_t line, uint32_t column,
     CompilationInfo& compilationInfo, EmitterMode emitterMode,
     FieldInitializers fieldInitializers /* = FieldInitializers::Invalid() */)
     : sc(sc),
@@ -122,7 +122,7 @@ BytecodeEmitter::BytecodeEmitter(
 
 BytecodeEmitter::BytecodeEmitter(
     BytecodeEmitter* parent, BCEParserHandle* handle, SharedContext* sc,
-    HandleScript script, Handle<LazyScript*> lazyScript, uint32_t line,
+    HandleScript script, Handle<BaseScript*> lazyScript, uint32_t line,
     uint32_t column, CompilationInfo& compilationInfo, EmitterMode emitterMode,
     FieldInitializers fieldInitializers)
     : BytecodeEmitter(parent, sc, script, lazyScript, line, column,
@@ -133,7 +133,7 @@ BytecodeEmitter::BytecodeEmitter(
 
 BytecodeEmitter::BytecodeEmitter(
     BytecodeEmitter* parent, const EitherParser& parser, SharedContext* sc,
-    HandleScript script, Handle<LazyScript*> lazyScript, uint32_t line,
+    HandleScript script, Handle<BaseScript*> lazyScript, uint32_t line,
     uint32_t column, CompilationInfo& compilationInfo, EmitterMode emitterMode,
     FieldInitializers fieldInitializers)
     : BytecodeEmitter(parent, sc, script, lazyScript, line, column,
@@ -922,15 +922,6 @@ bool BytecodeEmitter::emitInternedObjectOp(uint32_t index, JSOp op) {
   MOZ_ASSERT(JOF_OPTYPE(op) == JOF_OBJECT);
   MOZ_ASSERT(index < perScriptData().gcThingList().length());
   return emitIndexOp(op, index);
-}
-
-bool BytecodeEmitter::emitObjectOp(ObjectBox* objbox, JSOp op) {
-  uint32_t index;
-  if (!perScriptData().gcThingList().append(objbox, &index)) {
-    return false;
-  }
-
-  return emitInternedObjectOp(index, op);
 }
 
 bool BytecodeEmitter::emitObjectPairOp(ObjectBox* objbox1, ObjectBox* objbox2,
@@ -1746,7 +1737,8 @@ bool BytecodeEmitter::emitGetName(NameNode* name) {
 }
 
 bool BytecodeEmitter::emitTDZCheckIfNeeded(HandleAtom name,
-                                           const NameLocation& loc) {
+                                           const NameLocation& loc,
+                                           ValueIsOnStack isOnStack) {
   // Dynamic accesses have TDZ checks built into their VM code and should
   // never emit explicit TDZ checks.
   MOZ_ASSERT(loc.hasKnownSlot());
@@ -1763,13 +1755,25 @@ bool BytecodeEmitter::emitTDZCheckIfNeeded(HandleAtom name,
     return true;
   }
 
-  if (loc.kind() == NameLocation::Kind::FrameSlot) {
-    if (!emitLocalOp(JSOp::CheckLexical, loc.frameSlot())) {
-      return false;
+  // If the value is not on the stack, we have to load it first.
+  if (isOnStack == ValueIsOnStack::No) {
+    if (loc.kind() == NameLocation::Kind::FrameSlot) {
+      if (!emitLocalOp(JSOp::GetLocal, loc.frameSlot())) {
+        return false;
+      }
+    } else {
+      if (!emitEnvCoordOp(JSOp::GetAliasedVar, loc.environmentCoordinate())) {
+        return false;
+      }
     }
-  } else {
-    if (!emitEnvCoordOp(JSOp::CheckAliasedLexical,
-                        loc.environmentCoordinate())) {
+  }
+
+  if (!emitAtomOp(JSOp::CheckLexical, name)) {
+    return false;
+  }
+
+  if (isOnStack == ValueIsOnStack::No) {
+    if (!emit1(JSOp::Pop)) {
       return false;
     }
   }

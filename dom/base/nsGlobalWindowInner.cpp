@@ -248,7 +248,7 @@
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/BrowserChild.h"
 
-#include "mozilla/net/CookieSettings.h"
+#include "mozilla/net/CookieJarSettings.h"
 
 #include "AccessCheck.h"
 #include "SessionStorageCache.h"
@@ -4493,7 +4493,7 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
   if (ShouldPartitionStorage(access)) {
     if (!mDoc) {
       access = StorageAccess::eDeny;
-    } else if (!StoragePartitioningEnabled(access, mDoc->CookieSettings())) {
+    } else if (!StoragePartitioningEnabled(access, mDoc->CookieJarSettings())) {
       static const char* kPrefName =
           "privacy.restrict3rdpartystorage.partitionedHosts";
 
@@ -4512,14 +4512,15 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
     return nullptr;
   }
 
-  nsCOMPtr<nsICookieSettings> cookieSettings;
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings;
   if (mDoc) {
-    cookieSettings = mDoc->CookieSettings();
+    cookieJarSettings = mDoc->CookieJarSettings();
   } else {
-    cookieSettings = net::CookieSettings::CreateBlockingAll();
+    cookieJarSettings = net::CookieJarSettings::GetBlockingAll();
   }
 
-  bool partitioningEnabled = StoragePartitioningEnabled(access, cookieSettings);
+  bool partitioningEnabled =
+      StoragePartitioningEnabled(access, cookieJarSettings);
   bool shouldPartition = ShouldPartitionStorage(access);
   bool partition = partitioningEnabled && shouldPartition;
 
@@ -5602,8 +5603,9 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelAntiTrackingPrincipal() {
     return nullptr;
   }
 
-  bool stopAtOurLevel = mDoc && mDoc->CookieSettings()->GetCookieBehavior() ==
-                                    nsICookieService::BEHAVIOR_REJECT_TRACKER;
+  bool stopAtOurLevel =
+      mDoc && mDoc->CookieJarSettings()->GetCookieBehavior() ==
+                  nsICookieService::BEHAVIOR_REJECT_TRACKER;
 
   if (stopAtOurLevel && topLevelOuterWindow == outerWindow) {
     return nullptr;
@@ -7421,9 +7423,15 @@ void nsPIDOMWindowInner::BroadcastReport(Report* aReport) {
 }
 
 void nsPIDOMWindowInner::NotifyReportingObservers() {
-  nsTArray<RefPtr<ReportingObserver>> reportingObservers(mReportingObservers);
-  for (RefPtr<ReportingObserver>& observer : reportingObservers) {
-    observer->MaybeNotify();
+  const nsTArray<RefPtr<ReportingObserver>> reportingObservers(
+      mReportingObservers);
+  for (auto& observer : reportingObservers) {
+    // MOZ_KnownLive because 'reportingObservers' is guaranteed to
+    // keep it alive.
+    //
+    // This can go away once
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1620312 is fixed.
+    MOZ_KnownLive(observer)->MaybeNotify();
   }
 }
 

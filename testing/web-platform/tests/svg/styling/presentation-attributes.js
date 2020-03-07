@@ -62,7 +62,7 @@ const PROPERTIES = {
   "d": {
     value: "M0,0 L1,1",
     relevantElement: "path",
-    irrelevantElement: "image",
+    irrelevantElement: null,
   },
   "dominant-baseline": {
     value: "middle",
@@ -142,10 +142,10 @@ const PROPERTIES = {
   "height": {
     value: "1",
     relevantElement: "rect",
-    irrelevantElement: "path",
+    irrelevantElement: null,
   },
   "image-rendering": {
-    value: "optimizeSpeed",
+    value: ["optimizeSpeed", "pixelated"],
     relevantElement: "image",
     irrelevantElement: "path",
   },
@@ -207,17 +207,17 @@ const PROPERTIES = {
   "r": {
     value: "1",
     relevantElement: "circle",
-    irrelevantElement: "rect",
+    irrelevantElement: null,
   },
   "rx": {
     value: "1",
     relevantElement: "rect",
-    irrelevantElement: "path",
+    irrelevantElement: null,
   },
   "ry": {
     value: "1",
     relevantElement: "rect",
-    irrelevantElement: "path",
+    irrelevantElement: null,
   },
   "shape-rendering": {
     value: "geometricPrecision",
@@ -302,7 +302,7 @@ const PROPERTIES = {
   "transform": {
     value: "scale(2)",
     relevantElement: "g",
-    irrelevantElement: "linearGradient",
+    irrelevantElement: null,
   },
   "unicode-bidi": {
     value: "embed",
@@ -327,7 +327,7 @@ const PROPERTIES = {
   "width": {
     value: "1",
     relevantElement: "rect",
-    irrelevantElement: "path",
+    irrelevantElement: null,
   },
   "word-spacing": {
     value: "1",
@@ -342,12 +342,12 @@ const PROPERTIES = {
   "x": {
     value: "1",
     relevantElement: "rect",
-    irrelevantElement: "path",
+    irrelevantElement: null,
   },
   "y": {
     value: "1",
     relevantElement: "rect",
-    irrelevantElement: "path",
+    irrelevantElement: null,
   },
 };
 
@@ -361,17 +361,25 @@ function presentationAttributeIsSupported(element, attribute, value, property) {
   return propertyValueBefore != propertyValueAfter;
 }
 
-function assertPresentationAttributeIsSupported(element, attribute, value, property) {
+function assertPresentationAttributeIsSupported(element, attribute, values, property) {
+  if (typeof values === 'string')
+    values = [values];
+  let supported = values.some(
+    value => presentationAttributeIsSupported(element, attribute, value, property));
   assert_true(
-    presentationAttributeIsSupported(element, attribute, value, property),
-    `Presentation attribute ${attribute}="${value}" should be supported on ${element} element`
+    supported,
+    `Presentation attribute ${attribute}="${values.join(" | ")}" should be supported on ${element} element`
   );
 }
 
-function assertPresentationAttributeIsNotSupported(element, attribute, value, property) {
+function assertPresentationAttributeIsNotSupported(element, attribute, values, property) {
+  if (typeof values === 'string')
+    values = [values];
+  let supported = values.some(
+    value => presentationAttributeIsSupported(element, attribute, value, property));
   assert_false(
-    presentationAttributeIsSupported(element, attribute, value, property),
-    `Presentation attribute ${attribute}="${value}" should be supported on ${element} element`
+    supported,
+    `Presentation attribute ${attribute}="${values.join(" | ")}" should not be supported on ${element} element`
   );
 }
 

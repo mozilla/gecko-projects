@@ -2402,39 +2402,14 @@
      */ \
     MACRO(ThrowMsg, throw_msg, NULL, 3, 0, 0, JOF_UINT16) \
     /*
-     * Throw a TypeError for invalid assignment to a `const`. The environment
-     * coordinate is used to get the variable name for the error message.
+     * Throws a runtime TypeError for invalid assignment to a `const` binding.
      *
      *   Category: Control flow
      *   Type: Exceptions
-     *   Operands: uint8_t hops, uint24_t slot
-     *   Stack: v => v
+     *   Operands: uint32_t nameIndex
+     *   Stack:
      */ \
-    MACRO(ThrowSetAliasedConst, throw_set_aliased_const, NULL, 5, 1, 1, JOF_ENVCOORD|JOF_NAME|JOF_DETECTING) \
-    /*
-     * Throw a TypeError for invalid assignment to the callee binding in a named
-     * lambda, which is always a `const` binding. This is a different bytecode
-     * than `JSOp::ThrowSetConst` because the named lambda callee, if not closed
-     * over, does not have a frame slot to look up the name with for the error
-     * message.
-     *
-     *   Category: Control flow
-     *   Type: Exceptions
-     *   Operands:
-     *   Stack: v => v
-     */ \
-    MACRO(ThrowSetCallee, throw_set_callee, NULL, 1, 1, 1, JOF_BYTE) \
-    /*
-     * Throws a runtime TypeError for invalid assignment to an optimized
-     * `const` binding. `localno` is used to get the variable name for the
-     * error message.
-     *
-     *   Category: Control flow
-     *   Type: Exceptions
-     *   Operands: uint24_t localno
-     *   Stack: v => v
-     */ \
-    MACRO(ThrowSetConst, throw_set_const, NULL, 4, 1, 1, JOF_LOCAL|JOF_NAME|JOF_DETECTING) \
+    MACRO(ThrowSetConst, throw_set_const, NULL, 5, 0, 0, JOF_ATOM|JOF_NAME|JOF_DETECTING) \
     /*
      * No-op instruction that marks the top of the bytecode for a
      * *TryStatement*.
@@ -2635,13 +2610,9 @@
      */ \
     MACRO(InitAliasedLexical, init_aliased_lexical, NULL, 5, 1, 1, JOF_ENVCOORD|JOF_NAME|JOF_PROPINIT|JOF_DETECTING) \
     /*
-     * Throw a ReferenceError if the optimized local `localno` is
-     * uninitialized.
+     * Throw a ReferenceError if the value on top of the stack is uninitialized.
      *
-     * `localno` must be the number of a fixed slot in the current stack frame
-     * previously initialized or marked uninitialized using `JSOp::InitLexical`.
-     *
-     * Typically used before `JSOp::GetLocal` or `JSOp::SetLocal`.
+     * Typically used after `JSOp::GetLocal` or `JSOp::GetAliasedVar`.
      *
      * Implements: [GetBindingValue][1] step 3 and [SetMutableBinding][2] step
      * 4 for declarative Environment Records.
@@ -2651,23 +2622,10 @@
      *
      *   Category: Variables and scopes
      *   Type: Initialization
-     *   Operands: uint24_t localno
-     *   Stack: =>
+     *   Operands: uint32_t nameIndex
+     *   Stack: v => v
      */ \
-    MACRO(CheckLexical, check_lexical, NULL, 4, 0, 0, JOF_LOCAL|JOF_NAME) \
-    /*
-     * Like `JSOp::CheckLexical` but for aliased bindings.
-     *
-     * Note: There are no `CheckName` or `CheckGName` instructions because
-     * they're unnecessary. `JSOp::{Get,Set}{Name,GName}` all check for
-     * uninitialized lexicals and throw if needed.
-     *
-     *   Category: Variables and scopes
-     *   Type: Initialization
-     *   Operands: uint8_t hops, uint24_t slot
-     *   Stack: =>
-     */ \
-    MACRO(CheckAliasedLexical, check_aliased_lexical, NULL, 5, 0, 0, JOF_ENVCOORD|JOF_NAME) \
+    MACRO(CheckLexical, check_lexical, NULL, 5, 1, 1, JOF_ATOM|JOF_NAME) \
     /*
      * Throw a ReferenceError if the value on top of the stack is
      * `MagicValue(JS_UNINITIALIZED_LEXICAL)`. Used in derived class
@@ -3099,6 +3057,9 @@
      *
      * See `JSOp::PushLexicalEnv` for the fine print.
      *
+     * There is no corresponding `JSOp::PopVarEnv` operation, because a
+     * `VarEnvironmentObject` is never popped from the environment chain.
+     *
      * Implements: Places in the spec where the VariableEnvironment is set:
      *
      * -   The bit in [PerformEval][1] where, in strict direct eval, the new
@@ -3107,9 +3068,7 @@
      *
      * -   The weird scoping rules for functions with default parameter
      *     expressions, as specified in [FunctionDeclarationInstantiation][2]
-     *     step 28 ("NOTE: A separate Environment Record is needed...") and
-     *     [IteratorBindingInitialization for *FormalParameter* and
-     *     *FormalRestParameter*][3].
+     *     step 28 ("NOTE: A separate Environment Record is needed...").
      *
      * Note: The spec also pushes a new VariableEnvironment on entry to every
      * function, but the VM takes care of that as part of pushing the stack
@@ -3118,7 +3077,6 @@
      *
      * [1]: https://tc39.es/ecma262/#sec-performeval
      * [2]: https://tc39.es/ecma262/#sec-functiondeclarationinstantiation
-     * [3]: https://tc39.es/ecma262/#sec-function-definitions-runtime-semantics-iteratorbindinginitialization
      *
      *   Category: Variables and scopes
      *   Type: Entering and leaving environments
@@ -3126,17 +3084,6 @@
      *   Stack: =>
      */ \
     MACRO(PushVarEnv, push_var_env, NULL, 5, 0, 0, JOF_SCOPE) \
-    /*
-     * Pop a `VarEnvironmentObject` from the environment chain.
-     *
-     * See `JSOp::PushLexicalEnv` for the fine print.
-     *
-     *   Category: Variables and scopes
-     *   Type: Entering and leaving environments
-     *   Operands:
-     *   Stack: =>
-     */ \
-    MACRO(PopVarEnv, pop_var_env, NULL, 1, 0, 0, JOF_BYTE) \
     /*
      * Push a `WithEnvironmentObject` wrapping ToObject(`val`) to the
      * environment chain.
@@ -3516,6 +3463,10 @@
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(MACRO) \
+  MACRO(236)                                   \
+  MACRO(237)                                   \
+  MACRO(238)                                   \
+  MACRO(239)                                   \
   MACRO(240)                                   \
   MACRO(241)                                   \
   MACRO(242)                                   \

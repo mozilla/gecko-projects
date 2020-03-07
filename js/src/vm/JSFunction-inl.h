@@ -38,8 +38,8 @@ inline bool CanReuseFunctionForClone(JSContext* cx, HandleFunction fun) {
   }
   fun->baseScript()->setHasBeenCloned();
 
-  if (fun->hasScript()) {
-    if (LazyScript* lazy = fun->nonLazyScript()->maybeLazyScript()) {
+  if (fun->hasBytecode()) {
+    if (BaseScript* lazy = fun->nonLazyScript()->maybeLazyScript()) {
       lazy->setHasBeenCloned();
     }
   }

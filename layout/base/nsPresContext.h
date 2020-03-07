@@ -494,6 +494,13 @@ class nsPresContext : public nsISupports,
     UpdateEffectiveTextZoom();
   }
 
+  /**
+   * Notify the pres context that the safe area insets have changed.
+   */
+  void SetSafeAreaInsets(const mozilla::ScreenIntMargin& aInsets);
+
+  mozilla::ScreenIntMargin GetSafeAreaInsets() const { return mSafeAreaInsets; }
+
  protected:
   void UpdateEffectiveTextZoom();
 
@@ -596,7 +603,7 @@ class nsPresContext : public nsISupports,
     return AppUnitsToIntCSSPixels(DevPixelsToAppUnits(aPixels));
   }
 
-  float DevPixelsToFloatCSSPixels(int32_t aPixels) {
+  float DevPixelsToFloatCSSPixels(int32_t aPixels) const {
     return AppUnitsToFloatCSSPixels(DevPixelsToAppUnits(aPixels));
   }
 
@@ -752,10 +759,17 @@ class nsPresContext : public nsISupports,
   uint32_t GetBidi() const;
 
   /*
-   * Obtain a native them for rendering our widgets (both form controls and
+   * Obtain a native theme for rendering our widgets (both form controls and
    * html)
+   *
+   * Guaranteed to return non-null.
    */
-  nsITheme* GetTheme();
+  nsITheme* Theme() MOZ_NONNULL_RETURN {
+    if (MOZ_LIKELY(mTheme)) {
+      return mTheme;
+    }
+    return EnsureTheme();
+  }
 
   /*
    * Notify the pres context that the theme has changed.  An internal switch
@@ -1203,6 +1217,8 @@ class nsPresContext : public nsISupports,
   // The maximum height of the dynamic toolbar on mobile.
   mozilla::ScreenIntCoord mDynamicToolbarMaxHeight;
   mozilla::ScreenIntCoord mDynamicToolbarHeight;
+  // Safe area insets support
+  mozilla::ScreenIntMargin mSafeAreaInsets;
   nsSize mPageSize;
   float mPageScale;
   float mPPScale;
@@ -1319,6 +1335,8 @@ class nsPresContext : public nsISupports,
   virtual ~nsPresContext();
 
   void LastRelease();
+
+  nsITheme* EnsureTheme();
 
 #ifdef DEBUG
  private:

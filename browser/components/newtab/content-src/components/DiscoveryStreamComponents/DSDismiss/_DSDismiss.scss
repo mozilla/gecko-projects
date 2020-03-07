@@ -1,8 +1,7 @@
 .ds-dismiss {
   position: relative;
   border-radius: 8px;
-  transition-delay: 100ms;
-  transition-duration: 200ms;
+  transition-duration: 250ms;
   transition-property: background;
 
   &:hover {
@@ -24,6 +23,7 @@
     inset-inline-end: 0;
     top: 0;
     border-radius: 50%;
+    background-color: transparent;
 
     .icon {
       @include dark-theme-only {
@@ -36,6 +36,10 @@
     &:hover {
       @include dark-theme-only {
         background: $grey-90-50;
+
+        .icon {
+          fill: $grey-10;
+        }
       }
 
       background: $grey-90-20;

@@ -114,11 +114,14 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
-  // TODO: What happens if the caller has called other methods on the
-  // nsIChannel after the ctor, but before this?
+  if (!GetDocShell() || !GetDocShell()->GetBrowsingContext() ||
+      GetDocShell()->GetBrowsingContext()->IsDiscarded()) {
+    return NS_ERROR_FAILURE;
+  }
 
   gNeckoChild->SendPDocumentChannelConstructor(
-      this, browserChild, IPC::SerializedLoadContext(this), args);
+      this, browserChild, GetDocShell()->GetBrowsingContext(),
+      IPC::SerializedLoadContext(this), args);
 
   mIsPending = true;
   mWasOpened = true;
@@ -226,9 +229,7 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
   // This is used to report any errors back to the parent by calling
   // CrossProcessRedirectFinished.
   auto scopeExit = MakeScopeExit([&]() {
-    Maybe<LoadInfoArgs> dummy;
-    mRedirectResolver(
-        Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(rv, dummy));
+    mRedirectResolver(rv);
     mRedirectResolver = nullptr;
   });
 
@@ -321,9 +322,7 @@ DocumentChannelChild::OnRedirectVerifyCallback(nsresult aStatusCode) {
   // we're done.
   if (NS_FAILED(mStatus)) {
     redirectChannel->SetNotificationCallbacks(nullptr);
-    Maybe<LoadInfoArgs> dummy;
-    redirectResolver(
-        Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(aStatusCode, dummy));
+    redirectResolver(aStatusCode);
     return NS_OK;
   }
 
@@ -339,9 +338,7 @@ DocumentChannelChild::OnRedirectVerifyCallback(nsresult aStatusCode) {
     redirectChannel->SetNotificationCallbacks(nullptr);
   }
 
-  Maybe<LoadInfoArgs> dummy;
-  redirectResolver(
-      Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(rv, dummy));
+  redirectResolver(rv);
 
   if (NS_FAILED(rv)) {
     ShutdownListeners(rv);

@@ -4470,27 +4470,12 @@ bool BaselineInterpreterCodeGen::emit_NewTarget() {
 }
 
 template <typename Handler>
-bool BaselineCodeGen<Handler>::emitThrowConstAssignment() {
+bool BaselineCodeGen<Handler>::emit_ThrowSetConst() {
   prepareVMCall();
   pushArg(Imm32(JSMSG_BAD_CONST_ASSIGN));
 
   using Fn = bool (*)(JSContext*, unsigned);
   return callVM<Fn, jit::ThrowRuntimeLexicalError>();
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_ThrowSetConst() {
-  return emitThrowConstAssignment();
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_ThrowSetAliasedConst() {
-  return emitThrowConstAssignment();
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_ThrowSetCallee() {
-  return emitThrowConstAssignment();
 }
 
 template <typename Handler>
@@ -4512,19 +4497,10 @@ bool BaselineCodeGen<Handler>::emitUninitializedLexicalCheck(
   return true;
 }
 
-template <>
-bool BaselineCompilerCodeGen::emit_CheckLexical() {
+template <typename Handler>
+bool BaselineCodeGen<Handler>::emit_CheckLexical() {
   frame.syncStack(0);
-  masm.loadValue(frame.addressOfLocal(GET_LOCALNO(handler.pc())), R0);
-  return emitUninitializedLexicalCheck(R0);
-}
-
-template <>
-bool BaselineInterpreterCodeGen::emit_CheckLexical() {
-  Register scratch = R0.scratchReg();
-  LoadUint24Operand(masm, 0, scratch);
-  BaseValueIndex addr = ComputeAddressOfLocal(masm, scratch);
-  masm.loadValue(addr, R0);
+  masm.loadValue(frame.addressOfStackValue(-1), R0);
   return emitUninitializedLexicalCheck(R0);
 }
 
@@ -4539,13 +4515,6 @@ bool BaselineCodeGen<Handler>::emit_InitGLexical() {
   pushGlobalLexicalEnvironmentValue(R1);
   frame.push(R0);
   return emit_SetProp();
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_CheckAliasedLexical() {
-  frame.syncStack(0);
-  emitGetAliasedVar(R0);
-  return emitUninitializedLexicalCheck(R0);
 }
 
 template <typename Handler>
@@ -5063,16 +5032,6 @@ bool BaselineCodeGen<Handler>::emit_PushVarEnv() {
 
   using Fn = bool (*)(JSContext*, BaselineFrame*, HandleScope);
   return callVM<Fn, jit::PushVarEnv>();
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_PopVarEnv() {
-  prepareVMCall();
-  masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
-  pushArg(R0.scratchReg());
-
-  using Fn = bool (*)(JSContext*, BaselineFrame*);
-  return callVM<Fn, jit::PopVarEnv>();
 }
 
 template <typename Handler>

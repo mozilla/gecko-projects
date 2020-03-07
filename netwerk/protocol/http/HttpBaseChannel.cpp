@@ -56,7 +56,6 @@
 #include "nsIObserverService.h"
 #include "nsIPrincipal.h"
 #include "nsIProtocolProxyService.h"
-#include "nsISSLSocketControl.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISecurityConsoleMessage.h"
@@ -64,6 +63,7 @@
 #include "nsIStorageStream.h"
 #include "nsIStreamConverterService.h"
 #include "nsITimedChannel.h"
+#include "nsITransportSecurityInfo.h"
 #include "nsIURIMutator.h"
 #include "nsMimeTypes.h"
 #include "nsNetCID.h"
@@ -385,6 +385,7 @@ nsresult HttpBaseChannel::Init(nsIURI* aURI, uint32_t aCaps,
       !type.EqualsLiteral("unknown"))
     mProxyInfo = aProxyInfo;
 
+  mCurrentThread = GetCurrentThreadEventTarget();
   return rv;
 }
 
@@ -1958,10 +1959,11 @@ HttpBaseChannel::SetIsMainDocumentChannel(bool aValue) {
 NS_IMETHODIMP
 HttpBaseChannel::GetProtocolVersion(nsACString& aProtocolVersion) {
   nsresult rv;
-  nsCOMPtr<nsISSLSocketControl> ssl = do_QueryInterface(mSecurityInfo, &rv);
+  nsCOMPtr<nsITransportSecurityInfo> info =
+      do_QueryInterface(mSecurityInfo, &rv);
   nsAutoCString protocol;
-  if (NS_SUCCEEDED(rv) && ssl &&
-      NS_SUCCEEDED(ssl->GetNegotiatedNPN(protocol)) && !protocol.IsEmpty()) {
+  if (NS_SUCCEEDED(rv) && info &&
+      NS_SUCCEEDED(info->GetNegotiatedNPN(protocol)) && !protocol.IsEmpty()) {
     // The negotiated protocol was not empty so we can use it.
     aProtocolVersion = protocol;
     return NS_OK;
@@ -2149,8 +2151,8 @@ HttpBaseChannel::SetCookie(const nsACString& aCookieHeader) {
   nsAutoCString date;
   // empty date is not an error
   Unused << mResponseHead->GetHeader(nsHttp::Date, date);
-  nsresult rv = cs->SetCookieStringFromHttp(mURI, nullptr, nullptr,
-                                            aCookieHeader, date, this);
+  nsresult rv =
+      cs->SetCookieStringFromHttp(mURI, nullptr, aCookieHeader, date, this);
   if (NS_SUCCEEDED(rv)) {
     NotifySetCookie(aCookieHeader);
   }
@@ -2720,6 +2722,10 @@ void HttpBaseChannel::AddConsoleReport(
   mReportCollector->AddConsoleReport(aErrorFlags, aCategory, aPropertiesFile,
                                      aSourceFileURI, aLineNumber, aColumnNumber,
                                      aMessageName, aStringParams);
+
+  // If this channel is already part of a loadGroup, we can flush this console
+  // report immediately.
+  HttpBaseChannel::MaybeFlushConsoleReports();
 }
 
 void HttpBaseChannel::FlushReportsToConsole(uint64_t aInnerWindowID,
@@ -2745,6 +2751,11 @@ void HttpBaseChannel::FlushConsoleReports(nsILoadGroup* aLoadGroup,
 void HttpBaseChannel::FlushConsoleReports(
     nsIConsoleReportCollector* aCollector) {
   mReportCollector->FlushConsoleReports(aCollector);
+}
+
+void HttpBaseChannel::StealConsoleReports(
+    nsTArray<net::ConsoleReportCollected>& aReports) {
+  mReportCollector->StealConsoleReports(aReports);
 }
 
 void HttpBaseChannel::ClearConsoleReports() {
@@ -2982,7 +2993,8 @@ HttpBaseChannel::SetNewListener(nsIStreamListener* aListener,
 //-----------------------------------------------------------------------------
 
 void HttpBaseChannel::ReleaseListeners() {
-  MOZ_ASSERT(NS_IsMainThread(), "Should only be called on the main thread.");
+  MOZ_ASSERT(mCurrentThread->IsOnCurrentThread(),
+             "Should only be called on the current thread");
 
   mListener = nullptr;
   mCallbacks = nullptr;
@@ -3520,12 +3532,11 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
 
   // convey the User-Agent header value
   // since we might be setting custom user agent from DevTools.
-  if (httpInternal &&
-      mCorsMode == CORS_MODE_NO_CORS &&
+  if (httpInternal && mCorsMode == CORS_MODE_NO_CORS &&
       redirectType == ReplacementReason::Redirect) {
     nsAutoCString oldUserAgent;
     nsresult hasHeader =
-      mRequestHead.GetHeader(nsHttp::User_Agent, oldUserAgent);
+        mRequestHead.GetHeader(nsHttp::User_Agent, oldUserAgent);
     if (NS_SUCCEEDED(hasHeader)) {
       rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"),
                                          oldUserAgent, false);
@@ -4521,6 +4532,16 @@ HttpBaseChannel::GetCrossOriginOpenerPolicy(
   }
   *aPolicy = mComputedCrossOriginOpenerPolicy;
   return NS_OK;
+}
+
+void HttpBaseChannel::MaybeFlushConsoleReports() {
+  // If this channel is part of a loadGroup, we can flush the console reports
+  // immediately.
+  nsCOMPtr<nsILoadGroup> loadGroup;
+  nsresult rv = GetLoadGroup(getter_AddRefs(loadGroup));
+  if (NS_SUCCEEDED(rv) && loadGroup) {
+    FlushConsoleReports(loadGroup);
+  }
 }
 
 }  // namespace net

@@ -13,20 +13,8 @@ const {
 loader.lazyRequireGetter(this, "getFront", "devtools/shared/protocol", true);
 loader.lazyRequireGetter(
   this,
-  "ProcessDescriptorFront",
-  "devtools/shared/fronts/descriptors/process",
-  true
-);
-loader.lazyRequireGetter(
-  this,
   "TabDescriptorFront",
   "devtools/shared/fronts/descriptors/tab",
-  true
-);
-loader.lazyRequireGetter(
-  this,
-  "FrameDescriptorFront",
-  "devtools/shared/fronts/descriptors/frame",
   true
 );
 loader.lazyRequireGetter(
@@ -215,7 +203,7 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
     let { workers } = await this.listWorkers();
 
     // And then from the Child processes
-    const { processes } = await this.listProcesses();
+    const processes = await this.listProcesses();
     for (const processDescriptorFront of processes) {
       // Ignore parent process
       if (processDescriptorFront.isParent) {
@@ -231,77 +219,29 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
     return workers;
   }
 
-  async listProcesses() {
-    const { processes } = await super.listProcesses();
-    const processDescriptors = processes.map(form =>
-      this._getProcessDescriptorFront(form)
-    );
-    return { processes: processDescriptors };
-  }
-
   /**
-   * Fetch the ParentProcessTargetActor for the main process.
+   * Fetch the ProcessDescriptorFront for the main process.
    *
-   * `getProcess` requests allows to fetch the target actor for any process
-   * and the main process is having the process ID zero.
+   * `getProcess` requests allows to fetch the descriptor for any process and
+   * the main process is having the process ID zero.
    */
   getMainProcess() {
     return this.getProcess(0);
   }
 
-  async getProcess(id) {
-    const { form } = await super.getProcess(id);
-    // The server currently returns a form, when we can drop backwards compatibility,
-    // we can use automatic marshalling here instead, making the next line unnecessary
-    const processDescriptorFront = this._getProcessDescriptorFront(form);
-    return processDescriptorFront.getTarget();
-  }
-
   /**
-   * This exists as a polyfill for now for tabTargets, which do not have descriptors.
-   * The mainRoot fills the role of the descriptor
-   */
-
-  /**
-   *  Get the previous frame descriptor front if it exists, create a new one if not
-   */
-  _getFrameDescriptorFront(form) {
-    let front = this.actor(form.actor);
-    if (front) {
-      return front;
-    }
-    front = new FrameDescriptorFront(this._client, null, this);
-    front.form(form);
-    front.actorID = form.actor;
-    this.manage(front);
-    return front;
-  }
-
-  /**
-   * Get the previous process descriptor front if it exists, create a new one if not.
+   * Retrieve the target descriptor for the provided id.
    *
-   * If we are using a modern server, we will get a form for a processDescriptorFront.
-   * Until we can switch to auto marshalling, we need to marshal this into a process
-   * descriptor front ourselves.
+   * @return {ProcessDescriptorFront} the process descriptor front for the
+   *         provided id.
    */
-  _getProcessDescriptorFront(form) {
-    let front = this.actor(form.actor);
-    if (front) {
-      return front;
-    }
-    front = new ProcessDescriptorFront(this._client, null, this);
-    front.form(form);
-    front.actorID = form.actor;
-    this.manage(front);
-    return front;
-  }
-
-  async getBrowsingContextDescriptor(id) {
-    const form = await super.getBrowsingContextDescriptor(id);
-    if (form.actor && form.actor.includes("processDescriptor")) {
-      return this._getProcessDescriptorFront(form);
-    }
-    return this._getFrameDescriptorFront(form);
+  async getProcess(id) {
+    const { form, processDescriptor } = await super.getProcess(id);
+    // Backward compatibility: FF74 or older servers will return the
+    // process descriptor as the "form" property of the response.
+    // Once FF75 is merged to release we can always expect `processDescriptor`
+    // to be defined.
+    return processDescriptor || form;
   }
 
   /**
@@ -377,6 +317,7 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
     if (front) {
       if (!form.actor.includes("tabDescriptor")) {
         // Backwards compatibility for servers FF74 and older.
+        front.form(form);
         return front;
       }
 

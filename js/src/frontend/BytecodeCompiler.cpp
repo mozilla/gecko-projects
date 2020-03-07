@@ -896,51 +896,6 @@ ModuleObject* frontend::CompileModule(JSContext* cx,
   return CreateModule(cx, options, srcBuf);
 }
 
-// When leaving this scope, the given function should either:
-//   * be linked to a fully compiled script
-//   * remain linking to a lazy script
-class MOZ_STACK_CLASS AutoAssertFunctionDelazificationCompletion {
-#ifdef DEBUG
-  RootedFunction fun_;
-#endif
-
-  void checkIsLazy() {
-    MOZ_ASSERT(fun_->isInterpretedLazy(), "Function should remain lazy");
-    MOZ_ASSERT(!fun_->lazyScript()->hasScript(),
-               "LazyScript should not have a script");
-  }
-
- public:
-  AutoAssertFunctionDelazificationCompletion(JSContext* cx, HandleFunction fun)
-#ifdef DEBUG
-      : fun_(cx, fun)
-#endif
-  {
-    checkIsLazy();
-  }
-
-  ~AutoAssertFunctionDelazificationCompletion() {
-#ifdef DEBUG
-    if (!fun_) {
-      return;
-    }
-#endif
-
-    // If fun_ is not nullptr, it means delazification doesn't complete.
-    // Assert that the function keeps linking to lazy script
-    checkIsLazy();
-  }
-
-  void complete() {
-    // Assert the completion of delazification and forget the function.
-    MOZ_ASSERT(fun_->nonLazyScript());
-
-#ifdef DEBUG
-    fun_ = nullptr;
-#endif
-  }
-};
-
 static void CheckFlagsOnDelazification(uint32_t lazy, uint32_t nonLazy) {
 #ifdef DEBUG
   // These flags are expect to be unset for lazy scripts and are only valid
@@ -971,7 +926,7 @@ static void CheckFlagsOnDelazification(uint32_t lazy, uint32_t nonLazy) {
 }
 
 template <typename Unit>
-static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
+static bool CompileLazyFunctionImpl(JSContext* cx, Handle<BaseScript*> lazy,
                                     const Unit* units, size_t length) {
   MOZ_ASSERT(cx->compartment() == lazy->compartment());
 
@@ -984,7 +939,6 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
 
   AutoAssertReportedException assertException(cx);
   Rooted<JSFunction*> fun(cx, lazy->function());
-  AutoAssertFunctionDelazificationCompletion delazificationCompletion(cx, fun);
 
   JS::CompileOptions options(cx);
   options.setMutedErrors(lazy->mutedErrors())
@@ -1058,17 +1012,16 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
 
   CheckFlagsOnDelazification(lazy->immutableFlags(), script->immutableFlags());
 
-  delazificationCompletion.complete();
   assertException.reset();
   return true;
 }
 
-bool frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy,
+bool frontend::CompileLazyFunction(JSContext* cx, Handle<BaseScript*> lazy,
                                    const char16_t* units, size_t length) {
   return CompileLazyFunctionImpl(cx, lazy, units, length);
 }
 
-bool frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy,
+bool frontend::CompileLazyFunction(JSContext* cx, Handle<BaseScript*> lazy,
                                    const Utf8Unit* units, size_t length) {
   return CompileLazyFunctionImpl(cx, lazy, units, length);
 }
@@ -1077,7 +1030,7 @@ bool frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy,
 
 template <class ParserT>
 static bool CompileLazyBinASTFunctionImpl(JSContext* cx,
-                                          Handle<LazyScript*> lazy,
+                                          Handle<BaseScript*> lazy,
                                           const uint8_t* buf, size_t length) {
   MOZ_ASSERT(cx->compartment() == lazy->compartment());
 
@@ -1089,7 +1042,6 @@ static bool CompileLazyBinASTFunctionImpl(JSContext* cx,
 
   AutoAssertReportedException assertException(cx);
   Rooted<JSFunction*> fun(cx, lazy->function());
-  AutoAssertFunctionDelazificationCompletion delazificationCompletion(cx, fun);
 
   CompileOptions options(cx);
   options.setMutedErrors(lazy->mutedErrors())
@@ -1132,13 +1084,12 @@ static bool CompileLazyBinASTFunctionImpl(JSContext* cx,
     return false;
   }
 
-  delazificationCompletion.complete();
   assertException.reset();
   return script;
 }
 
 bool frontend::CompileLazyBinASTFunction(JSContext* cx,
-                                         Handle<LazyScript*> lazy,
+                                         Handle<BaseScript*> lazy,
                                          const uint8_t* buf, size_t length) {
   if (lazy->scriptSource()->binASTSourceMetadata()->isMultipart()) {
     return CompileLazyBinASTFunctionImpl<BinASTTokenReaderMultipart>(

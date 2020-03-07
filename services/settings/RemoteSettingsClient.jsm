@@ -9,6 +9,7 @@ var EXPORTED_SYMBOLS = ["RemoteSettingsClient"];
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
 );
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ClientEnvironmentBase:
@@ -138,6 +139,13 @@ class UnknownCollectionError extends Error {
   constructor(cid) {
     super(`Unknown Collection "${cid}"`);
     this.name = "UnknownCollectionError";
+  }
+}
+
+class SyncConflictError extends Error {
+  constructor() {
+    super("Unable to overwrite local data");
+    this.name = "SyncConflictError";
   }
 }
 
@@ -279,8 +287,9 @@ class RemoteSettingsClient extends EventEmitter {
   async getLastModified() {
     let timestamp = -1;
     try {
-      const collection = await this.openCollection();
-      timestamp = await collection.db.getLastModified();
+      const kintoCollection = await this.openCollection();
+      timestamp = await kintoCollection.db.getLastModified();
+      await kintoCollection.db.close();
     } catch (err) {
       console.warn(
         `Error retrieving the getLastModified timestamp from ${
@@ -370,6 +379,8 @@ class RemoteSettingsClient extends EventEmitter {
       });
     }
 
+    await kintoCollection.db.close();
+
     // Filter the records based on `this.filterFunc` results.
     return this._filterEntries(data);
   }
@@ -422,6 +433,8 @@ class RemoteSettingsClient extends EventEmitter {
     let importedFromDump = [];
     const startedAt = new Date();
     let reportStatus = null;
+    let thrownError = null;
+    let kintoCollection = null;
     try {
       // If network is offline, we can't synchronize.
       if (Utils.isOffline) {
@@ -429,7 +442,7 @@ class RemoteSettingsClient extends EventEmitter {
       }
 
       // Synchronize remote data into a local DB using Kinto.
-      const kintoCollection = await this.openCollection();
+      kintoCollection = await this.openCollection();
       let collectionLastModified = await kintoCollection.db.getLastModified();
 
       // If there is no data currently in the collection, attempt to import
@@ -549,7 +562,7 @@ class RemoteSettingsClient extends EventEmitter {
           }
           if (!syncResult.ok) {
             // With PULL_ONLY, there cannot be any conflicts, but don't silent it anyway.
-            throw new Error("Sync failed");
+            throw new SyncConflictError();
           }
           // The records imported from the dump should be considered as "created" for the
           // listeners.
@@ -592,23 +605,11 @@ class RemoteSettingsClient extends EventEmitter {
             throw e;
           }
         } else {
-          // The sync has thrown, it can be related to metadata, network or a general error.
-          if (e instanceof RemoteSettingsClient.MissingSignatureError) {
-            // Collection metadata has no signature info, no need to retry.
-            reportStatus = UptakeTelemetry.STATUS.SIGNATURE_ERROR;
-          } else if (/unparseable/.test(e.message)) {
-            reportStatus = UptakeTelemetry.STATUS.PARSE_ERROR;
-          } else if (/NetworkError/.test(e.message)) {
-            reportStatus = UptakeTelemetry.STATUS.NETWORK_ERROR;
-          } else if (/Timeout/.test(e.message)) {
-            reportStatus = UptakeTelemetry.STATUS.TIMEOUT_ERROR;
-          } else if (/HTTP 5??/.test(e.message)) {
-            reportStatus = UptakeTelemetry.STATUS.SERVER_ERROR;
-          } else if (/Backoff/.test(e.message)) {
-            reportStatus = UptakeTelemetry.STATUS.BACKOFF;
-          } else {
-            reportStatus = UptakeTelemetry.STATUS.SYNC_ERROR;
-          }
+          // The sync has thrown for other reason than signature verification.
+          // Default status for errors at this step is SYNC_ERROR.
+          reportStatus = this._telemetryFromError(e, {
+            default: UptakeTelemetry.STATUS.SYNC_ERROR,
+          });
           throw e;
         }
       }
@@ -631,37 +632,99 @@ class RemoteSettingsClient extends EventEmitter {
         );
       }
     } catch (e) {
-      // IndexedDB errors. See https://developer.mozilla.org/en-US/docs/Web/API/IDBRequest/error
-      if (
-        /(IndexedDB|AbortError|ConstraintError|QuotaExceededError|VersionError)/.test(
-          e.message
-        )
-      ) {
-        reportStatus = UptakeTelemetry.STATUS.CUSTOM_1_ERROR;
+      thrownError = e;
+      // If browser is shutting down, then we can report a specific status.
+      // (eg. IndexedDB will abort transactions)
+      if (Services.startup.shuttingDown) {
+        reportStatus = UptakeTelemetry.STATUS.SHUTDOWN_ERROR;
       }
-      if (e instanceof RemoteSettingsClient.NetworkOfflineError) {
-        reportStatus = UptakeTelemetry.STATUS.NETWORK_OFFLINE_ERROR;
-      }
-      // No specific error was tracked, mark it as unknown.
-      if (reportStatus === null) {
-        reportStatus = UptakeTelemetry.STATUS.UNKNOWN_ERROR;
+      // If no Telemetry status was determined yet (ie. outside sync step),
+      // then introspect error, default status at this step is UNKNOWN.
+      else if (reportStatus == null) {
+        reportStatus = this._telemetryFromError(e, {
+          default: UptakeTelemetry.STATUS.UNKNOWN_ERROR,
+        });
       }
       throw e;
     } finally {
+      if (kintoCollection) {
+        await kintoCollection.db.close();
+      }
       const durationMilliseconds = new Date() - startedAt;
       // No error was reported, this is a success!
       if (reportStatus === null) {
         reportStatus = UptakeTelemetry.STATUS.SUCCESS;
       }
       // Report success/error status to Telemetry.
-      await UptakeTelemetry.report(TELEMETRY_COMPONENT, reportStatus, {
+      let reportArgs = {
         source: this.identifier,
         trigger,
         duration: durationMilliseconds,
-      });
+      };
+      // In Bug 1617133, we will try to break down specific errors into
+      // more precise statuses by reporting the JavaScript error name
+      // ("TypeError", etc.) to Telemetry on Nightly.
+      const channel = UptakeTelemetry.Policy.getChannel();
+      if (
+        thrownError !== null &&
+        channel == "nightly" &&
+        [
+          UptakeTelemetry.STATUS.SYNC_ERROR,
+          UptakeTelemetry.STATUS.CUSTOM_1_ERROR, // IndexedDB.
+          UptakeTelemetry.STATUS.UNKNOWN_ERROR,
+          UptakeTelemetry.STATUS.SHUTDOWN_ERROR,
+        ].includes(reportStatus)
+      ) {
+        // List of possible error names for IndexedDB:
+        // https://searchfox.org/mozilla-central/rev/49ed791/dom/base/DOMException.cpp#28-53
+        reportArgs = { ...reportArgs, errorName: thrownError.name };
+      }
+
+      await UptakeTelemetry.report(
+        TELEMETRY_COMPONENT,
+        reportStatus,
+        reportArgs
+      );
+
       console.debug(`${this.identifier} sync status is ${reportStatus}`);
       this._syncRunning = false;
     }
+  }
+
+  /**
+   * Determine the Telemetry uptake status based on the specified
+   * error.
+   */
+  _telemetryFromError(e, options = { default: null }) {
+    let reportStatus = options.default;
+
+    if (e instanceof RemoteSettingsClient.NetworkOfflineError) {
+      reportStatus = UptakeTelemetry.STATUS.NETWORK_OFFLINE_ERROR;
+    } else if (e instanceof RemoteSettingsClient.MissingSignatureError) {
+      // Collection metadata has no signature info, no need to retry.
+      reportStatus = UptakeTelemetry.STATUS.SIGNATURE_ERROR;
+    } else if (e instanceof SyncConflictError) {
+      reportStatus = UptakeTelemetry.STATUS.CONFLICT_ERROR;
+    } else if (/unparseable/.test(e.message)) {
+      reportStatus = UptakeTelemetry.STATUS.PARSE_ERROR;
+    } else if (/NetworkError/.test(e.message)) {
+      reportStatus = UptakeTelemetry.STATUS.NETWORK_ERROR;
+    } else if (/Timeout/.test(e.message)) {
+      reportStatus = UptakeTelemetry.STATUS.TIMEOUT_ERROR;
+    } else if (/HTTP 5??/.test(e.message)) {
+      reportStatus = UptakeTelemetry.STATUS.SERVER_ERROR;
+    } else if (/Backoff/.test(e.message)) {
+      reportStatus = UptakeTelemetry.STATUS.BACKOFF;
+    } else if (
+      // Errors from kinto.js IDB adapter.
+      e instanceof Kinto.adapters.IDB.IDBError ||
+      // Other IndexedDB errors (eg. RemoteSettingsWorker).
+      /IndexedDB/.test(e.message)
+    ) {
+      reportStatus = UptakeTelemetry.STATUS.CUSTOM_1_ERROR;
+    }
+
+    return reportStatus;
   }
 
   /**

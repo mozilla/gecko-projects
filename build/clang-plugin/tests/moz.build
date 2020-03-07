@@ -38,6 +38,7 @@ SOURCES += [
     'TestNonParameterChecker.cpp',
     'TestNonTemporaryClass.cpp',
     'TestNonTrivialTypeInFfi.cpp',
+    'TestNoPrincipalGetUri.cpp',
     'TestNoRefcountedInsideLambdas.cpp',
     'TestNoUsingNamespaceMozillaJava.cpp',
     'TestOverrideBaseCall.cpp',
@@ -58,6 +59,8 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'TestFopenUsage.cpp',
         'TestLoadLibraryUsage.cpp',
     ]
+
+include('../external/tests/sources.mozbuild')
 
 DisableStlWrapping()
 NoVisibilityFlags()

@@ -193,7 +193,7 @@ const globalImportContext = typeof Window === "undefined" ? BACKGROUND_PROCESS :
 // }
 const actionTypes = {};
 
-for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM_POCKET", "AS_ROUTER_INITIALIZED", "AS_ROUTER_PREF_CHANGED", "AS_ROUTER_TARGETING_UPDATE", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "CLEAR_PREF", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISCOVERY_STREAM_CONFIG_CHANGE", "DISCOVERY_STREAM_CONFIG_RESET", "DISCOVERY_STREAM_CONFIG_RESET_DEFAULTS", "DISCOVERY_STREAM_CONFIG_SETUP", "DISCOVERY_STREAM_CONFIG_SET_VALUE", "DISCOVERY_STREAM_DEV_EXPIRE_CACHE", "DISCOVERY_STREAM_DEV_IDLE_DAILY", "DISCOVERY_STREAM_DEV_SYNC_RS", "DISCOVERY_STREAM_DEV_SYSTEM_TICK", "DISCOVERY_STREAM_FEEDS_UPDATE", "DISCOVERY_STREAM_FEED_UPDATE", "DISCOVERY_STREAM_IMPRESSION_STATS", "DISCOVERY_STREAM_LAYOUT_RESET", "DISCOVERY_STREAM_LAYOUT_UPDATE", "DISCOVERY_STREAM_LINK_BLOCKED", "DISCOVERY_STREAM_LOADED_CONTENT", "DISCOVERY_STREAM_PERSONALIZATION_INIT", "DISCOVERY_STREAM_PERSONALIZATION_LAST_UPDATED", "DISCOVERY_STREAM_PERSONALIZATION_VERSION", "DISCOVERY_STREAM_PERSONALIZATION_VERSION_TOGGLE", "DISCOVERY_STREAM_RETRY_FEED", "DISCOVERY_STREAM_SPOCS_CAPS", "DISCOVERY_STREAM_SPOCS_ENDPOINT", "DISCOVERY_STREAM_SPOCS_FILL", "DISCOVERY_STREAM_SPOCS_PLACEMENTS", "DISCOVERY_STREAM_SPOCS_UPDATE", "DISCOVERY_STREAM_SPOC_BLOCKED", "DISCOVERY_STREAM_SPOC_IMPRESSION", "DOWNLOAD_CHANGED", "FAKE_FOCUS_SEARCH", "FILL_SEARCH_TERM", "HANDOFF_SEARCH_TO_AWESOMEBAR", "HIDE_PRIVACY_INFO", "HIDE_SEARCH", "INIT", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "OPEN_WEBEXT_SETTINGS", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "POCKET_CTA", "POCKET_LINK_DELETED_OR_ARCHIVED", "POCKET_LOGGED_IN", "POCKET_WAITING_FOR_SPOC", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SHOW_PRIVACY_INFO", "SHOW_SEARCH", "SKIPPED_SIGNIN", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_PREVIEW_MODE", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SUBMIT_EMAIL", "SUBMIT_SIGNIN", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "TRAILHEAD_ENROLL_EVENT", "UNINIT", "UPDATE_PINNED_SEARCH_SHORTCUTS", "UPDATE_SEARCH_SHORTCUTS", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
+for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM_POCKET", "AS_ROUTER_INITIALIZED", "AS_ROUTER_PREF_CHANGED", "AS_ROUTER_TARGETING_UPDATE", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "CLEAR_PREF", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISCOVERY_STREAM_COLLECTION_DISMISSIBLE_TOGGLE", "DISCOVERY_STREAM_CONFIG_CHANGE", "DISCOVERY_STREAM_CONFIG_RESET", "DISCOVERY_STREAM_CONFIG_RESET_DEFAULTS", "DISCOVERY_STREAM_CONFIG_SETUP", "DISCOVERY_STREAM_CONFIG_SET_VALUE", "DISCOVERY_STREAM_DEV_EXPIRE_CACHE", "DISCOVERY_STREAM_DEV_IDLE_DAILY", "DISCOVERY_STREAM_DEV_SYNC_RS", "DISCOVERY_STREAM_DEV_SYSTEM_TICK", "DISCOVERY_STREAM_FEEDS_UPDATE", "DISCOVERY_STREAM_FEED_UPDATE", "DISCOVERY_STREAM_IMPRESSION_STATS", "DISCOVERY_STREAM_LAYOUT_RESET", "DISCOVERY_STREAM_LAYOUT_UPDATE", "DISCOVERY_STREAM_LINK_BLOCKED", "DISCOVERY_STREAM_LOADED_CONTENT", "DISCOVERY_STREAM_PERSONALIZATION_INIT", "DISCOVERY_STREAM_PERSONALIZATION_LAST_UPDATED", "DISCOVERY_STREAM_PERSONALIZATION_VERSION", "DISCOVERY_STREAM_PERSONALIZATION_VERSION_TOGGLE", "DISCOVERY_STREAM_RETRY_FEED", "DISCOVERY_STREAM_SPOCS_CAPS", "DISCOVERY_STREAM_SPOCS_ENDPOINT", "DISCOVERY_STREAM_SPOCS_FILL", "DISCOVERY_STREAM_SPOCS_PLACEMENTS", "DISCOVERY_STREAM_SPOCS_UPDATE", "DISCOVERY_STREAM_SPOC_BLOCKED", "DISCOVERY_STREAM_SPOC_IMPRESSION", "DOWNLOAD_CHANGED", "FAKE_FOCUS_SEARCH", "FILL_SEARCH_TERM", "HANDOFF_SEARCH_TO_AWESOMEBAR", "HIDE_PRIVACY_INFO", "HIDE_SEARCH", "INIT", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "OPEN_WEBEXT_SETTINGS", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "POCKET_CTA", "POCKET_LINK_DELETED_OR_ARCHIVED", "POCKET_LOGGED_IN", "POCKET_WAITING_FOR_SPOC", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SHOW_PRIVACY_INFO", "SHOW_SEARCH", "SKIPPED_SIGNIN", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_PREVIEW_MODE", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SUBMIT_EMAIL", "SUBMIT_SIGNIN", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "TRAILHEAD_ENROLL_EVENT", "UNINIT", "UPDATE_PINNED_SEARCH_SHORTCUTS", "UPDATE_SEARCH_SHORTCUTS", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
   actionTypes[type] = type;
 } // These are acceptable actions for AS Router messages to have. They can show up
 // as call-to-action buttons in snippets, onboarding tour, etc.
@@ -4235,6 +4235,7 @@ class _DiscoveryStreamBase extends react__WEBPACK_IMPORTED_MODULE_13___default.a
           items: component.properties.items,
           cta_variant: component.cta_variant,
           display_engagement_labels: ENGAGEMENT_LABEL_ENABLED,
+          dismissible: this.props.DiscoveryStream.isCollectionDismissible,
           dispatch: this.props.dispatch
         });
 
@@ -6313,20 +6314,15 @@ class CollectionCardGrid extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
 
   onDismissClick() {
     const {
-      data,
-      items
+      data
     } = this.props;
 
     if (this.props.dispatch && data && data.spocs && data.spocs.length) {
       const pos = 0;
-      const source = this.props.type.toUpperCase(); // Grab the displayed items in the array to dismiss.
-      // This fires a ping for all items displayed, even if below the fold.
-      // It does not fire it for items not displayed, but those items would
-      // still be filtered out because of matching flight_ids.
-      // This is otherwise just for telemetry puproses, to report which items were displayed,
-      // but not nessisarily visible, at the time of dismiss.
+      const source = this.props.type.toUpperCase(); // Grab the available items in the array to dismiss.
+      // This fires a ping for all items available, even if below the fold.
 
-      const spocsData = data.spocs.slice(0, items).map(item => ({
+      const spocsData = data.spocs.map(item => ({
         url: item.url,
         guid: item.id,
         shim: item.shim
@@ -6352,7 +6348,8 @@ class CollectionCardGrid extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
 
   render() {
     const {
-      data
+      data,
+      dismissible
     } = this.props;
 
     if (!data || !data.spocs || !data.spocs[0] || // We only display complete collections.
@@ -6392,10 +6389,7 @@ class CollectionCardGrid extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
     // we use the type "COLLECTIONCARDGRID_CARD".
 
     const type = `${this.props.type}_card`;
-    return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(content_src_components_DiscoveryStreamComponents_DSDismiss_DSDismiss__WEBPACK_IMPORTED_MODULE_2__["DSDismiss"], {
-      onDismissClick: this.onDismissClick,
-      extraClasses: `ds-dismiss-ds-collection`
-    }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", {
+    const collectionGrid = react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", {
       className: "ds-collection-card-grid"
     }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(content_src_components_DiscoveryStreamComponents_CardGrid_CardGrid__WEBPACK_IMPORTED_MODULE_1__["CardGrid"], {
       title: title,
@@ -6406,7 +6400,16 @@ class CollectionCardGrid extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
       type: type,
       dispatch: this.props.dispatch,
       items: this.props.items
-    })));
+    }));
+
+    if (dismissible) {
+      return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(content_src_components_DiscoveryStreamComponents_DSDismiss_DSDismiss__WEBPACK_IMPORTED_MODULE_2__["DSDismiss"], {
+        onDismissClick: this.onDismissClick,
+        extraClasses: `ds-dismiss-ds-collection`
+      }, collectionGrid);
+    }
+
+    return collectionGrid;
   }
 
 }
@@ -10396,11 +10399,25 @@ const selectLayoutRender = ({
   };
 
   const handleComponent = component => {
+    if (component.spocs && component.spocs.positions && component.spocs.positions.length) {
+      const placement = component.placement || {};
+      const placementName = placement.name || "spocs";
+      const spocsData = spocs.data[placementName];
+
+      if (spocs.loaded && spocsData && spocsData.items && spocsData.items.length) {
+        return { ...component,
+          data: {
+            spocs: spocsData.items.filter(spoc => spoc && !spocs.blocked.includes(spoc.url)).map((spoc, index) => ({ ...spoc,
+              pos: index
+            }))
+          }
+        };
+      }
+    }
+
     return { ...component,
       data: {
-        spocs: handleSpocs([], component).map((spoc, index) => ({ ...spoc,
-          pos: index
-        }))
+        spocs: []
       }
     };
   };
@@ -11611,7 +11628,7 @@ class localized_Localized extends external_React_["Component"] {
     const {
       id,
       attrs,
-      children: elem
+      children: elem = null
     } = this.props; // Validate that the child element isn't an array
 
     if (Array.isArray(elem)) {
@@ -12899,6 +12916,10 @@ const SnippetsTemplates = {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
+var builtins_namespaceObject = {};
+__webpack_require__.r(builtins_namespaceObject);
+__webpack_require__.d(builtins_namespaceObject, "NUMBER", function() { return NUMBER; });
+__webpack_require__.d(builtins_namespaceObject, "DATETIME", function() { return DATETIME; });
 
 // CONCATENATED MODULE: ./node_modules/fluent/src/types.js
 /* global Intl */
@@ -12950,8 +12971,12 @@ class FluentType {
 
 }
 class FluentNone extends FluentType {
+  valueOf() {
+    return null;
+  }
+
   toString() {
-    return this.value || "???";
+    return `{${this.value || "???"}}`;
   }
 
 }
@@ -13003,10 +13028,6 @@ class FluentDateTime extends FluentType {
  * `FluentType`.  Functions must return `FluentType` objects as well.
  */
 
-/* harmony default export */ var builtins = ({
-  "NUMBER": ([arg], opts) => new FluentNumber(arg.valueOf(), merge(arg.opts, opts)),
-  "DATETIME": ([arg], opts) => new FluentDateTime(arg.valueOf(), merge(arg.opts, opts))
-});
 
 function merge(argopts, opts) {
   return Object.assign({}, argopts, values(opts));
@@ -13020,6 +13041,29 @@ function values(opts) {
   }
 
   return unwrapped;
+}
+
+function NUMBER([arg], opts) {
+  if (arg instanceof FluentNone) {
+    return arg;
+  }
+
+  if (arg instanceof FluentNumber) {
+    return new FluentNumber(arg.valueOf(), merge(arg.opts, opts));
+  }
+
+  return new FluentNone("NUMBER()");
+}
+function DATETIME([arg], opts) {
+  if (arg instanceof FluentNone) {
+    return arg;
+  }
+
+  if (arg instanceof FluentDateTime) {
+    return new FluentDateTime(arg.valueOf(), merge(arg.opts, opts));
+  }
+
+  return new FluentNone("DATETIME()");
 }
 // CONCATENATED MODULE: ./node_modules/fluent/src/resolver.js
 /* global Intl */
@@ -13231,7 +13275,7 @@ function MessageReference(scope, {
     }
 
     scope.errors.push(new ReferenceError(`Unknown attribute: ${attr}`));
-    return Type(scope, message);
+    return new FluentNone(`${name}.${attr}`);
   }
 
   return Type(scope, message);
@@ -13268,7 +13312,7 @@ function TermReference(scope, {
     }
 
     scope.errors.push(new ReferenceError(`Unknown attribute: ${attr}`));
-    return Type(local, term);
+    return new FluentNone(`${id}.${attr}`);
   }
 
   return Type(local, term);
@@ -13281,7 +13325,7 @@ function FunctionReference(scope, {
 }) {
   // Some functions are built-in. Others may be provided by the runtime via
   // the `FluentBundle` constructor.
-  const func = scope.bundle._functions[name] || builtins[name];
+  const func = scope.bundle._functions[name] || builtins_namespaceObject[name];
 
   if (!func) {
     scope.errors.push(new ReferenceError(`Unknown function: ${name}()`));
@@ -13297,7 +13341,7 @@ function FunctionReference(scope, {
     return func(...getArguments(scope, args));
   } catch (e) {
     // XXX Report errors.
-    return new FluentNone();
+    return new FluentNone(`${name}()`);
   }
 } // Resolve a select expression to the member object.
 
@@ -14226,32 +14270,6 @@ class bundle_FluentBundle {
   }
 
 }
-// CONCATENATED MODULE: ./node_modules/fluent/src/util.js
-function nonBlank(line) {
-  return !/^\s*$/.test(line);
-}
-
-function countIndent(line) {
-  const [indent] = line.match(/^\s*/);
-  return indent.length;
-}
-/**
- * Template literal tag for dedenting FTL code.
- *
- * Strip the common indent of non-blank lines. Remove blank lines.
- *
- * @param {Array<string>} strings
- */
-
-
-function ftl(strings) {
-  const [code] = strings;
-  const lines = code.split("\n").filter(nonBlank);
-  const indents = lines.map(countIndent);
-  const common = Math.min(...indents);
-  const indent = new RegExp(`^\\s{${common}}`);
-  return lines.map(line => line.replace(indent, "")).join("\n");
-}
 // CONCATENATED MODULE: ./node_modules/fluent/src/index.js
 /*
  * @module fluent
@@ -14261,7 +14279,6 @@ function ftl(strings) {
  * framework designed to unleash the expressive power of the natural language.
  *
  */
-
 
 
 
@@ -14382,6 +14399,7 @@ class Dedupe {
 const TOP_SITES_DEFAULT_ROWS = 1;
 const TOP_SITES_MAX_SITES_PER_ROW = 8;
 const PREF_PERSONALIZATION_VERSION = "discoverystream.personalization.version";
+const PREF_COLLECTION_DISMISSIBLE = "discoverystream.isCollectionDismissible";
 const dedupe = new Dedupe(site => site && site.url);
 const INITIAL_STATE = {
   App: {
@@ -14431,6 +14449,7 @@ const INITIAL_STATE = {
     layout: [],
     lastUpdated: null,
     isPrivacyInfoModalVisible: false,
+    isCollectionDismissible: false,
     feeds: {
       data: {// "https://foo.com/feed1": {lastUpdated: 123, data: []}
       },
@@ -15022,7 +15041,8 @@ function Personalization(prevState = INITIAL_STATE.Personalization, action) {
     default:
       return prevState;
   }
-}
+} // eslint-disable-next-line complexity
+
 
 function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
   // Return if action data is empty, or spocs or feeds data is not loaded
@@ -15086,6 +15106,11 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
       return { ...prevState,
         lastUpdated: action.data.lastUpdated || null,
         layout: action.data.layout || []
+      };
+
+    case Actions["actionTypes"].DISCOVERY_STREAM_COLLECTION_DISMISSIBLE_TOGGLE:
+      return { ...prevState,
+        isCollectionDismissible: action.data.value
       };
 
     case Actions["actionTypes"].HIDE_PRIVACY_INFO:
@@ -15226,6 +15251,15 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
 
       return isNotReady() ? prevState : nextState(items => items.map(removeBookmarkInfo));
 
+    case Actions["actionTypes"].PREF_CHANGED:
+      if (action.data.name === PREF_COLLECTION_DISMISSIBLE) {
+        return { ...prevState,
+          isCollectionDismissible: action.data.value
+        };
+      }
+
+      return prevState;
+
     default:
       return prevState;
   }
@@ -15291,7 +15325,7 @@ var FullPageInterrupt = __webpack_require__(20);
 // EXTERNAL MODULE: ./node_modules/fluent-react/src/index.js + 14 modules
 var src = __webpack_require__(74);
 
-// EXTERNAL MODULE: ./content-src/asrouter/rich-text-strings.js + 8 modules
+// EXTERNAL MODULE: ./content-src/asrouter/rich-text-strings.js + 7 modules
 var rich_text_strings = __webpack_require__(76);
 
 // CONCATENATED MODULE: ./content-src/asrouter/templates/FirstRun/Interrupt.jsx

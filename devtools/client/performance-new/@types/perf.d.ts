@@ -13,7 +13,6 @@ import {
 
 export interface PanelWindow {
   gToolbox?: any;
-  gTarget?: any;
   gInit(perfFront: any, preferenceFront: any): void;
   gDestroy(): void;
   gReportReady?(): void
@@ -97,7 +96,7 @@ export type RecordingState =
 // We are currently migrating to a new UX workflow with about:profiling.
 // This type provides an easy way to change the implementation based
 // on context.
-export type PageContext = "popup" | "devtools" | "aboutprofiling";
+export type PageContext = "devtools" | "aboutprofiling";
 
 export interface State {
   recordingState: RecordingState;
@@ -210,6 +209,8 @@ export interface InitializedValues {
   receiveProfile: ReceiveProfile;
   // A function to set the recording settings.
   setRecordingPreferences: SetRecordingPreferences;
+  // The current list of presets, loaded in from a JSM.
+  presets: Presets;
   // Determine the current page context.
   pageContext: PageContext;
   // The popup and devtools panel use different codepaths for getting symbol tables.
@@ -264,6 +265,7 @@ export type Action =
       perfFront: PerfFront;
       receiveProfile: ReceiveProfile;
       setRecordingPreferences: SetRecordingPreferences;
+      presets: Presets;
       pageContext: PageContext;
       recordingSettingsFromPreferences: RecordingStateFromPreferences;
       getSymbolTableGetter: (profile: object) => GetSymbolTableCallback;
@@ -279,6 +281,7 @@ export interface InitializeStoreValues {
   perfFront: PerfFront;
   receiveProfile: ReceiveProfile;
   setRecordingPreferences: SetRecordingPreferences;
+  presets: Presets;
   pageContext: PageContext;
   recordingPreferences: RecordingStateFromPreferences;
   supportedFeatures: string[] | null;
@@ -364,6 +367,17 @@ export interface PerformancePref {
    * and update it elsewhere.
    */
   PopupEnabled: "devtools.performance.popup.enabled";
+  /**
+   * The profiler popup has some introductory text explaining what it is the first
+   * time that you open it. After that, it is not displayed by default.
+   */
+  PopupIntroDisplayed: "devtools.performance.popup.intro-displayed";
+  /**
+   * This preference is used outside of the performance-new type system
+   * (in DevToolsStartup). It toggles the availability of the menu item
+   * "Tools -> Web Developer -> Enable Profiler Toolbar Icon".
+   */
+  PopupFeatureFlag: "devtools.performance.popup.feature-flag";
 }
 
 /**
@@ -399,7 +413,7 @@ export interface PresetDefinition {
   duration: number;
 }
 
-export interface PresetDefinitions {
+export interface Presets {
   [presetName: string]: PresetDefinition;
 }
 

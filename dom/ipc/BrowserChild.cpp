@@ -1264,6 +1264,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvUpdateDimensions(
     dispatcher->PostDOMEvent();
   }
 
+  RecvSafeAreaInsetsChanged(mPuppetWidget->GetSafeAreaInsets());
+
   return IPC_OK();
 }
 
@@ -3255,6 +3257,44 @@ mozilla::ipc::IPCResult BrowserChild::RecvThemeChanged(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult BrowserChild::RecvSafeAreaInsetsChanged(
+    const mozilla::ScreenIntMargin& aSafeAreaInsets) {
+  mPuppetWidget->UpdateSafeAreaInsets(aSafeAreaInsets);
+
+  nsCOMPtr<nsIScreenManager> screenMgr =
+      do_GetService("@mozilla.org/gfx/screenmanager;1");
+  ScreenIntMargin currentSafeAreaInsets;
+  if (screenMgr) {
+    // aSafeAreaInsets is for current screen. But we have to calculate
+    // safe insets for content window.
+    int32_t x, y, cx, cy;
+    GetDimensions(0, &x, &y, &cx, &cy);
+    nsCOMPtr<nsIScreen> screen;
+    screenMgr->ScreenForRect(x, y, cx, cy, getter_AddRefs(screen));
+
+    if (screen) {
+      LayoutDeviceIntRect windowRect(x + mClientOffset.x + mChromeOffset.x,
+                                     y + mClientOffset.y + mChromeOffset.y, cx,
+                                     cy);
+      currentSafeAreaInsets = nsContentUtils::GetWindowSafeAreaInsets(
+          screen, aSafeAreaInsets, windowRect);
+    }
+  }
+
+  if (nsCOMPtr<Document> document = GetTopLevelDocument()) {
+    nsPresContext* presContext = document->GetPresContext();
+    if (presContext) {
+      presContext->SetSafeAreaInsets(currentSafeAreaInsets);
+    }
+  }
+
+  // https://github.com/w3c/csswg-drafts/issues/4670
+  // Actually we don't set this value on sub document. This behaviour is
+  // same as Blink that safe area insets isn't set on sub document.
+
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult BrowserChild::RecvAwaitLargeAlloc() {
   mAwaitingLA = true;
   return IPC_OK();
@@ -4005,7 +4045,7 @@ BrowserChildMessageManager::BrowserChildMessageManager(
     : ContentFrameMessageManager(new nsFrameMessageManager(aBrowserChild)),
       mBrowserChild(aBrowserChild) {}
 
-BrowserChildMessageManager::~BrowserChildMessageManager() {}
+BrowserChildMessageManager::~BrowserChildMessageManager() = default;
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowserChildMessageManager)
 

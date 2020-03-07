@@ -97,9 +97,10 @@ static inline const MDefinition* MaybeUnwrap(const MDefinition* object) {
 // Get the object of any load/store. Returns nullptr if not tied to
 // an object.
 static inline const MDefinition* GetObject(const MDefinition* ins) {
-  if (!ins->getAliasSet().isStore() && !ins->getAliasSet().isLoad()) {
+  if (ins->getAliasSet().isNone()) {
     return nullptr;
   }
+  MOZ_ASSERT(ins->getAliasSet().isStore() || ins->getAliasSet().isLoad());
 
   // Note: only return the object if that object owns that property.
   // I.e. the property isn't on the prototype chain.
@@ -149,7 +150,6 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::GetDOMProperty:
     case MDefinition::Opcode::GetDOMMember:
     case MDefinition::Opcode::Call:
-    case MDefinition::Opcode::Compare:
     case MDefinition::Opcode::GetArgumentsObjectArg:
     case MDefinition::Opcode::SetArgumentsObjectArg:
     case MDefinition::Opcode::CompareExchangeTypedArrayElement:
@@ -169,10 +169,7 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::WasmStoreGlobalVar:
     case MDefinition::Opcode::WasmStoreGlobalCell:
     case MDefinition::Opcode::WasmStoreRef:
-    case MDefinition::Opcode::ArrayJoin:
-    case MDefinition::Opcode::ArraySlice:
-    case MDefinition::Opcode::StoreElementHole:
-    case MDefinition::Opcode::FallibleStoreElement:
+    case MDefinition::Opcode::WasmStoreStackResult:
       return nullptr;
     default:
 #ifdef DEBUG

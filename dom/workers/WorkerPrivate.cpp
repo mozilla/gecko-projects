@@ -65,7 +65,7 @@
 #include "ScriptLoader.h"
 #include "mozilla/dom/ServiceWorkerEvents.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
-#include "mozilla/net/CookieSettings.h"
+#include "mozilla/net/CookieJarSettings.h"
 #include "WorkerCSPEventListener.h"
 #include "WorkerDebugger.h"
 #include "WorkerDebuggerManager.h"
@@ -1330,7 +1330,12 @@ nsresult WorkerPrivate::SetCSPFromHeaderValues(
   // is a SystemPrincipal) then we fall back and use the
   // base URI as selfURI for CSP.
   nsCOMPtr<nsIURI> selfURI;
-  mLoadInfo.mPrincipal->GetURI(getter_AddRefs(selfURI));
+  // Its not recommended to use the BasePrincipal to get the URI
+  // but in this case we need to make an exception
+  auto* basePrin = BasePrincipal::Cast(mLoadInfo.mPrincipal);
+  if (basePrin) {
+    basePrin->GetURI(getter_AddRefs(selfURI));
+  }
   if (!selfURI) {
     selfURI = mLoadInfo.mBaseURI;
   }
@@ -2639,7 +2644,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mFromWindow = true;
       loadInfo.mWindowID = globalWindow->WindowID();
       loadInfo.mStorageAccess = StorageAllowedForWindow(globalWindow);
-      loadInfo.mCookieSettings = document->CookieSettings();
+      loadInfo.mCookieJarSettings = document->CookieJarSettings();
       loadInfo.mOriginAttributes =
           nsContentUtils::GetOriginAttributes(document);
       loadInfo.mParentController = globalWindow->GetController();
@@ -2685,8 +2690,8 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mFromWindow = false;
       loadInfo.mWindowID = UINT64_MAX;
       loadInfo.mStorageAccess = StorageAccess::eAllow;
-      loadInfo.mCookieSettings = mozilla::net::CookieSettings::Create();
-      MOZ_ASSERT(loadInfo.mCookieSettings);
+      loadInfo.mCookieJarSettings = mozilla::net::CookieJarSettings::Create();
+      MOZ_ASSERT(loadInfo.mCookieJarSettings);
 
       loadInfo.mOriginAttributes = OriginAttributes();
     }
@@ -2709,7 +2714,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
 
     rv = ChannelFromScriptURLMainThread(
         loadInfo.mLoadingPrincipal, document, loadInfo.mLoadGroup, url,
-        clientInfo, ContentPolicyType(aWorkerType), loadInfo.mCookieSettings,
+        clientInfo, ContentPolicyType(aWorkerType), loadInfo.mCookieJarSettings,
         loadInfo.mReferrerInfo, getter_AddRefs(loadInfo.mChannel));
     NS_ENSURE_SUCCESS(rv, rv);
 

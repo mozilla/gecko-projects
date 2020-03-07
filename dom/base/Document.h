@@ -15,7 +15,7 @@
 #include "nsCOMArray.h"           // for member
 #include "nsCompatibility.h"      // for member
 #include "nsCOMPtr.h"             // for member
-#include "nsICookieSettings.h"
+#include "nsICookieJarSettings.h"
 #include "nsGkAtoms.h"           // for static class members
 #include "nsNameSpaceManager.h"  // for static class members
 #include "nsIApplicationCache.h"
@@ -584,9 +584,6 @@ class Document : public nsINode,
   nsIPrincipal* GetContentBlockingAllowListPrincipal() const {
     return mContentBlockingAllowListPrincipal;
   }
-
-  already_AddRefed<nsIPrincipal> RecomputeContentBlockingAllowListPrincipal(
-      nsIURI* aURIBeingLoaded, const OriginAttributes& aAttrs);
 
   // EventTarget
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
@@ -1425,8 +1422,8 @@ class Document : public nsINode,
   // flag.
   bool StorageAccessSandboxed() const;
 
-  // Returns the cookie settings for this and sub contexts.
-  nsICookieSettings* CookieSettings();
+  // Returns the cookie jar settings for this and sub contexts.
+  nsICookieJarSettings* CookieJarSettings();
 
   // Increments the document generation.
   inline void Changed() { ++mGeneration; }
@@ -3624,7 +3621,10 @@ class Document : public nsINode,
   void ScheduleIntersectionObserverNotification();
   MOZ_CAN_RUN_SCRIPT void NotifyIntersectionObservers();
 
-  DOMIntersectionObserver* GetLazyLoadImageObserver();
+  DOMIntersectionObserver* GetLazyLoadImageObserver() {
+    return mLazyLoadImageObserver;
+  }
+  DOMIntersectionObserver& EnsureLazyLoadImageObserver();
 
   // Dispatch a runnable related to the document.
   nsresult Dispatch(TaskCategory aCategory,
@@ -5054,7 +5054,7 @@ class Document : public nsINode,
 
   bool mPendingInitialTranslation;
 
-  nsCOMPtr<nsICookieSettings> mCookieSettings;
+  nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
 
   // Document generation. Gets incremented everytime it changes.
   int32_t mGeneration;
@@ -5171,6 +5171,8 @@ class MOZ_RAII IgnoreOpensDuringUnload final {
  private:
   Document* mDoc;
 };
+
+bool IsInActiveTab(Document* aDoc);
 
 }  // namespace dom
 }  // namespace mozilla

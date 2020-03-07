@@ -620,11 +620,17 @@ async function setInputValueForAutocompletion(
 ) {
   const { jsterm } = hud;
 
+  const initialPromises = [];
+  if (jsterm.autocompletePopup.isOpen) {
+    initialPromises.push(jsterm.autocompletePopup.once("popup-closed"));
+  }
   setInputValue(hud, "");
+  await Promise.all(initialPromises);
+
   jsterm.focus();
 
   const updated = jsterm.once("autocomplete-updated");
-  EventUtils.sendString(value);
+  EventUtils.sendString(value, hud.iframeWindow);
   await updated;
 
   if (caretPosition < 0) {
@@ -727,6 +733,19 @@ function getInputCompletionValue(hud) {
   return jsterm.editor.getAutoCompletionText();
 }
 
+function closeAutocompletePopup(hud) {
+  const { jsterm } = hud;
+
+  if (!jsterm.autocompletePopup.isOpen) {
+    return Promise.resolve();
+  }
+
+  const onPopupClosed = jsterm.autocompletePopup.once("popup-closed");
+  const onAutocompleteUpdated = jsterm.once("autocomplete-updated");
+  EventUtils.synthesizeKey("KEY_Escape");
+  return Promise.all([onPopupClosed, onAutocompleteUpdated]);
+}
+
 /**
  * Returns a boolean indicating if the console input is focused.
  *
@@ -775,18 +794,8 @@ async function openDebugger(options = {}) {
   toolbox = await gDevTools.showToolbox(target, "jsdebugger");
   const panel = toolbox.getCurrentPanel();
 
-  // Do not clear VariableView lazily so it doesn't disturb test ending.
-  if (panel._view) {
-    panel._view.Variables.lazyEmpty = false;
-  }
+  await toolbox.threadFront.getSources();
 
-  // Old debugger
-  if (panel.panelWin && panel.panelWin.DebuggerController) {
-    await panel.panelWin.DebuggerController.waitForSourcesLoaded();
-  } else {
-    // New debugger
-    await toolbox.threadFront.getSources();
-  }
   return { target, toolbox, panel };
 }
 

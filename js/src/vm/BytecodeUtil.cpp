@@ -190,7 +190,7 @@ bool js::DumpRealmPCCounts(JSContext* cx) {
     if (base->isLazyScript()) {
       continue;
     }
-    JSScript* script = static_cast<JSScript*>(base.get());
+    JSScript* script = base->asJSScript();
     if (script->realm() != cx->realm()) {
       continue;
     }
@@ -693,11 +693,9 @@ uint32_t BytecodeParser::simulateOp(JSOp op, uint32_t offset,
     case JSOp::SetArg:
     case JSOp::SetIntrinsic:
     case JSOp::SetLocal:
-    case JSOp::ThrowSetAliasedConst:
-    case JSOp::ThrowSetCallee:
-    case JSOp::ThrowSetConst:
     case JSOp::InitAliasedLexical:
     case JSOp::IterNext:
+    case JSOp::CheckLexical:
       // Keep the top value.
       MOZ_ASSERT(nuses == 1);
       MOZ_ASSERT(ndefs == 1);
@@ -2600,7 +2598,7 @@ JS_FRIEND_API void js::StopPCCountProfiling(JSContext* cx) {
       if (base->isLazyScript()) {
         continue;
       }
-      JSScript* script = static_cast<JSScript*>(base.get());
+      JSScript* script = base->asJSScript();
       if (script->hasScriptCounts() && script->hasJitScript()) {
         if (!vec->append(script)) {
           return;
@@ -2892,13 +2890,13 @@ struct CollectedScripts {
   explicit CollectedScripts(MutableHandle<ScriptVector> scripts)
       : scripts(scripts) {}
 
-  static void consider(JSRuntime* rt, void* data, JSScript* script,
+  static void consider(JSRuntime* rt, void* data, BaseScript* script,
                        const JS::AutoRequireNoGC& nogc) {
     auto self = static_cast<CollectedScripts*>(data);
     if (!script->filename()) {
       return;
     }
-    if (!self->scripts.append(script)) {
+    if (!self->scripts.append(script->asJSScript())) {
       self->ok = false;
     }
   }
@@ -2972,15 +2970,14 @@ static bool GenerateLcovInfo(JSContext* cx, JS::Realm* realm,
       if (!gcThing.is<JSObject>()) {
         continue;
       }
-
-      // Only continue on JSFunction objects.
       JSObject* obj = &gcThing.as<JSObject>();
+
       if (!obj->is<JSFunction>()) {
         continue;
       }
       fun = &obj->as<JSFunction>();
 
-      // Let's skip wasm for now.
+      // Ignore asm.js functions
       if (!fun->isInterpreted()) {
         continue;
       }
@@ -3042,7 +3039,7 @@ bool js::GetSuccessorBytecodes(JSScript* script, jsbytecode* pc,
   MOZ_ASSERT(script->containsPC(pc));
 
   JSOp op = (JSOp)*pc;
-  if (FlowsIntoNext(op)) {
+  if (BytecodeFallsThrough(op)) {
     if (!successors.append(GetNextPc(pc))) {
       return false;
     }

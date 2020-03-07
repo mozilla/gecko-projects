@@ -321,6 +321,11 @@ class ExtensionInstallListener {
     this.resolve({ installError, state });
   }
 
+  onInstallPostponed(aInstall) {
+    const { error: installError, state } = aInstall;
+    this.resolve({ installError, state });
+  }
+
   onInstallEnded(aInstall, aAddon) {
     const addonId = aAddon.id;
     const { sourceURI } = aInstall;
@@ -442,6 +447,17 @@ var GeckoViewWebExtension = {
     debug`observe ${aTopic}`;
 
     switch (aTopic) {
+      case "testing-installed-addon":
+      case "testing-uninstalled-addon": {
+        // We pretend devtools installed/uninstalled this addon so we don't
+        // have to add an API just for internal testing.
+        // TODO: assert this is under a test
+        EventDispatcher.instance.sendRequest({
+          type: "GeckoView:WebExtension:DebuggerListUpdated",
+        });
+        break;
+      }
+
       case "devtools-installed-addon": {
         EventDispatcher.instance.sendRequest({
           type: "GeckoView:WebExtension:DebuggerListUpdated",
@@ -850,3 +866,5 @@ GeckoViewWebExtension.browserActions = new WeakMap();
 // WeakMap[Extension -> PageAction]
 GeckoViewWebExtension.pageActions = new WeakMap();
 Services.obs.addObserver(GeckoViewWebExtension, "devtools-installed-addon");
+Services.obs.addObserver(GeckoViewWebExtension, "testing-installed-addon");
+Services.obs.addObserver(GeckoViewWebExtension, "testing-uninstalled-addon");

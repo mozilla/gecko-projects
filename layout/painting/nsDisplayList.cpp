@@ -788,6 +788,9 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
   uint64_t animationGeneration =
       effects ? effects->GetAnimationGeneration() : 0;
   aAnimationInfo.SetAnimationGeneration(animationGeneration);
+  if (!effects || effects->IsEmpty()) {
+    return;
+  }
 
   EffectCompositor::ClearIsRunningOnCompositor(aFrame, aType);
   const nsCSSPropertyIDSet& propertySet =
@@ -869,6 +872,21 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
 static uint64_t AddAnimationsForWebRender(
     nsDisplayItem* aItem, mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder, wr::RenderRoot aRenderRoot) {
+  EffectSet* effects =
+      EffectSet::GetEffectSetForFrame(aItem->Frame(), aItem->GetType());
+  if (!effects || effects->IsEmpty()) {
+    // If there is no animation on the nsIFrame, that means
+    //  1) we've never created any animations on this frame or
+    //  2) the frame was reconstruced or
+    //  3) all animations on the frame have finished
+    // in such cases we don't need do anything here.
+    //
+    // Even if there is a WebRenderAnimationData for the display item type on
+    // this frame, it's going to be discarded since it's not marked as being
+    // used.
+    return 0;
+  }
+
   RefPtr<WebRenderAnimationData> animationData =
       aManager->CommandBuilder()
           .CreateOrRecycleWebRenderUserData<WebRenderAnimationData>(
@@ -3938,13 +3956,15 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(
       mAssociatedImage(false) {
   MOZ_COUNT_CTOR(nsDisplayBackgroundImage);
 
-  if (mBackgroundStyle && mBackgroundStyle != aFrame->Style()) {
-    MOZ_ASSERT(aFrame->IsCanvasFrame() || aFrame->IsTableCellFrame());
-    auto& layer = mBackgroundStyle->StyleBackground()->mImage.mLayers[mLayer];
-    if (aFrame->AssociateImage(layer.mImage)) {
-      mAssociatedImage = true;
-    }
-  }
+  // If we have the same background style as our frame we know we're not going
+  // to need to associate our image to the frame. nsFrame::DidSetComputedStyle
+  // would've done that for us already.
+  //
+  // We need to check this here because the style frame pointer of the frame may
+  // change (and doesn't have to invalidate the display item unless background
+  // styles change).
+  mTriedToAssociateImage =
+      !(mBackgroundStyle && mBackgroundStyle != mFrame->Style());
 
   mBounds = GetBoundsInternal(aInitData.builder, aFrameForBounds);
   if (mShouldFixToViewport) {
@@ -4168,7 +4188,7 @@ bool nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
   }
 
   if (isThemed) {
-    nsITheme* theme = presContext->GetTheme();
+    nsITheme* theme = presContext->Theme();
     if (theme->NeedToClearBackgroundBehindWidget(
             aFrame, aFrame->StyleDisplay()->mAppearance) &&
         aBuilder->IsInChromeDocumentOrPopup() && !aBuilder->IsInTransform()) {
@@ -4528,6 +4548,8 @@ bool nsDisplayBackgroundImage::CreateWebRenderCommands(
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
+  AssociateImageIfNeeded();
+
   if (!CanBuildWebRenderDisplayItems(aManager->LayerManager(),
                                      aDisplayListBuilder)) {
     return false;
@@ -4673,6 +4695,17 @@ bool nsDisplayBackgroundImage::RenderingMightDependOnPositioningAreaSizeChange()
   return false;
 }
 
+void nsDisplayBackgroundImage::AssociateImageIfNeeded() {
+  if (mTriedToAssociateImage) {
+    return;
+  }
+  mTriedToAssociateImage = true;
+  auto& layer = mBackgroundStyle->StyleBackground()->mImage.mLayers[mLayer];
+  if (mFrame->AssociateImage(layer.mImage)) {
+    mAssociatedImage = true;
+  }
+}
+
 void nsDisplayBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
                                      gfxContext* aCtx) {
   PaintInternal(aBuilder, aCtx, GetPaintRect(), &mBounds);
@@ -4682,6 +4715,7 @@ void nsDisplayBackgroundImage::PaintInternal(nsDisplayListBuilder* aBuilder,
                                              gfxContext* aCtx,
                                              const nsRect& aBounds,
                                              nsRect* aClipRect) {
+  AssociateImageIfNeeded();
   gfxContext* ctx = aCtx;
   StyleGeometryBox clip =
       mBackgroundStyle->StyleBackground()->mImage.mLayers[mLayer].mClip;
@@ -4814,7 +4848,7 @@ void nsDisplayThemedBackground::Init(nsDisplayListBuilder* aBuilder) {
   StyleFrame()->IsThemed(disp, &mThemeTransparency);
 
   // Perform necessary RegisterThemeGeometry
-  nsITheme* theme = StyleFrame()->PresContext()->GetTheme();
+  nsITheme* theme = StyleFrame()->PresContext()->Theme();
   nsITheme::ThemeGeometryType type =
       theme->ThemeGeometryTypeForWidget(StyleFrame(), disp->mAppearance);
   if (type != nsITheme::eThemeGeometryTypeUnknown) {
@@ -4879,7 +4913,7 @@ void nsDisplayThemedBackground::PaintInternal(nsDisplayListBuilder* aBuilder,
                                               nsRect* aClipRect) {
   // XXXzw this ignores aClipRect.
   nsPresContext* presContext = StyleFrame()->PresContext();
-  nsITheme* theme = presContext->GetTheme();
+  nsITheme* theme = presContext->Theme();
   nsRect drawing(mBackgroundRect);
   theme->GetWidgetOverflow(presContext->DeviceContext(), StyleFrame(),
                            mAppearance, &drawing);
@@ -4894,7 +4928,7 @@ bool nsDisplayThemedBackground::CreateWebRenderCommands(
     const StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
-  nsITheme* theme = StyleFrame()->PresContext()->GetTheme();
+  nsITheme* theme = StyleFrame()->PresContext()->Theme();
   return theme->CreateWebRenderCommandsForWidget(aBuilder, aResources, aSc,
                                                  aManager, StyleFrame(),
                                                  mAppearance, mBackgroundRect);
@@ -4924,7 +4958,7 @@ void nsDisplayThemedBackground::ComputeInvalidationRegion(
     // painting area.
     aInvalidRegion->Xor(bounds, geometry->mBounds);
   }
-  nsITheme* theme = StyleFrame()->PresContext()->GetTheme();
+  nsITheme* theme = StyleFrame()->PresContext()->Theme();
   if (theme->WidgetAppearanceDependsOnWindowFocus(mAppearance) &&
       IsWindowActive() != geometry->mWindowIsActive) {
     aInvalidRegion->Or(*aInvalidRegion, bounds);
@@ -4941,9 +4975,9 @@ nsRect nsDisplayThemedBackground::GetBoundsInternal() {
   nsPresContext* presContext = mFrame->PresContext();
 
   nsRect r = mBackgroundRect - ToReferenceFrame();
-  presContext->GetTheme()->GetWidgetOverflow(
-      presContext->DeviceContext(), mFrame, mFrame->StyleDisplay()->mAppearance,
-      &r);
+  presContext->Theme()->GetWidgetOverflow(presContext->DeviceContext(), mFrame,
+                                          mFrame->StyleDisplay()->mAppearance,
+                                          &r);
   return r + ToReferenceFrame();
 }
 
@@ -5370,9 +5404,8 @@ bool nsDisplayOutline::IsThemedOutline() const {
   }
 
   nsPresContext* pc = mFrame->PresContext();
-  nsITheme* theme = pc->GetTheme();
-  return theme &&
-         theme->ThemeSupportsWidget(pc, mFrame, StyleAppearance::FocusOutline);
+  nsITheme* theme = pc->Theme();
+  return theme->ThemeSupportsWidget(pc, mFrame, StyleAppearance::FocusOutline);
 }
 
 bool nsDisplayOutline::CreateWebRenderCommands(
@@ -6883,6 +6916,17 @@ bool nsDisplayOwnLayer::IsScrollbarContainer() const {
          layers::ScrollbarLayerType::Container;
 }
 
+bool nsDisplayOwnLayer::IsRootScrollbarContainerWithDynamicToolbar() const {
+  if (!IsScrollbarContainer()) {
+    return false;
+  }
+
+  return mFrame->PresContext()->IsRootContentDocumentCrossProcess() &&
+         mFrame->PresContext()->HasDynamicToolbar() &&
+         mScrollbarData.mTargetViewId ==
+             nsLayoutUtils::ScrollIdForRootScrollFrame(mFrame->PresContext());
+}
+
 bool nsDisplayOwnLayer::IsZoomingLayer() const {
   return GetType() == DisplayItemType::TYPE_ASYNC_ZOOM;
 }
@@ -6918,19 +6962,18 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
   Maybe<wr::WrAnimationProperty> prop;
   bool needsProp =
       aManager->LayerManager()->AsyncPanZoomEnabled() &&
-      (IsScrollThumbLayer() || IsZoomingLayer() || IsFixedPositionLayer());
+      (IsScrollThumbLayer() || IsZoomingLayer() || IsFixedPositionLayer() ||
+       IsRootScrollbarContainerWithDynamicToolbar());
 
   if (needsProp) {
     // APZ is enabled and this is a scroll thumb or zooming layer, so we need
     // to create and set an animation id. That way APZ can adjust the position/
     // zoom of this content asynchronously as needed.
-    RefPtr<WebRenderAnimationData> animationData =
+    RefPtr<WebRenderAPZAnimationData> animationData =
         aManager->CommandBuilder()
-            .CreateOrRecycleWebRenderUserData<WebRenderAnimationData>(
+            .CreateOrRecycleWebRenderUserData<WebRenderAPZAnimationData>(
                 this, aBuilder.GetRenderRoot());
-    AnimationInfo& animationInfo = animationData->GetAnimationInfo();
-    animationInfo.EnsureAnimationsId();
-    mWrAnimationId = animationInfo.GetCompositorAnimationsId();
+    mWrAnimationId = animationData->GetAnimationId();
 
     prop.emplace();
     prop->id = mWrAnimationId;
@@ -6978,7 +7021,15 @@ bool nsDisplayOwnLayer::UpdateScrollData(
     return true;
   }
 
+  MOZ_ASSERT(IsScrollbarContainer() || IsScrollThumbLayer());
+
   aLayerData->SetScrollbarData(mScrollbarData);
+
+  if (IsRootScrollbarContainerWithDynamicToolbar()) {
+    aLayerData->SetScrollbarAnimationId(mWrAnimationId);
+    return true;
+  }
+
   if (IsScrollThumbLayer()) {
     aLayerData->SetScrollbarAnimationId(mWrAnimationId);
     LayoutDeviceRect bounds = LayoutDeviceIntRect::FromAppUnits(

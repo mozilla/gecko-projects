@@ -36,11 +36,13 @@
 #include "mozilla/FlushType.h"                // for FlushType::Frames
 #include "mozilla/IMEContentObserver.h"       // for IMEContentObserver
 #include "mozilla/IMEStateManager.h"          // for IMEStateManager
-#include "mozilla/mozalloc.h"                 // for operator new, etc.
-#include "mozilla/mozInlineSpellChecker.h"    // for mozInlineSpellChecker
-#include "mozilla/mozSpellChecker.h"          // for mozSpellChecker
-#include "mozilla/Preferences.h"              // for Preferences
-#include "mozilla/PresShell.h"                // for PresShell
+#include "mozilla/InputEventOptions.h"        // for InputEventOptions
+#include "mozilla/InternalMutationEvent.h"  // for NS_EVENT_BITS_MUTATION_CHARACTERDATAMODIFIED
+#include "mozilla/mozalloc.h"               // for operator new, etc.
+#include "mozilla/mozInlineSpellChecker.h"  // for mozInlineSpellChecker
+#include "mozilla/mozSpellChecker.h"        // for mozSpellChecker
+#include "mozilla/Preferences.h"            // for Preferences
+#include "mozilla/PresShell.h"              // for PresShell
 #include "mozilla/RangeBoundary.h"      // for RawRangeBoundary, RangeBoundary
 #include "mozilla/Services.h"           // for GetObserverService
 #include "mozilla/ServoCSSParser.h"     // for ServoCSSParser
@@ -51,15 +53,16 @@
 #include "mozilla/TextServicesDocument.h"  // for TextServicesDocument
 #include "mozilla/TextEvents.h"
 #include "mozilla/TransactionManager.h"  // for TransactionManager
-#include "mozilla/dom/AbstractRange.h"   // for AbstractRange
-#include "mozilla/dom/CharacterData.h"   // for CharacterData
-#include "mozilla/dom/DataTransfer.h"    // for DataTransfer
-#include "mozilla/InternalMutationEvent.h"  // for NS_EVENT_BITS_MUTATION_CHARACTERDATAMODIFIED
-#include "mozilla/dom/Element.h"      // for Element, nsINode::AsElement
-#include "mozilla/dom/EventTarget.h"  // for EventTarget
+#include "mozilla/Tuple.h"
+#include "mozilla/dom/AbstractRange.h"  // for AbstractRange
+#include "mozilla/dom/CharacterData.h"  // for CharacterData
+#include "mozilla/dom/DataTransfer.h"   // for DataTransfer
+#include "mozilla/dom/Element.h"        // for Element, nsINode::AsElement
+#include "mozilla/dom/EventTarget.h"    // for EventTarget
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "mozilla/dom/HTMLBRElement.h"
-#include "mozilla/dom/Selection.h"  // for Selection, etc.
+#include "mozilla/dom/Selection.h"    // for Selection, etc.
+#include "mozilla/dom/StaticRange.h"  // for StaticRange
 #include "mozilla/dom/Text.h"
 #include "mozilla/dom/Event.h"
 #include "nsAString.h"                // for nsAString::Length, etc.
@@ -2183,8 +2186,8 @@ void EditorBase::DispatchInputEvent() {
   RefPtr<DataTransfer> dataTransfer = GetInputEventDataTransfer();
   DebugOnly<nsresult> rvIgnored = nsContentUtils::DispatchInputEvent(
       targetElement, eEditorInput, ToInputType(GetEditAction()), textEditor,
-      dataTransfer ? nsContentUtils::InputEventOptions(dataTransfer)
-                   : nsContentUtils::InputEventOptions(GetInputEventData()));
+      dataTransfer ? InputEventOptions(dataTransfer)
+                   : InputEventOptions(GetInputEventData()));
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                        "Failed to dispatch input event");
 }
@@ -2704,8 +2707,8 @@ nsresult EditorBase::InsertTextWithTransaction(
       NS_ENSURE_TRUE(newOffset.isValid(), NS_ERROR_FAILURE);
     }
     nsresult rv = InsertTextIntoTextNodeWithTransaction(
-        aStringToInsert, MOZ_KnownLive(*pointToInsert.GetContainerAsText()),
-        pointToInsert.Offset());
+        aStringToInsert, EditorDOMPointInText(pointToInsert.ContainerAsText(),
+                                              pointToInsert.Offset()));
     NS_ENSURE_SUCCESS(rv, rv);
     if (aPointAfterInsertedString) {
       aPointAfterInsertedString->Set(pointToInsert.GetContainer(),
@@ -2719,8 +2722,8 @@ nsresult EditorBase::InsertTextWithTransaction(
     NS_ENSURE_TRUE(newOffset.isValid(), NS_ERROR_FAILURE);
     // we are inserting text into an existing text node.
     nsresult rv = InsertTextIntoTextNodeWithTransaction(
-        aStringToInsert, MOZ_KnownLive(*pointToInsert.GetContainerAsText()),
-        pointToInsert.Offset());
+        aStringToInsert, EditorDOMPointInText(pointToInsert.ContainerAsText(),
+                                              pointToInsert.Offset()));
     NS_ENSURE_SUCCESS(rv, rv);
     if (aPointAfterInsertedString) {
       aPointAfterInsertedString->Set(pointToInsert.GetContainer(),
@@ -2762,56 +2765,48 @@ static bool TextFragmentBeginsWithStringAtOffset(
   return aString.EqualsLatin1(aTextFragment.Get1b() + aOffset, stringLength);
 }
 
-namespace {
-struct AdjustedInsertionRange {
-  EditorRawDOMPoint mBegin;
-  EditorRawDOMPoint mEnd;
-};
-}  // anonymous namespace
-
-static AdjustedInsertionRange AdjustTextInsertionRange(
-    Text& aTextNode, const int32_t aInsertionOffset,
-    const nsAString& aInsertedString) {
-  if (TextFragmentBeginsWithStringAtOffset(aTextNode.TextFragment(),
-                                           aInsertionOffset, aInsertedString)) {
-    EditorRawDOMPoint begin{&aTextNode, aInsertionOffset};
-    EditorRawDOMPoint end{
-        &aTextNode,
-        static_cast<int32_t>(aInsertionOffset + aInsertedString.Length())};
-    return {begin, end};
+static Tuple<EditorDOMPointInText, EditorDOMPointInText>
+AdjustTextInsertionRange(const EditorDOMPointInText& aInsertedPoint,
+                         const nsAString& aInsertedString) {
+  if (TextFragmentBeginsWithStringAtOffset(
+          aInsertedPoint.ContainerAsText()->TextFragment(),
+          aInsertedPoint.Offset(), aInsertedString)) {
+    return MakeTuple(aInsertedPoint,
+                     EditorDOMPointInText(
+                         aInsertedPoint.ContainerAsText(),
+                         aInsertedPoint.Offset() + aInsertedString.Length()));
   }
 
-  const EditorRawDOMPoint begin{&aTextNode, 0};
-  const EditorRawDOMPoint end{&aTextNode,
-                              static_cast<int32_t>(aTextNode.TextLength())};
-  return {begin, end};
+  return MakeTuple(
+      EditorDOMPointInText(aInsertedPoint.ContainerAsText(), 0),
+      EditorDOMPointInText::AtEndOf(*aInsertedPoint.ContainerAsText()));
 }
 nsresult EditorBase::InsertTextIntoTextNodeWithTransaction(
-    const nsAString& aStringToInsert, Text& aTextNode, int32_t aOffset,
-    bool aSuppressIME) {
+    const nsAString& aStringToInsert,
+    const EditorDOMPointInText& aPointToInsert, bool aSuppressIME) {
   MOZ_ASSERT(IsEditActionDataAvailable());
+  MOZ_ASSERT(aPointToInsert.IsSetAndValid());
 
+  EditorDOMPointInText pointToInsert(aPointToInsert);
   RefPtr<EditTransactionBase> transaction;
   bool isIMETransaction = false;
-  RefPtr<Text> insertedTextNode = &aTextNode;
-  int32_t insertedOffset = aOffset;
   // aSuppressIME is used when editor must insert text, yet this text is not
   // part of the current IME operation. Example: adjusting whitespace around an
   // IME insertion.
   if (ShouldHandleIMEComposition() && !aSuppressIME) {
-    transaction = CompositionTransaction::Create(*this, aStringToInsert,
-                                                 aTextNode, aOffset);
+    transaction =
+        CompositionTransaction::Create(*this, aStringToInsert, pointToInsert);
     isIMETransaction = true;
     // All characters of the composition string will be replaced with
     // aStringToInsert.  So, we need to emulate to remove the composition
     // string.
     // FYI: The text node information in mComposition has been updated by
     //      CompositionTransaction::Create().
-    insertedTextNode = mComposition->GetContainerTextNode();
-    insertedOffset = mComposition->XPOffsetInTextNode();
+    pointToInsert.Set(mComposition->GetContainerTextNode(),
+                      mComposition->XPOffsetInTextNode());
   } else {
-    transaction = InsertTextTransaction::Create(*this, aStringToInsert,
-                                                aTextNode, aOffset);
+    transaction =
+        InsertTextTransaction::Create(*this, aStringToInsert, pointToInsert);
   }
 
   // XXX We may not need these view batches anymore.  This is handled at a
@@ -2820,22 +2815,22 @@ nsresult EditorBase::InsertTextIntoTextNodeWithTransaction(
   nsresult rv = DoTransactionInternal(transaction);
   EndUpdateViewBatch();
 
-  if (AsHTMLEditor() && insertedTextNode) {
+  if (AsHTMLEditor() && pointToInsert.IsSet()) {
     // The DOM was potentially modified during the transaction. This is possible
     // through mutation event listeners. That is, the node could've been removed
     // from the doc or otherwise modified.
     if (!MaybeHasMutationEventListeners(
             NS_EVENT_BITS_MUTATION_CHARACTERDATAMODIFIED)) {
-      const EditorRawDOMPoint begin{insertedTextNode, insertedOffset};
-      const EditorRawDOMPoint end{
-          insertedTextNode,
-          static_cast<int32_t>(insertedOffset + aStringToInsert.Length())};
+      EditorDOMPointInText endOfInsertion(
+          pointToInsert.ContainerAsText(),
+          pointToInsert.Offset() + aStringToInsert.Length());
+      TopLevelEditSubActionDataRef().DidInsertText(*this, pointToInsert,
+                                                   endOfInsertion);
+    } else if (pointToInsert.ContainerAsText()->IsInComposedDoc()) {
+      EditorDOMPointInText begin, end;
+      Tie(begin, end) =
+          AdjustTextInsertionRange(pointToInsert, aStringToInsert);
       TopLevelEditSubActionDataRef().DidInsertText(*this, begin, end);
-    } else if (insertedTextNode->IsInComposedDoc()) {
-      AdjustedInsertionRange adjustedRange = AdjustTextInsertionRange(
-          *insertedTextNode, insertedOffset, aStringToInsert);
-      TopLevelEditSubActionDataRef().DidInsertText(*this, adjustedRange.mBegin,
-                                                   adjustedRange.mEnd);
     }
   }
 
@@ -2845,8 +2840,8 @@ nsresult EditorBase::InsertTextIntoTextNodeWithTransaction(
     for (auto& listener : listeners) {
       // TODO: might need adaptation because of mutation event listeners called
       // during `DoTransactionInternal`.
-      listener->DidInsertText(insertedTextNode, insertedOffset, aStringToInsert,
-                              rv);
+      listener->DidInsertText(pointToInsert.ContainerAsText(),
+                              pointToInsert.Offset(), aStringToInsert, rv);
     }
   }
 
@@ -2904,12 +2899,17 @@ nsresult EditorBase::NotifyDocumentListeners(
       }
       // Needs to store all listeners before notifying ComposerCommandsUpdate
       // since notifying it might change mDocStateListeners.
-      AutoDocumentStateListenerArray listeners(mDocStateListeners);
+      const AutoDocumentStateListenerArray listeners(mDocStateListeners);
       if (composerCommandsUpdate) {
         composerCommandsUpdate->OnBeforeHTMLEditorDestroyed();
       }
       for (auto& listener : listeners) {
-        nsresult rv = listener->NotifyDocumentWillBeDestroyed();
+        // MOZ_KnownLive because 'listeners' is guaranteed to
+        // keep it alive.
+        //
+        // This can go away once
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1620312 is fixed.
+        nsresult rv = MOZ_KnownLive(listener)->NotifyDocumentWillBeDestroyed();
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -2936,12 +2936,18 @@ nsresult EditorBase::NotifyDocumentListeners(
       }
       // Needs to store all listeners before notifying ComposerCommandsUpdate
       // since notifying it might change mDocStateListeners.
-      AutoDocumentStateListenerArray listeners(mDocStateListeners);
+      const AutoDocumentStateListenerArray listeners(mDocStateListeners);
       if (composerCommandsUpdate) {
         composerCommandsUpdate->OnHTMLEditorDirtyStateChanged(mDocDirtyState);
       }
       for (auto& listener : listeners) {
-        nsresult rv = listener->NotifyDocumentStateChanged(mDocDirtyState);
+        // MOZ_KnownLive because 'listeners' is guaranteed to
+        // keep it alive.
+        //
+        // This can go away once
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1620312 is fixed.
+        nsresult rv =
+            MOZ_KnownLive(listener)->NotifyDocumentStateChanged(mDocDirtyState);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -5763,6 +5769,11 @@ void EditorBase::AutoEditActionDataSetter::InitializeDataTransferWithClipboard(
                        true /* is external */, aClipboardType);
 }
 
+void EditorBase::AutoEditActionDataSetter::AppendTargetRange(
+    StaticRange& aTargetRange) {
+  mTargetRanges.AppendElement(aTargetRange);
+}
+
 nsresult EditorBase::AutoEditActionDataSetter::MaybeDispatchBeforeInputEvent() {
   MOZ_ASSERT(!HasTriedToDispatchBeforeInputEvent(),
              "We've already handled beforeinput event");
@@ -5805,11 +5816,37 @@ nsresult EditorBase::AutoEditActionDataSetter::MaybeDispatchBeforeInputEvent() {
     return NS_ERROR_FAILURE;
   }
   OwningNonNull<TextEditor> textEditor = *mEditorBase.AsTextEditor();
+  EditorInputType inputType = ToInputType(mEditAction);
+  // If mTargetRanges has not been initialized yet, it means that we may need
+  // to set it to selection ranges.
+  if (textEditor->AsHTMLEditor() && mTargetRanges.IsEmpty() &&
+      MayHaveTargetRangesOnHTMLEditor(inputType)) {
+    if (uint32_t rangeCount = textEditor->SelectionRefPtr()->RangeCount()) {
+      mTargetRanges.SetCapacity(rangeCount);
+      for (uint32_t i = 0; i < rangeCount; i++) {
+        nsRange* range = textEditor->SelectionRefPtr()->GetRangeAt(i);
+        if (NS_WARN_IF(!range) || NS_WARN_IF(!range->IsPositioned())) {
+          continue;
+        }
+        // Now, we need to fix the offset of target range because it may
+        // be referred after modifying the DOM tree and range boundaries
+        // of `range` may have not computed offset yet.
+        RefPtr<StaticRange> targetRange = StaticRange::Create(
+            range->GetStartContainer(), range->StartOffset(),
+            range->GetEndContainer(), range->EndOffset(), IgnoreErrors());
+        if (NS_WARN_IF(!targetRange) ||
+            NS_WARN_IF(!targetRange->IsPositioned())) {
+          continue;
+        }
+        mTargetRanges.AppendElement(std::move(targetRange));
+      }
+    }
+  }
   nsEventStatus status = nsEventStatus_eIgnore;
   nsresult rv = nsContentUtils::DispatchInputEvent(
-      targetElement, eEditorBeforeInput, ToInputType(mEditAction), textEditor,
-      mDataTransfer ? nsContentUtils::InputEventOptions(mDataTransfer)
-                    : nsContentUtils::InputEventOptions(mData),
+      targetElement, eEditorBeforeInput, inputType, textEditor,
+      mDataTransfer ? InputEventOptions(mDataTransfer, std::move(mTargetRanges))
+                    : InputEventOptions(mData, std::move(mTargetRanges)),
       &status);
   if (NS_WARN_IF(mEditorBase.Destroyed())) {
     return NS_ERROR_EDITOR_DESTROYED;

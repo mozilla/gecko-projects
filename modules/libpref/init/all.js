@@ -686,6 +686,8 @@ pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.debug.obscure-images", false);
 pref("gfx.webrender.debug.glyph-flashing", false);
+pref("gfx.webrender.debug.disable-raster-root-scale", false);
+
 
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -864,6 +866,8 @@ pref("devtools.performance.recording.threads", "[\"GeckoMain\",\"Compositor\",\"
 // the host machine. This is used in order to look up symbol information from
 // build artifacts of local builds.
 pref("devtools.performance.recording.objdirs", "[]");
+// The popup will display some introductory text the first time it is displayed.
+pref("devtools.performance.popup.intro-displayed", false);
 
 // view source
 pref("view_source.editor.path", "");
@@ -2306,14 +2310,6 @@ pref("security.cert_pinning.process_headers_from_non_builtin_roots", false);
 // Default: false
 pref("security.cert_pinning.hpkp.enabled", false);
 
-// If set to true strict checks will happen on the triggering principal for loads.
-// Android is disabled at the moment pending Bug 1504968
-#if !defined(RELEASE_OR_BETA) && !defined(ANDROID)
-  pref("security.strict_security_checks.enabled", true);
-#else
-  pref("security.strict_security_checks.enabled", false);
-#endif
-
 // Remote settings preferences
 pref("services.settings.poll_interval", 86400); // 24H
 pref("services.settings.server", "https://firefox.settings.services.mozilla.com/v1");
@@ -3539,8 +3535,6 @@ pref("ui.mouse.radius.inputSource.touchOnly", true);
   pref("middlemouse.openNewWindow", true);
   pref("middlemouse.scrollbarPosition", true);
 
-  pref("browser.urlbar.clickSelectsAll", false);
-
   // Tab focus model bit field:
   // 1 focuses text controls, 2 focuses other form elements, 4 adds links.
   // Leave this at the default, 7, to match mozilla1.0-era user expectations.
@@ -3581,8 +3575,6 @@ pref("ui.mouse.radius.inputSource.touchOnly", true);
   pref("middlemouse.paste", true);
   pref("middlemouse.openNewWindow", true);
   pref("middlemouse.scrollbarPosition", true);
-
-  pref("browser.urlbar.clickSelectsAll", false);
 
   // Tab focus model bit field:
   // 1 focuses text controls, 2 focuses other form elements, 4 adds links.

@@ -406,6 +406,16 @@ bool SpecifiedKeyframeArraysAreEqual(const nsTArray<Keyframe>& aA,
 }
 #endif
 
+static bool HasCurrentColor(
+    const nsTArray<AnimationPropertySegment>& aSegments) {
+  for (const AnimationPropertySegment& segment : aSegments) {
+    if ((!segment.mFromValue.IsNull() && segment.mFromValue.IsCurrentColor()) ||
+        (!segment.mToValue.IsNull() && segment.mToValue.IsCurrentColor())) {
+      return true;
+    }
+  }
+  return false;
+}
 void KeyframeEffect::UpdateProperties(const ComputedStyle* aStyle) {
   MOZ_ASSERT(aStyle);
 
@@ -443,9 +453,19 @@ void KeyframeEffect::UpdateProperties(const ComputedStyle* aStyle) {
   mProperties = std::move(properties);
   UpdateEffectSet();
 
+  mHasCurrentColor = false;
+
   for (AnimationProperty& property : mProperties) {
     property.mIsRunningOnCompositor =
         runningOnCompositorProperties.HasProperty(property.mProperty);
+
+    if (property.mProperty == eCSSProperty_background_color &&
+        !mHasCurrentColor) {
+      if (HasCurrentColor(property.mSegments)) {
+        mHasCurrentColor = true;
+        break;
+      }
+    }
   }
 
   CalculateCumulativeChangeHint(aStyle);
@@ -704,15 +724,16 @@ template <class OptionsType>
 static KeyframeEffectParams KeyframeEffectParamsFromUnion(
     const OptionsType& aOptions, CallerType aCallerType, ErrorResult& aRv) {
   KeyframeEffectParams result;
-  if (aOptions.IsUnrestrictedDouble() ||
-      // Ignore iterationComposite and composite if the corresponding pref is
-      // not set. The default value 'Replace' will be used instead.
-      !StaticPrefs::dom_animations_api_compositing_enabled()) {
+  if (aOptions.IsUnrestrictedDouble()) {
     return result;
   }
 
   const KeyframeEffectOptions& options =
       KeyframeEffectOptionsFromUnion(aOptions);
+
+  // If dom.animations-api.compositing.enabled is turned off,
+  // iterationComposite and composite are the default value 'replace' in the
+  // dictionary.
   result.mIterationComposite = options.mIterationComposite;
   result.mComposite = options.mComposite;
 
@@ -1975,6 +1996,13 @@ KeyframeEffect::MatchForCompositor KeyframeEffect::IsMatchForCompositor(
     if (!StaticPrefs::gfx_omta_background_color()) {
       return KeyframeEffect::MatchForCompositor::No;
     }
+  }
+
+  // We can't run this background color animation on the compositor if there
+  // is any `current-color` keyframe.
+  if (mHasCurrentColor) {
+    aPerformanceWarning = AnimationPerformanceWarning::Type::HasCurrentColor;
+    return KeyframeEffect::MatchForCompositor::NoAndBlockThisProperty;
   }
 
   return mAnimation->IsPlaying() ? KeyframeEffect::MatchForCompositor::Yes

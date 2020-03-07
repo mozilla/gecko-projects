@@ -606,6 +606,8 @@ static void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
                       wr::DebugFlags::DISABLE_GRADIENT_PRIMS)
   GFX_WEBRENDER_DEBUG(".obscure-images", wr::DebugFlags::OBSCURE_IMAGES)
   GFX_WEBRENDER_DEBUG(".glyph-flashing", wr::DebugFlags::GLYPH_FLASHING)
+  GFX_WEBRENDER_DEBUG(".disable-raster-root-scaling",
+                      wr::DebugFlags::DISABLE_RASTER_ROOT_SCALING)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags.bits);
@@ -1172,10 +1174,6 @@ void gfxPlatform::ReportTelemetry() {
   gfxInfo->GetAdapterDeviceID(adapterDeviceId);
   Telemetry::ScalarSet(Telemetry::ScalarID::GFX_ADAPTER_DEVICE_ID,
                        adapterDeviceId);
-  // Temporary workaround for bug 1601091, should be removed once telemetry
-  // issue is fixed.
-  Telemetry::ScalarSet(Telemetry::ScalarID::GFX_ADAPTER_DEVICE_ID_LAST_SEEN,
-                       adapterDeviceId);
 
   nsString adapterSubsystemId;
   gfxInfo->GetAdapterSubsysID(adapterSubsystemId);
@@ -1479,7 +1477,7 @@ void gfxPlatform::WillShutdown() {
 #endif
 }
 
-gfxPlatform::~gfxPlatform() {}
+gfxPlatform::~gfxPlatform() = default;
 
 /* static */
 already_AddRefed<DrawTarget> gfxPlatform::CreateDrawTargetForSurface(
@@ -3528,12 +3526,6 @@ void gfxPlatform::NotifyCompositorCreated(LayersBackend aBackend) {
   if (XRE_IsParentProcess()) {
     Telemetry::ScalarSet(
         Telemetry::ScalarID::GFX_COMPOSITOR,
-        NS_ConvertUTF8toUTF16(GetLayersBackendName(mCompositorBackend)));
-
-    // Temporary workaround for bug 1601091, should be removed once telemetry
-    // issue is fixed.
-    Telemetry::ScalarSet(
-        Telemetry::ScalarID::GFX_COMPOSITOR_LAST_SEEN,
         NS_ConvertUTF8toUTF16(GetLayersBackendName(mCompositorBackend)));
   }
 

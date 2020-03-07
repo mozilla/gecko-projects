@@ -1699,10 +1699,10 @@ class nsIFrame : public nsQueryFrame {
     }
     nsIFrame* mutable_this = const_cast<nsIFrame*>(this);
     nsPresContext* pc = PresContext();
-    nsITheme* theme = pc->GetTheme();
-    if (!theme ||
-        !theme->ThemeSupportsWidget(pc, mutable_this, aDisp->mAppearance))
+    nsITheme* theme = pc->Theme();
+    if (!theme->ThemeSupportsWidget(pc, mutable_this, aDisp->mAppearance)) {
       return false;
+    }
     if (aTransparencyState) {
       *aTransparencyState =
           theme->GetWidgetTransparency(mutable_this, aDisp->mAppearance);
@@ -3848,8 +3848,8 @@ class nsIFrame : public nsQueryFrame {
 
   static bool AddXULPrefSize(nsIFrame* aBox, nsSize& aSize, bool& aWidth,
                              bool& aHeightSet);
-  static bool AddXULMinSize(nsBoxLayoutState& aState, nsIFrame* aBox,
-                            nsSize& aSize, bool& aWidth, bool& aHeightSet);
+  static bool AddXULMinSize(nsIFrame* aBox, nsSize& aSize, bool& aWidth,
+                            bool& aHeightSet);
   static bool AddXULMaxSize(nsIFrame* aBox, nsSize& aSize, bool& aWidth,
                             bool& aHeightSet);
   static bool AddXULFlex(nsIFrame* aBox, nscoord& aFlex);

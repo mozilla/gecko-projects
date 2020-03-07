@@ -490,10 +490,7 @@ class SpeculativeConnectArgs : public ARefBase {
 nsresult nsHttpConnectionMgr::SpeculativeConnect(
     nsHttpConnectionInfo* ci, nsIInterfaceRequestor* callbacks, uint32_t caps,
     NullHttpTransaction* nullTransaction) {
-  MOZ_ASSERT(NS_IsMainThread(),
-             "nsHttpConnectionMgr::SpeculativeConnect called off main thread!");
-
-  if (!IsNeckoChild()) {
+  if (!IsNeckoChild() && NS_IsMainThread()) {
     // HACK: make sure PSM gets initialized on the main thread.
     net_EnsurePSMInit();
   }
@@ -1812,8 +1809,13 @@ nsresult nsHttpConnectionMgr::DispatchTransaction(nsConnectionEntry* ent,
     rv = conn->Activate(trans, caps, priority);
     MOZ_ASSERT(NS_SUCCEEDED(rv), "SPDY Cannot Fail Dispatch");
     if (NS_SUCCEEDED(rv) && !trans->GetPendingTime().IsNull()) {
-      AccumulateTimeDelta(Telemetry::TRANSACTION_WAIT_TIME_SPDY,
-                          trans->GetPendingTime(), TimeStamp::Now());
+      if (conn->UsingSpdy()) {
+        AccumulateTimeDelta(Telemetry::TRANSACTION_WAIT_TIME_SPDY,
+                            trans->GetPendingTime(), TimeStamp::Now());
+      } else {
+        AccumulateTimeDelta(Telemetry::TRANSACTION_WAIT_TIME_HTTP3,
+                            trans->GetPendingTime(), TimeStamp::Now());
+      }
       trans->SetPendingTime(false);
     }
     return rv;

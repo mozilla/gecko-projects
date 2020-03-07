@@ -120,6 +120,7 @@ using mozilla::fontlist::Pointer from "SharedFontList.h";
 using gfxSparseBitSet from "gfxFontUtils.h";
 using mozilla::dom::MediaControlKeysEvent from "ipc/MediaControlIPC.h";
 using mozilla::dom::ControlledMediaState from "ipc/MediaControlIPC.h";
+using mozilla::dom::MaybeMediaMetadataBase from "mozilla/dom/MediaSessionIPCUtils.h";
 using refcounted class nsDocShellLoadState from "nsDocShellLoadState.h";
 using mozilla::dom::ServiceWorkerShutdownState::Progress from "mozilla/dom/ServiceWorkerShutdownState.h";
 
@@ -839,7 +840,7 @@ child:
     // moved to a new process it now has different properties.
 
     async CrossProcessRedirect(RedirectToRealChannelArgs args)
-        returns (nsresult rv, LoadInfoArgs? arg);
+        returns (nsresult rv);
 
     /**
     * This method is used to notifty content process to start delayed autoplay
@@ -1158,7 +1159,7 @@ parent:
      */
     async POfflineCacheUpdate(URIParams manifestURI, URIParams documentURI,
                               PrincipalInfo loadingPrincipal, bool stickDocument,
-                              CookieSettingsArgs cookieSettings);
+                              CookieJarSettingsArgs cookieJarSettings);
 
     /**
      * Sets "offline-app" permission for the principal.  Called when we hit
@@ -1514,6 +1515,13 @@ parent:
     * created or destroyed.
     */
     async NotifyMediaSessionUpdated(MaybeDiscardedBrowsingContext aContext, bool aIsCreated);
+
+    /**
+     * This method is used to update media session's media metadata whenever its
+     * metadata is being updated.
+     */
+    async NotifyUpdateMediaMetadata(MaybeDiscardedBrowsingContext aContext,
+                                    MaybeMediaMetadataBase aMetadata);
 
     /**
      * Due to sandboxing, a child process's UntrustedModulesProcessor cannot

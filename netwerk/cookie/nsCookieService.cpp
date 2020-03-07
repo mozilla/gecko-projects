@@ -13,7 +13,7 @@
 #include "mozilla/StorageAccess.h"
 #include "mozilla/Unused.h"
 
-#include "mozilla/net/CookieSettings.h"
+#include "mozilla/net/CookieJarSettings.h"
 #include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/HttpBaseChannel.h"
 #include "mozilla/net/NeckoCommon.h"
@@ -51,6 +51,7 @@
 #include "nsIInputStream.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsNetCID.h"
+#include "mozilla/dom/nsMixedContentBlocker.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/storage.h"
 #include "mozilla/AutoRestore.h"
@@ -2082,59 +2083,37 @@ nsresult nsCookieService::GetCookieStringCommon(nsIURI* aHostURI,
 }
 
 // static
-already_AddRefed<nsICookieSettings> nsCookieService::GetCookieSettings(
+already_AddRefed<nsICookieJarSettings> nsCookieService::GetCookieJarSettings(
     nsIChannel* aChannel) {
-  nsCOMPtr<nsICookieSettings> cookieSettings;
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings;
   if (aChannel) {
     nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
-    nsresult rv = loadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
+    nsresult rv =
+        loadInfo->GetCookieJarSettings(getter_AddRefs(cookieJarSettings));
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      cookieSettings = CookieSettings::CreateBlockingAll();
+      cookieJarSettings = CookieJarSettings::GetBlockingAll();
     }
   } else {
-    cookieSettings = CookieSettings::Create();
+    cookieJarSettings = CookieJarSettings::Create();
   }
 
-  MOZ_ASSERT(cookieSettings);
-  return cookieSettings.forget();
+  MOZ_ASSERT(cookieJarSettings);
+  return cookieJarSettings.forget();
 }
 
 NS_IMETHODIMP
-nsCookieService::SetCookieString(nsIURI* aHostURI, nsIPrompt* aPrompt,
+nsCookieService::SetCookieString(nsIURI* aHostURI,
                                  const nsACString& aCookieHeader,
                                  nsIChannel* aChannel) {
-  // The aPrompt argument is deprecated and unused.  Avoid introducing new
-  // code that uses this argument by warning if the value is non-null.
-  MOZ_ASSERT(!aPrompt);
-  if (aPrompt) {
-    nsCOMPtr<nsIConsoleService> aConsoleService =
-        do_GetService("@mozilla.org/consoleservice;1");
-    if (aConsoleService) {
-      aConsoleService->LogStringMessage(
-          u"Non-null prompt ignored by nsCookieService.");
-    }
-  }
   return SetCookieStringCommon(aHostURI, aCookieHeader, VoidCString(), aChannel,
                                false);
 }
 
 NS_IMETHODIMP
 nsCookieService::SetCookieStringFromHttp(nsIURI* aHostURI, nsIURI* aFirstURI,
-                                         nsIPrompt* aPrompt,
                                          const nsACString& aCookieHeader,
                                          const nsACString& aServerTime,
                                          nsIChannel* aChannel) {
-  // The aPrompt argument is deprecated and unused.  Avoid introducing new
-  // code that uses this argument by warning if the value is non-null.
-  MOZ_ASSERT(!aPrompt);
-  if (aPrompt) {
-    nsCOMPtr<nsIConsoleService> aConsoleService =
-        do_GetService("@mozilla.org/consoleservice;1");
-    if (aConsoleService) {
-      aConsoleService->LogStringMessage(
-          u"Non-null prompt ignored by nsCookieService.");
-    }
-  }
   return SetCookieStringCommon(aHostURI, aCookieHeader, aServerTime, aChannel,
                                true);
 }
@@ -2143,8 +2122,7 @@ int64_t nsCookieService::ParseServerTime(const nsACString& aServerTime) {
   // parse server local time. this is not just done here for efficiency
   // reasons - if there's an error parsing it, and we need to default it
   // to the current time, we must do it here since the current time in
-  // SetCookieInternal() will change for each cookie processed (e.g. if the
-  // user is prompted).
+  // SetCookieInternal() will change for each cookie processed.
   PRTime tempServerTime;
   int64_t serverTime;
   PRStatus result =
@@ -2220,7 +2198,8 @@ void nsCookieService::SetCookieStringInternal(
   }
 
   nsCookieKey key(baseDomain, aOriginAttrs);
-  nsCOMPtr<nsICookieSettings> cookieSettings = GetCookieSettings(aChannel);
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
+      GetCookieJarSettings(aChannel);
 
   // check default prefs
   uint32_t priorCookieCount = 0;
@@ -2230,7 +2209,7 @@ void nsCookieService::SetCookieStringInternal(
   CountCookiesFromHostInternal(hostFromURI, aOriginAttrs.mPrivateBrowsingId,
                                &priorCookieCount);
   CookieStatus cookieStatus = CheckPrefs(
-      cookieSettings, aHostURI, aIsForeign, aIsThirdPartyTrackingResource,
+      cookieJarSettings, aHostURI, aIsForeign, aIsThirdPartyTrackingResource,
       aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
       aCookieHeader, priorCookieCount, aOriginAttrs, &rejectedReason);
 
@@ -3020,7 +2999,8 @@ void nsCookieService::GetCookiesForURI(
     return;
   }
 
-  nsCOMPtr<nsICookieSettings> cookieSettings = GetCookieSettings(aChannel);
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
+      GetCookieJarSettings(aChannel);
 
   // check default prefs
   uint32_t rejectedReason = aRejectedReason;
@@ -3028,7 +3008,7 @@ void nsCookieService::GetCookiesForURI(
   CountCookiesFromHostInternal(hostFromURI, aOriginAttrs.mPrivateBrowsingId,
                                &priorCookieCount);
   CookieStatus cookieStatus = CheckPrefs(
-      cookieSettings, aHostURI, aIsForeign, aIsThirdPartyTrackingResource,
+      cookieJarSettings, aHostURI, aIsForeign, aIsThirdPartyTrackingResource,
       aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
       VoidCString(), priorCookieCount, aOriginAttrs, &rejectedReason);
 
@@ -3055,7 +3035,8 @@ void nsCookieService::GetCookiesForURI(
   // check if aHostURI is using an https secure protocol.
   // if it isn't, then we can't send a secure cookie over the connection.
   // if SchemeIs fails, assume an insecure connection, to be on the safe side
-  bool isSecure = aHostURI->SchemeIs("https");
+  bool potentiallyTurstworthy =
+      nsMixedContentBlocker::IsPotentiallyTrustworthyOrigin(aHostURI);
 
   nsCookie* cookie;
   int64_t currentTimeInUsec = PR_Now();
@@ -3077,7 +3058,7 @@ void nsCookieService::GetCookiesForURI(
     if (!DomainMatches(cookie, hostFromURI)) continue;
 
     // if the cookie is secure and the host scheme isn't, we can't send it
-    if (cookie->IsSecure() && !isSecure) continue;
+    if (cookie->IsSecure() && !potentiallyTurstworthy) continue;
 
     if (aIsSameSiteForeign && !ProcessSameSiteCookieForForeignRequest(
                                   aChannel, cookie, aIsSafeTopLevelNav)) {
@@ -3229,10 +3210,11 @@ bool nsCookieService::CanSetCookie(nsIURI* aHostURI, const nsCookieKey& aKey,
   // 1 = nonsecure and "https:"
   // 2 = secure and "http:"
   // 3 = secure and "https:"
-  bool isHTTPS = aHostURI->SchemeIs("https");
-  Telemetry::Accumulate(
-      Telemetry::COOKIE_SCHEME_SECURITY,
-      ((aCookieData.isSecure()) ? 0x02 : 0x00) | ((isHTTPS) ? 0x01 : 0x00));
+  bool potentiallyTurstworthy =
+      nsMixedContentBlocker::IsPotentiallyTrustworthyOrigin(aHostURI);
+  Telemetry::Accumulate(Telemetry::COOKIE_SCHEME_SECURITY,
+                        ((aCookieData.isSecure()) ? 0x02 : 0x00) |
+                            ((potentiallyTurstworthy) ? 0x01 : 0x00));
 
   // Collect telemetry on how often are first- and third-party cookies set
   // from HTTPS origins:
@@ -3253,7 +3235,7 @@ bool nsCookieService::CanSetCookie(nsIURI* aHostURI, const nsCookieKey& aKey,
     }
     Telemetry::Accumulate(Telemetry::COOKIE_SCHEME_HTTPS,
                           (isThirdParty ? 0x04 : 0x00) |
-                              (isHTTPS ? 0x02 : 0x00) |
+                              (potentiallyTurstworthy ? 0x02 : 0x00) |
                               (aCookieData.isSecure() ? 0x01 : 0x00));
   }
 
@@ -3303,7 +3285,7 @@ bool nsCookieService::CanSetCookie(nsIURI* aHostURI, const nsCookieKey& aKey,
   }
 
   // magic prefix checks. MUST be run after CheckDomain() and CheckPath()
-  if (!CheckPrefixes(aCookieData, isHTTPS)) {
+  if (!CheckPrefixes(aCookieData, potentiallyTurstworthy)) {
     COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader,
                       "failed the prefix tests");
     return newCookie;
@@ -3337,7 +3319,7 @@ bool nsCookieService::CanSetCookie(nsIURI* aHostURI, const nsCookieKey& aKey,
   // If the new cookie is non-https and wants to set secure flag,
   // browser have to ignore this new cookie.
   // (draft-ietf-httpbis-cookie-alone section 3.1)
-  if (aCookieData.isSecure() && !isHTTPS) {
+  if (aCookieData.isSecure() && !potentiallyTurstworthy) {
     COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, aCookieHeader,
                       "non-https cookie can't set secure flag");
     return newCookie;
@@ -3984,7 +3966,7 @@ static inline bool IsSubdomainOf(const nsCString& a, const nsCString& b) {
 }
 
 CookieStatus nsCookieService::CheckPrefs(
-    nsICookieSettings* aCookieSettings, nsIURI* aHostURI, bool aIsForeign,
+    nsICookieJarSettings* aCookieJarSettings, nsIURI* aHostURI, bool aIsForeign,
     bool aIsThirdPartyTrackingResource,
     bool aIsThirdPartySocialTrackingResource,
     bool aFirstPartyStorageAccessGranted, const nsACString& aCookieHeader,
@@ -4016,7 +3998,7 @@ CookieStatus nsCookieService::CheckPrefs(
   // check the permission list first; if we find an entry, it overrides
   // default prefs. see bug 184059.
   uint32_t cookiePermission = nsICookiePermission::ACCESS_DEFAULT;
-  rv = aCookieSettings->CookiePermission(principal, &cookiePermission);
+  rv = aCookieJarSettings->CookiePermission(principal, &cookiePermission);
   if (NS_SUCCEEDED(rv)) {
     switch (cookiePermission) {
       case nsICookiePermission::ACCESS_DENY:
@@ -4037,7 +4019,7 @@ CookieStatus nsCookieService::CheckPrefs(
   // access to the first-party cookie jar.
   if (aIsForeign && aIsThirdPartyTrackingResource &&
       !aFirstPartyStorageAccessGranted &&
-      aCookieSettings->GetRejectThirdPartyTrackers()) {
+      aCookieJarSettings->GetRejectThirdPartyTrackers()) {
     // Explicitly pass nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER
     // here to ensure that we are testing the partitioning configuration only
     // for the nsICookieService::BEHAVIOR_REJECT_TRACKER configuration.
@@ -4045,7 +4027,7 @@ CookieStatus nsCookieService::CheckPrefs(
     // don't want to give a free pass to tracker cookies here!
     if (StoragePartitioningEnabled(
             nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
-            aCookieSettings)) {
+            aCookieJarSettings)) {
       MOZ_ASSERT(!aOriginAttrs.mFirstPartyDomain.IsEmpty(),
                  "We must have a StoragePrincipal here!");
       return STATUS_ACCEPTED;
@@ -4067,7 +4049,7 @@ CookieStatus nsCookieService::CheckPrefs(
   // Check aFirstPartyStorageAccessGranted when checking aCookieBehavior
   // so that we take things such as the content blocking allow list into
   // account.
-  if (aCookieSettings->GetCookieBehavior() ==
+  if (aCookieJarSettings->GetCookieBehavior() ==
           nsICookieService::BEHAVIOR_REJECT &&
       !aFirstPartyStorageAccessGranted) {
     COOKIE_LOGFAILURE(aCookieHeader.IsVoid() ? GET_COOKIE : SET_COOKIE,
@@ -4078,7 +4060,7 @@ CookieStatus nsCookieService::CheckPrefs(
 
   // check if cookie is foreign
   if (aIsForeign) {
-    if (aCookieSettings->GetCookieBehavior() ==
+    if (aCookieJarSettings->GetCookieBehavior() ==
             nsICookieService::BEHAVIOR_REJECT_FOREIGN &&
         !aFirstPartyStorageAccessGranted) {
       COOKIE_LOGFAILURE(aCookieHeader.IsVoid() ? GET_COOKIE : SET_COOKIE,
@@ -4087,7 +4069,7 @@ CookieStatus nsCookieService::CheckPrefs(
       return STATUS_REJECTED;
     }
 
-    if (aCookieSettings->GetLimitForeignContexts() &&
+    if (aCookieJarSettings->GetLimitForeignContexts() &&
         !aFirstPartyStorageAccessGranted && aNumOfCookies == 0) {
       COOKIE_LOGFAILURE(aCookieHeader.IsVoid() ? GET_COOKIE : SET_COOKIE,
                         aHostURI, aCookieHeader, "context is third party");

@@ -418,7 +418,7 @@ class CycleCollectWithLogsParent final : public PCycleCollectWithLogsParent {
 
 // A memory reporter for ContentParent objects themselves.
 class ContentParentsMemoryReporter final : public nsIMemoryReporter {
-  ~ContentParentsMemoryReporter() {}
+  ~ContentParentsMemoryReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -4521,7 +4521,7 @@ already_AddRefed<mozilla::docshell::POfflineCacheUpdateParent>
 ContentParent::AllocPOfflineCacheUpdateParent(
     const URIParams& aManifestURI, const URIParams& aDocumentURI,
     const PrincipalInfo& aLoadingPrincipalInfo, const bool& aStickDocument,
-    const CookieSettingsArgs& aCookieSettingsArgs) {
+    const CookieJarSettingsArgs& aCookieJarSettingsArgs) {
   RefPtr<mozilla::docshell::OfflineCacheUpdateParent> update =
       new mozilla::docshell::OfflineCacheUpdateParent();
   return update.forget();
@@ -4530,14 +4530,15 @@ ContentParent::AllocPOfflineCacheUpdateParent(
 mozilla::ipc::IPCResult ContentParent::RecvPOfflineCacheUpdateConstructor(
     POfflineCacheUpdateParent* aActor, const URIParams& aManifestURI,
     const URIParams& aDocumentURI, const PrincipalInfo& aLoadingPrincipal,
-    const bool& aStickDocument, const CookieSettingsArgs& aCookieSettingsArgs) {
+    const bool& aStickDocument,
+    const CookieJarSettingsArgs& aCookieJarSettingsArgs) {
   MOZ_ASSERT(aActor);
 
   RefPtr<mozilla::docshell::OfflineCacheUpdateParent> update =
       static_cast<mozilla::docshell::OfflineCacheUpdateParent*>(aActor);
 
   nsresult rv = update->Schedule(aManifestURI, aDocumentURI, aLoadingPrincipal,
-                                 aStickDocument, aCookieSettingsArgs);
+                                 aStickDocument, aCookieJarSettingsArgs);
   if (NS_FAILED(rv) && IsAlive()) {
     // Inform the child of failure.
     Unused << update->SendFinish(false, false);
@@ -5880,6 +5881,19 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyMediaSessionUpdated(
   }
 
   NotfiyMediaSessionCreationOrDeconstruction(aContext.get(), aIsCreated);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvNotifyUpdateMediaMetadata(
+    const MaybeDiscarded<BrowsingContext>& aContext,
+    const Maybe<MediaMetadataBase>& aMetadata) {
+  if (aContext.IsNullOrDiscarded()) {
+    return IPC_OK();
+  }
+  if (RefPtr<MediaController> controller =
+          aContext.get_canonical()->GetMediaController()) {
+    controller->UpdateMetadata(aContext.ContextId(), aMetadata);
+  }
   return IPC_OK();
 }
 

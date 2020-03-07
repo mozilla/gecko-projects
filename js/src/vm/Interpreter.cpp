@@ -3363,13 +3363,10 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       ReservedRooted<Value> val(
           &rootValue0, REGS.fp()->aliasedEnvironment(ec).aliasedBinding(ec));
 #ifdef DEBUG
-      // Only the .this slot can hold the TDZ MagicValue.
       if (IsUninitializedLexical(val)) {
-        PropertyName* name = EnvironmentCoordinateNameSlow(script, REGS.pc);
-        MOZ_ASSERT(name == cx->names().dotThis);
         JSOp next = JSOp(*GetNextPc(REGS.pc));
         MOZ_ASSERT(next == JSOp::CheckThis || next == JSOp::CheckReturn ||
-                   next == JSOp::CheckThisReinit);
+                   next == JSOp::CheckThisReinit || next == JSOp::CheckLexical);
       }
 #endif
       PUSH_COPY(val);
@@ -3385,18 +3382,16 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     }
     END_CASE(SetAliasedVar)
 
-    CASE(ThrowSetConst)
-    CASE(ThrowSetAliasedConst)
-    CASE(ThrowSetCallee) {
-      ReportRuntimeConstAssignment(cx, script, REGS.pc);
+    CASE(ThrowSetConst) {
+      ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, REGS.pc);
       goto error;
     }
     END_CASE(ThrowSetConst)
 
     CASE(CheckLexical) {
-      uint32_t i = GET_LOCALNO(REGS.pc);
-      ReservedRooted<Value> val(&rootValue0, REGS.fp()->unaliasedLocal(i));
-      if (!CheckUninitializedLexical(cx, script, REGS.pc, val)) {
+      if (REGS.sp[-1].isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
+                                  REGS.pc);
         goto error;
       }
     }
@@ -3407,16 +3402,6 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       REGS.fp()->unaliasedLocal(i) = REGS.sp[-1];
     }
     END_CASE(InitLexical)
-
-    CASE(CheckAliasedLexical) {
-      EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
-      ReservedRooted<Value> val(
-          &rootValue0, REGS.fp()->aliasedEnvironment(ec).aliasedBinding(ec));
-      if (!CheckUninitializedLexical(cx, script, REGS.pc, val)) {
-        goto error;
-      }
-    }
-    END_CASE(CheckAliasedLexical)
 
     CASE(InitAliasedLexical) {
       EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
@@ -3466,15 +3451,11 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       PUSH_COPY_SKIP_CHECK(REGS.fp()->unaliasedLocal(i));
 
 #ifdef DEBUG
-      // Derived class constructors store the TDZ Value in the .this slot
-      // before a super() call.
       if (IsUninitializedLexical(REGS.sp[-1])) {
-        MOZ_ASSERT(script->isDerivedClassConstructor());
         JSOp next = JSOp(*GetNextPc(REGS.pc));
         MOZ_ASSERT(next == JSOp::CheckThis || next == JSOp::CheckReturn ||
-                   next == JSOp::CheckThisReinit);
+                   next == JSOp::CheckThisReinit || next == JSOp::CheckLexical);
       }
-#endif
 
       /*
        * Skip the same-compartment assertion if the local will be immediately
@@ -3485,6 +3466,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       if (JSOp(REGS.pc[JSOpLength_GetLocal]) != JSOp::Pop) {
         cx->debugOnlyCheck(REGS.sp[-1]);
       }
+#endif
     }
     END_CASE(GetLocal)
 
@@ -3958,22 +3940,6 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       }
     }
     END_CASE(PushVarEnv)
-
-    CASE(PopVarEnv) {
-#ifdef DEBUG
-      Scope* scope = script->lookupScope(REGS.pc);
-      MOZ_ASSERT(scope);
-      MOZ_ASSERT(scope->is<VarScope>());
-      MOZ_ASSERT(scope->as<VarScope>().hasEnvironment());
-#endif
-
-      if (MOZ_UNLIKELY(cx->realm()->isDebuggee())) {
-        DebugEnvironments::onPopVar(cx, REGS.fp(), REGS.pc);
-      }
-
-      REGS.fp()->popOffEnvironmentChain<VarEnvironmentObject>();
-    }
-    END_CASE(PopVarEnv)
 
     CASE(Generator) {
       MOZ_ASSERT(!cx->isExceptionPending());
@@ -5292,24 +5258,11 @@ void js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
 
 void js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
                                    HandleScript script, jsbytecode* pc) {
-  JSOp op = JSOp(*pc);
-  MOZ_ASSERT(op == JSOp::CheckLexical || op == JSOp::CheckAliasedLexical ||
-             op == JSOp::ThrowSetConst || op == JSOp::ThrowSetAliasedConst ||
-             op == JSOp::ThrowSetCallee || op == JSOp::GetImport);
+  MOZ_ASSERT(JSOp(*pc) == JSOp::CheckLexical ||
+             JSOp(*pc) == JSOp::ThrowSetConst || JSOp(*pc) == JSOp::GetImport);
+  MOZ_ASSERT(IsAtomOp(JSOp(*pc)));
 
-  RootedPropertyName name(cx);
-
-  if (op == JSOp::ThrowSetCallee) {
-    name = script->function()->explicitName()->asPropertyName();
-  } else if (IsLocalOp(op)) {
-    name = FrameSlotName(script, pc)->asPropertyName();
-  } else if (IsAtomOp(op)) {
-    name = script->getName(pc);
-  } else {
-    MOZ_ASSERT(IsAliasedVarOp(op));
-    name = EnvironmentCoordinateNameSlow(script, pc);
-  }
-
+  RootedPropertyName name(cx, script->getName(pc));
   ReportRuntimeLexicalError(cx, errorNumber, name);
 }
 

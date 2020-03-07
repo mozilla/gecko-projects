@@ -488,13 +488,13 @@ class ContentParent final
   already_AddRefed<POfflineCacheUpdateParent> AllocPOfflineCacheUpdateParent(
       const URIParams& aManifestURI, const URIParams& aDocumentURI,
       const PrincipalInfo& aLoadingPrincipalInfo, const bool& aStickDocument,
-      const CookieSettingsArgs& aCookieSettingsArgs);
+      const CookieJarSettingsArgs& aCookieJarSettingsArgs);
 
   virtual mozilla::ipc::IPCResult RecvPOfflineCacheUpdateConstructor(
       POfflineCacheUpdateParent* aActor, const URIParams& aManifestURI,
       const URIParams& aDocumentURI, const PrincipalInfo& aLoadingPrincipal,
       const bool& stickDocument,
-      const CookieSettingsArgs& aCookieSettingsArgs) override;
+      const CookieJarSettingsArgs& aCookieJarSettingsArgs) override;
 
   mozilla::ipc::IPCResult RecvSetOfflinePermission(
       const IPC::Principal& principal);
@@ -1256,6 +1256,10 @@ class ContentParent final
   mozilla::ipc::IPCResult RecvNotifyMediaSessionUpdated(
       const MaybeDiscarded<BrowsingContext>& aContext, bool aIsCreated);
 
+  mozilla::ipc::IPCResult RecvNotifyUpdateMediaMetadata(
+      const MaybeDiscarded<BrowsingContext>& aContext,
+      const Maybe<MediaMetadataBase>& aMetadata);
+
   mozilla::ipc::IPCResult RecvGetModulesTrust(
       ModulePaths&& aModPaths, bool aRunAtNormalPriority,
       GetModulesTrustResolver&& aResolver);
@@ -1505,7 +1509,7 @@ class ParentIdleListener : public nsIObserver {
       : mParent(aParent), mObserver(aObserver), mTime(aTime) {}
 
  private:
-  virtual ~ParentIdleListener() {}
+  virtual ~ParentIdleListener() = default;
 
   RefPtr<mozilla::dom::ContentParent> mParent;
   uint64_t mObserver;

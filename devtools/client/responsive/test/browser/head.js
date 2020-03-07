@@ -49,6 +49,11 @@ loader.lazyRequireGetter(
   "ResponsiveUIManager",
   "devtools/client/responsive/manager"
 );
+loader.lazyRequireGetter(
+  this,
+  "message",
+  "devtools/client/responsive/utils/message"
+);
 
 const E10S_MULTI_ENABLED =
   Services.prefs.getIntPref("dom.ipc.processCount") > 1;
@@ -130,78 +135,127 @@ var closeRDM = async function(tab, options) {
 
 /**
  * Adds a new test task that adds a tab with the given URL, awaits the
- * rdmPreTask (if provided), opens responsive design mode, awaits the rdmTask,
- * closes responsive design mode, awaits the rdmPostTask (if provided), and
- * removes the tab. If includeBrowserEmbeddedUI is truthy, the sequence will
- * be repeated with the devtools.responsive.browserUI.enabled pref set.
+ * preTask (if provided), opens responsive design mode, awaits the task,
+ * closes responsive design mode, awaits the postTask (if provided), and
+ * removes the tab. The final argument is an options object, with these
+ * optional properties:
+ *
+ * usingBrowserUI: the devtools.responsive.browserUI.enabled pref is set
+ *   to the truthiness of this value (default false).
+ * onlyPrefAndTask: if truthy, only the pref will be set and the task
+ *   will be called, with none of the tab creation/teardown or open/close
+ *   of RDM (default false).
+ * waitForDeviceList: if truthy, the function will wait until the device
+ *   list is loaded before calling the task (default false).
  *
  * Example usage:
  *
  *   addRDMTaskWithPreAndPost(
  *     TEST_URL,
- *     async function preTask({ browser, usingBrowserUI }) {
+ *     async function preTask({ message, browser, usingBrowserUI }) {
  *       // Your pre-task goes here...
  *     },
- *     async function task({ ui, manager, browser, usingBrowserUI }) {
+ *     async function task({ ui, manager, message, browser, usingBrowserUI,
+ *                           preTaskValue }) {
  *       // Your task goes here...
  *     },
- *     async function postTask({ browser, usingBrowserUI }) {
+ *     async function postTask({ message, browser, usingBrowserUI,
+ *                               preTaskValue, taskValue }) {
  *       // Your post-task goes here...
  *     },
- *     true
+ *     { usingBrowserUI: true, waitForDeviceList: true }
  *   );
  */
-function addRDMTaskWithPreAndPost(
-  rdmURL,
-  rdmPreTask,
-  rdmTask,
-  rdmPostTask,
-  includeBrowserEmbeddedUI
-) {
-  // Define a task setup function that can work with our without the
-  // browser embedded UI.
-  function taskSetup(url, preTask, task, postTask, usingBrowserUI) {
-    add_task(async function() {
-      await SpecialPowers.pushPrefEnv({
-        set: [["devtools.responsive.browserUI.enabled", usingBrowserUI]],
-      });
-      const tab = await addTab(url);
-      const browser = tab.linkedBrowser;
+function addRDMTaskWithPreAndPost(url, preTask, task, postTask, options) {
+  // Interpret our options.
+  let usingBrowserUI = false;
+  let onlyPrefAndTask = false;
+  let waitForDeviceList = false;
+  if (typeof options == "object") {
+    usingBrowserUI = !!options.usingBrowserUI;
+    onlyPrefAndTask = !!options.onlyPrefAndTask;
+    waitForDeviceList = !!options.waitForDeviceList;
+  }
+
+  add_task(async function() {
+    await SpecialPowers.pushPrefEnv({
+      set: [["devtools.responsive.browserUI.enabled", usingBrowserUI]],
+    });
+
+    let tab;
+    let browser;
+    let preTaskValue = null;
+    let taskValue = null;
+    let ui;
+    let manager;
+
+    if (!onlyPrefAndTask) {
+      tab = await addTab(url);
+      browser = tab.linkedBrowser;
+
       if (preTask) {
-        await preTask({ browser, usingBrowserUI });
+        preTaskValue = await preTask({ message, browser, usingBrowserUI });
       }
-      const { ui, manager } = await openRDM(tab);
-      try {
-        await task({ ui, manager, browser, usingBrowserUI });
-      } catch (err) {
-        ok(
-          false,
-          "Got an error with usingBrowserUI " +
-            usingBrowserUI +
-            ": " +
-            DevToolsUtils.safeErrorString(err)
+
+      const rdmValues = await openRDM(tab);
+      ui = rdmValues.ui;
+      manager = rdmValues.manager;
+
+      // Always wait for the post-init message.
+      await message.wait(ui.toolWindow, "post-init");
+
+      // Always wait for the viewport to be added.
+      const { store } = ui.toolWindow;
+      await waitUntilState(store, state => state.viewports.length == 1);
+
+      if (waitForDeviceList) {
+        // Wait until the device list has been loaded.
+        const localTypes = require("devtools/client/responsive/types");
+
+        await waitUntilState(
+          store,
+          state => state.devices.listState == localTypes.loadableState.LOADED
         );
       }
+    }
 
+    try {
+      taskValue = await task({
+        ui,
+        manager,
+        message,
+        browser,
+        usingBrowserUI,
+        preTaskValue,
+      });
+    } catch (err) {
+      ok(
+        false,
+        "Got an error with usingBrowserUI " +
+          usingBrowserUI +
+          ": " +
+          DevToolsUtils.safeErrorString(err)
+      );
+    }
+
+    if (!onlyPrefAndTask) {
       await closeRDM(tab);
       if (postTask) {
-        await postTask({ browser, usingBrowserUI });
+        await postTask({
+          message,
+          browser,
+          usingBrowserUI,
+          preTaskValue,
+          taskValue,
+        });
       }
       await removeTab(tab);
+    }
 
-      // Flush prefs to not only undo our earlier change, but also undo
-      // any changes made by the tasks.
-      await SpecialPowers.flushPrefEnv();
-    });
-  }
-
-  // Call the task setup function without using the browser UI pref.
-  taskSetup(rdmURL, rdmPreTask, rdmTask, rdmPostTask, false);
-
-  if (includeBrowserEmbeddedUI) {
-    // Call it again with the browser UI pref on.
-    taskSetup(rdmURL, rdmPreTask, rdmTask, rdmPostTask, true);
-  }
+    // Flush prefs to not only undo our earlier change, but also undo
+    // any changes made by the tasks.
+    await SpecialPowers.flushPrefEnv();
+  });
 }
 
 /**
@@ -215,20 +269,14 @@ function addRDMTaskWithPreAndPost(
  *
  *   addRDMTask(
  *     TEST_URL,
- *     async function task({ ui, manager, browser, usingBrowserUI }) {
+ *     async function task({ ui, manager, message, browser, usingBrowserUI }) {
  *       // Your task goes here...
  *     },
- *     true
+ *     { usingBrowserUI: true, waitForDeviceList: true }
  *   );
  */
-function addRDMTask(rdmURL, rdmTask, includeBrowserEmbeddedUI) {
-  addRDMTaskWithPreAndPost(
-    rdmURL,
-    undefined,
-    rdmTask,
-    undefined,
-    includeBrowserEmbeddedUI
-  );
+function addRDMTask(rdmURL, rdmTask, options) {
+  addRDMTaskWithPreAndPost(rdmURL, undefined, rdmTask, undefined, options);
 }
 
 function spawnViewportTask(ui, args, task) {
@@ -337,25 +385,43 @@ function getElRect(selector, win) {
  * Drag an element identified by 'selector' by [x,y] amount. Returns
  * the rect of the dragged element as it was before drag.
  */
-function dragElementBy(selector, x, y, win) {
-  const { Simulate } = win.require(
-    "devtools/client/shared/vendor/react-dom-test-utils"
-  );
-  const rect = getElRect(selector, win);
+function dragElementBy(selector, x, y, ui) {
+  const browserWindow = ui.getBrowserWindow();
+  const rect = getElRect(selector, browserWindow);
   const startPoint = {
     clientX: Math.floor(rect.left + rect.width / 2),
     clientY: Math.floor(rect.top + rect.height / 2),
   };
   const endPoint = [startPoint.clientX + x, startPoint.clientY + y];
 
-  const elem = win.document.querySelector(selector);
+  const elem = browserWindow.document.querySelector(selector);
 
-  // mousedown is a React listener, need to use its testing tools to avoid races
-  Simulate.mouseDown(elem, startPoint);
+  if (!Services.prefs.getBoolPref("devtools.responsive.browserUI.enabled")) {
+    const { Simulate } = ui.toolWindow.require(
+      "devtools/client/shared/vendor/react-dom-test-utils"
+    );
+    // mousedown is a React listener, need to use its testing tools to avoid races
+    Simulate.mouseDown(elem, startPoint);
+  } else {
+    EventUtils.synthesizeMouseAtPoint(
+      startPoint.clientX,
+      startPoint.clientY,
+      { type: "mousedown" },
+      browserWindow
+    );
+  }
 
   // mousemove and mouseup are regular DOM listeners
-  EventUtils.synthesizeMouseAtPoint(...endPoint, { type: "mousemove" }, win);
-  EventUtils.synthesizeMouseAtPoint(...endPoint, { type: "mouseup" }, win);
+  EventUtils.synthesizeMouseAtPoint(
+    ...endPoint,
+    { type: "mousemove" },
+    browserWindow
+  );
+  EventUtils.synthesizeMouseAtPoint(
+    ...endPoint,
+    { type: "mouseup" },
+    browserWindow
+  );
 
   return rect;
 }
@@ -367,13 +433,18 @@ async function testViewportResize(
   expectedViewportSize,
   expectedHandleMove
 ) {
-  const win = ui.getBrowserWindow();
+  let resized;
 
-  const resized = waitForViewportResizeTo(ui, ...expectedViewportSize);
-  const startRect = dragElementBy(selector, ...moveBy, win);
+  if (!Services.prefs.getBoolPref("devtools.responsive.browserUI.enabled")) {
+    resized = waitForViewportResizeTo(ui, ...expectedViewportSize);
+  } else {
+    resized = ui.once("viewport-resize-dragend");
+  }
+
+  const startRect = dragElementBy(selector, ...moveBy, ui);
   await resized;
 
-  const endRect = getElRect(selector, win);
+  const endRect = getElRect(selector, ui.getBrowserWindow());
   is(
     endRect.left - startRect.left,
     expectedHandleMove[0],
@@ -623,7 +694,7 @@ function testViewportDeviceMenuLabel(ui, expectedDeviceName) {
 }
 
 async function toggleTouchSimulation(ui) {
-  const { document } = ui.getBrowserWindow();
+  const { document } = ui.toolWindow;
   const touchButton = document.getElementById("touch-simulation-button");
   const changed = once(ui, "touch-simulation-changed");
   const loaded = waitForViewportLoad(ui);
@@ -652,7 +723,7 @@ async function testUserAgentFromBrowser(browser, expected) {
 }
 
 function testViewportDimensions(ui, w, h) {
-  const viewport = ui.toolWindow.document.querySelector(".viewport-content");
+  const viewport = ui.viewportElement;
 
   is(
     ui.toolWindow.getComputedStyle(viewport).getPropertyValue("width"),
@@ -823,18 +894,12 @@ async function setTouchAndMetaViewportSupport(ui, value) {
 
 // This function checks that zoom, layout viewport width and height
 // are all as expected.
-async function testViewportZoomWidthAndHeight(
-  message,
-  ui,
-  zoom,
-  width,
-  height
-) {
+async function testViewportZoomWidthAndHeight(msg, ui, zoom, width, height) {
   if (typeof zoom !== "undefined") {
     const resolution = await spawnViewportTask(ui, {}, function() {
       return content.windowUtils.getResolution();
     });
-    is(resolution, zoom, message + " should have expected zoom.");
+    is(resolution, zoom, msg + " should have expected zoom.");
   }
 
   if (typeof width !== "undefined" || typeof height !== "undefined") {
@@ -845,18 +910,10 @@ async function testViewportZoomWidthAndHeight(
       };
     });
     if (typeof width !== "undefined") {
-      is(
-        innerSize.width,
-        width,
-        message + " should have expected inner width."
-      );
+      is(innerSize.width, width, msg + " should have expected inner width.");
     }
     if (typeof height !== "undefined") {
-      is(
-        innerSize.height,
-        height,
-        message + " should have expected inner height."
-      );
+      is(innerSize.height, height, msg + " should have expected inner height.");
     }
   }
 }

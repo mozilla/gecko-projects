@@ -11,6 +11,7 @@
 #include "jit/MIRGraph.h"
 #include "jit/WarpOracle.h"
 
+#include "jit/JitScript-inl.h"
 #include "vm/BytecodeIterator-inl.h"
 #include "vm/BytecodeLocation-inl.h"
 
@@ -426,6 +427,68 @@ bool WarpBuilder::build_InitLexical(BytecodeLocation loc) {
   return true;
 }
 
+bool WarpBuilder::build_GetArg(BytecodeLocation loc) {
+  uint32_t arg = loc.arg();
+  if (info().argsObjAliasesFormals()) {
+    MDefinition* argsObj = current->argumentsObject();
+    auto* getArg = MGetArgumentsObjectArg::New(alloc(), argsObj, arg);
+    current->add(getArg);
+    current->push(getArg);
+  } else {
+    current->pushArg(arg);
+  }
+  return true;
+}
+
+bool WarpBuilder::build_SetArg(BytecodeLocation loc) {
+  MOZ_ASSERT(script_->jitScript()->modifiesArguments());
+
+  uint32_t arg = loc.arg();
+  MDefinition* val = current->peek(-1);
+
+  if (!info().argumentsAliasesFormals()) {
+    MOZ_ASSERT(!info().argsObjAliasesFormals());
+
+    // |arguments| is never referenced within this function. No arguments object
+    // is created in this case, so we don't need to worry about synchronizing
+    // the argument values when writing to them.
+    MOZ_ASSERT_IF(!info().hasArguments(), !info().needsArgsObj());
+
+    // The arguments object doesn't map to the actual argument values, so we
+    // also don't need to worry about synchronizing them.
+    // Directly writing to a positional formal parameter is only possible when
+    // the |arguments| contents are never observed, otherwise we can't
+    // reconstruct the original parameter values when we access them through
+    // |arguments[i]|. AnalyzeArgumentsUsage ensures this is handled correctly.
+    MOZ_ASSERT_IF(info().hasArguments(), !info().hasMappedArgsObj());
+
+    current->setArg(arg);
+    return true;
+  }
+
+  MOZ_ASSERT(info().hasArguments() && info().hasMappedArgsObj(),
+             "arguments aliases formals when an arguments binding is present "
+             "and the arguments object is mapped");
+
+  // TODO: double check corresponding IonBuilder code when supporting the
+  // arguments analysis in WarpBuilder.
+
+  MOZ_ASSERT(info().needsArgsObj(),
+             "unexpected JSOp::SetArg with lazy arguments");
+
+  MOZ_ASSERT(
+      info().argsObjAliasesFormals(),
+      "argsObjAliasesFormals() is true iff a mapped arguments object is used");
+
+  // If an arguments object is in use, and it aliases formals, then all SetArgs
+  // must go through the arguments object.
+  MDefinition* argsObj = current->argumentsObject();
+  current->add(MPostWriteBarrier::New(alloc(), argsObj, val));
+  auto* ins = MSetArgumentsObjectArg::New(alloc(), argsObj, arg, val);
+  current->add(ins);
+  return resumeAfter(ins, loc);
+}
+
 bool WarpBuilder::build_ToNumeric(BytecodeLocation loc) {
   MDefinition* value = current->pop();
   MToNumeric* ins = MToNumeric::New(alloc(), value, /* types = */ nullptr);
@@ -445,6 +508,51 @@ bool WarpBuilder::buildUnaryOp(BytecodeLocation loc) {
 bool WarpBuilder::build_Inc(BytecodeLocation loc) { return buildUnaryOp(loc); }
 
 bool WarpBuilder::build_Dec(BytecodeLocation loc) { return buildUnaryOp(loc); }
+
+bool WarpBuilder::build_Neg(BytecodeLocation loc) { return buildUnaryOp(loc); }
+
+bool WarpBuilder::build_BitNot(BytecodeLocation loc) {
+  return buildUnaryOp(loc);
+}
+
+bool WarpBuilder::buildBinaryOp(BytecodeLocation loc) {
+  MDefinition* right = current->pop();
+  MDefinition* left = current->pop();
+  MInstruction* ins = MBinaryCache::New(alloc(), left, right, MIRType::Value);
+  current->add(ins);
+  current->push(ins);
+  return resumeAfter(ins, loc);
+}
+
+bool WarpBuilder::build_Add(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_Sub(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_Mul(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_Div(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_Mod(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_BitAnd(BytecodeLocation loc) {
+  return buildBinaryOp(loc);
+}
+
+bool WarpBuilder::build_BitOr(BytecodeLocation loc) {
+  return buildBinaryOp(loc);
+}
+
+bool WarpBuilder::build_BitXor(BytecodeLocation loc) {
+  return buildBinaryOp(loc);
+}
+
+bool WarpBuilder::build_Lsh(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_Rsh(BytecodeLocation loc) { return buildBinaryOp(loc); }
+
+bool WarpBuilder::build_Ursh(BytecodeLocation loc) {
+  return buildBinaryOp(loc);
+}
 
 bool WarpBuilder::buildCompareOp(BytecodeLocation loc) {
   MDefinition* right = current->pop();
@@ -675,7 +783,12 @@ bool WarpBuilder::buildTestOp(BytecodeLocation loc) {
     std::swap(target1, target2);
   }
 
-  MDefinition* value = current->pop();
+  // JSOp::And and JSOp::Or inspect the top stack value but don't pop it.
+  // Also note that JSOp::Case must pop a second value on the true-branch (the
+  // input to the switch-statement). This conditional pop happens in
+  // build_JumpTarget.
+  bool mustKeepCondition = (op == JSOp::And || op == JSOp::Or);
+  MDefinition* value = mustKeepCondition ? current->peek(-1) : current->pop();
 
   // If this op always branches to the same location we treat this as a
   // JSOp::Goto.
@@ -732,6 +845,43 @@ bool WarpBuilder::buildTestBackedge(BytecodeLocation loc) {
 bool WarpBuilder::build_IfEq(BytecodeLocation loc) { return buildTestOp(loc); }
 
 bool WarpBuilder::build_IfNe(BytecodeLocation loc) { return buildTestOp(loc); }
+
+bool WarpBuilder::build_And(BytecodeLocation loc) { return buildTestOp(loc); }
+
+bool WarpBuilder::build_Or(BytecodeLocation loc) { return buildTestOp(loc); }
+
+bool WarpBuilder::build_Case(BytecodeLocation loc) { return buildTestOp(loc); }
+
+bool WarpBuilder::build_Default(BytecodeLocation loc) {
+  current->pop();
+  return buildForwardGoto(loc.getJumpTarget());
+}
+
+bool WarpBuilder::build_Coalesce(BytecodeLocation loc) {
+  BytecodeLocation target1 = loc.next();
+  BytecodeLocation target2 = loc.getJumpTarget();
+  MOZ_ASSERT(target2 > target1);
+
+  MDefinition* value = current->peek(-1);
+
+  MInstruction* isNullOrUndefined = MIsNullOrUndefined::New(alloc(), value);
+  current->add(isNullOrUndefined);
+
+  current->end(MTest::New(alloc(), isNullOrUndefined, /* ifTrue = */ nullptr,
+                          /* ifFalse = */ nullptr));
+
+  if (!addPendingEdge(PendingEdge::NewTestTrue(current, JSOp::Coalesce),
+                      target1)) {
+    return false;
+  }
+  if (!addPendingEdge(PendingEdge::NewTestFalse(current, JSOp::Coalesce),
+                      target2)) {
+    return false;
+  }
+
+  setTerminatedBlock();
+  return true;
+}
 
 bool WarpBuilder::buildBackedge() {
   MOZ_ASSERT(loopDepth_ > 0);

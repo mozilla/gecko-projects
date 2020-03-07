@@ -18,6 +18,7 @@
 #include "TableAccessible.h"
 #include "TableCellAccessible.h"
 #include "mozilla/a11y/PDocAccessible.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "OuterDocAccessible.h"
 
 #include "nsRect.h"
@@ -301,7 +302,7 @@ static inline NSMutableArray* ConvertToNSArray(nsTArray<ProxyAccessible*>& aArra
 
   if ([attribute isEqualToString:NSAccessibilityDOMIdentifierAttribute]) {
     nsAutoString id;
-    if (accWrap)
+    if (accWrap && accWrap->GetContent())
       nsCoreUtils::GetID(accWrap->GetContent(), id);
     else
       proxy->DOMNodeID(id);
@@ -544,7 +545,18 @@ static inline NSMutableArray* ConvertToNSArray(nsTArray<ProxyAccessible*>& aArra
   mozAccessible* focusedChild = nil;
   if (accWrap) {
     Accessible* focusedGeckoChild = accWrap->FocusedChild();
-    if (focusedGeckoChild) focusedChild = GetNativeFromGeckoAccessible(focusedGeckoChild);
+    if (focusedGeckoChild) {
+      focusedChild = GetNativeFromGeckoAccessible(focusedGeckoChild);
+    } else {
+      dom::BrowserParent* browser = dom::BrowserParent::GetFocused();
+      if (browser) {
+        a11y::DocAccessibleParent* proxyDoc = browser->GetTopLevelDocAccessible();
+        if (proxyDoc) {
+          mozAccessible* nativeRemoteChild = GetNativeFromProxy(proxyDoc);
+          return [nativeRemoteChild accessibilityFocusedUIElement];
+        }
+      }
+    }
   } else if (proxy) {
     ProxyAccessible* focusedGeckoChild = proxy->FocusedChild();
     if (focusedGeckoChild) focusedChild = GetNativeFromProxy(focusedGeckoChild);
@@ -1142,8 +1154,15 @@ struct RoleDescrComparator {
   if (curNative) [mChildren addObject:curNative];
 }
 
+- (BOOL)accessibilityNotifiesWhenDestroyed {
+  return YES;
+}
+
 - (void)expire {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  NSAccessibilityPostNotification(
+      self, NSAccessibilityUIElementDestroyedNotification);
 
   [self invalidateChildren];
 

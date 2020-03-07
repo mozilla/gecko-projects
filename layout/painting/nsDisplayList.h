@@ -4668,6 +4668,7 @@ class nsDisplayBackgroundImage : public nsDisplayImageContainer {
   nsRect GetBoundsInternal(nsDisplayListBuilder* aBuilder,
                            nsIFrame* aFrameForBounds = nullptr);
 
+  void AssociateImageIfNeeded();
   void DisassociateImage();
 
   void PaintInternal(nsDisplayListBuilder* aBuilder, gfxContext* aCtx,
@@ -4699,6 +4700,7 @@ class nsDisplayBackgroundImage : public nsDisplayImageContainer {
   bool mShouldFixToViewport;
   uint32_t mImageFlags;
   bool mAssociatedImage;
+  bool mTriedToAssociateImage;
 };
 
 enum class TableType : uint8_t {
@@ -6113,6 +6115,7 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
   nsDisplayOwnLayerFlags GetFlags() { return mFlags; }
   bool IsScrollThumbLayer() const;
   bool IsScrollbarContainer() const;
+  bool IsRootScrollbarContainerWithDynamicToolbar() const;
   bool IsZoomingLayer() const;
   bool IsFixedPositionLayer() const;
 

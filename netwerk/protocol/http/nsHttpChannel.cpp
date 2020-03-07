@@ -120,7 +120,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/net/AsyncUrlChannelClassifier.h"
-#include "mozilla/net/CookieSettings.h"
+#include "mozilla/net/CookieJarSettings.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "HttpTrafficAnalyzer.h"
@@ -575,9 +575,7 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   // header for *all* navigational requests instead of all requests as
   // defined in the spec, see:
   // https://www.w3.org/TR/upgrade-insecure-requests/#preference
-  nsContentPolicyType type = mLoadInfo
-                                 ? mLoadInfo->GetExternalContentPolicyType()
-                                 : nsIContentPolicy::TYPE_OTHER;
+  nsContentPolicyType type = mLoadInfo->GetExternalContentPolicyType();
 
   if (type == nsIContentPolicy::TYPE_DOCUMENT ||
       type == nsIContentPolicy::TYPE_SUBDOCUMENT) {
@@ -587,7 +585,7 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   }
 
   nsCOMPtr<nsIPrincipal> resultPrincipal;
-  if (!mURI->SchemeIs("https") && mLoadInfo) {
+  if (!mURI->SchemeIs("https")) {
     nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
         this, getter_AddRefs(resultPrincipal));
   }
@@ -1055,7 +1053,7 @@ nsresult nsHttpChannel::ContinueHandleAsyncRedirect(nsresult rv) {
     LOG(("ContinueHandleAsyncRedirect got failure result [rv=%" PRIx32 "]\n",
          static_cast<uint32_t>(rv)));
 
-    bool redirectsEnabled = !mLoadInfo || !mLoadInfo->GetDontFollowRedirects();
+    bool redirectsEnabled = !mLoadInfo->GetDontFollowRedirects();
 
     if (redirectsEnabled) {
       // TODO: stop failing original channel if redirect vetoed?
@@ -1402,15 +1400,12 @@ nsresult nsHttpChannel::SetupTransaction() {
   EnsureRequestContext();
 
   HttpTrafficCategory category = CreateTrafficCategory();
-  std::function<void()> observer;
+  std::function<void(TransactionObserverResult &&)> observer;
   if (mTransactionObserver) {
-    RefPtr<HttpTransactionShell> transaction = mTransaction;
-    observer = [transactionObserver{std::move(mTransactionObserver)},
-                transaction]() {
-      TransactionObserverResult result;
-      transaction->GetTransactionObserverResult(result);
-      transactionObserver->Complete(result.versionOk(), result.authOk(),
-                                    result.closeReason());
+    observer = [transactionObserver{std::move(mTransactionObserver)}](
+                   TransactionObserverResult&& aResult) {
+      transactionObserver->Complete(aResult.versionOk(), aResult.authOk(),
+                                    aResult.closeReason());
     };
   }
   rv = mTransaction->Init(
@@ -1817,8 +1812,8 @@ void nsHttpChannel::SetCachedContentType() {
           NS_ConvertUTF8toUTF16(contentTypeStr))) {
     contentType = nsICacheEntry::CONTENT_TYPE_JAVASCRIPT;
   } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("text/css")) ||
-             (mLoadInfo && mLoadInfo->GetExternalContentPolicyType() ==
-                               nsIContentPolicy::TYPE_STYLESHEET)) {
+             (mLoadInfo->GetExternalContentPolicyType() ==
+              nsIContentPolicy::TYPE_STYLESHEET)) {
     contentType = nsICacheEntry::CONTENT_TYPE_STYLESHEET;
   } else if (StringBeginsWith(contentTypeStr,
                               NS_LITERAL_CSTRING("application/wasm"))) {
@@ -2465,13 +2460,18 @@ nsresult nsHttpChannel::ProcessResponse() {
 
   if (Telemetry::CanRecordPrereleaseData()) {
     // how often do we see something like Alt-Svc: "443:quic,p=1"
+    // and Alt-Svc: "h3-****"
     nsAutoCString alt_service;
     Unused << mResponseHead->GetHeader(nsHttp::Alternate_Service, alt_service);
-    bool saw_quic =
-        (!alt_service.IsEmpty() && PL_strstr(alt_service.get(), "quic"))
-            ? true
-            : false;
-    Telemetry::Accumulate(Telemetry::HTTP_SAW_QUIC_ALT_PROTOCOL, saw_quic);
+    uint32_t saw_quic = 0;
+    if (!alt_service.IsEmpty()) {
+      if (PL_strstr(alt_service.get(), "h3-")) {
+        saw_quic = 1;
+      } else if (PL_strstr(alt_service.get(), "quic")) {
+        saw_quic = 2;
+      }
+    }
+    Telemetry::Accumulate(Telemetry::HTTP_SAW_QUIC_ALT_PROTOCOL_2, saw_quic);
 
     // Gather data on how many URLS get redirected
     switch (httpStatus) {
@@ -2659,7 +2659,7 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
 }
 
 void nsHttpChannel::AssertNotDocumentChannel() {
-  if (!mLoadInfo || !IsDocument()) {
+  if (!IsDocument()) {
     return;
   }
 
@@ -5965,7 +5965,7 @@ nsresult nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType) {
 
   // If we were told to not follow redirects automatically, then again
   // carry on as though this were a normal response.
-  if (mLoadInfo && mLoadInfo->GetDontFollowRedirects()) {
+  if (mLoadInfo->GetDontFollowRedirects()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -6458,7 +6458,7 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
     return rv;
   }
   MOZ_ASSERT(
-      !mLoadInfo || mLoadInfo->GetSecurityMode() == 0 ||
+      mLoadInfo->GetSecurityMode() == 0 ||
           mLoadInfo->GetInitialSecurityCheckDone() ||
           (mLoadInfo->GetSecurityMode() ==
                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
@@ -8301,7 +8301,7 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     upgradeKey = NS_LITERAL_CSTRING("disabledNoReason");
     // Checks "security.mixed_content.upgrade_display_content" is true
     if (nsMixedContentBlocker::ShouldUpgradeMixedDisplayContent()) {
-      if (mLoadInfo && mLoadInfo->GetBrowserUpgradeInsecureRequests()) {
+      if (mLoadInfo->GetBrowserUpgradeInsecureRequests()) {
         // HTTP content the browser has upgraded to HTTPS
         upgradeKey = NS_LITERAL_CSTRING("enabledUpgrade");
       } else {
@@ -8312,7 +8312,7 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     // shift http to https disposition enums
     chanDisposition =
         static_cast<ChannelDisposition>(chanDisposition + kHttpsCanceled);
-  } else if (mLoadInfo && mLoadInfo->GetBrowserWouldUpgradeInsecureRequests()) {
+  } else if (mLoadInfo->GetBrowserWouldUpgradeInsecureRequests()) {
     // HTTP content the browser would upgrade to HTTPS if upgrading was
     // enabled
     upgradeKey = NS_LITERAL_CSTRING("disabledUpgrade");
@@ -8391,6 +8391,8 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
 
   // Register entry to the PerformanceStorage resource timing
   MaybeReportTimingData();
+
+  MaybeFlushConsoleReports();
 
 #ifdef MOZ_GECKO_PROFILER
   if (profiler_can_accept_markers() && !mRedirectURI) {
@@ -10484,16 +10486,15 @@ nsresult nsHttpChannel::RedirectToInterceptedChannel() {
 }
 
 void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
-  nsCOMPtr<nsICookieSettings> cs;
+  nsCOMPtr<nsICookieJarSettings> cjs;
   if (mLoadInfo) {
-    Unused << mLoadInfo->GetCookieSettings(getter_AddRefs(cs));
+    Unused << mLoadInfo->GetCookieJarSettings(getter_AddRefs(cjs));
   }
-  if (!cs) {
-    cs = net::CookieSettings::Create();
+  if (!cjs) {
+    cjs = net::CookieJarSettings::Create();
   }
-  if (cs->GetRejectThirdPartyTrackers()) {
-    bool isPrivate =
-        mLoadInfo && mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  if (cjs->GetRejectThirdPartyTrackers()) {
+    bool isPrivate = mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
     // If our referrer has been set before, and our referrer policy is unset
     // (default policy) if we thought the channel wasn't a third-party
     // tracking channel, we may need to set our referrer with referrer policy

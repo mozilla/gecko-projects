@@ -230,7 +230,7 @@ BrowserParent::BrowserParent(ContentParent* aManager, const TabId& aTabId,
   mIsReadyToHandleInputEvents = !ContentParent::IsInputEventQueueSupported();
 }
 
-BrowserParent::~BrowserParent() {}
+BrowserParent::~BrowserParent() = default;
 
 /* static */
 void BrowserParent::InitializeStatics() { MOZ_ASSERT(XRE_IsParentProcess()); }
@@ -935,9 +935,15 @@ void BrowserParent::InitRendering() {
   Unused << SendInitRendering(textureFactoryIdentifier, layersId,
                               mRemoteLayerTreeOwner.GetCompositorOptions(),
                               mRemoteLayerTreeOwner.IsLayersConnected());
+
+  RefPtr<nsIWidget> widget = GetTopLevelWidget();
+  if (widget) {
+    ScreenIntMargin safeAreaInsets = widget->GetSafeAreaInsets();
+    Unused << SendSafeAreaInsetsChanged(safeAreaInsets);
+  }
+
 #if defined(MOZ_WIDGET_ANDROID)
   if (XRE_IsParentProcess()) {
-    RefPtr<nsIWidget> widget = GetTopLevelWidget();
     MOZ_ASSERT(widget);
 
     Unused << SendDynamicToolbarMaxHeightChanged(
@@ -1689,7 +1695,7 @@ class SynthesizedEventObserver : public nsIObserver {
   }
 
  private:
-  virtual ~SynthesizedEventObserver() {}
+  virtual ~SynthesizedEventObserver() = default;
 
   RefPtr<BrowserParent> mBrowserParent;
   uint64_t mObserverId;

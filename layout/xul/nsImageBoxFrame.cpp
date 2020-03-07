@@ -606,9 +606,11 @@ bool nsImageBoxFrame::CanOptimizeToImageLayer() {
 
 imgRequestProxy* nsImageBoxFrame::GetRequestFromStyle() {
   const nsStyleDisplay* disp = StyleDisplay();
-  if (disp->HasAppearance() && nsBox::gTheme &&
-      nsBox::gTheme->ThemeSupportsWidget(nullptr, this, disp->mAppearance)) {
-    return nullptr;
+  if (disp->HasAppearance()) {
+    nsPresContext* pc = PresContext();
+    if (pc->Theme()->ThemeSupportsWidget(pc, this, disp->mAppearance)) {
+      return nullptr;
+    }
   }
 
   return StyleList()->GetListStyleImage();
@@ -736,7 +738,7 @@ nsSize nsImageBoxFrame::GetXULMinSize(nsBoxLayoutState& aState) {
   DISPLAY_MIN_SIZE(this, size);
   AddBorderAndPadding(size);
   bool widthSet, heightSet;
-  nsIFrame::AddXULMinSize(aState, this, size, widthSet, heightSet);
+  nsIFrame::AddXULMinSize(this, size, widthSet, heightSet);
   return size;
 }
 

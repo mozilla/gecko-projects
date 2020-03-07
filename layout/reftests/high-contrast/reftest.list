@@ -23,7 +23,9 @@ fuzzy-if(cocoaWidget,255-255,16-16) == backplate-bg-image-012.html backplate-bg-
 test-pref(browser.display.suppress_canvas_background_image_on_forced_colors,true) == bg-image-root-001.html bg-image-root-001-ref.html
 test-pref(browser.display.suppress_canvas_background_image_on_forced_colors,false) != bg-image-root-001.html bg-image-root-001-ref.html
 
-fails-if(Android) needs-focus == selection-001.html selection-001-ref.html # bug 1602509
+== bg-image-div-001.html bg-image-div-001-ref.html
+
+needs-focus == selection-001.html selection-001-ref.html
 pref(browser.display.document_color_use,0) needs-focus != selection-001.html selection-001-ref.html
 
 == color-transparent-001.html about:blank
@@ -33,3 +35,5 @@ pref(browser.display.document_color_use,0) needs-focus != selection-001.html sel
 
 pref(browser.display.document_color_use,2) == non-themed-button-001.html non-themed-button-001-ref.html
 pref(browser.display.document_color_use,2) == non-themed-button-002.html non-themed-button-002-ref.html
+
+!= cascade-001.html about:blank

@@ -155,7 +155,6 @@ IonBuilder::IonBuilder(JSContext* analysisContext, MIRGenerator& mirGen,
       loopStack_(*alloc_),
       trackedOptimizationSites_(*alloc_),
       abortedPreliminaryGroups_(*alloc_),
-      lexicalCheck_(nullptr),
       callerResumePoint_(nullptr),
       callerBuilder_(nullptr),
       iterators_(*alloc_),
@@ -431,7 +430,7 @@ IonBuilder::InliningDecision IonBuilder::canInlineTarget(JSFunction* target,
     }
   }
 
-  if (!target->hasScript()) {
+  if (!target->hasBytecode()) {
     return DontInline(nullptr, "Lazy script");
   }
 
@@ -443,16 +442,25 @@ IonBuilder::InliningDecision IonBuilder::canInlineTarget(JSFunction* target,
 
     // Don't inline if creating |this| for this target is complicated, for
     // example when the newTarget.prototype lookup may be effectful.
-    if (callInfo.getNewTarget() != callInfo.fun()) {
-      return DontInline(inlineScript, "Constructing with different newTarget");
+    if (!target->constructorNeedsUninitializedThis() &&
+        callInfo.getNewTarget() != callInfo.fun()) {
+      JSFunction* newTargetFun =
+          getSingleCallTarget(callInfo.getNewTarget()->resultTypeSet());
+      if (!newTargetFun) {
+        return DontInline(inlineScript, "Constructing with unknown newTarget");
+      }
+      if (!newTargetFun->hasNonConfigurablePrototypeDataProperty()) {
+        return DontInline(inlineScript,
+                          "Constructing with effectful newTarget.prototype");
+      }
+    } else {
+      // At this point, the target is either a function that requires an
+      // uninitialized-this (bound function or derived class constructor) or a
+      // scripted constructor with a non-configurable .prototype data property
+      // (self-hosted built-in constructor, non-self-hosted scripted function).
+      MOZ_ASSERT(target->constructorNeedsUninitializedThis() ||
+                 target->hasNonConfigurablePrototypeDataProperty());
     }
-
-    // At this point, the target is either a function that requires an
-    // uninitialized-this (bound function or derived class constructor) or a
-    // scripted constructor with a non-configurable .prototype data property
-    // (self-hosted built-in constructor, non-self-hosted scripted function).
-    MOZ_ASSERT(target->constructorNeedsUninitializedThis() ||
-               target->hasNonConfigurablePrototypeDataProperty());
   }
 
   if (!callInfo.constructing() && target->isClassConstructor()) {
@@ -1992,8 +2000,6 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op, bool* restarted) {
       return Ok();
 
     case JSOp::ThrowSetConst:
-    case JSOp::ThrowSetAliasedConst:
-    case JSOp::ThrowSetCallee:
       return jsop_throwsetconst();
 
     case JSOp::CheckLexical:
@@ -2011,9 +2017,6 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op, bool* restarted) {
       current->push(value);
       return jsop_setprop(info().getAtom(pc)->asPropertyName());
     }
-
-    case JSOp::CheckAliasedLexical:
-      return jsop_checkaliasedlexical(EnvironmentCoordinate(pc));
 
     case JSOp::InitAliasedLexical:
       return jsop_setaliasedvar(EnvironmentCoordinate(pc));
@@ -2102,6 +2105,10 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op, bool* restarted) {
 
     case JSOp::SpreadCall:
       return jsop_spreadcall();
+
+    case JSOp::SpreadNew:
+    case JSOp::SpreadSuperCall:
+      return jsop_spreadnew();
 
     case JSOp::Call:
     case JSOp::CallIgnoresRv:
@@ -2462,8 +2469,6 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op, bool* restarted) {
     case JSOp::LeaveWith:
 
     // Spread
-    case JSOp::SpreadNew:
-    case JSOp::SpreadSuperCall:
     case JSOp::SpreadEval:
     case JSOp::StrictSpreadEval:
 
@@ -2475,7 +2480,6 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op, bool* restarted) {
 
     // Environments (bug 1366470)
     case JSOp::PushVarEnv:
-    case JSOp::PopVarEnv:
 
     // Compound assignment
     case JSOp::GetBoundName:
@@ -4121,7 +4125,7 @@ class AutoAccumulateReturns {
 
 IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
                                                           JSFunction* target) {
-  MOZ_ASSERT(target->hasScript());
+  MOZ_ASSERT(target->hasBytecode());
   MOZ_ASSERT(IsIonInlinableOp(JSOp(*pc)));
 
   MBasicBlock::BackupPoint backup(current);
@@ -5373,7 +5377,7 @@ JSObject* IonBuilder::getSingletonPrototype(JSFunction* target) {
 }
 
 MDefinition* IonBuilder::createThisScriptedSingleton(JSFunction* target) {
-  if (!target->hasScript()) {
+  if (!target->hasBytecode()) {
     return nullptr;
   }
 
@@ -5433,7 +5437,7 @@ MDefinition* IonBuilder::createThisScriptedBaseline(MDefinition* callee) {
   // Try to inline |this| creation based on Baseline feedback.
 
   JSFunction* target = inspector->getSingleCallee(pc);
-  if (!target || !target->hasScript()) {
+  if (!target || !target->hasBytecode()) {
     return nullptr;
   }
 
@@ -5533,13 +5537,8 @@ MDefinition* IonBuilder::createThis(JSFunction* target, MDefinition* callee,
   // JIT entry.
   MOZ_ASSERT_IF(target, !target->isNativeWithJitEntry());
 
-  if (inlining) {
-    // We must not have an effectful .prototype lookup.
-    MOZ_ASSERT(callee == newTarget);
-    MOZ_ASSERT(target);
-    MOZ_ASSERT(target->constructorNeedsUninitializedThis() ||
-               target->hasNonConfigurablePrototypeDataProperty());
-  }
+  // Can't inline without a known target function.
+  MOZ_ASSERT_IF(inlining, target);
 
   // Create |this| for unknown target.
   if (!target) {
@@ -5562,6 +5561,9 @@ MDefinition* IonBuilder::createThis(JSFunction* target, MDefinition* callee,
   }
 
   if (callee == newTarget) {
+    // We must not have an effectful .prototype lookup when inlining.
+    MOZ_ASSERT_IF(inlining, target->hasNonConfigurablePrototypeDataProperty());
+
     // Try baking in the prototype.
     if (MDefinition* createThis = createThisScriptedSingleton(target)) {
       return createThis;
@@ -5581,6 +5583,8 @@ MDefinition* IonBuilder::createThis(JSFunction* target, MDefinition* callee,
     return createThisScripted(callee, newTarget);
   }
 
+  // The .prototype lookup may be effectful, so we can't inline the call.
+  MOZ_ASSERT(!inlining);
   return createThisSlow(callee, newTarget, inlining);
 }
 
@@ -5715,25 +5719,28 @@ AbortReasonOr<Ok> IonBuilder::jsop_funapply(uint32_t argc) {
   return jsop_funapplyarguments(argc);
 }
 
-AbortReasonOr<Ok> IonBuilder::jsop_spreadcall() {
-  // The arguments array is constructed by a JSOp::NewArray and not
-  // leaked to user. The complications of spread call iterator behaviour are
-  // handled when the user objects are expanded and copied into this hidden
-  // array.
-
+static void AssertSpreadArgIsArray(MDefinition* argument,
+                                   CompilerConstraintList* constraints) {
 #ifdef DEBUG
   // If we know class, ensure it is what we expected
-  MDefinition* argument = current->peek(-1);
   if (TemporaryTypeSet* objTypes = argument->resultTypeSet()) {
-    if (const JSClass* clasp = objTypes->getKnownClass(constraints())) {
+    if (const JSClass* clasp = objTypes->getKnownClass(constraints)) {
       MOZ_ASSERT(clasp == &ArrayObject::class_);
     }
   }
 #endif
+}
 
+AbortReasonOr<Ok> IonBuilder::jsop_spreadcall() {
   MDefinition* argArr = current->pop();
   MDefinition* argThis = current->pop();
   MDefinition* argFunc = current->pop();
+
+  // The arguments array is constructed by a JSOp::NewArray and not
+  // leaked to user. The complications of spread call iterator behaviour are
+  // handled when the user objects are expanded and copied into this hidden
+  // array.
+  AssertSpreadArgIsArray(argArr, constraints());
 
   // Extract call target.
   TemporaryTypeSet* funTypes = argFunc->resultTypeSet();
@@ -5759,6 +5766,50 @@ AbortReasonOr<Ok> IonBuilder::jsop_spreadcall() {
   }
 
   // TypeBarrier the call result
+  TemporaryTypeSet* types = bytecodeTypes(pc);
+  return pushTypeBarrier(apply, types, BarrierKind::TypeSet);
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_spreadnew() {
+  MDefinition* newTarget = current->pop();
+  MDefinition* argArr = current->pop();
+  MDefinition* thisValue = current->pop();
+  MDefinition* callee = current->pop();
+
+  // The arguments array is constructed by JSOp::NewArray and not leaked to the
+  // user. The complications of spread call iterator behaviour are handled when
+  // the user objects are expanded and copied into this hidden array.
+  AssertSpreadArgIsArray(argArr, constraints());
+
+  // Extract call target.
+  TemporaryTypeSet* funTypes = callee->resultTypeSet();
+  JSFunction* target = getSingleCallTarget(funTypes);
+  if (target && !target->isConstructor()) {
+    // Don't optimize when the target doesn't support construct calls.
+    target = nullptr;
+  }
+  WrappedFunction* wrappedTarget =
+      target ? new (alloc()) WrappedFunction(target) : nullptr;
+
+  // Inline the constructor on the caller-side.
+  MDefinition* create = createThis(target, callee, newTarget, false);
+  thisValue->setImplicitlyUsedUnchecked();
+
+  // Dense elements of the argument array.
+  MElements* elements = MElements::New(alloc(), argArr);
+  current->add(elements);
+
+  auto* apply = MConstructArray::New(alloc(), wrappedTarget, callee, elements,
+                                     create, newTarget);
+  current->add(apply);
+  current->push(apply);
+  MOZ_TRY(resumeAfter(apply));
+
+  if (target && target->realm() == script()->realm()) {
+    apply->setNotCrossRealm();
+  }
+
+  // TypeBarrier the call result.
   TemporaryTypeSet* types = bytecodeTypes(pc);
   return pushTypeBarrier(apply, types, BarrierKind::TypeSet);
 }
@@ -5816,7 +5867,6 @@ bool IonBuilder::ensureArrayIteratorPrototypeNextNotModified() {
 
 AbortReasonOr<Ok> IonBuilder::jsop_optimize_spreadcall() {
   MDefinition* arr = current->peek(-1);
-  arr->setImplicitlyUsedUnchecked();
 
   // Assuming optimization isn't available doesn't affect correctness.
   // TODO: Investigate dynamic checks.
@@ -5873,6 +5923,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_optimize_spreadcall() {
     current->add(ins);
     current->push(ins);
   } else {
+    arr->setImplicitlyUsedUnchecked();
     pushConstant(BooleanValue(false));
   }
   return Ok();
@@ -6186,7 +6237,7 @@ bool IonBuilder::testNeedsArgumentCheck(JSFunction* target,
   // callee. Since typeset accumulates and can't decrease that means we don't
   // need to check the arguments anymore.
 
-  if (!target->hasScript()) {
+  if (!target->hasBytecode()) {
     return true;
   }
 
@@ -12023,7 +12074,6 @@ AbortReasonOr<Ok> IonBuilder::jsop_deffun() {
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_throwsetconst() {
-  current->peek(-1)->setImplicitlyUsedUnchecked();
   MInstruction* lexicalError =
       MThrowRuntimeLexicalError::New(alloc(), JSMSG_BAD_CONST_ASSIGN);
   current->add(lexicalError);
@@ -12031,30 +12081,11 @@ AbortReasonOr<Ok> IonBuilder::jsop_throwsetconst() {
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_checklexical() {
-  uint32_t slot = info().localSlot(GET_LOCALNO(pc));
+  MDefinition* val = current->peek(-1);
   MDefinition* lexical;
-  MOZ_TRY_VAR(lexical, addLexicalCheck(current->getSlot(slot)));
-  current->setSlot(slot, lexical);
-  return Ok();
-}
-
-AbortReasonOr<Ok> IonBuilder::jsop_checkaliasedlexical(
-    EnvironmentCoordinate ec) {
-  MDefinition* let;
-  MOZ_TRY_VAR(let, addLexicalCheck(getAliasedVar(ec)));
-
-  jsbytecode* nextPc = pc + JSOpLength_CheckAliasedLexical;
-  MOZ_ASSERT(JSOp(*nextPc) == JSOp::GetAliasedVar ||
-             JSOp(*nextPc) == JSOp::SetAliasedVar ||
-             JSOp(*nextPc) == JSOp::ThrowSetAliasedConst);
-  MOZ_ASSERT(ec == EnvironmentCoordinate(nextPc));
-
-  // If we are checking for a load, push the checked let so that the load
-  // can use it.
-  if (JSOp(*nextPc) == JSOp::GetAliasedVar) {
-    setLexicalCheck(let);
-  }
-
+  MOZ_TRY_VAR(lexical, addLexicalCheck(val));
+  current->pop();
+  current->push(lexical);
   return Ok();
 }
 
@@ -12260,11 +12291,7 @@ MDefinition* IonBuilder::getAliasedVar(EnvironmentCoordinate ec) {
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_getaliasedvar(EnvironmentCoordinate ec) {
-  // See jsop_checkaliasedlexical.
-  MDefinition* load = takeLexicalCheck();
-  if (!load) {
-    load = getAliasedVar(ec);
-  }
+  MDefinition* load = getAliasedVar(ec);
   current->push(load);
 
   TemporaryTypeSet* types = bytecodeTypes(pc);
@@ -12799,6 +12826,9 @@ AbortReasonOr<Ok> IonBuilder::jsop_checkreturn() {
 
   if (returnValue->type() == MIRType::Undefined &&
       !thisValue->mightBeMagicType()) {
+    // The return value mustn't be optimized out, otherwise baseline may see the
+    // optimized-out magic value when it re-executes this op after a bailout.
+    returnValue->setImplicitlyUsedUnchecked();
     thisValue->setImplicitlyUsedUnchecked();
     current->setSlot(info().returnValueSlot(), thisValue);
     return Ok();
@@ -12815,7 +12845,21 @@ AbortReasonOr<Ok> IonBuilder::jsop_superfun() {
 
   do {
     TemporaryTypeSet* calleeTypes = callee->resultTypeSet();
-    JSObject* calleeObj = calleeTypes ? calleeTypes->maybeSingleton() : nullptr;
+    if (!calleeTypes) {
+      break;
+    }
+
+    TemporaryTypeSet::ObjectKey* calleeKey = calleeTypes->maybeSingleObject();
+    if (!calleeKey) {
+      break;
+    }
+
+    JSObject* calleeObj;
+    if (calleeKey->isSingleton()) {
+      calleeObj = calleeKey->singleton();
+    } else {
+      calleeObj = calleeKey->group()->maybeInterpretedFunction();
+    }
     if (!calleeObj) {
       break;
     }
@@ -12832,7 +12876,6 @@ AbortReasonOr<Ok> IonBuilder::jsop_superfun() {
     }
 
     // Add a constraint to ensure we're notified when the prototype changes.
-    TypeSet::ObjectKey* calleeKey = TypeSet::ObjectKey::get(calleeObj);
     if (!calleeKey->hasStableClassAndProto(constraints())) {
       break;
     }
@@ -13056,18 +13099,14 @@ void IonBuilder::addAbortedPreliminaryGroup(ObjectGroup* group) {
 }
 
 AbortReasonOr<MDefinition*> IonBuilder::addLexicalCheck(MDefinition* input) {
-  MOZ_ASSERT(JSOp(*pc) == JSOp::CheckLexical ||
-             JSOp(*pc) == JSOp::CheckAliasedLexical ||
-             JSOp(*pc) == JSOp::GetImport);
-
-  MInstruction* lexicalCheck;
+  MOZ_ASSERT(JSOp(*pc) == JSOp::CheckLexical || JSOp(*pc) == JSOp::GetImport);
 
   // If we're guaranteed to not be JS_UNINITIALIZED_LEXICAL, no need to check.
   if (input->type() == MIRType::MagicUninitializedLexical) {
     // Mark the input as implicitly used so the JS_UNINITIALIZED_LEXICAL
     // magic value will be preserved on bailout.
     input->setImplicitlyUsedUnchecked();
-    lexicalCheck =
+    MInstruction* lexicalCheck =
         MThrowRuntimeLexicalError::New(alloc(), JSMSG_UNINITIALIZED_LEXICAL);
     current->add(lexicalCheck);
     MOZ_TRY(resumeAfter(lexicalCheck));
@@ -13075,7 +13114,7 @@ AbortReasonOr<MDefinition*> IonBuilder::addLexicalCheck(MDefinition* input) {
   }
 
   if (input->type() == MIRType::Value) {
-    lexicalCheck = MLexicalCheck::New(alloc(), input);
+    MInstruction* lexicalCheck = MLexicalCheck::New(alloc(), input);
     current->add(lexicalCheck);
     if (failedLexicalCheck_) {
       lexicalCheck->setNotMovableUnchecked();
@@ -13083,6 +13122,7 @@ AbortReasonOr<MDefinition*> IonBuilder::addLexicalCheck(MDefinition* input) {
     return lexicalCheck;
   }
 
+  input->setImplicitlyUsedUnchecked();
   return input;
 }
 

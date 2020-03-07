@@ -49,9 +49,24 @@ namespace jit {
   _(GetLocal)               \
   _(SetLocal)               \
   _(InitLexical)            \
+  _(GetArg)                 \
+  _(SetArg)                 \
   _(ToNumeric)              \
   _(Inc)                    \
   _(Dec)                    \
+  _(Neg)                    \
+  _(BitNot)                 \
+  _(Add)                    \
+  _(Sub)                    \
+  _(Mul)                    \
+  _(Div)                    \
+  _(Mod)                    \
+  _(BitAnd)                 \
+  _(BitOr)                  \
+  _(BitXor)                 \
+  _(Lsh)                    \
+  _(Rsh)                    \
+  _(Ursh)                   \
   _(Eq)                     \
   _(Ne)                     \
   _(Lt)                     \
@@ -64,6 +79,11 @@ namespace jit {
   _(LoopHead)               \
   _(IfEq)                   \
   _(IfNe)                   \
+  _(And)                    \
+  _(Or)                     \
+  _(Case)                   \
+  _(Default)                \
+  _(Coalesce)               \
   _(Goto)                   \
   _(Return)                 \
   _(RetRval)
@@ -124,6 +144,7 @@ class MOZ_STACK_CLASS WarpBuilder {
   MOZ_MUST_USE bool buildEpilogue();
 
   MOZ_MUST_USE bool buildUnaryOp(BytecodeLocation loc);
+  MOZ_MUST_USE bool buildBinaryOp(BytecodeLocation loc);
   MOZ_MUST_USE bool buildCompareOp(BytecodeLocation loc);
   MOZ_MUST_USE bool buildTestOp(BytecodeLocation loc);
 

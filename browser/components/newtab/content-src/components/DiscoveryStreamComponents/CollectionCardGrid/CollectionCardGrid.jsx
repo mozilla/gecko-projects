@@ -15,17 +15,13 @@ export class CollectionCardGrid extends React.PureComponent {
   }
 
   onDismissClick() {
-    const { data, items } = this.props;
+    const { data } = this.props;
     if (this.props.dispatch && data && data.spocs && data.spocs.length) {
       const pos = 0;
       const source = this.props.type.toUpperCase();
-      // Grab the displayed items in the array to dismiss.
-      // This fires a ping for all items displayed, even if below the fold.
-      // It does not fire it for items not displayed, but those items would
-      // still be filtered out because of matching flight_ids.
-      // This is otherwise just for telemetry puproses, to report which items were displayed,
-      // but not nessisarily visible, at the time of dismiss.
-      const spocsData = data.spocs.slice(0, items).map(item => ({
+      // Grab the available items in the array to dismiss.
+      // This fires a ping for all items available, even if below the fold.
+      const spocsData = data.spocs.map(item => ({
         url: item.url,
         guid: item.id,
         shim: item.shim,
@@ -49,7 +45,7 @@ export class CollectionCardGrid extends React.PureComponent {
   }
 
   render() {
-    const { data } = this.props;
+    const { data, dismissible } = this.props;
     if (
       !data ||
       !data.spocs ||
@@ -86,24 +82,31 @@ export class CollectionCardGrid extends React.PureComponent {
     // we use the type "COLLECTIONCARDGRID_CARD".
     const type = `${this.props.type}_card`;
 
-    return (
-      <DSDismiss
-        onDismissClick={this.onDismissClick}
-        extraClasses={`ds-dismiss-ds-collection`}
-      >
-        <div className="ds-collection-card-grid">
-          <CardGrid
-            title={title}
-            context={context}
-            data={recsData}
-            feed={feed}
-            border={this.props.border}
-            type={type}
-            dispatch={this.props.dispatch}
-            items={this.props.items}
-          />
-        </div>
-      </DSDismiss>
+    const collectionGrid = (
+      <div className="ds-collection-card-grid">
+        <CardGrid
+          title={title}
+          context={context}
+          data={recsData}
+          feed={feed}
+          border={this.props.border}
+          type={type}
+          dispatch={this.props.dispatch}
+          items={this.props.items}
+        />
+      </div>
     );
+
+    if (dismissible) {
+      return (
+        <DSDismiss
+          onDismissClick={this.onDismissClick}
+          extraClasses={`ds-dismiss-ds-collection`}
+        >
+          {collectionGrid}
+        </DSDismiss>
+      );
+    }
+    return collectionGrid;
   }
 }

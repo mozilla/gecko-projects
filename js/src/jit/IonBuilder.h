@@ -561,6 +561,7 @@ class MOZ_STACK_CLASS IonBuilder {
   AbortReasonOr<Ok> jsop_funapplyarguments(uint32_t argc);
   AbortReasonOr<Ok> jsop_funapplyarray(uint32_t argc);
   AbortReasonOr<Ok> jsop_spreadcall();
+  AbortReasonOr<Ok> jsop_spreadnew();
   AbortReasonOr<Ok> jsop_optimize_spreadcall();
   AbortReasonOr<Ok> jsop_call(uint32_t argc, bool constructing,
                               bool ignoresReturnValue);
@@ -1048,18 +1049,6 @@ class MOZ_STACK_CLASS IonBuilder {
   BytecodeSite* bytecodeSite(jsbytecode* pc) {
     MOZ_ASSERT(info().inlineScriptTree()->script()->containsPC(pc));
     return new (alloc()) BytecodeSite(info().inlineScriptTree(), pc);
-  }
-
-  MDefinition* lexicalCheck_;
-
-  void setLexicalCheck(MDefinition* lexical) {
-    MOZ_ASSERT(!lexicalCheck_);
-    lexicalCheck_ = lexical;
-  }
-  MDefinition* takeLexicalCheck() {
-    MDefinition* lexical = lexicalCheck_;
-    lexicalCheck_ = nullptr;
-    return lexical;
   }
 
   /* Information used for inline-call builders. */

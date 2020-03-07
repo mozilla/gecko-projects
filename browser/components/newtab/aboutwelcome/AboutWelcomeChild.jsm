@@ -45,6 +45,10 @@ class AboutWelcomeChild extends JSWindowActorChild {
       defineAs: "AWGetStartupData",
     });
 
+    Cu.exportFunction(this.AWGetFxAMetricsFlowURI.bind(this), window, {
+      defineAs: "AWGetFxAMetricsFlowURI",
+    });
+
     Cu.exportFunction(this.AWSendEventTelemetry.bind(this), window, {
       defineAs: "AWSendEventTelemetry",
     });
@@ -52,6 +56,12 @@ class AboutWelcomeChild extends JSWindowActorChild {
     Cu.exportFunction(this.AWSendToParent.bind(this), window, {
       defineAs: "AWSendToParent",
     });
+  }
+
+  wrapPromise(promise) {
+    return new this.contentWindow.Promise((resolve, reject) =>
+      promise.then(resolve, reject)
+    );
   }
 
   /**
@@ -63,13 +73,22 @@ class AboutWelcomeChild extends JSWindowActorChild {
     return Cu.cloneInto(experimentData, this.contentWindow);
   }
 
+  AWGetFxAMetricsFlowURI() {
+    return this.wrapPromise(this.sendQuery("AWPage:FXA_METRICS_FLOW_URI"));
+  }
+
   /**
    * Send Event Telemetry
    * @param {object} eventData
    */
   AWSendEventTelemetry(eventData) {
-    // TODO: Send event Telemetry with Services.telemetry
-    log.debug("Sending event telemetry:", eventData);
+    this.AWSendToParent("TELEMETRY_EVENT", {
+      ...eventData,
+      event_context: {
+        ...eventData.event_context,
+        page: "about:welcome",
+      },
+    });
   }
 
   /**

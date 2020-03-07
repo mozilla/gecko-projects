@@ -6,6 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DocumentLoadListener.h"
+#include "mozilla/ContentBlockingAllowList.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/MozPromiseInlines.h"  // For MozPromise::FromDomPromise
@@ -236,13 +237,12 @@ NS_INTERFACE_MAP_BEGIN(DocumentLoadListener)
 NS_INTERFACE_MAP_END
 
 DocumentLoadListener::DocumentLoadListener(
-    CanonicalBrowsingContext* aProcessTopBrowsingContext,
-    nsILoadContext* aLoadContext, PBOverrideStatus aOverrideStatus,
-    ADocumentChannelBridge* aBridge)
+    CanonicalBrowsingContext* aBrowsingContext, nsILoadContext* aLoadContext,
+    PBOverrideStatus aOverrideStatus, ADocumentChannelBridge* aBridge)
     : mLoadContext(aLoadContext), mPBOverride(aOverrideStatus) {
   LOG(("DocumentLoadListener ctor [this=%p]", this));
   mParentChannelListener = new ParentChannelListener(
-      this, aProcessTopBrowsingContext, aLoadContext->UsePrivateBrowsing());
+      this, aBrowsingContext, aLoadContext->UsePrivateBrowsing());
   mDocumentChannelBridge = aBridge;
 }
 
@@ -343,8 +343,6 @@ CanonicalBrowsingContext* DocumentLoadListener::GetBrowsingContext() {
 }
 
 bool DocumentLoadListener::Open(
-    CanonicalBrowsingContext* aBrowsingContext,
-    CanonicalBrowsingContext* aProcessTopBrowsingContext,
     nsDocShellLoadState* aLoadState, class LoadInfo* aLoadInfo,
     nsLoadFlags aLoadFlags, uint32_t aLoadType, uint32_t aCacheKey,
     bool aIsActive, bool aIsTopLevelDoc, bool aHasNonEmptySandboxingFlags,
@@ -354,6 +352,8 @@ bool DocumentLoadListener::Open(
     uint64_t aOuterWindowId, nsresult* aRv) {
   LOG(("DocumentLoadListener Open [this=%p, uri=%s]", this,
        aLoadState->URI()->GetSpecOrDefault().get()));
+  RefPtr<CanonicalBrowsingContext> browsingContext =
+      mParentChannelListener->GetBrowsingContext();
 
   OriginAttributes attrs;
   mLoadContext->GetOriginAttributes(attrs);
@@ -364,12 +364,12 @@ bool DocumentLoadListener::Open(
   // TODO: Handle TYPE_SUBDOCUMENT LoadInfo construction, and stop passing
   // aLoadInfo across IPC.
   RefPtr<LoadInfo> loadInfo = aLoadInfo;
-  if (!aBrowsingContext->GetParent()) {
+  if (!browsingContext->GetParent()) {
     // If we're a top level load, then we should have not got an existing
     // LoadInfo, or if we did, it should be TYPE_DOCUMENT.
     MOZ_ASSERT(!aLoadInfo || aLoadInfo->InternalContentPolicyType() ==
                                  nsIContentPolicy::TYPE_DOCUMENT);
-    loadInfo = CreateLoadInfo(aBrowsingContext, aLoadState, aOuterWindowId);
+    loadInfo = CreateLoadInfo(browsingContext, aLoadState, aOuterWindowId);
   }
 
   if (!nsDocShell::CreateAndConfigureRealChannelForLoadState(
@@ -389,29 +389,34 @@ bool DocumentLoadListener::Open(
   RefPtr<HttpBaseChannel> httpBaseChannel = do_QueryObject(mChannel, aRv);
   if (httpBaseChannel) {
     nsCOMPtr<nsIURI> topWindowURI;
-    if (topWindow) {
+    nsCOMPtr<nsIPrincipal> contentBlockingAllowListPrincipal;
+    if (bc->IsTop()) {
+      // If this is for the top level loading, the top window URI should be the
+      // URI which we are loading.
+      topWindowURI = uriBeingLoaded;
+
+      // We need to recompute the ContentBlockingAllowListPrincipal here for the
+      // top level channel because we might navigate from the the initial
+      // about:blank page or the existing page which may have a different origin
+      // than the URI we are going to load here. Thus, we need to recompute the
+      // prinicpal in order to get the correct
+      // ContentBlockingAllowListPrincipal.
+      OriginAttributes attrs;
+      aLoadInfo->GetOriginAttributes(&attrs);
+      ContentBlockingAllowList::RecomputePrincipal(
+          uriBeingLoaded, attrs,
+          getter_AddRefs(contentBlockingAllowListPrincipal));
+    } else if (topWindow) {
       nsCOMPtr<nsIPrincipal> topWindowPrincipal =
           topWindow->DocumentPrincipal();
       if (topWindowPrincipal && !topWindowPrincipal->GetIsNullPrincipal()) {
         topWindowPrincipal->GetURI(getter_AddRefs(topWindowURI));
       }
-    }
-    httpBaseChannel->SetTopWindowURI(topWindowURI);
 
-    nsCOMPtr<nsIPrincipal> contentBlockingAllowListPrincipal;
-    if (topWindow) {
       contentBlockingAllowListPrincipal =
           topWindow->GetContentBlockingAllowListPrincipal();
     }
-
-    if (bc->IsTop() && contentBlockingAllowListPrincipal &&
-        contentBlockingAllowListPrincipal->GetIsNullPrincipal()) {
-      OriginAttributes attrs;
-      aLoadInfo->GetOriginAttributes(&attrs);
-      AntiTrackingCommon::RecomputeContentBlockingAllowListPrincipal(
-          uriBeingLoaded, attrs,
-          getter_AddRefs(contentBlockingAllowListPrincipal));
-    }
+    httpBaseChannel->SetTopWindowURI(topWindowURI);
 
     if (contentBlockingAllowListPrincipal &&
         contentBlockingAllowListPrincipal->GetIsContentPrincipal()) {
@@ -458,7 +463,7 @@ bool DocumentLoadListener::Open(
     RefPtr<ParentProcessDocumentOpenInfo> openInfo =
         new ParentProcessDocumentOpenInfo(mParentChannelListener,
                                           aPluginsAllowed, *aDocumentOpenFlags,
-                                          aProcessTopBrowsingContext);
+                                          browsingContext);
     openInfo->Prepare();
 
     *aRv = mChannel->AsyncOpen(openInfo);
@@ -777,16 +782,10 @@ void DocumentLoadListener::SerializeRedirectData(
     redirectLoadInfo->AppendRedirectHistoryEntry(entry, true);
   }
 
-  if (!aIsCrossProcess) {
-    // When we're switching into a new process, the destination
-    // docshell will create a new initial client source which conflicts
-    // with this. We should probably use this one, but need to update
-    // docshell to understand that.
-    const Maybe<ClientInfo>& reservedClientInfo =
-        channelLoadInfo->GetReservedClientInfo();
-    if (reservedClientInfo) {
-      redirectLoadInfo->SetReservedClientInfo(*reservedClientInfo);
-    }
+  const Maybe<ClientInfo>& reservedClientInfo =
+      channelLoadInfo->GetReservedClientInfo();
+  if (reservedClientInfo) {
+    redirectLoadInfo->SetReservedClientInfo(*reservedClientInfo);
   }
 
   // Register the new channel and obtain id for it
@@ -941,42 +940,8 @@ void DocumentLoadListener::TriggerRedirectToRealChannel(
   RedirectToRealChannel(redirectFlags, newLoadFlags, aDestinationProcess)
       ->Then(
           GetCurrentThreadSerialEventTarget(), __func__,
-          [self](Tuple<nsresult, Maybe<LoadInfoArgs>>&& aResponse) {
-            if (NS_SUCCEEDED(Get<0>(aResponse))) {
-              nsCOMPtr<nsILoadInfo> newLoadInfo;
-              MOZ_ALWAYS_SUCCEEDS(LoadInfoArgsToLoadInfo(
-                  Get<1>(aResponse), getter_AddRefs(newLoadInfo)));
-              if (newLoadInfo) {
-                // Since the old reservedClientInfo might be controlled by a
-                // ServiceWorker when opening the channel, we need to update
-                // the controlled ClientInfo in ServiceWorkerManager to make
-                // sure the same origin subresource load can be intercepted by
-                // the ServiceWorker.
-                nsCOMPtr<nsILoadInfo> oldLoadInfo;
-                self->mChannel->GetLoadInfo(getter_AddRefs(oldLoadInfo));
-                MOZ_ASSERT(oldLoadInfo);
-                Maybe<ClientInfo> oldClientInfo =
-                    oldLoadInfo->GetReservedClientInfo();
-                Maybe<ServiceWorkerDescriptor> oldController =
-                    oldLoadInfo->GetController();
-                Maybe<ClientInfo> newClientInfo =
-                    newLoadInfo->GetReservedClientInfo();
-                Maybe<ServiceWorkerDescriptor> newController =
-                    newLoadInfo->GetController();
-                if (oldClientInfo.isSome() && newClientInfo.isSome() &&
-                    newController.isSome() && oldController.isSome() &&
-                    newController.ref() == oldController.ref()) {
-                  RefPtr<ServiceWorkerManager> swMgr =
-                      ServiceWorkerManager::GetInstance();
-                  MOZ_ASSERT(swMgr);
-                  swMgr->UpdateControlledClient(oldClientInfo.ref(),
-                                                newClientInfo.ref(),
-                                                newController.ref());
-                }
-                self->mChannel->SetLoadInfo(newLoadInfo);
-              }
-            }
-            self->RedirectToRealChannelFinished(Get<0>(aResponse));
+          [self](const nsresult& aResponse) {
+            self->RedirectToRealChannelFinished(aResponse);
           },
           [self](const mozilla::ipc::ResponseRejectReason) {
             self->RedirectToRealChannelFinished(NS_ERROR_FAILURE);
