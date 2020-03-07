@@ -10,8 +10,6 @@
 # another mozconfig file, you'll need to use mozconfig.common.override instead
 # of this file.
 
-ac_add_options --enable-update-agent
-
 if test -n "$USE_ARTIFACT"; then
 . "$topsrcdir/build/mozconfig.artifact.automation"
 fi
