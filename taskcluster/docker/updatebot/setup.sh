@@ -18,6 +18,7 @@ apt-get install -y --no-install-recommends \
     python3-minimal \
     python3-requests \
     python3-requests-unixsocket \
+    python3-pymysql \
     fzf \
     openssh-client
 

@@ -38,7 +38,7 @@ original_path = os.getcwd()
 bugzilla_api_key = get_secret('bugzilla-api-key')
 # phabricator_token = get_secret('phabricator-token')
 try_sshkey = get_secret('try-sshkey')
-# database_password = get_secret('database_password')
+database_config = get_secret('database-password')
 
 # Checkout =================================================
 
@@ -60,25 +60,5 @@ sshkey.close()
 os.chmod("id_rsa", stat.S_IRWXU)
 
 # Vendor =================================================
-from components import find_library_metadata, vendor, find_release_version, \
-    file_bug, commit, submit_to_try, commentOnBug
-
-library = "dav1d"
-library = find_library_metadata("dav1d")
-
-os.chdir("/builds/worker/checkouts/gecko")
-
-vendor(library)
-
-new_release_version = find_release_version(library)
-if not new_release_version:
-    print("Could not find a new release version string")
-    sys.exit(0)
-
-bug_id = file_bug(library, new_release_version)
-
-commit(library, bug_id, new_release_version)
-
-try_run = submit_to_try(library)
-
-commentOnBug(bug_id, try_run)
+from automation import run
+run(database_config)
