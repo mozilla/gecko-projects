@@ -47,11 +47,8 @@ subprocess.check_call(['git', 'clone',
                        'https://github.com/mozilla-services/third-party-library-update.git'])
 os.chdir('third-party-library-update')
 # subprocess.check_call(['git', 'checkout', revision])
-shutil.copyfile("apikey.py.example", "apikey.py")
-subprocess.check_call(["sed", "-i", "s/<foobar>/" + bugzilla_api_key + "/", "apikey.py"])
-
-# from fileBug import fileBug
-# fileBug("Core", "ImageLib", "Testing From Automation", "Test Description")
+shutil.copyfile("apis/apikey.py.example", "apis/apikey.py")
+subprocess.check_call(["sed", "-i", "s/<foobar>/" + bugzilla_api_key + "/", "apis/apikey.py"])
 
 # Set Up SSH =============================================
 sshkey = open("id_rsa", "w")
