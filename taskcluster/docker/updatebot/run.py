@@ -44,8 +44,8 @@ database_config = get_secret('database-password')
 
 os.chdir("/builds/worker")
 subprocess.check_call(['git', 'clone',
-                       'https://github.com/mozilla-services/third-party-library-update.git'])
-os.chdir('third-party-library-update')
+                       'https://github.com/mozilla-services/updatebot.git'])
+os.chdir('updatebot')
 # subprocess.check_call(['git', 'checkout', revision])
 shutil.copyfile("apis/apikey.py.example", "apis/apikey.py")
 subprocess.check_call(["sed", "-i", "s/<foobar>/" + bugzilla_api_key + "/", "apis/apikey.py"])
