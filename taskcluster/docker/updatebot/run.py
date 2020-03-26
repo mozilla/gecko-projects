@@ -36,7 +36,7 @@ def get_secret(name):
 original_path = os.getcwd()
 
 bugzilla_api_key = get_secret('bugzilla-api-key')
-# phabricator_token = get_secret('phabricator-token')
+phabricator_token = get_secret('phabricator-token')
 try_sshkey = get_secret('try-sshkey')
 database_config = get_secret('database-password')
 
@@ -55,6 +55,22 @@ sshkey = open("id_rsa", "w")
 sshkey.write(try_sshkey)
 sshkey.close()
 os.chmod("id_rsa", stat.S_IRWXU)
+
+# Set Up Phabricator =====================================
+arcrc = open("/home/worker/.arcrc", "w")
+towrite = """
+{
+  "hosts": {
+    "https://phabricator.services.mozilla.com/api/": {
+      "token": "TOKENHERE"
+    }
+  }
+}
+""".replace("TOKENHERE", phabricator_token)
+arcrc.write(towrite)
+arcrc.close()
+os.chmod("/home/worker/.arcrc", stat.S_IRWXU)
+
 
 # Vendor =================================================
 from automation import run
