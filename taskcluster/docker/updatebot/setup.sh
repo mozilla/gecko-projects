@@ -26,6 +26,6 @@ apt-get install -y --no-install-recommends \
     openssh-client
 
 mkdir -p /home/worker/.mozbuild
-chown worker:worker /home/worker/.mozbuild
+chown -R worker:worker /home/worker/
 
 rm -rf /setup
