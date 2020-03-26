@@ -12,6 +12,9 @@ apt-get update -y
 
 # Install dependencies
 apt-get install -y --no-install-recommends \
+    arcanist \
+    ca-certificates \
+    curl \
     python-requests \
     python-requests-unixsocket \
     python3.5 \
