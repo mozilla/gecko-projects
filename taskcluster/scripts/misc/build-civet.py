@@ -7,6 +7,7 @@ from __future__ import absolute_import, print_function
 
 import os
 import sys
+import shutil
 import requests
 import subprocess
 import taskcluster
@@ -16,7 +17,7 @@ civet_revision = '9def689af50bd35ffd28701b5c392205300bfe89'
 
 original_path = os.getcwd()
 
-# This secret must be in RSA format. See https://stackoverflow.com/q/54994641
+# This secret MUST be in RSA format! See https://stackoverflow.com/q/54994641
 sshkey = None
 if 'TASK_ID' in os.environ:
     secrets_url = 'http://taskcluster/secrets/v1/secret/project/civet/github-deploy-key'
@@ -46,3 +47,7 @@ os.chdir(original_path)
 
 build_clang = [os.environ['GECKO_PATH'] + '/taskcluster/scripts/misc/build-clang.sh']
 subprocess.check_call(build_clang + sys.argv[1:])
+
+destdir = "/builds/worker/private-artifacts/"
+os.mkdir(destdir)
+shutil.move("/builds/worker/artifacts/clang-tidy.tar.xz", destdir + "clang-tidy.tar.xz")

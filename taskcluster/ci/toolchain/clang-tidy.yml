@@ -98,7 +98,13 @@ linux64-civet-tidy:
         job-name: linux64-civet-tidy
     treeherder:
         symbol: TL(linux64-civet-tidy)
+    worker:
+        artifacts:
+            - name: project/civet/clang-tidy.tar.xz
+              path: /builds/worker/private-artifacts/clang-tidy.tar.xz
+              type: file
     run:
+        toolchain-artifact: project/civet/clang-tidy.tar.xz
         script: build-civet.py
         arguments:
             - 'build/build-clang/civet-tidy-linux64.json'
