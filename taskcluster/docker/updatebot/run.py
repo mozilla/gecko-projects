@@ -62,7 +62,7 @@ arcrc = open("/home/worker/.arcrc", "w")
 towrite = """
 {
   "hosts": {
-    "https://phabricator.services.mozilla.com/api/": {
+    "https://phabricator-dev.allizom.org/api/": {
       "token": "TOKENHERE"
     }
   }
