@@ -74,7 +74,7 @@ os.chmod("/home/worker/.arcrc", stat.S_IRWXU)
 
 
 # Vendor =================================================
-os.chdir("/builds/worker/checkouts/gecko")
-
 from automation import run
+
+os.chdir("/builds/worker/checkouts/gecko")
 run(database_config)
