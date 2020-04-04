@@ -55,7 +55,7 @@ subprocess.check_call(["sed", "-i", "s/<foobar>/" + bugzilla_api_key + "/", "api
 sshkey = open("id_rsa", "w")
 sshkey.write(try_sshkey)
 sshkey.close()
-os.chmod("id_rsa", stat.S_IRWXU)
+os.chmod("id_rsa", stat.S_IRUSR | stat.S_IWUSR)
 
 # Set Up Phabricator =====================================
 arcrc = open("/home/worker/.arcrc", "w")
@@ -70,7 +70,7 @@ towrite = """
 """.replace("TOKENHERE", phabricator_token)
 arcrc.write(towrite)
 arcrc.close()
-os.chmod("/home/worker/.arcrc", stat.S_IRWXU)
+os.chmod("/home/worker/.arcrc", stat.S_IRUSR | stat.S_IWUSR)
 
 
 # Vendor =================================================
