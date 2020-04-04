@@ -18,6 +18,7 @@ import taskcluster
 
 # Bump this number when you need to cause a commit for the job to re-run: 1
 
+
 def get_secret(name):
     secret = None
     if 'TASK_ID' in os.environ:
@@ -77,4 +78,7 @@ os.chmod("/home/worker/.arcrc", stat.S_IRUSR | stat.S_IWUSR)
 from automation import run
 
 os.chdir("/builds/worker/checkouts/gecko")
+subprocess.check_call(["sed", "-i", 
+    "s#https://phabricator.services.mozilla.com/#https://phabricator-dev.allizom.org/#",
+    ".arcconfig"])
 run(database_config)
