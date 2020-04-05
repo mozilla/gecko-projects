@@ -48,6 +48,7 @@ os.chdir("/builds/worker")
 subprocess.check_call(['git', 'clone',
                        'https://github.com/mozilla-services/updatebot.git'])
 os.chdir('updatebot')
+subprocess.check_call(['git', 'checkout', "tom-dev"])
 # subprocess.check_call(['git', 'checkout', revision])
 shutil.copyfile("apis/apikey.py.example", "apis/apikey.py")
 subprocess.check_call(["sed", "-i", "s/<foobar>/" + bugzilla_api_key + "/", "apis/apikey.py"])
@@ -78,7 +79,7 @@ os.chmod("/home/worker/.arcrc", stat.S_IRUSR | stat.S_IWUSR)
 from automation import run
 
 os.chdir("/builds/worker/checkouts/gecko")
-subprocess.check_call(["sed", "-i", 
+subprocess.check_call(["sed", "-i",
     "s#https://phabricator.services.mozilla.com/#https://phabricator-dev.allizom.org/#",
     ".arcconfig"])
 run(database_config)
