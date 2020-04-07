@@ -16,7 +16,7 @@ import requests
 import subprocess
 import taskcluster
 
-# Bump this number when you need to cause a commit for the job to re-run: 2
+# Bump this number when you need to cause a commit for the job to re-run: 3
 
 
 def get_secret(name):
