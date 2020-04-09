@@ -50,8 +50,6 @@ subprocess.check_call(['git', 'clone',
 os.chdir('updatebot')
 subprocess.check_call(['git', 'checkout', "tom-dev"])
 # subprocess.check_call(['git', 'checkout', revision])
-shutil.copyfile("apis/apikey.py.example", "apis/apikey.py")
-subprocess.check_call(["sed", "-i", "s/<foobar>/" + bugzilla_api_key + "/", "apis/apikey.py"])
 
 # Set Up SSH =============================================
 sshkey = open("id_rsa", "w")
@@ -82,4 +80,12 @@ os.chdir("/builds/worker/checkouts/gecko")
 subprocess.check_call(["sed", "-i",
     "s#https://phabricator.services.mozilla.com/#https://phabricator-dev.allizom.org/#",
     ".arcconfig"])
-run(database_config)
+
+configs = {
+    'Database': database_config,
+    'Bugzilla': {
+        'url': "https://bugzilla-dev.allizom.org/rest/",
+        'apikey': bugzilla_api_key
+    }
+}
+run(configs)
