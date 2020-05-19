@@ -365,6 +365,7 @@ win32-shippable/opt:
                 by-project:
                     # browser/confvars.sh looks for nightly-try
                     try: true
+                    maple: true
                     default: false
     shipping-phase: build
     shipping-product: firefox
