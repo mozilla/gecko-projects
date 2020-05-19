@@ -28,9 +28,9 @@ repackage_signing_description_schema = schema.extend({
 })
 
 SIGNING_FORMATS = {
-    "target.installer.exe": ["autograph_authenticode_stub"],
-    "target.stub-installer.exe": ["autograph_authenticode_stub"],
-    "target.installer.msi": ["autograph_authenticode"],
+    "target.installer.exe": ["autograph_authenticode_stub:202005"],
+    "target.stub-installer.exe": ["autograph_authenticode_stub:202005"],
+    "target.installer.msi": ["autograph_authenticode:202005"],
 }
 
 transforms = TransformSequence()

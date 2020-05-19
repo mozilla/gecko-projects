@@ -60,7 +60,7 @@ def make_signing_description(config, jobs):
 
         if 'win' in build_platform:
             # job['primary-dependency'].task['payload']['command']
-            formats = ['autograph_authenticode']
+            formats = ['autograph_authenticode:202005']
         else:
             formats = ['autograph_gpg']
 

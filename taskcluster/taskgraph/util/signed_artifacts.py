@@ -83,12 +83,12 @@ def generate_specifications_of_artifacts_to_sign(
             'artifacts': [
                 get_artifact_path(job, '{locale}/setup.exe'),
             ],
-            'formats': ['autograph_authenticode'],
+            'formats': ['autograph_authenticode:202005'],
         }, {
             'artifacts': [
                 get_artifact_path(job, '{locale}/target.zip'),
             ],
-            'formats': ['autograph_authenticode', 'autograph_widevine', 'autograph_omnija'],
+            'formats': ['autograph_authenticode:202005', 'autograph_widevine', 'autograph_omnija'],
         }]
 
         if use_stub:
