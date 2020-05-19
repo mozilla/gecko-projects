@@ -7,9 +7,10 @@
 
 from __future__ import print_function
 
+import os
 import re
-import yaml
 import sys
+import yaml
 
 # This is a list of flags that determine which process a measurement is allowed
 # to record from.
@@ -84,13 +85,14 @@ class ParserError(Exception):
 
     def handle_now(self):
         ParserError.print_eventuals()
-        print(self.message, file=sys.stderr)
-        sys.exit(1)
+        print(str(self), file=sys.stderr)
+        sys.stderr.flush()
+        os._exit(1)
 
     @classmethod
     def print_eventuals(cls):
         while cls.eventual_errors:
-            print(cls.eventual_errors.pop(0).message, file=sys.stderr)
+            print(str(cls.eventual_errors.pop(0)), file=sys.stderr)
 
     @classmethod
     def exit_func(cls):
@@ -175,7 +177,6 @@ class StringTable:
         :param name: the name of the output array.
         """
         entries = self.table.items()
-        entries.sort(key=lambda x: x[1])
 
         # Avoid null-in-string warnings with GCC and potentially
         # overlong string constants; write everything out the long way.
@@ -192,7 +193,7 @@ class StringTable:
         f.write("#else\n")
         f.write("constexpr char %s[] = {\n" % name)
         f.write("#endif\n")
-        for (string, offset) in entries:
+        for (string, offset) in sorted(entries, key=lambda x: x[1]):
             if "*/" in string:
                 raise ValueError("String in string table contains unexpected sequence '*/': %s" %
                                  string)

@@ -16,7 +16,6 @@
 // Local Includes
 // Helper Classes
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsWeakReference.h"
 #include "nsDataHashtable.h"
 #include "nsJSThingHashtable.h"
@@ -123,7 +122,6 @@ class RequestOrUSVString;
 class SharedWorker;
 class Selection;
 class SpeechSynthesis;
-class TabGroup;
 class Timeout;
 class U2F;
 class VisualViewport;
@@ -268,6 +266,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   virtual nsIPrincipal* GetEffectiveStoragePrincipal() override;
 
+  virtual nsIPrincipal* IntrinsicStoragePrincipal() override;
+
   // nsIDOMWindow
   NS_DECL_NSIDOMWINDOW
 
@@ -306,8 +306,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
 
   nsresult PostHandleEvent(mozilla::EventChainPostVisitor& aVisitor) override;
-
-  void ClearActiveStoragePrincipal();
 
   void Suspend();
   void Resume();
@@ -388,15 +386,13 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> IndexedGetter(
       uint32_t aIndex);
 
-  static bool IsPrivilegedChromeWindow(JSContext* /* unused */, JSObject* aObj);
+  static bool IsPrivilegedChromeWindow(JSContext*, JSObject* aObj);
 
-  static bool IsRequestIdleCallbackEnabled(JSContext* aCx,
-                                           JSObject* /* unused */);
+  static bool IsRequestIdleCallbackEnabled(JSContext* aCx, JSObject*);
 
-  static bool RegisterProtocolHandlerAllowedForContext(JSContext* /* unused */,
-                                                       JSObject* aObj);
+  static bool DeviceSensorsEnabled(JSContext*, JSObject*);
 
-  static bool DeviceSensorsEnabled(JSContext* /* unused */, JSObject* aObj);
+  static bool ContentPropertyEnabled(JSContext* aCx, JSObject*);
 
   bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
                  JS::Handle<jsid> aId,
@@ -588,6 +584,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   mozilla::dom::Location* Location() override;
   nsHistory* GetHistory(mozilla::ErrorResult& aError);
   mozilla::dom::CustomElementRegistry* CustomElements() override;
+  mozilla::dom::CustomElementRegistry* GetExistingCustomElements();
   mozilla::dom::BarProp* GetLocationbar(mozilla::ErrorResult& aError);
   mozilla::dom::BarProp* GetMenubar(mozilla::ErrorResult& aError);
   mozilla::dom::BarProp* GetPersonalbar(mozilla::ErrorResult& aError);
@@ -898,6 +895,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void Maximize();
   void Minimize();
   void Restore();
+  void GetWorkspaceID(nsAString& workspaceID);
+  void MoveToWorkspace(const nsAString& workspaceID);
   void NotifyDefaultButtonLoaded(mozilla::dom::Element& aDefaultButton,
                                  mozilla::ErrorResult& aError);
   mozilla::dom::ChromeMessageBroadcaster* MessageManager();
@@ -936,8 +935,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   nsIDOMWindowUtils* GetWindowUtils(mozilla::ErrorResult& aRv);
 
-  bool HasOpenerForInitialContentBrowser();
-
   void UpdateTopInnerWindow();
 
   virtual bool IsInSyncOperation() override {
@@ -947,7 +944,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   bool IsSharedMemoryAllowed() const override;
 
   // https://whatpr.org/html/4734/structured-data.html#cross-origin-isolated
-  bool CrossOriginIsolated() const;
+  bool CrossOriginIsolated() const override;
 
  protected:
   // Web IDL helpers
@@ -1178,12 +1175,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   friend class nsPIDOMWindowInner;
   friend class nsPIDOMWindowOuter;
 
-  mozilla::dom::TabGroup* TabGroupInner();
-
-  // Like TabGroupInner, but it is more tolerant of being called at peculiar
-  // times, and it can return null.
-  mozilla::dom::TabGroup* MaybeTabGroupInner();
-
   bool IsBackgroundInternal() const;
 
   // NOTE: Chrome Only
@@ -1209,7 +1200,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void CancelDocumentFlushedResolvers();
 
   // Try to fire the "load" event on our content embedder if we're an iframe.
-  void FireFrameLoadEvent(bool aIsTrusted);
+  void FireFrameLoadEvent();
+
+  void UpdateAutoplayPermission();
 
  public:
   // Dispatch a runnable related to the global.
@@ -1265,10 +1258,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // event.
   bool mNeedsFocus : 1;
   bool mHasFocus : 1;
-
-  // when true, show focus rings for the current focused content only.
-  // This will be reset when another element is focused
-  bool mShowFocusRingForContent : 1;
 
   // true if tab navigation has occurred for this window. Focus rings
   // should be displayed.
@@ -1352,6 +1341,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // FreeInnerObjects has been called.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
   nsCOMPtr<nsIPrincipal> mDocumentStoragePrincipal;
+  nsCOMPtr<nsIPrincipal> mDocumentIntrinsicStoragePrincipal;
   nsCOMPtr<nsIContentSecurityPolicy> mDocumentCsp;
 
   RefPtr<mozilla::dom::DebuggerNotificationManager>
@@ -1442,11 +1432,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // Members in the mChromeFields member should only be used in chrome windows.
   // All accesses to this field should be guarded by a check of mIsChrome.
   struct ChromeFields {
-    ChromeFields() : mGroupMessageManagers(1) {}
-
     RefPtr<mozilla::dom::ChromeMessageBroadcaster> mMessageManager;
     nsRefPtrHashtable<nsStringHashKey, mozilla::dom::ChromeMessageBroadcaster>
-        mGroupMessageManagers;
+        mGroupMessageManagers{1};
   } mChromeFields;
 
   // These fields are used by the inner and outer windows to prevent

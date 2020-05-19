@@ -51,17 +51,6 @@ bool HashableValue::setValue(JSContext* cx, HandleValue v) {
       // Normalize the sign bit of a NaN.
       value = JS::CanonicalizedDoubleValue(d);
     }
-  } else if (v.isBigInt()) {
-    // NurseryKeysVector currently only supports objects, so we must ensure all
-    // BigInt hash-values are tenured. (bug 1608056)
-    RootedBigInt bi(cx, v.toBigInt());
-    if (IsInsideNursery(bi)) {
-      bi = BigInt::copy(cx, bi, gc::TenuredHeap);
-      if (!bi) {
-        return false;
-      }
-    }
-    value = BigIntValue(bi);
   } else {
     value = v;
   }
@@ -188,7 +177,8 @@ bool GlobalObject::initMapIteratorProto(JSContext* cx,
   if (!base) {
     return false;
   }
-  RootedPlainObject proto(cx, NewObjectWithGivenProto<PlainObject>(cx, base));
+  RootedPlainObject proto(
+      cx, GlobalObject::createBlankPrototypeInheriting<PlainObject>(cx, base));
   if (!proto) {
     return false;
   }
@@ -221,40 +211,38 @@ MapIteratorObject* MapIteratorObject::create(JSContext* cx, HandleObject obj,
     return nullptr;
   }
 
-  Nursery& nursery = cx->nursery();
+  MapIteratorObject* iterobj =
+      NewObjectWithGivenProto<MapIteratorObject>(cx, proto);
+  if (!iterobj) {
+    return nullptr;
+  }
 
-  MapIteratorObject* iterobj;
-  void* buffer;
-  NewObjectKind objectKind = GenericObject;
-  while (true) {
-    iterobj = NewObjectWithGivenProto<MapIteratorObject>(cx, proto, objectKind);
+  iterobj->init(mapobj, kind);
+
+  constexpr size_t BufferSize =
+      RoundUp(sizeof(ValueMap::Range), gc::CellAlignBytes);
+
+  Nursery& nursery = cx->nursery();
+  void* buffer = nursery.allocateBufferSameLocation(iterobj, BufferSize);
+  if (!buffer) {
+    // Retry with |iterobj| and |buffer| forcibly tenured.
+    iterobj = NewTenuredObjectWithGivenProto<MapIteratorObject>(cx, proto);
     if (!iterobj) {
       return nullptr;
     }
 
-    iterobj->setSlot(TargetSlot, ObjectValue(*mapobj));
-    iterobj->setSlot(RangeSlot, PrivateValue(nullptr));
-    iterobj->setSlot(KindSlot, Int32Value(int32_t(kind)));
+    iterobj->init(mapobj, kind);
 
-    const size_t size = RoundUp(sizeof(ValueMap::Range), gc::CellAlignBytes);
-    buffer = nursery.allocateBufferSameLocation(iterobj, size);
-    if (buffer) {
-      break;
-    }
-
-    if (!IsInsideNursery(iterobj)) {
+    buffer = nursery.allocateBufferSameLocation(iterobj, BufferSize);
+    if (!buffer) {
       ReportOutOfMemory(cx);
       return nullptr;
     }
-
-    // There was space in the nursery for the object but not the
-    // Range. Try again in the tenured heap.
-    MOZ_ASSERT(objectKind == GenericObject);
-    objectKind = TenuredObject;
   }
 
   bool insideNursery = IsInsideNursery(iterobj);
   MOZ_ASSERT(insideNursery == nursery.isInside(buffer));
+
   if (insideNursery && !HasNurseryMemory(mapobj.get())) {
     if (!cx->nursery().addMapWithNurseryMemory(mapobj)) {
       ReportOutOfMemory(cx);
@@ -294,7 +282,7 @@ size_t MapIteratorObject::objectMoved(JSObject* obj, JSObject* old) {
 
   Nursery& nursery = iter->runtimeFromMainThread()->gc.nursery();
   if (!nursery.isInside(range)) {
-    nursery.removeMallocedBuffer(range);
+    nursery.removeMallocedBufferDuringMinorGC(range);
     return 0;
   }
 
@@ -461,7 +449,7 @@ void MapObject::trace(JSTracer* trc, JSObject* obj) {
 }
 
 struct js::UnbarrieredHashPolicy {
-  typedef Value Lookup;
+  using Lookup = Value;
   static HashNumber hash(const Lookup& v,
                          const mozilla::HashCodeScrambler& hcs) {
     return HashValue(v, hcs);
@@ -471,7 +459,7 @@ struct js::UnbarrieredHashPolicy {
   static void makeEmpty(Value* vp) { vp->setMagic(JS_HASH_KEY_EMPTY); }
 };
 
-using NurseryKeysVector = Vector<JSObject*, 0, SystemAllocPolicy>;
+using NurseryKeysVector = mozilla::Vector<Value, 0, SystemAllocPolicy>;
 
 template <typename TableObject>
 static NurseryKeysVector* GetNurseryKeys(TableObject* t) {
@@ -515,9 +503,7 @@ class js::OrderedHashTableRef : public gc::BufferableRef {
         reinterpret_cast<typename ObjectT::UnbarrieredTable*>(realTable);
     NurseryKeysVector* keys = GetNurseryKeys(object);
     MOZ_ASSERT(keys);
-    for (JSObject* obj : *keys) {
-      MOZ_ASSERT(obj);
-      Value key = ObjectValue(*obj);
+    for (Value& key : *keys) {
       Value prior = key;
       MOZ_ASSERT(unbarrieredTable->hash(key) ==
                  realTable->hash(*reinterpret_cast<HashableValue*>(&key)));
@@ -531,7 +517,7 @@ class js::OrderedHashTableRef : public gc::BufferableRef {
 template <typename ObjectT>
 inline static MOZ_MUST_USE bool WriteBarrierPostImpl(ObjectT* obj,
                                                      const Value& keyValue) {
-  if (MOZ_LIKELY(!keyValue.isObject())) {
+  if (MOZ_LIKELY(!keyValue.isObject() && !keyValue.isBigInt())) {
     MOZ_ASSERT_IF(keyValue.isGCThing(), !IsInsideNursery(keyValue.toGCThing()));
     return true;
   }
@@ -540,8 +526,7 @@ inline static MOZ_MUST_USE bool WriteBarrierPostImpl(ObjectT* obj,
     return true;
   }
 
-  JSObject* key = &keyValue.toObject();
-  if (!IsInsideNursery(key)) {
+  if (!IsInsideNursery(keyValue.toGCThing())) {
     return true;
   }
 
@@ -552,14 +537,11 @@ inline static MOZ_MUST_USE bool WriteBarrierPostImpl(ObjectT* obj,
       return false;
     }
 
-    key->storeBuffer()->putGeneric(OrderedHashTableRef<ObjectT>(obj));
+    keyValue.toGCThing()->storeBuffer()->putGeneric(
+        OrderedHashTableRef<ObjectT>(obj));
   }
 
-  if (!keys->append(key)) {
-    return false;
-  }
-
-  return true;
+  return keys->append(keyValue);
 }
 
 inline static MOZ_MUST_USE bool WriteBarrierPost(MapObject* map,
@@ -978,7 +960,8 @@ bool GlobalObject::initSetIteratorProto(JSContext* cx,
   if (!base) {
     return false;
   }
-  RootedPlainObject proto(cx, NewObjectWithGivenProto<PlainObject>(cx, base));
+  RootedPlainObject proto(
+      cx, GlobalObject::createBlankPrototypeInheriting<PlainObject>(cx, base));
   if (!proto) {
     return false;
   }
@@ -1003,40 +986,38 @@ SetIteratorObject* SetIteratorObject::create(JSContext* cx, HandleObject obj,
     return nullptr;
   }
 
-  Nursery& nursery = cx->nursery();
+  SetIteratorObject* iterobj =
+      NewObjectWithGivenProto<SetIteratorObject>(cx, proto);
+  if (!iterobj) {
+    return nullptr;
+  }
 
-  SetIteratorObject* iterobj;
-  void* buffer;
-  NewObjectKind objectKind = GenericObject;
-  while (true) {
-    iterobj = NewObjectWithGivenProto<SetIteratorObject>(cx, proto, objectKind);
+  iterobj->init(setobj, kind);
+
+  constexpr size_t BufferSize =
+      RoundUp(sizeof(ValueSet::Range), gc::CellAlignBytes);
+
+  Nursery& nursery = cx->nursery();
+  void* buffer = nursery.allocateBufferSameLocation(iterobj, BufferSize);
+  if (!buffer) {
+    // Retry with |iterobj| and |buffer| forcibly tenured.
+    iterobj = NewTenuredObjectWithGivenProto<SetIteratorObject>(cx, proto);
     if (!iterobj) {
       return nullptr;
     }
 
-    iterobj->setSlot(TargetSlot, ObjectValue(*setobj));
-    iterobj->setSlot(RangeSlot, PrivateValue(nullptr));
-    iterobj->setSlot(KindSlot, Int32Value(int32_t(kind)));
+    iterobj->init(setobj, kind);
 
-    const size_t size = RoundUp(sizeof(ValueSet::Range), gc::CellAlignBytes);
-    buffer = nursery.allocateBufferSameLocation(iterobj, size);
-    if (buffer) {
-      break;
-    }
-
-    if (!IsInsideNursery(iterobj)) {
+    buffer = nursery.allocateBufferSameLocation(iterobj, BufferSize);
+    if (!buffer) {
       ReportOutOfMemory(cx);
       return nullptr;
     }
-
-    // There was space in the nursery for the object but not the
-    // Range. Try again in the tenured heap.
-    MOZ_ASSERT(objectKind == GenericObject);
-    objectKind = TenuredObject;
   }
 
   bool insideNursery = IsInsideNursery(iterobj);
   MOZ_ASSERT(insideNursery == nursery.isInside(buffer));
+
   if (insideNursery && !HasNurseryMemory(setobj.get())) {
     if (!cx->nursery().addSetWithNurseryMemory(setobj)) {
       ReportOutOfMemory(cx);
@@ -1076,7 +1057,7 @@ size_t SetIteratorObject::objectMoved(JSObject* obj, JSObject* old) {
 
   Nursery& nursery = iter->runtimeFromMainThread()->gc.nursery();
   if (!nursery.isInside(range)) {
-    nursery.removeMallocedBuffer(range);
+    nursery.removeMallocedBufferDuringMinorGC(range);
     return 0;
   }
 

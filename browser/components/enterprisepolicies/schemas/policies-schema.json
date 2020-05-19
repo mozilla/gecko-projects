@@ -17,6 +17,10 @@
       }
     },
 
+    "AppAutoUpdate": {
+      "type": "boolean"
+    },
+
     "AppUpdateURL": {
       "type": "URL"
     },
@@ -67,6 +71,9 @@
           }
         },
         "Locked": {
+          "type": "boolean"
+        },
+        "PrivateBrowsing": {
           "type": "boolean"
         }
       }
@@ -188,6 +195,43 @@
     },
 
     "DisableBuiltinPDFViewer": {
+      "type": "boolean"
+    },
+
+    "DisabledCiphers": {
+      "type": "object",
+      "properties": {
+        "TLS_DHE_RSA_WITH_AES_128_CBC_SHA": {
+          "type": "boolean"
+        },
+        "TLS_DHE_RSA_WITH_AES_256_CBC_SHA": {
+          "type": "boolean"
+        },
+        "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA": {
+          "type": "boolean"
+        },
+        "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA": {
+          "type": "boolean"
+        },
+        "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256": {
+          "type": "boolean"
+        },
+        "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": {
+          "type": "boolean"
+        },
+        "TLS_RSA_WITH_AES_128_CBC_SHA": {
+          "type": "boolean"
+        },
+        "TLS_RSA_WITH_AES_256_CBC_SHA": {
+          "type": "boolean"
+        },
+        "TLS_RSA_WITH_3DES_EDE_CBC_SHA": {
+          "type": "boolean"
+        }
+      }
+    },
+
+    "DisableDefaultBrowserAgent": {
       "type": "boolean"
     },
 
@@ -335,6 +379,18 @@
       }
     },
 
+    "EncryptedMediaExtensions": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
+        }
+      }
+    },
+
     "Extensions": {
       "type": "object",
       "properties": {
@@ -380,6 +436,12 @@
               "type": "string"
             },
             "install_sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "restricted_domains": {
               "type": "array",
               "items": {
                 "type": "string"
@@ -486,7 +548,7 @@
         },
         "StartPage": {
           "type": "string",
-          "enum": ["none", "homepage", "previous-session"]
+          "enum": ["none", "homepage", "previous-session", "homepage-locked"]
         }
       }
     },
@@ -509,6 +571,17 @@
 
     "LegacyProfiles": {
       "type": "boolean"
+    },
+
+    "LegacySameSiteCookieBehaviorEnabled": {
+      "type": "boolean"
+    },
+
+    "LegacySameSiteCookieBehaviorEnabledForDomainList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
 
     "LocalFileLinks": {
@@ -548,6 +621,18 @@
 
     "PasswordManagerEnabled": {
       "type": "boolean"
+    },
+
+    "PDFjs": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean"
+        },
+        "EnablePermissions": {
+          "type": "boolean"
+        }
+      }
     },
 
     "Permissions": {
@@ -614,6 +699,11 @@
         "Autoplay": {
           "type": "object",
           "properties": {
+            "Default": {
+              "type": "string",
+              "enum": ["allow-audio-video", "block-audio", "block-audio-video"]
+            },
+
             "Allow": {
               "type": "array",
               "strict": false,
@@ -628,6 +718,10 @@
               "items": {
                 "type": "origin"
               }
+            },
+
+            "Locked": {
+              "type": "boolean"
             }
           }
         },
@@ -719,9 +813,6 @@
         "accessibility.force_disabled": {
           "type": "number",
           "enum": [-1, 0, 1]
-        },
-        "app.update.auto": {
-          "type": "boolean"
         },
         "browser.bookmarks.autoExportHTML": {
           "type": "boolean"
@@ -1073,6 +1164,9 @@
           "type": "boolean"
         },
         "FeatureRecommendations": {
+          "type": "boolean"
+        },
+        "UrlbarInterventions": {
           "type": "boolean"
         },
         "Locked": {

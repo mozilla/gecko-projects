@@ -431,8 +431,8 @@ class nsCSPSrcVisitor {
   virtual bool visitHashSrc(const nsCSPHashSrc& src) = 0;
 
  protected:
-  explicit nsCSPSrcVisitor(){};
-  virtual ~nsCSPSrcVisitor(){};
+  explicit nsCSPSrcVisitor() = default;
+  virtual ~nsCSPSrcVisitor() = default;
 };
 
 /* =============== nsCSPDirective ============= */
@@ -450,7 +450,9 @@ class nsCSPDirective {
   virtual void toString(nsAString& outStr) const;
   void toDomCSPStruct(mozilla::dom::CSP& outCSP) const;
 
-  virtual void addSrcs(const nsTArray<nsCSPBaseSrc*>& aSrcs) { mSrcs = aSrcs; }
+  virtual void addSrcs(const nsTArray<nsCSPBaseSrc*>& aSrcs) {
+    mSrcs = aSrcs.Clone();
+  }
 
   virtual bool restrictsContentType(nsContentPolicyType aContentType) const;
 

@@ -21,7 +21,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/NativeNt.h"
 #include "mozilla/Tuple.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/Types.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
@@ -363,6 +362,11 @@ class WindowsDllInterceptor final
     // NB: We intentionally leak mModule
   }
 
+  constexpr static uint32_t GetWorstCaseRequiredBytesToPatch() {
+    return WindowsDllDetourPatcherPrimitive<
+        typename VMPolicy::MMPolicyT>::GetWorstCaseRequiredBytesToPatch();
+  }
+
  private:
   /**
    * Hook/detour the method aName from the DLL we set in Init so that it calls
@@ -430,12 +434,22 @@ class WindowsDllInterceptor final
       // injected DLLs do the same and interfere with our stuff.
       bool needs10BytePatch = (mModule == ::GetModuleHandleW(L"ntdll.dll"));
 
-      // CloseHandle on Windows 8 only accomodates 10-byte patches.
       bool isWin8Or81 = IsWin8OrLater() && (!IsWin10OrLater());
-      needs10BytePatch |= isWin8Or81 &&
-                          (mModule == ::GetModuleHandleW(L"kernel32.dll")) &&
+      bool isWin8 = IsWin8OrLater() && (!IsWin8Point1OrLater());
+
+      bool isKernel32Dll = (mModule == ::GetModuleHandleW(L"kernel32.dll"));
+
+      // CloseHandle on Windows 8/8.1 only accomodates 10-byte patches.
+      needs10BytePatch |= isWin8Or81 && isKernel32Dll &&
                           (reinterpret_cast<void*>(aProc) ==
                            reinterpret_cast<void*>(&CloseHandle));
+
+      // CreateFileA and DuplicateHandle on Windows 8 require 10-byte patches.
+      needs10BytePatch |= isWin8 && isKernel32Dll &&
+                          ((reinterpret_cast<void*>(aProc) ==
+                            reinterpret_cast<void*>(&::CreateFileA)) ||
+                           (reinterpret_cast<void*>(aProc) ==
+                            reinterpret_cast<void*>(&::DuplicateHandle)));
 
       if (needs10BytePatch) {
         flags |= DetourFlags::eEnable10BytePatch;
@@ -701,6 +715,33 @@ class MOZ_ONLY_USED_TO_AVOID_STATIC_CONSTRUCTORS
   INIT_ONCE mInitOnce;
   HMODULE mFromModule;  // never freed
   FuncPtrT mOrigFunc;
+};
+
+/**
+ * This class applies an irreversible patch to jump to a target function
+ * without backing up the original function.
+ */
+class WindowsDllEntryPointInterceptor final {
+  using DllMainFn = BOOL(WINAPI*)(HINSTANCE, DWORD, LPVOID);
+  using MMPolicyT = MMPolicyInProcessEarlyStage;
+
+  MMPolicyT mMMPolicy;
+
+ public:
+  explicit WindowsDllEntryPointInterceptor(
+      const MMPolicyT::Kernel32Exports& aK32Exports)
+      : mMMPolicy(aK32Exports) {}
+
+  bool Set(const nt::PEHeaders& aHeaders, DllMainFn aDestination) {
+    if (!aHeaders) {
+      return false;
+    }
+
+    WindowsDllDetourPatcherPrimitive<MMPolicyT> patcher;
+    return patcher.AddIrreversibleHook(
+        mMMPolicy, aHeaders.GetEntryPoint(),
+        reinterpret_cast<uintptr_t>(aDestination));
+  }
 };
 
 }  // namespace interceptor

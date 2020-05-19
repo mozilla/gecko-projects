@@ -17,7 +17,6 @@
 #include "mozilla/GuardObjects.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "mozilla/Variant.h"
 
@@ -72,7 +71,7 @@ struct Tier2GeneratorTask : public RunnableTask {
   virtual void cancel() = 0;
 };
 
-typedef UniquePtr<Tier2GeneratorTask> UniqueTier2GeneratorTask;
+using UniqueTier2GeneratorTask = UniquePtr<Tier2GeneratorTask>;
 typedef Vector<Tier2GeneratorTask*, 0, SystemAllocPolicy>
     Tier2GeneratorTaskPtrVector;
 
@@ -98,10 +97,10 @@ class GlobalHelperThreadState {
   typedef Vector<jit::IonCompileTask*, 0, SystemAllocPolicy>
       IonCompileTaskVector;
   typedef Vector<ParseTask*, 0, SystemAllocPolicy> ParseTaskVector;
-  typedef mozilla::LinkedList<ParseTask> ParseTaskList;
+  using ParseTaskList = mozilla::LinkedList<ParseTask>;
   typedef Vector<UniquePtr<SourceCompressionTask>, 0, SystemAllocPolicy>
       SourceCompressionTaskVector;
-  typedef mozilla::LinkedList<GCParallelTask> GCParallelTaskList;
+  using GCParallelTaskList = mozilla::LinkedList<GCParallelTask>;
   typedef Vector<PromiseHelperTask*, 0, SystemAllocPolicy>
       PromiseHelperTaskVector;
   typedef Vector<JSContext*, 0, SystemAllocPolicy> ContextVector;
@@ -717,6 +716,13 @@ struct MOZ_RAII AutoSetHelperThreadContext {
   }
 };
 
+struct MOZ_RAII AutoSetContextRuntime {
+  explicit AutoSetContextRuntime(JSRuntime* rt) {
+    TlsContext.get()->setRuntime(rt);
+  }
+  ~AutoSetContextRuntime() { TlsContext.get()->setRuntime(nullptr); }
+};
+
 struct ParseTask : public mozilla::LinkedListElement<ParseTask>,
                    public JS::OffThreadToken,
                    public RunnableTask {
@@ -841,7 +847,7 @@ class SourceCompressionTask : public RunnableTask {
       : runtime_(rt),
         majorGCNumber_(rt->gc.majorGCCount()),
         sourceHolder_(source) {}
-  virtual ~SourceCompressionTask() {}
+  virtual ~SourceCompressionTask() = default;
 
   bool runtimeMatches(JSRuntime* runtime) const { return runtime == runtime_; }
   bool shouldStart() const {

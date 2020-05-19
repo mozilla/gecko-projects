@@ -352,6 +352,15 @@ FRAME_STATE_BIT(FlexContainer, 23, NS_STATE_FLEX_SYNTHESIZE_BASELINE)
 // -webkit-line-ellipsis marker.
 FRAME_STATE_BIT(FlexContainer, 24, NS_STATE_FLEX_HAS_LINE_CLAMP_ELLIPSIS)
 
+// True iff some first-in-flow in-flow children were pushed.
+// Note that those child frames may have been removed without this bit
+// being updated for performance reasons, so code shouldn't depend on
+// actually finding any pushed items when this bit is set.
+FRAME_STATE_BIT(FlexContainer, 25, NS_STATE_FLEX_DID_PUSH_ITEMS)
+
+// We've merged some OverflowList children since last reflow.
+FRAME_STATE_BIT(FlexContainer, 26, NS_STATE_FLEX_HAS_CHILD_NIFS)
+
 // == Frame state bits that apply to grid container frames ====================
 
 FRAME_STATE_GROUP(GridContainer, nsGridContainerFrame)
@@ -388,6 +397,14 @@ FRAME_STATE_BIT(GridContainer, 27, NS_STATE_GRID_HAS_ROW_SUBGRID_ITEM)
 
 // We've merged some OverflowList children since last reflow.
 FRAME_STATE_BIT(GridContainer, 28, NS_STATE_GRID_HAS_CHILD_NIFS)
+
+// True if the container has masonry layout in its inline axis.
+// (mutually exclusive with NS_STATE_GRID_IS_ROW_MASONRY)
+FRAME_STATE_BIT(GridContainer, 29, NS_STATE_GRID_IS_COL_MASONRY)
+
+// True if the container has masonry layout in its block axis.
+// (mutually exclusive with NS_STATE_GRID_IS_COL_MASONRY)
+FRAME_STATE_BIT(GridContainer, 30, NS_STATE_GRID_IS_ROW_MASONRY)
 
 // == Frame state bits that apply to SVG frames ===============================
 

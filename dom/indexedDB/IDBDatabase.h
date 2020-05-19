@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBTransactionBinding.h"
 #include "mozilla/dom/StorageTypeBinding.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/UniquePtr.h"
@@ -43,7 +44,6 @@ class StringOrStringSequence;
 
 namespace indexedDB {
 class BackgroundDatabaseChild;
-class DatabaseSpec;
 class PBackgroundIDBDatabaseFileChild;
 }  // namespace indexedDB
 
@@ -61,7 +61,7 @@ class IDBDatabase final : public DOMEventTargetHelper {
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
   // and the world will explode.
-  RefPtr<IDBFactory> mFactory;
+  SafeRefPtr<IDBFactory> mFactory;
 
   UniquePtr<DatabaseSpec> mSpec;
 
@@ -88,8 +88,8 @@ class IDBDatabase final : public DOMEventTargetHelper {
   bool mIncreasedActiveDatabaseCount;
 
  public:
-  static MOZ_MUST_USE RefPtr<IDBDatabase> Create(
-      IDBOpenDBRequest* aRequest, IDBFactory* aFactory,
+  [[nodiscard]] static RefPtr<IDBDatabase> Create(
+      IDBOpenDBRequest* aRequest, SafeRefPtr<IDBFactory> aFactory,
       indexedDB::BackgroundDatabaseChild* aActor,
       UniquePtr<DatabaseSpec> aSpec);
 
@@ -113,7 +113,7 @@ class IDBDatabase final : public DOMEventTargetHelper {
 
   uint64_t Version() const;
 
-  MOZ_MUST_USE RefPtr<Document> GetOwnerDocument() const;
+  [[nodiscard]] RefPtr<Document> GetOwnerDocument() const;
 
   void Close() {
     AssertIsOnOwningThread();
@@ -147,20 +147,14 @@ class IDBDatabase final : public DOMEventTargetHelper {
   // DatabaseInfo.
   void RevertToPreviousState();
 
-  IDBFactory* Factory() const {
-    AssertIsOnOwningThread();
+  void RegisterTransaction(IDBTransaction& aTransaction);
 
-    return mFactory;
-  }
-
-  void RegisterTransaction(IDBTransaction* aTransaction);
-
-  void UnregisterTransaction(IDBTransaction* aTransaction);
+  void UnregisterTransaction(IDBTransaction& aTransaction);
 
   void AbortTransactions(bool aShouldWarn);
 
   indexedDB::PBackgroundIDBDatabaseFileChild* GetOrCreateFileActorForBlob(
-      Blob* aBlob);
+      Blob& aBlob);
 
   void NoteFinishedFileActor(
       indexedDB::PBackgroundIDBDatabaseFileChild* aFileActor);
@@ -179,16 +173,16 @@ class IDBDatabase final : public DOMEventTargetHelper {
 
   void NoteFinishedMutableFile(IDBMutableFile* aMutableFile);
 
-  MOZ_MUST_USE RefPtr<DOMStringList> ObjectStoreNames() const;
+  [[nodiscard]] RefPtr<DOMStringList> ObjectStoreNames() const;
 
-  MOZ_MUST_USE RefPtr<IDBObjectStore> CreateObjectStore(
+  [[nodiscard]] RefPtr<IDBObjectStore> CreateObjectStore(
       const nsAString& aName,
       const IDBObjectStoreParameters& aOptionalParameters, ErrorResult& aRv);
 
   void DeleteObjectStore(const nsAString& name, ErrorResult& aRv);
 
   // This will be called from the DOM.
-  MOZ_MUST_USE RefPtr<IDBTransaction> Transaction(
+  [[nodiscard]] RefPtr<IDBTransaction> Transaction(
       JSContext* aCx, const StringOrStringSequence& aStoreNames,
       IDBTransactionMode aMode, ErrorResult& aRv);
 
@@ -199,7 +193,7 @@ class IDBDatabase final : public DOMEventTargetHelper {
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(versionchange)
 
-  MOZ_MUST_USE RefPtr<IDBRequest> CreateMutableFile(
+  [[nodiscard]] RefPtr<IDBRequest> CreateMutableFile(
       JSContext* aCx, const nsAString& aName, const Optional<nsAString>& aType,
       ErrorResult& aRv);
 
@@ -214,6 +208,14 @@ class IDBDatabase final : public DOMEventTargetHelper {
   }
 
   const DatabaseSpec* Spec() const { return mSpec.get(); }
+
+  template <typename Pred>
+  indexedDB::ObjectStoreSpec* LookupModifiableObjectStoreSpec(Pred&& aPred) {
+    auto& objectStores = mSpec->objectStores();
+    const auto foundIt =
+        std::find_if(objectStores.begin(), objectStores.end(), aPred);
+    return foundIt != objectStores.end() ? &*foundIt : nullptr;
+  }
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, DOMEventTargetHelper)
@@ -230,7 +232,7 @@ class IDBDatabase final : public DOMEventTargetHelper {
                                JS::Handle<JSObject*> aGivenProto) override;
 
  private:
-  IDBDatabase(IDBOpenDBRequest* aRequest, IDBFactory* aFactory,
+  IDBDatabase(IDBOpenDBRequest* aRequest, SafeRefPtr<IDBFactory> aFactory,
               indexedDB::BackgroundDatabaseChild* aActor,
               UniquePtr<DatabaseSpec> aSpec);
 

@@ -708,6 +708,10 @@ SimpleTest.waitForExplicitFinish = function() {
 SimpleTest.requestLongerTimeout = function(factor) {
   if (parentRunner) {
     parentRunner.requestLongerTimeout(factor);
+  } else {
+    dump(
+      "[SimpleTest.requestLongerTimeout()] ignoring request, maybe you meant to call the global `requestLongerTimeout` instead?\n"
+    );
   }
 };
 
@@ -907,7 +911,7 @@ SimpleTest.waitForFocus = function(callback, targetWindow, expectBlankPage) {
         if (loaded && focused && !finished) {
           finished = true;
           if (isChildProcess) {
-            sendAsyncMessage("WaitForFocus:ChildFocused", {}, null);
+            sendAsyncMessage("WaitForFocus:ChildFocused", {});
           } else {
             SimpleTest._pendingWaitForFocusCount--;
             SimpleTest.executeSoon(function() {
@@ -1501,7 +1505,7 @@ SimpleTest.finish = function() {
  *   message, errorMessage, sourceName, sourceLine, category:
  *     string or regexp
  *   lineNumber, columnNumber: number
- *   isScriptError, isWarning, isException, isStrict: boolean
+ *   isScriptError, isWarning: boolean
  * Strings, numbers, and booleans must compare equal to the named
  * property of the Nth console message.  Regexps must match.  Any
  * fields present in the message but not in the pattern object are ignored.

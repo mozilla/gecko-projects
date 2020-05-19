@@ -112,7 +112,7 @@ void TCPSocketChildBase::AddIPDLReference() {
   this->AddRef();
 }
 
-TCPSocketChild::~TCPSocketChild() {}
+TCPSocketChild::~TCPSocketChild() = default;
 
 mozilla::ipc::IPCResult TCPSocketChild::RecvUpdateBufferedAmount(
     const uint32_t& aBuffered, const uint32_t& aTrackingNumber) {
@@ -163,9 +163,7 @@ nsresult TCPSocketChild::SendSend(const ArrayBuffer& aData,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  nsTArray<uint8_t> arr;
-  arr.SwapElements(fallibleArr);
-  SendData(arr);
+  SendData(SendableData{std::move(fallibleArr)});
   return NS_OK;
 }
 

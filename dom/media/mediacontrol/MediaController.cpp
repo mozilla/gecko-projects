@@ -10,6 +10,7 @@
 #include "MediaControlUtils.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "mozilla/dom/MediaSessionUtils.h"
 
 // avoid redefined macro in unified build
 #undef LOG
@@ -21,8 +22,8 @@
 namespace mozilla {
 namespace dom {
 
-MediaController::MediaController(uint64_t aContextId)
-    : mBrowsingContextId(aContextId) {
+MediaController::MediaController(uint64_t aBrowsingContextId)
+    : MediaStatusManager(aBrowsingContextId) {
   MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess(),
                         "MediaController only runs on Chrome process!");
   LOG("Create controller %" PRId64, Id());
@@ -35,16 +36,20 @@ MediaController::~MediaController() {
   }
 };
 
+void MediaController::Focus() {
+  LOG("Focus");
+  UpdateMediaControlKeysEventToContentMediaIfNeeded(
+      MediaControlKeysEvent::eFocus);
+}
+
 void MediaController::Play() {
   LOG("Play");
-  SetPlayState(PlaybackState::ePlaying);
   UpdateMediaControlKeysEventToContentMediaIfNeeded(
       MediaControlKeysEvent::ePlay);
 }
 
 void MediaController::Pause() {
   LOG("Pause");
-  SetPlayState(PlaybackState::ePaused);
   UpdateMediaControlKeysEventToContentMediaIfNeeded(
       MediaControlKeysEvent::ePause);
 }
@@ -75,16 +80,21 @@ void MediaController::SeekForward() {
 
 void MediaController::Stop() {
   LOG("Stop");
-  SetPlayState(PlaybackState::eStopped);
   UpdateMediaControlKeysEventToContentMediaIfNeeded(
       MediaControlKeysEvent::eStop);
 }
+
+uint64_t MediaController::Id() const { return mTopLevelBrowsingContextId; }
+
+bool MediaController::IsAudible() const { return IsMediaAudible(); }
+
+bool MediaController::IsPlaying() const { return IsMediaPlaying(); }
 
 void MediaController::UpdateMediaControlKeysEventToContentMediaIfNeeded(
     MediaControlKeysEvent aEvent) {
   // There is no controlled media existing or controller has been shutdown, we
   // have no need to update media action to the content process.
-  if (!ControlledMediaNum() || mShutdown) {
+  if (!IsAnyMediaBeingControlled() || mShutdown) {
     return;
   }
   // If we have an active media session, then we should directly notify the
@@ -94,7 +104,7 @@ void MediaController::UpdateMediaControlKeysEventToContentMediaIfNeeded(
   RefPtr<BrowsingContext> context =
       mActiveMediaSessionContextId
           ? BrowsingContext::Get(*mActiveMediaSessionContextId)
-          : BrowsingContext::Get(mBrowsingContextId);
+          : BrowsingContext::Get(Id());
   if (context && !context->IsDiscarded()) {
     context->Canonical()->UpdateMediaControlKeysEvent(aEvent);
   }
@@ -102,7 +112,6 @@ void MediaController::UpdateMediaControlKeysEventToContentMediaIfNeeded(
 
 void MediaController::Shutdown() {
   MOZ_ASSERT(!mShutdown, "Do not call shutdown twice!");
-  SetPlayState(PlaybackState::eStopped);
   // The media controller would be removed from the service when we receive a
   // notification from the content process about all controlled media has been
   // stoppped. However, if controlled media is stopped after detaching
@@ -111,87 +120,54 @@ void MediaController::Shutdown() {
   // the corresponding controller. Therefore, we should manually remove the
   // controller from the service.
   Deactivate();
-  mControlledMediaNum = 0;
-  mPlayingControlledMediaNum = 0;
   mShutdown = true;
 }
 
-void MediaController::NotifyMediaStateChanged(ControlledMediaState aState) {
+void MediaController::NotifyMediaPlaybackChanged(uint64_t aBrowsingContextId,
+                                                 MediaPlaybackState aState) {
   if (mShutdown) {
     return;
   }
-  if (aState == ControlledMediaState::eStarted) {
-    IncreaseControlledMediaNum();
-  } else if (aState == ControlledMediaState::eStopped) {
-    DecreaseControlledMediaNum();
-  } else if (aState == ControlledMediaState::ePlayed) {
-    IncreasePlayingControlledMediaNum();
-  } else if (aState == ControlledMediaState::ePaused) {
-    DecreasePlayingControlledMediaNum();
-  }
+  MediaStatusManager::NotifyMediaPlaybackChanged(aBrowsingContextId, aState);
+  UpdateActivatedStateIfNeeded();
 }
 
-void MediaController::NotifyMediaAudibleChanged(bool aAudible) {
+void MediaController::NotifyMediaAudibleChanged(uint64_t aBrowsingContextId,
+                                                MediaAudibleState aState) {
   if (mShutdown) {
     return;
   }
-  mAudible = aAudible;
+
+  bool oldAudible = IsAudible();
+  MediaStatusManager::NotifyMediaAudibleChanged(aBrowsingContextId, aState);
+  if (IsAudible() == oldAudible) {
+    return;
+  }
+  UpdateActivatedStateIfNeeded();
+
+  // Request the audio focus amongs different controllers that could cause
+  // pausing other audible controllers if we enable the audio focus management.
   RefPtr<MediaControlService> service = MediaControlService::GetService();
   MOZ_ASSERT(service);
-  if (mAudible) {
+  if (IsAudible()) {
     service->GetAudioFocusManager().RequestAudioFocus(this);
   } else {
     service->GetAudioFocusManager().RevokeAudioFocus(this);
   }
 }
 
-void MediaController::IncreaseControlledMediaNum() {
+bool MediaController::ShouldActivateController() const {
   MOZ_ASSERT(!mShutdown);
-  MOZ_DIAGNOSTIC_ASSERT(mControlledMediaNum >= 0);
-  mControlledMediaNum++;
-  LOG("Increase controlled media num to %" PRId64, mControlledMediaNum);
-  if (mControlledMediaNum == 1) {
-    Activate();
-  }
+  return IsAnyMediaBeingControlled() && IsAudible() && !mIsRegisteredToService;
 }
 
-void MediaController::DecreaseControlledMediaNum() {
+bool MediaController::ShouldDeactivateController() const {
   MOZ_ASSERT(!mShutdown);
-  MOZ_DIAGNOSTIC_ASSERT(mControlledMediaNum >= 1);
-  mControlledMediaNum--;
-  LOG("Decrease controlled media num to %" PRId64, mControlledMediaNum);
-  if (mControlledMediaNum == 0) {
-    Deactivate();
-  }
+  return !IsAnyMediaBeingControlled() && mIsRegisteredToService;
 }
 
-void MediaController::IncreasePlayingControlledMediaNum() {
-  MOZ_ASSERT(!mShutdown);
-  MOZ_ASSERT(mPlayingControlledMediaNum >= 0);
-  mPlayingControlledMediaNum++;
-  LOG("Increase playing controlled media num to %" PRId64,
-      mPlayingControlledMediaNum);
-  MOZ_ASSERT(mPlayingControlledMediaNum <= mControlledMediaNum,
-             "The number of playing media should not exceed the number of "
-             "controlled media!");
-  if (mPlayingControlledMediaNum == 1) {
-    SetPlayState(PlaybackState::ePlaying);
-  }
-}
-
-void MediaController::DecreasePlayingControlledMediaNum() {
-  MOZ_ASSERT(!mShutdown);
-  mPlayingControlledMediaNum--;
-  LOG("Decrease playing controlled media num to %" PRId64,
-      mPlayingControlledMediaNum);
-  MOZ_ASSERT(mPlayingControlledMediaNum >= 0);
-  if (mPlayingControlledMediaNum == 0) {
-    SetPlayState(PlaybackState::ePaused);
-  }
-}
-
-// TODO : Use watchable to moniter mControlledMediaNum
 void MediaController::Activate() {
+  LOG("Activate");
   MOZ_ASSERT(!mShutdown);
   RefPtr<MediaControlService> service = MediaControlService::GetService();
   if (service && !mIsRegisteredToService) {
@@ -201,6 +177,7 @@ void MediaController::Activate() {
 }
 
 void MediaController::Deactivate() {
+  LOG("Deactivate");
   MOZ_ASSERT(!mShutdown);
   RefPtr<MediaControlService> service = MediaControlService::GetService();
   if (service) {
@@ -212,25 +189,39 @@ void MediaController::Deactivate() {
   }
 }
 
-void MediaController::SetPlayState(PlaybackState aState) {
-  if (mShutdown || mState == aState) {
+void MediaController::SetIsInPictureInPictureMode(
+    bool aIsInPictureInPictureMode) {
+  if (mIsInPictureInPictureMode == aIsInPictureInPictureMode) {
     return;
   }
-  LOG("SetPlayState : '%s'", ToPlaybackStateEventStr(aState));
-  mState = aState;
-  mPlaybackStateChangedEvent.Notify(mState);
+  LOG("Set IsInPictureInPictureMode to %s",
+      aIsInPictureInPictureMode ? "true" : "false");
+  mIsInPictureInPictureMode = aIsInPictureInPictureMode;
+  if (RefPtr<MediaControlService> service = MediaControlService::GetService();
+      service && mIsInPictureInPictureMode) {
+    service->NotifyControllerBeingUsedInPictureInPictureMode(this);
+  }
 }
 
-PlaybackState MediaController::GetState() const { return mState; }
-
-uint64_t MediaController::Id() const { return mBrowsingContextId; }
-
-bool MediaController::IsAudible() const {
-  return mState == PlaybackState::ePlaying && mAudible;
+void MediaController::HandleActualPlaybackStateChanged() {
+  // Media control service would like to know all controllers' playback state
+  // in order to decide which controller should be the main controller that is
+  // usually the last tab which plays media.
+  if (RefPtr<MediaControlService> service = MediaControlService::GetService()) {
+    service->NotifyControllerPlaybackStateChanged(this);
+  }
 }
 
-uint64_t MediaController::ControlledMediaNum() const {
-  return mControlledMediaNum;
+bool MediaController::IsInPictureInPictureMode() const {
+  return mIsInPictureInPictureMode;
+}
+
+void MediaController::UpdateActivatedStateIfNeeded() {
+  if (ShouldActivateController()) {
+    Activate();
+  } else if (ShouldDeactivateController()) {
+    Deactivate();
+  }
 }
 
 }  // namespace dom

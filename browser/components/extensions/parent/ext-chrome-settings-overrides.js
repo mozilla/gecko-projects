@@ -377,11 +377,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
     let engineName = searchProvider.name.trim();
     if (searchProvider.is_default) {
       let engine = Services.search.getEngineByName(engineName);
-      let defaultEngines = await Services.search.getDefaultEngines();
-      if (
-        engine &&
-        defaultEngines.some(defaultEngine => defaultEngine.name == engineName)
-      ) {
+      if (engine && engine.isAppProvided) {
         // Needs to be called every time to handle reenabling, but
         // only sets default for install or enable.
         await this.setDefault(engineName);
@@ -461,26 +457,6 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
 
   async addSearchEngine() {
     let { extension } = this;
-    let isCurrent = false;
-    let index = -1;
-    if (
-      extension.startupReason === "ADDON_UPGRADE" &&
-      !extension.addonData.builtIn
-    ) {
-      let engines = await Services.search.getEnginesByExtensionID(extension.id);
-      if (engines.length) {
-        let firstEngine = engines[0];
-        let firstEngineName = firstEngine.name;
-        // There can be only one engine right now
-        isCurrent =
-          (await Services.search.getDefault()).name == firstEngineName;
-        // Get position of engine and store it
-        index = (await Services.search.getEngines())
-          .map(engine => engine.name)
-          .indexOf(firstEngineName);
-        await Services.search.removeEngine(firstEngine);
-      }
-    }
     try {
       let engines = await Services.search.addEnginesFromExtension(extension);
       if (engines.length) {
@@ -491,21 +467,6 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
           ENGINE_ADDED_SETTING_NAME,
           engines[0].name
         );
-      }
-      if (
-        extension.startupReason === "ADDON_UPGRADE" &&
-        !extension.addonData.builtIn
-      ) {
-        let engines = await Services.search.getEnginesByExtensionID(
-          extension.id
-        );
-        let engine = Services.search.getEngineByName(engines[0].name);
-        if (isCurrent) {
-          await Services.search.setDefault(engine);
-        }
-        if (index != -1) {
-          await Services.search.moveEngine(engine, index);
-        }
       }
     } catch (e) {
       Cu.reportError(e);

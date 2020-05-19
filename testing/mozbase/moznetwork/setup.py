@@ -6,11 +6,11 @@ from __future__ import absolute_import
 
 from setuptools import setup
 
-PACKAGE_VERSION = '1.0.0'
+PACKAGE_VERSION = '1.1.0'
 
 deps = [
     'mozinfo',
-    'mozlog >= 5.0',
+    'mozlog >= 6.0',
 ]
 
 setup(

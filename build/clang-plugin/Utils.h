@@ -7,6 +7,7 @@
 
 #include "CustomAttributes.h"
 #include "ThirdPartyPaths.h"
+#include "ThreadAllows.h"
 #include "plugin.h"
 
 inline StringRef getFilename(const SourceManager &SM, SourceLocation Loc) {
@@ -173,7 +174,8 @@ inline bool isInIgnoredNamespaceForImplicitCtor(const Decl *Declaration) {
          Name == "arm_ex_to_module" ||  // arm_ex_to_module
          Name == "testing" ||           // gtest
          Name == "Json" ||              // jsoncpp
-         Name == "rlbox";               // rlbox
+         Name == "rlbox" ||             // rlbox
+         Name == "v8";                  // irregexp
 }
 
 inline bool isInIgnoredNamespaceForImplicitConversion(const Decl *Declaration) {

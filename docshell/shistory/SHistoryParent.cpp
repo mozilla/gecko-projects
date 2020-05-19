@@ -5,11 +5,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SHistoryParent.h"
+
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/SHEntryParent.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ContentProcessManager.h"
-#include "nsTHashtable.h"
+#include "mozilla/dom/PContentParent.h"
 #include "mozilla/Logging.h"
+#include "nsTHashtable.h"
+#include "SHEntryChild.h"
 
 extern mozilla::LazyLogModule gSHistoryLog;
 
@@ -24,13 +28,19 @@ LegacySHistory::LegacySHistory(SHistoryParent* aSHistoryParent,
   aRootBC->SetSessionHistory(this);
 }
 
-static void FillInLoadResult(nsresult aRv,
-                             const nsSHistory::LoadEntryResult& aLoadResult,
-                             LoadSHEntryResult* aResult) {
+static void FillInLoadResult(
+    nsresult aRv, const nsTArray<nsSHistory::LoadEntryResult>& aLoadResults,
+    LoadSHEntryResult* aResult) {
   if (NS_SUCCEEDED(aRv)) {
-    *aResult = LoadSHEntryData(
-        static_cast<LegacySHEntry*>(aLoadResult.mLoadState->SHEntry()),
-        aLoadResult.mBrowsingContext, aLoadResult.mLoadState);
+    nsTArray<LoadSHEntryData> data;
+    data.SetCapacity(aLoadResults.Length());
+    for (const nsSHistory::LoadEntryResult& l : aLoadResults) {
+      data.AppendElement(
+          LoadSHEntryData(static_cast<LegacySHEntry*>(l.mLoadState->SHEntry()),
+                          l.mBrowsingContext, l.mLoadState));
+    }
+
+    *aResult = data;
   } else {
     *aResult = aRv;
   }
@@ -41,19 +51,12 @@ SHistoryParent::SHistoryParent(CanonicalBrowsingContext* aContext)
 
 SHistoryParent::~SHistoryParent() { mHistory->mSHistoryParent = nullptr; }
 
-SHEntryParent* SHistoryParent::CreateEntry(
-    PContentParent* aContentParent, PSHistoryParent* aSHistoryParent,
-    const PSHEntryOrSharedID& aEntryOrSharedID) {
-  RefPtr<LegacySHEntry> entry;
-  if (aEntryOrSharedID.type() == PSHEntryOrSharedID::Tuint64_t) {
-    entry = new LegacySHEntry(
-        aContentParent, static_cast<SHistoryParent*>(aSHistoryParent)->mHistory,
-        aEntryOrSharedID.get_uint64_t());
-  } else {
-    entry = new LegacySHEntry(*(
-        static_cast<const SHEntryParent*>(aEntryOrSharedID.get_PSHEntryParent())
-            ->mEntry));
-  }
+SHEntryParent* SHistoryParent::CreateEntry(PContentParent* aContentParent,
+                                           PSHistoryParent* aSHistoryParent,
+                                           uint64_t aSharedID) {
+  RefPtr<LegacySHEntry> entry = new LegacySHEntry(
+      aContentParent, static_cast<SHistoryParent*>(aSHistoryParent)->mHistory,
+      aSharedID);
   return entry->CreateActor();
 }
 
@@ -95,12 +98,10 @@ bool SHistoryParent::RecvPurgeHistory(int32_t aNumEntries, nsresult* aResult) {
 }
 
 bool SHistoryParent::RecvReloadCurrentEntry(LoadSHEntryResult* aLoadResult) {
-  nsSHistory::LoadEntryResult loadResult;
-  nsresult rv = mHistory->ReloadCurrentEntry(loadResult);
+  nsTArray<nsSHistory::LoadEntryResult> loadResults;
+  nsresult rv = mHistory->ReloadCurrentEntry(loadResults);
   if (NS_SUCCEEDED(rv)) {
-    *aLoadResult = LoadSHEntryData(
-        static_cast<LegacySHEntry*>(loadResult.mLoadState->SHEntry()),
-        loadResult.mBrowsingContext, loadResult.mLoadState);
+    FillInLoadResult(rv, loadResults, aLoadResult);
   } else {
     *aLoadResult = rv;
   }
@@ -109,9 +110,9 @@ bool SHistoryParent::RecvReloadCurrentEntry(LoadSHEntryResult* aLoadResult) {
 
 bool SHistoryParent::RecvGotoIndex(int32_t aIndex,
                                    LoadSHEntryResult* aLoadResult) {
-  nsSHistory::LoadEntryResult loadResult;
-  nsresult rv = mHistory->GotoIndex(aIndex, loadResult);
-  FillInLoadResult(rv, loadResult, aLoadResult);
+  nsTArray<nsSHistory::LoadEntryResult> loadResults;
+  nsresult rv = mHistory->GotoIndex(aIndex, loadResults);
+  FillInLoadResult(rv, loadResults, aLoadResult);
   return true;
 }
 
@@ -193,12 +194,12 @@ bool SHistoryParent::RecvRemoveFrameEntries(PSHEntryParent* aEntry) {
 
 bool SHistoryParent::RecvReload(const uint32_t& aReloadFlags,
                                 LoadSHEntryResult* aLoadResult) {
-  Maybe<nsSHistory::LoadEntryResult> loadResult;
-  nsresult rv = mHistory->Reload(aReloadFlags, loadResult);
-  if (NS_SUCCEEDED(rv) && !loadResult) {
+  nsTArray<nsSHistory::LoadEntryResult> loadResults;
+  nsresult rv = mHistory->Reload(aReloadFlags, loadResults);
+  if (NS_SUCCEEDED(rv) && loadResults.IsEmpty()) {
     *aLoadResult = NS_OK;
   } else {
-    FillInLoadResult(rv, loadResult.ref(), aLoadResult);
+    FillInLoadResult(rv, loadResults, aLoadResult);
   }
   return true;
 }
@@ -369,6 +370,66 @@ NS_IMETHODIMP
 LegacySHistory::ReloadCurrentEntry() {
   return mSHistoryParent->SendReloadCurrentEntryFromChild() ? NS_OK
                                                             : NS_ERROR_FAILURE;
+}
+
+bool SHistoryParent::RecvAddToRootSessionHistory(
+    bool aCloneChildren, PSHEntryParent* aOSHE,
+    const MaybeDiscarded<BrowsingContext>& aBC, PSHEntryParent* aEntry,
+    uint32_t aLoadType, bool aShouldPersist,
+    Maybe<int32_t>* aPreviousEntryIndex, Maybe<int32_t>* aLoadedEntryIndex,
+    nsTArray<SwapEntriesDocshellData>* aEntriesToUpdate,
+    int32_t* aEntriesPurged, nsresult* aResult) {
+  MOZ_ASSERT(!aBC.IsNull(), "Browsing context cannot be null");
+  nsTArray<EntriesAndBrowsingContextData> entriesToSendOverIDL;
+  *aResult = mHistory->AddToRootSessionHistory(
+      aCloneChildren,
+      aOSHE ? static_cast<SHEntryParent*>(aOSHE)->mEntry.get() : nullptr,
+      aBC.GetMaybeDiscarded(),
+      static_cast<SHEntryParent*>(aEntry)->mEntry.get(), aLoadType,
+      aShouldPersist, static_cast<ContentParent*>(Manager())->ChildID(),
+      aPreviousEntryIndex, aLoadedEntryIndex, &entriesToSendOverIDL,
+      aEntriesPurged);
+  SHistoryParent::CreateActorsForSwapEntries(entriesToSendOverIDL,
+                                             aEntriesToUpdate, Manager());
+  return true;
+}
+
+bool SHistoryParent::RecvAddChildSHEntryHelper(
+    PSHEntryParent* aCloneRef, PSHEntryParent* aNewEntry,
+    const MaybeDiscarded<BrowsingContext>& aBC, bool aCloneChildren,
+    nsTArray<SwapEntriesDocshellData>* aEntriesToUpdate,
+    int32_t* aEntriesPurged, RefPtr<CrossProcessSHEntry>* aChild,
+    nsresult* aResult) {
+  MOZ_ASSERT(!aBC.IsNull(), "Browsing context cannot be null");
+  nsCOMPtr<nsISHEntry> child;
+  nsTArray<EntriesAndBrowsingContextData> entriesToSendOverIPC;
+  *aResult = mHistory->AddChildSHEntryHelper(
+      static_cast<SHEntryParent*>(aCloneRef)->mEntry.get(),
+      aNewEntry ? static_cast<SHEntryParent*>(aNewEntry)->mEntry.get()
+                : nullptr,
+      aBC.GetMaybeDiscarded(), aCloneChildren,
+      static_cast<ContentParent*>(Manager())->ChildID(), &entriesToSendOverIPC,
+      aEntriesPurged, getter_AddRefs(child));
+  SHistoryParent::CreateActorsForSwapEntries(entriesToSendOverIPC,
+                                             aEntriesToUpdate, Manager());
+  *aChild = child.forget().downcast<LegacySHEntry>();
+  return true;
+}
+
+void SHistoryParent::CreateActorsForSwapEntries(
+    const nsTArray<EntriesAndBrowsingContextData>& aEntriesToSendOverIPC,
+    nsTArray<SwapEntriesDocshellData>* aEntriesToUpdate,
+    PContentParent* aContentParent) {
+  for (auto& data : aEntriesToSendOverIPC) {
+    SwapEntriesDocshellData* toUpdate = aEntriesToUpdate->AppendElement();
+
+    // Old entry
+    toUpdate->oldEntry() = static_cast<LegacySHEntry*>(data.oldEntry.get());
+
+    // New entry
+    toUpdate->newEntry() = static_cast<LegacySHEntry*>(data.newEntry.get());
+    toUpdate->context() = data.context;
+  }
 }
 
 }  // namespace dom

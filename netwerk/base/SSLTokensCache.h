@@ -18,11 +18,14 @@ namespace mozilla {
 namespace net {
 
 struct SessionCacheInfo {
+  SessionCacheInfo Clone() const;
+
   psm::EVStatus mEVStatus = psm::EVStatus::NotEV;
   uint16_t mCertificateTransparencyStatus =
       nsITransportSecurityInfo::CERTIFICATE_TRANSPARENCY_NOT_APPLICABLE;
   nsTArray<uint8_t> mServerCertBytes;
   Maybe<nsTArray<nsTArray<uint8_t>>> mSucceededCertChainBytes;
+  Maybe<bool> mIsBuiltCertChainRootBuiltInRoot;
 };
 
 class SSLTokensCache : public nsIMemoryReporter {

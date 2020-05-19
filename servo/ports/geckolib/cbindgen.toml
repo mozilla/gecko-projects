@@ -203,11 +203,20 @@ include = [
   "ComputedJustifyItems",
   "AlignContent",
   "JustifyContent",
+  "AlignTracks",
+  "JustifyTracks",
   "TransformStyle",
   "Image",
   "ClipPath",
   "ShapeOutside",
   "GridAutoFlow",
+  "Cursor",
+  "SVGStrokeDashArray",
+  "SVGLength",
+  "SVGOpacity",
+  "SVGWidth",
+  "TextAlign",
+  "TextAlignLast",
 ]
 item_types = ["enums", "structs", "unions", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -224,6 +233,7 @@ renaming_overrides_prefixing = true
 "nsACString" = "nsACString"
 "nsAString" = "nsAString"
 "nsString" = "nsString"
+"CopyableTArray" = "CopyableTArray"
 "nsTArray" = "nsTArray"
 "nsPresContext" = "nsPresContext"
 "ComputedTiming" = "ComputedTiming"
@@ -269,6 +279,22 @@ renaming_overrides_prefixing = true
   inline bool IsZero() const;
   CSSCoord ToCSSPixels() const { return _0; }
   inline void ScaleBy(float);
+"""
+
+"GenericCalcNode" = """
+ private:
+
+  template <typename ResultT, typename PercentageConverter>
+  ResultT ResolveInternal(ResultT aPercentageBasis,
+                          PercentageConverter aPercentageConverter) const;
+
+ public:
+  CSSCoord ResolveToCSSPixels(CSSCoord aPercentageBasis) const;
+
+  using CoordPercentageRounder = nscoord(*)(float);
+  nscoord Resolve(nscoord aBasis, CoordPercentageRounder) const;
+
+  void ScaleLengthsBy(float);
 """
 
 "LengthPercentageUnion" = """
@@ -386,21 +412,33 @@ renaming_overrides_prefixing = true
 
   // Defined in WritingModes.h
   inline const T& Get(mozilla::Side) const;
-  inline const T& Get(mozilla::WritingMode, mozilla::LogicalSide) const;
-  inline const T& GetIStart(mozilla::WritingMode) const;
-  inline const T& GetBStart(mozilla::WritingMode) const;
-  inline const T& GetIEnd(mozilla::WritingMode) const;
-  inline const T& GetBEnd(mozilla::WritingMode) const;
+  inline const T& Get(WritingMode, LogicalSide) const;
+  inline const T& GetIStart(WritingMode) const;
+  inline const T& GetBStart(WritingMode) const;
+  inline const T& Start(LogicalAxis, WritingMode) const;
+  inline const T& GetIEnd(WritingMode) const;
+  inline const T& GetBEnd(WritingMode) const;
+  inline const T& End(LogicalAxis, WritingMode) const;
+
+  inline T& Get(mozilla::Side);
+  inline T& Get(WritingMode, LogicalSide);
+  inline T& GetIStart(WritingMode);
+  inline T& GetBStart(WritingMode);
+  inline T& GetIEnd(WritingMode);
+  inline T& GetBEnd(WritingMode);
 """
 
 "GenericBorderRadius" = """
-  inline const StyleLengthPercentage& Get(mozilla::HalfCorner) const;
+  inline const StyleLengthPercentage& Get(HalfCorner) const;
 """
 
 "RestyleHint" = """
   static inline StyleRestyleHint RestyleSubtree();
   static inline StyleRestyleHint RecascadeSubtree();
   static inline StyleRestyleHint ForAnimations();
+  // Returns true if this change hint is guaranteed to at least recascade all
+  // elements in the subtree of the element it is applied to.
+  inline bool DefinitelyRecascadesAllSubtree() const;
 """
 
 "TextTransform" = """
@@ -417,7 +455,7 @@ renaming_overrides_prefixing = true
 """
 
 # TODO(emilio): Add hooks to cbindgen to be able to generate MOZ_MUST_USE_TYPE
-# or MOZ_MUST_USE on the functions.
+# or [[nodiscard]] on the functions.
 "Owned" = """
   UniquePtr<GeckoType> Consume() {
     UniquePtr<GeckoType> ret(ptr);
@@ -513,7 +551,7 @@ renaming_overrides_prefixing = true
   // Increase the reference count.
   inline void IncrementRef();
   // Release the reference count, and return whether the result must be freed or not.
-  MOZ_MUST_USE inline bool DecrementRef();
+  [[nodiscard]] inline bool DecrementRef();
 """
 
 "ArcSlice" = """

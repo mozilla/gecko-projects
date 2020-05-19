@@ -39,6 +39,7 @@
 #include <algorithm>
 #include "sslexp.h"
 #include "mozilla/net/SSLTokensCache.h"
+#include "mozilla/StaticPrefs_network.h"
 
 #include "nsPrintfCString.h"
 #include "xpcpublic.h"
@@ -736,7 +737,6 @@ nsSocketTransport::nsSocketTransport()
       mFastOpenStatus(TFO_NOT_SET),
       mFirstRetryError(NS_OK),
       mDoNotRetryToConnect(false),
-      mSSLCallbackSet(false),
       mUsingQuic(false) {
   this->mNetAddr.raw.family = 0;
   this->mNetAddr.inet = {};
@@ -907,7 +907,6 @@ nsresult nsSocketTransport::InitWithConnectedSocket(PRFileDesc* fd,
   memcpy(&mNetAddr, addr, sizeof(NetAddr));
 
   mPollFlags = (PR_POLL_READ | PR_POLL_WRITE | PR_POLL_EXCEPT);
-  mPollTimeout = mTimeouts[TIMEOUT_READ_WRITE];
   mState = STATE_TRANSFERRING;
   SetSocketName(fd);
   mNetAddrIsSet = true;
@@ -918,6 +917,7 @@ nsresult nsSocketTransport::InitWithConnectedSocket(PRFileDesc* fd,
     mFD = fd;
     mFDref = 1;
     mFDconnected = true;
+    mPollTimeout = mTimeouts[TIMEOUT_READ_WRITE];
   }
 
   // make sure new socket is non-blocking
@@ -1277,36 +1277,6 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
   return rv;
 }
 
-// static
-SECStatus nsSocketTransport::StoreResumptionToken(
-    PRFileDesc* fd, const PRUint8* resumptionToken, unsigned int len,
-    void* ctx) {
-  PRIntn val;
-  if (SSL_OptionGet(fd, SSL_ENABLE_SESSION_TICKETS, &val) != SECSuccess ||
-      val == 0) {
-    return SECFailure;
-  }
-
-  nsCOMPtr<nsISSLSocketControl> secCtrl =
-      do_QueryInterface(static_cast<nsSocketTransport*>(ctx)->mSecInfo);
-  if (!secCtrl) {
-    return SECFailure;
-  }
-  nsAutoCString peerId;
-  secCtrl->GetPeerId(peerId);
-
-  nsCOMPtr<nsITransportSecurityInfo> secInfo = do_QueryInterface(secCtrl);
-  if (!secInfo) {
-    return SECFailure;
-  }
-
-  if (NS_FAILED(SSLTokensCache::Put(peerId, resumptionToken, len, secInfo))) {
-    return SECFailure;
-  }
-
-  return SECSuccess;
-}
-
 nsresult nsSocketTransport::InitiateSocket() {
   SOCKET_LOG(("nsSocketTransport::InitiateSocket [this=%p]\n", this));
 
@@ -1442,6 +1412,16 @@ nsresult nsSocketTransport::InitiateSocket() {
   status = PR_SetSocketOption(fd, &opt);
   NS_ASSERTION(status == PR_SUCCESS, "unable to make socket non-blocking");
 
+  if (mUsingQuic) {
+    opt.option = PR_SockOpt_RecvBufferSize;
+    opt.value.recv_buffer_size =
+        StaticPrefs::network_http_http3_recvBufferSize();
+    status = PR_SetSocketOption(fd, &opt);
+    if (status != PR_SUCCESS) {
+      SOCKET_LOG(("  Couldn't set recv buffer size"));
+    }
+  }
+
   if (!mUsingQuic) {
     if (mReuseAddrPort) {
       SOCKET_LOG(("  Setting port/addr reuse socket options\n"));
@@ -1522,11 +1502,11 @@ nsresult nsSocketTransport::InitiateSocket() {
     mFD = fd;
     mFDref = 1;
     mFDconnected = false;
+    mPollTimeout = mTimeouts[TIMEOUT_CONNECT];
   }
 
   SOCKET_LOG(("  advancing to STATE_CONNECTING\n"));
   mState = STATE_CONNECTING;
-  mPollTimeout = mTimeouts[TIMEOUT_CONNECT];
   SendStatus(NS_NET_STATUS_CONNECTING_TO);
 
   if (SOCKET_LOG_ENABLED()) {
@@ -1609,30 +1589,6 @@ nsresult nsSocketTransport::InitiateSocket() {
            "started [this=%p]\n",
            this));
     }
-  }
-
-  nsCOMPtr<nsISSLSocketControl> secCtrl = do_QueryInterface(mSecInfo);
-  if (usingSSL && secCtrl && SSLTokensCache::IsEnabled()) {
-    PRIntn val;
-    // If SSL_NO_CACHE option was set, we must not use the cache
-    if (SSL_OptionGet(fd, SSL_NO_CACHE, &val) == SECSuccess && val == 0) {
-      nsTArray<uint8_t> token;
-      nsAutoCString peerId;
-      secCtrl->GetPeerId(peerId);
-      nsresult rv2 = SSLTokensCache::Get(peerId, token);
-      if (NS_SUCCEEDED(rv2) && token.Length() != 0) {
-        SECStatus srv =
-            SSL_SetResumptionToken(fd, token.Elements(), token.Length());
-        if (srv == SECFailure) {
-          SOCKET_LOG(("Setting token failed with NSS error %d [id=%s]",
-                      PORT_GetError(), PromiseFlatCString(peerId).get()));
-          SSLTokensCache::Remove(peerId);
-        }
-      }
-    }
-
-    SSL_SetResumptionTokenCallback(fd, &StoreResumptionToken, this);
-    mSSLCallbackSet = true;
   }
 
   bool connectCalled = true;  // This is only needed for telemetry.
@@ -2006,7 +1962,6 @@ void nsSocketTransport::OnSocketConnected() {
   SOCKET_LOG(("  advancing to STATE_TRANSFERRING\n"));
 
   mPollFlags = (PR_POLL_READ | PR_POLL_WRITE | PR_POLL_EXCEPT);
-  mPollTimeout = mTimeouts[TIMEOUT_READ_WRITE];
   mState = STATE_TRANSFERRING;
 
   // Set the m*AddrIsSet flags only when state has reached TRANSFERRING
@@ -2030,6 +1985,7 @@ void nsSocketTransport::OnSocketConnected() {
     SetSocketName(mFD);
     mFDconnected = true;
     mFDFastOpenInProgress = false;
+    mPollTimeout = mTimeouts[TIMEOUT_READ_WRITE];
   }
 
   // Ensure keepalive is configured correctly if previously enabled.
@@ -2121,11 +2077,6 @@ void nsSocketTransport::ReleaseFD_Locked(PRFileDesc* fd) {
   NS_ASSERTION(mFD == fd, "wrong fd");
 
   if (--mFDref == 0) {
-    if (mSSLCallbackSet) {
-      SSL_SetResumptionTokenCallback(fd, nullptr, nullptr);
-      mSSLCallbackSet = false;
-    }
-
     if (gIOService->IsNetTearingDown() &&
         ((PR_IntervalNow() - gIOService->NetTearingDownStarted()) >
          gSocketTransportService->MaxTimeForPrClosePref())) {
@@ -2263,9 +2214,12 @@ void nsSocketTransport::OnSocketEvent(uint32_t type, nsresult status,
       break;
     case MSG_TIMEOUT_CHANGED:
       SOCKET_LOG(("  MSG_TIMEOUT_CHANGED\n"));
-      mPollTimeout =
-          mTimeouts[(mState == STATE_TRANSFERRING) ? TIMEOUT_READ_WRITE
-                                                   : TIMEOUT_CONNECT];
+      {
+        MutexAutoLock lock(mLock);
+        mPollTimeout =
+            mTimeouts[(mState == STATE_TRANSFERRING) ? TIMEOUT_READ_WRITE
+                                                     : TIMEOUT_CONNECT];
+      }
       break;
     default:
       SOCKET_LOG(("  unhandled event!\n"));
@@ -2326,7 +2280,10 @@ void nsSocketTransport::OnSocketReady(PRFileDesc* fd, int16_t outFlags) {
       mInput.OnSocketReady(NS_OK);
     }
     // Update poll timeout in case it was changed
-    mPollTimeout = mTimeouts[TIMEOUT_READ_WRITE];
+    {
+      MutexAutoLock lock(mLock);
+      mPollTimeout = mTimeouts[TIMEOUT_READ_WRITE];
+    }
   } else if ((mState == STATE_CONNECTING) && !gIOService->IsNetTearingDown()) {
     // We do not need to do PR_ConnectContinue when we are already
     // shutting down.
@@ -2399,7 +2356,10 @@ void nsSocketTransport::OnSocketReady(PRFileDesc* fd, int16_t outFlags) {
         // Set up the select flags for connect...
         mPollFlags = (PR_POLL_EXCEPT | PR_POLL_WRITE);
         // Update poll timeout in case it was changed
-        mPollTimeout = mTimeouts[TIMEOUT_CONNECT];
+        {
+          MutexAutoLock lock(mLock);
+          mPollTimeout = mTimeouts[TIMEOUT_CONNECT];
+        }
       }
       //
       // The SOCKS proxy rejected our request. Find out why.
@@ -2865,8 +2825,8 @@ nsSocketTransport::GetScriptablePeerAddr(nsINetAddr** addr) {
   rv = GetPeerAddr(&rawAddr);
   if (NS_FAILED(rv)) return rv;
 
-  NS_ADDREF(*addr = new nsNetAddr(&rawAddr));
-
+  RefPtr<nsNetAddr> netaddr = new nsNetAddr(&rawAddr);
+  netaddr.forget(addr);
   return NS_OK;
 }
 
@@ -2878,7 +2838,8 @@ nsSocketTransport::GetScriptableSelfAddr(nsINetAddr** addr) {
   rv = GetSelfAddr(&rawAddr);
   if (NS_FAILED(rv)) return rv;
 
-  NS_ADDREF(*addr = new nsNetAddr(&rawAddr));
+  RefPtr<nsNetAddr> netaddr = new nsNetAddr(&rawAddr);
+  netaddr.forget(addr);
 
   return NS_OK;
 }
@@ -2886,6 +2847,7 @@ nsSocketTransport::GetScriptableSelfAddr(nsINetAddr** addr) {
 NS_IMETHODIMP
 nsSocketTransport::GetTimeout(uint32_t type, uint32_t* value) {
   NS_ENSURE_ARG_MAX(type, nsISocketTransport::TIMEOUT_READ_WRITE);
+  MutexAutoLock lock(mLock);
   *value = (uint32_t)mTimeouts[type];
   return NS_OK;
 }
@@ -2898,7 +2860,10 @@ nsSocketTransport::SetTimeout(uint32_t type, uint32_t value) {
               value));
 
   // truncate overly large timeout values.
-  mTimeouts[type] = (uint16_t)std::min<uint32_t>(value, UINT16_MAX);
+  {
+    MutexAutoLock lock(mLock);
+    mTimeouts[type] = (uint16_t)std::min<uint32_t>(value, UINT16_MAX);
+  }
   PostEvent(MSG_TIMEOUT_CHANGED);
   return NS_OK;
 }
@@ -3003,10 +2968,43 @@ nsSocketTransport::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   SOCKET_LOG(("nsSocketTransport::OnLookupComplete: this=%p status %" PRIx32
               ".",
               this, static_cast<uint32_t>(status)));
+
+  if (request == mDNSTxtRequest) {
+    if (NS_SUCCEEDED(status)) {
+      nsCOMPtr<nsIDNSTXTRecord> txtResponse = do_QueryInterface(rec);
+      txtResponse->GetRecordsAsOneString(mDNSRecordTxt);
+      mDNSRecordTxt.Trim(" ");
+    }
+    Telemetry::Accumulate(Telemetry::ESNI_KEYS_RECORDS_FOUND,
+                          NS_SUCCEEDED(status));
+    // flag host lookup complete for the benefit of the ResolveHost method.
+    if (!mDNSRequest) {
+      mResolving = false;
+      MOZ_ASSERT(mDNSARequestFinished);
+      Telemetry::Accumulate(
+          Telemetry::ESNI_KEYS_RECORD_FETCH_DELAYS,
+          PR_IntervalToMilliseconds(PR_IntervalNow() - mDNSARequestFinished));
+
+      nsresult rv =
+          PostEvent(MSG_DNS_LOOKUP_COMPLETE, mDNSLookupStatus, nullptr);
+
+      // if posting a message fails, then we should assume that the socket
+      // transport has been shutdown.  this should never happen!  if it does
+      // it means that the socket transport service was shutdown before the
+      // DNS service.
+      if (NS_FAILED(rv)) {
+        NS_WARNING("unable to post DNS lookup complete message");
+      }
+    } else {
+      mDNSTxtRequest = nullptr;
+    }
+    return NS_OK;
+  }
+
   if (NS_FAILED(status) && mDNSTxtRequest) {
     mDNSTxtRequest->Cancel(NS_ERROR_ABORT);
   } else if (NS_SUCCEEDED(status)) {
-    mDNSRecord = static_cast<nsIDNSRecord*>(rec);
+    mDNSRecord = rec;
   }
 
   // flag host lookup complete for the benefit of the ResolveHost method.
@@ -3029,46 +3027,6 @@ nsSocketTransport::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
         status;  // remember the status to send it when esni lookup is ready.
     mDNSRequest = nullptr;
     mDNSARequestFinished = PR_IntervalNow();
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsSocketTransport::OnLookupByTypeComplete(nsICancelable* request,
-                                          nsIDNSByTypeRecord* txtResponse,
-                                          nsresult status) {
-  SOCKET_LOG(
-      ("nsSocketTransport::OnLookupByTypeComplete: "
-       "this=%p status %" PRIx32 ".",
-       this, static_cast<uint32_t>(status)));
-  MOZ_ASSERT(mDNSTxtRequest == request);
-
-  if (NS_SUCCEEDED(status)) {
-    txtResponse->GetRecordsAsOneString(mDNSRecordTxt);
-    mDNSRecordTxt.Trim(" ");
-  }
-  Telemetry::Accumulate(Telemetry::ESNI_KEYS_RECORDS_FOUND,
-                        NS_SUCCEEDED(status));
-  // flag host lookup complete for the benefit of the ResolveHost method.
-  if (!mDNSRequest) {
-    mResolving = false;
-    MOZ_ASSERT(mDNSARequestFinished);
-    Telemetry::Accumulate(
-        Telemetry::ESNI_KEYS_RECORD_FETCH_DELAYS,
-        PR_IntervalToMilliseconds(PR_IntervalNow() - mDNSARequestFinished));
-
-    nsresult rv = PostEvent(MSG_DNS_LOOKUP_COMPLETE, mDNSLookupStatus, nullptr);
-
-    // if posting a message fails, then we should assume that the socket
-    // transport has been shutdown.  this should never happen!  if it does
-    // it means that the socket transport service was shutdown before the
-    // DNS service.
-    if (NS_FAILED(rv)) {
-      NS_WARNING("unable to post DNS lookup complete message");
-    }
-  } else {
-    mDNSTxtRequest = nullptr;
   }
 
   return NS_OK;

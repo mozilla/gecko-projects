@@ -19,9 +19,11 @@
 #include "nsIStreamListener.h"
 #include "nsIRedirectHistoryEntry.h"
 #include "nsReadableUtils.h"
+#include "nsIXPConnect.h"
 
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/CmdLineAndEnvUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "mozilla/dom/BrowserChild.h"
@@ -287,11 +289,11 @@ static nsresult DoCheckLoadURIChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo) {
       nsIContentPolicy::TYPE_INTERNAL_DTD) {
     RefPtr<Document> doc;
     aLoadInfo->GetLoadingDocument(getter_AddRefs(doc));
-    return nsContentUtils::PrincipalAllowsL10n(
-               *aLoadInfo->TriggeringPrincipal(),
-               doc ? doc->GetDocumentURI() : nullptr)
-               ? NS_OK
-               : NS_ERROR_DOM_BAD_URI;
+    bool allowed = false;
+    aLoadInfo->TriggeringPrincipal()->IsL10nAllowed(
+        doc ? doc->GetDocumentURI() : nullptr, &allowed);
+
+    return allowed ? NS_OK : NS_ERROR_DOM_BAD_URI;
   }
 
   // This is used in order to allow a privileged DOMParser to parse documents
@@ -346,8 +348,6 @@ static nsresult DoCORSChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo,
                      "can not perform CORS checks without a listener");
 
   // No need to set up CORS if TriggeringPrincipal is the SystemPrincipal.
-  // For example, allow user stylesheets to load XBL from external files
-  // without requiring CORS.
   if (aLoadInfo->TriggeringPrincipal()->IsSystemPrincipal()) {
     return NS_OK;
   }
@@ -419,11 +419,6 @@ static nsresult DoContentSecurityChecks(nsIChannel* aChannel,
 
     case nsIContentPolicy::TYPE_REFRESH: {
       MOZ_ASSERT(false, "contentPolicyType not supported yet");
-      break;
-    }
-
-    case nsIContentPolicy::TYPE_XBL: {
-      mimeTypeGuess = EmptyCString();
       break;
     }
 
@@ -711,7 +706,7 @@ static void DebugDoContentSecurityCheck(nsIChannel* aChannel,
 
     // Log Principals
     nsCOMPtr<nsIPrincipal> requestPrincipal = aLoadInfo->TriggeringPrincipal();
-    LogPrincipal(aLoadInfo->LoadingPrincipal(),
+    LogPrincipal(aLoadInfo->GetLoadingPrincipal(),
                  NS_LITERAL_STRING("loadingPrincipal"));
     LogPrincipal(requestPrincipal, NS_LITERAL_STRING("triggeringPrincipal"));
     LogPrincipal(aLoadInfo->PrincipalToInherit(),
@@ -738,6 +733,9 @@ static void DebugDoContentSecurityCheck(nsIChannel* aChannel,
     MOZ_LOG(sCSMLog, LogLevel::Verbose,
             ("  initalSecurityChecksDone: %s\n",
              aLoadInfo->GetInitialSecurityCheckDone() ? "true" : "false"));
+    MOZ_LOG(sCSMLog, LogLevel::Verbose,
+            ("  allowDeprecatedSystemRequests: %s\n",
+             aLoadInfo->GetAllowDeprecatedSystemRequests() ? "true" : "false"));
 
     // Log CSPrequestPrincipal
     nsCOMPtr<nsIContentSecurityPolicy> csp = aLoadInfo->GetCsp();
@@ -769,100 +767,81 @@ nsresult nsContentSecurityManager::CheckAllowLoadInSystemPrivilegedContext(
 
   // nothing to do here if we are not loading a resource into a
   // system prvileged context.
-  if (!loadInfo->LoadingPrincipal() ||
-      !loadInfo->LoadingPrincipal()->IsSystemPrincipal()) {
+  if (!loadInfo->GetLoadingPrincipal() ||
+      !loadInfo->GetLoadingPrincipal()->IsSystemPrincipal()) {
     return NS_OK;
   }
-
-  nsCOMPtr<nsIURI> finalURI;
-  NS_GetFinalChannelURI(aChannel, getter_AddRefs(finalURI));
-
-  // nothing to do here if we are not loading a resource using http:, https:,
-  // etc.
-  if (!nsContentUtils::SchemeIs(finalURI, "http") &&
-      !nsContentUtils::SchemeIs(finalURI, "https") &&
-      !nsContentUtils::SchemeIs(finalURI, "ftp")) {
+  // loads with the allow flag are waived through
+  // until refactored (e.g., Shavar, OCSP)
+  if (loadInfo->GetAllowDeprecatedSystemRequests()) {
     return NS_OK;
   }
 
   nsContentPolicyType contentPolicyType =
       loadInfo->GetExternalContentPolicyType();
+  // allowing data fetches due to their lowered risk
+  // i.e., limited parsing, no rendering
+  if ((contentPolicyType == nsIContentPolicy::TYPE_FETCH) ||
+      (contentPolicyType == nsIContentPolicy::TYPE_XMLHTTPREQUEST) ||
+      (contentPolicyType == nsIContentPolicy::TYPE_WEBSOCKET)) {
+    return NS_OK;
+  }
 
-  // We distinguish between 2 cases:
-  // a) remote scripts
-  //    which should never be loaded into system privileged contexts
-  // b) remote documents/frames
-  //    which generally should also never be loaded into system
-  //    privileged contexts but with some exceptions, like e.g. the
-  //    discoverURL.
-  if (contentPolicyType == nsIContentPolicy::TYPE_SCRIPT) {
-    if (StaticPrefs::
-            dom_security_skip_remote_script_assertion_in_system_priv_context()) {
+  // Allow the user interface (e.g., schemes like chrome, resource)
+  nsCOMPtr<nsIURI> finalURI;
+  NS_GetFinalChannelURI(aChannel, getter_AddRefs(finalURI));
+  bool isUiResource = false;
+  if (NS_SUCCEEDED(NS_URIChainHasFlags(
+          finalURI, nsIProtocolHandler::URI_IS_UI_RESOURCE, &isUiResource)) &&
+      isUiResource) {
+    return NS_OK;
+  }
+  // For about: and extension-based URIs, which don't get
+  // URI_IS_UI_RESOURCE, first remove layers of view-source:, if present.
+  while (finalURI && finalURI->SchemeIs("view-source")) {
+    nsCOMPtr<nsINestedURI> nested = do_QueryInterface(finalURI);
+    if (nested) {
+      nested->GetInnerURI(getter_AddRefs(finalURI));
+    }
+  }
+  // This is our escape hatch, if things break in release.
+  // We expect to remove the pref in bug 1638770
+  bool cancelNonLocalSystemPrincipal =
+      Preferences::GetBool("security.cancel_non_local_systemprincipal");
+
+  // GetInnerURI can return null for malformed nested URIs like moz-icon:trash
+  if (!finalURI && cancelNonLocalSystemPrincipal) {
+    aChannel->Cancel(NS_ERROR_CONTENT_BLOCKED);
+    return NS_ERROR_CONTENT_BLOCKED;
+  }
+  // loads of userContent.css during startup and tests that show up as file:
+  if (finalURI->SchemeIs("file")) {
+    if ((contentPolicyType == nsIContentPolicy::TYPE_STYLESHEET) ||
+        (contentPolicyType == nsIContentPolicy::TYPE_OTHER)) {
       return NS_OK;
     }
-    nsAutoCString scriptSpec;
-    finalURI->GetSpec(scriptSpec);
-    MOZ_LOG(
-        sCSMLog, LogLevel::Warning,
-        ("Do not load remote scripts into system privileged contexts, url: %s",
-         scriptSpec.get()));
-    MOZ_ASSERT(false,
-               "Do not load remote scripts into system privileged contexts");
-    // Bug 1607673: Do not only assert but cancel the channel and
-    // return NS_ERROR_CONTENT_BLOCKED.
+  }
+  // loads from within omni.ja and system add-ons use jar:
+  // this is safe to allow, because we do not support remote jar.
+  // about: resources are always allowed: they are part of the build.
+  if (finalURI->SchemeIs("jar") || finalURI->SchemeIs("about")) {
     return NS_OK;
   }
-
-  if ((contentPolicyType != nsIContentPolicy::TYPE_DOCUMENT) &&
-      (contentPolicyType != nsIContentPolicy::TYPE_SUBDOCUMENT)) {
-    return NS_OK;
-  }
-
-  // FIXME The discovery feature in about:addons uses the SystemPrincpal.
-  // We should remove the exception for AMO with bug 1544011.
-  // We should remove the exception for Firefox Accounts with bug 1561318.
-  static nsAutoCString sDiscoveryPrePath;
-#ifdef ANDROID
-  static nsAutoCString sFxaSPrePath;
-#endif
-  static bool recvdPrefValues = false;
-  if (!recvdPrefValues) {
-    nsAutoCString discoveryURLString;
-    Preferences::GetCString("extensions.webservice.discoverURL",
-                            discoveryURLString);
-    // discoverURL is by default suffixed with parameters in path like
-    // /%LOCALE%/ so, we use the prePath for comparison
-    nsCOMPtr<nsIURI> discoveryURL;
-    NS_NewURI(getter_AddRefs(discoveryURL), discoveryURLString);
-    if (discoveryURL) {
-      discoveryURL->GetPrePath(sDiscoveryPrePath);
+  // images need less stricter checks
+  if (contentPolicyType == nsIContentPolicy::TYPE_IMAGE) {
+    if (finalURI->SchemeIs("moz-extension") ||
+        finalURI->SchemeIs("page-icon") || finalURI->SchemeIs("data")) {
+      return NS_OK;
     }
-#ifdef ANDROID
-    nsAutoCString fxaURLString;
-    Preferences::GetCString("identity.fxaccounts.remote.webchannel.uri",
-                            fxaURLString);
-    nsCOMPtr<nsIURI> fxaURL;
-    NS_NewURI(getter_AddRefs(fxaURL), fxaURLString);
-    if (fxaURL) {
-      fxaURL->GetPrePath(sFxaSPrePath);
-    }
-#endif
-    recvdPrefValues = true;
   }
-  nsAutoCString requestedPrePath;
-  finalURI->GetPrePath(requestedPrePath);
 
-  if (requestedPrePath.Equals(sDiscoveryPrePath)) {
-    return NS_OK;
-  }
-#ifdef ANDROID
-  if (requestedPrePath.Equals(sFxaSPrePath)) {
-    return NS_OK;
-  }
-#endif
-  nsAutoCString requestedURL;
-  finalURI->GetAsciiSpec(requestedURL);
-  if (xpc::AreNonLocalConnectionsDisabled()) {
+  // Relaxing restrictions for our test suites:
+  // (1) AreNonLocalConnectionsDisabled() disables network, so http://mochitest
+  // is actually local and allowed. (2) The marionette test framework uses
+  // injections and data URLs to execute scripts, checking for the environment
+  // variable breaks the attack but not the tests.
+  if (xpc::AreNonLocalConnectionsDisabled() ||
+      mozilla::EnvHasValue("MOZ_MARIONETTE")) {
     bool disallowSystemPrincipalRemoteDocuments = Preferences::GetBool(
         "security.disallow_non_local_systemprincipal_in_tests");
     if (disallowSystemPrincipalRemoteDocuments) {
@@ -874,12 +853,70 @@ nsresult nsContentSecurityManager::CheckAllowLoadInSystemPrivilegedContext(
     // but other mochitest are exempt from this
     return NS_OK;
   }
+
+  nsAutoCString requestedURL;
+  finalURI->GetAsciiSpec(requestedURL);
   MOZ_LOG(
       sCSMLog, LogLevel::Warning,
       ("SystemPrincipal must not load remote documents. URL: %s", requestedURL)
           .get());
+
   MOZ_ASSERT(false, "SystemPrincipal must not load remote documents.");
-  aChannel->Cancel(NS_ERROR_CONTENT_BLOCKED);
+  if (cancelNonLocalSystemPrincipal) {
+    aChannel->Cancel(NS_ERROR_CONTENT_BLOCKED);
+    return NS_ERROR_CONTENT_BLOCKED;
+  }
+  return NS_OK;
+}
+
+/*
+ * Every protocol handler must set one of the five security flags
+ * defined in nsIProtocolHandler - if not - deny the load.
+ */
+nsresult nsContentSecurityManager::CheckChannelHasProtocolSecurityFlag(
+    nsIChannel* aChannel) {
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsAutoCString scheme;
+  rv = uri->GetScheme(scheme);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIIOService> ios = do_GetIOService(&rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIProtocolHandler> handler;
+  rv = ios->GetProtocolHandler(scheme.get(), getter_AddRefs(handler));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  uint32_t flags;
+  rv = handler->DoGetProtocolFlags(uri, &flags);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  uint32_t securityFlagsSet = 0;
+  if (flags & nsIProtocolHandler::URI_LOADABLE_BY_ANYONE) {
+    securityFlagsSet += 1;
+  }
+  if (flags & nsIProtocolHandler::URI_DANGEROUS_TO_LOAD) {
+    securityFlagsSet += 1;
+  }
+  if (flags & nsIProtocolHandler::URI_IS_UI_RESOURCE) {
+    securityFlagsSet += 1;
+  }
+  if (flags & nsIProtocolHandler::URI_IS_LOCAL_FILE) {
+    securityFlagsSet += 1;
+  }
+  if (flags & nsIProtocolHandler::URI_LOADABLE_BY_SUBSUMERS) {
+    securityFlagsSet += 1;
+  }
+
+  // Ensure that only "1" valid security flags is set.
+  if (securityFlagsSet == 1) {
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(false, "protocol must use one valid security flag");
   return NS_ERROR_CONTENT_BLOCKED;
 }
 
@@ -910,6 +947,9 @@ nsresult nsContentSecurityManager::doContentSecurityCheck(
   }
 
   nsresult rv = CheckAllowLoadInSystemPrivilegedContext(aChannel);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = CheckChannelHasProtocolSecurityFlag(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // if dealing with a redirected channel then we have already installed
@@ -1021,7 +1061,7 @@ nsresult nsContentSecurityManager::CheckChannel(nsIChannel* aChannel) {
     // We shouldn't have the SEC_COOKIES_SAME_ORIGIN flag for top level loads
     MOZ_ASSERT(loadInfo->GetExternalContentPolicyType() !=
                nsIContentPolicy::TYPE_DOCUMENT);
-    nsIPrincipal* loadingPrincipal = loadInfo->LoadingPrincipal();
+    nsIPrincipal* loadingPrincipal = loadInfo->GetLoadingPrincipal();
 
     // It doesn't matter what we pass for the second, data-inherits, argument.
     // Any protocol which inherits won't pay attention to cookies anyway.
@@ -1044,7 +1084,6 @@ nsresult nsContentSecurityManager::CheckChannel(nsIChannel* aChannel) {
   }
 
   // Allow subresource loads if TriggeringPrincipal is the SystemPrincipal.
-  // For example, allow user stylesheets to load XBL from external files.
   if (loadInfo->TriggeringPrincipal()->IsSystemPrincipal() &&
       loadInfo->GetExternalContentPolicyType() !=
           nsIContentPolicy::TYPE_DOCUMENT &&

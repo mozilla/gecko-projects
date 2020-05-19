@@ -157,12 +157,22 @@ class Grid;
     }                                                \
   }
 
+#define REFLECT_NULLABLE_DOMSTRING_ATTR(method, attr)           \
+  void Get##method(nsAString& aValue) const {                   \
+    if (!GetAttr(nsGkAtoms::attr, aValue)) {                    \
+      SetDOMStringToNull(aValue);                               \
+    }                                                           \
+  }                                                             \
+  void Set##method(const nsAString& aValue, ErrorResult& aRv) { \
+    SetAttr(nsGkAtoms::attr, aValue, aRv);                      \
+  }
+
 class Element : public FragmentOrElement {
  public:
 #ifdef MOZILLA_INTERNAL_API
   explicit Element(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
       : FragmentOrElement(std::move(aNodeInfo)),
-        mState(NS_EVENT_STATE_MOZ_READONLY | NS_EVENT_STATE_DEFINED) {
+        mState(NS_EVENT_STATE_READONLY | NS_EVENT_STATE_DEFINED) {
     MOZ_ASSERT(mNodeInfo->NodeType() == ELEMENT_NODE,
                "Bad NodeType in aNodeInfo");
     SetIsElement();
@@ -215,6 +225,11 @@ class Element : public FragmentOrElement {
    * Get tabIndex of this element. If not found, return TabIndexDefault.
    */
   int32_t TabIndex();
+
+  /**
+   * Get the parsed value of tabindex attribute.
+   */
+  Maybe<int32_t> GetTabIndexAttrValue();
 
   /**
    * Set tabIndex value to this element.
@@ -363,7 +378,7 @@ class Element : public FragmentOrElement {
   /**
    * Returns if the element is interactive content as per HTML specification.
    */
-  virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const;
+  virtual bool IsInteractiveHTMLContent() const;
 
   /**
    * Returns |this| as an nsIMozBrowserFrame* if the element is a frame or
@@ -536,6 +551,52 @@ class Element : public FragmentOrElement {
       RemoveStates(NS_EVENT_STATE_DEFINED);
     }
   }
+
+  // AccessibilityRole
+  REFLECT_NULLABLE_DOMSTRING_ATTR(Role, role)
+
+  // AriaAttributes
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaAtomic, aria_atomic)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaAutoComplete, aria_autocomplete)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaBusy, aria_busy)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaChecked, aria_checked)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaColCount, aria_colcount)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaColIndex, aria_colindex)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaColIndexText, aria_colindextext)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaColSpan, aria_colspan)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaCurrent, aria_current)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaDescription, aria_description)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaDisabled, aria_disabled)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaExpanded, aria_expanded)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaHasPopup, aria_haspopup)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaHidden, aria_hidden)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaInvalid, aria_invalid)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaKeyShortcuts, aria_keyshortcuts)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaLabel, aria_label)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaLevel, aria_level)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaLive, aria_live)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaModal, aria_modal)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaMultiLine, aria_multiline)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaMultiSelectable, aria_multiselectable)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaOrientation, aria_orientation)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaPlaceholder, aria_placeholder)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaPosInSet, aria_posinset)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaPressed, aria_pressed)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaReadOnly, aria_readonly)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRelevant, aria_relevant)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRequired, aria_required)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRoleDescription, aria_roledescription)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRowCount, aria_rowcount)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRowIndex, aria_rowindex)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRowIndexText, aria_rowindextext)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaRowSpan, aria_rowspan)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaSelected, aria_selected)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaSetSize, aria_setsize)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaSort, aria_sort)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaValueMax, aria_valuemax)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaValueMin, aria_valuemin)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaValueNow, aria_valuenow)
+  REFLECT_NULLABLE_DOMSTRING_ATTR(AriaValueText, aria_valuetext)
 
  protected:
   /**
@@ -1300,6 +1361,8 @@ class Element : public FragmentOrElement {
   already_AddRefed<Flex> GetAsFlexContainer();
   void GetGridFragments(nsTArray<RefPtr<Grid>>& aResult);
 
+  bool HasGridFragments();
+
   already_AddRefed<DOMMatrixReadOnly> GetTransformToAncestor(
       Element& aAncestor);
   already_AddRefed<DOMMatrixReadOnly> GetTransformToParent();
@@ -1310,16 +1373,18 @@ class Element : public FragmentOrElement {
       const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
       ErrorResult& aError);
 
-  enum class Flush { Yes, No };
-
   MOZ_CAN_RUN_SCRIPT
   void GetAnimations(const GetAnimationsOptions& aOptions,
-                     nsTArray<RefPtr<Animation>>& aAnimations,
-                     Flush aFlush = Flush::Yes);
+                     nsTArray<RefPtr<Animation>>& aAnimations);
+
+  void GetAnimationsWithoutFlush(const GetAnimationsOptions& aOptions,
+                                 nsTArray<RefPtr<Animation>>& aAnimations);
 
   static void GetAnimationsUnsorted(Element* aElement,
                                     PseudoStyleType aPseudoType,
                                     nsTArray<RefPtr<Animation>>& aAnimations);
+
+  void CloneAnimationsFrom(const Element& aOther);
 
   virtual void GetInnerHTML(nsAString& aInnerHTML, OOMReporter& aError);
   virtual void SetInnerHTML(const nsAString& aInnerHTML,
@@ -1551,8 +1616,10 @@ class Element : public FragmentOrElement {
    */
   float FontSizeInflation();
 
-  ReferrerPolicy GetReferrerPolicyAsEnum();
-  ReferrerPolicy ReferrerPolicyFromAttr(const nsAttrValue* aValue);
+  void GetImplementedPseudoElement(nsAString&) const;
+
+  ReferrerPolicy GetReferrerPolicyAsEnum() const;
+  ReferrerPolicy ReferrerPolicyFromAttr(const nsAttrValue* aValue) const;
 
   /*
    * Helpers for .dataset.  This is implemented on Element, though only some
@@ -1996,6 +2063,11 @@ inline mozilla::dom::Element* nsINode::GetPreviousElementSibling() const {
   return nullptr;
 }
 
+inline mozilla::dom::Element* nsINode::GetAsElementOrParentElement() const {
+  return IsElement() ? const_cast<mozilla::dom::Element*>(AsElement())
+                     : GetParentElement();
+}
+
 inline mozilla::dom::Element* nsINode::GetNextElementSibling() const {
   nsIContent* nextSibling = GetNextSibling();
   while (nextSibling) {
@@ -2017,7 +2089,8 @@ inline mozilla::dom::Element* nsINode::GetNextElementSibling() const {
                                nsINode** aResult) const {           \
     *aResult = nullptr;                                             \
     RefPtr<mozilla::dom::NodeInfo> ni(aNodeInfo);                   \
-    RefPtr<_elementName> it = new _elementName(ni.forget());        \
+    auto* nim = ni->NodeInfoManager();                              \
+    RefPtr<_elementName> it = new (nim) _elementName(ni.forget());  \
     nsresult rv = const_cast<_elementName*>(this)->CopyInnerTo(it); \
     if (NS_SUCCEEDED(rv)) {                                         \
       it.forget(aResult);                                           \
@@ -2032,8 +2105,9 @@ inline mozilla::dom::Element* nsINode::GetNextElementSibling() const {
                                nsINode** aResult) const {                 \
     *aResult = nullptr;                                                   \
     RefPtr<mozilla::dom::NodeInfo> ni(aNodeInfo);                         \
+    auto* nim = ni->NodeInfoManager();                                    \
     RefPtr<_elementName> it =                                             \
-        new _elementName(ni.forget() EXPAND extra_args_);                 \
+        new (nim) _elementName(ni.forget() EXPAND extra_args_);           \
     nsresult rv = it->Init();                                             \
     nsresult rv2 = const_cast<_elementName*>(this)->CopyInnerTo(it);      \
     if (NS_FAILED(rv2)) {                                                 \

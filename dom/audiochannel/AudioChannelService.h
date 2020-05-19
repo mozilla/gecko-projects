@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_audiochannelservice_h__
 #define mozilla_dom_audiochannelservice_h__
 
-#include "nsAutoPtr.h"
 #include "nsIObserver.h"
 #include "nsTObserverArray.h"
 #include "nsTArray.h"
@@ -15,6 +14,7 @@
 #include "AudioChannelAgent.h"
 #include "nsAttrValue.h"
 #include "mozilla/Logging.h"
+#include "mozilla/UniquePtr.h"
 
 #include <functional>
 
@@ -224,7 +224,6 @@ class AudioChannelService final : public nsIObserver {
                                    AudibleState aAudible,
                                    AudibleChangedReasons aReason);
 
-    void NotifyChannelActive(uint64_t aWindowID, bool aActive);
     void MaybeNotifyMediaBlockStart(AudioChannelAgent* aAgent);
   };
 
@@ -232,7 +231,7 @@ class AudioChannelService final : public nsIObserver {
 
   AudioChannelWindow* GetWindowData(uint64_t aWindowID) const;
 
-  nsTObserverArray<nsAutoPtr<AudioChannelWindow>> mWindows;
+  nsTObserverArray<UniquePtr<AudioChannelWindow>> mWindows;
 };
 
 const char* SuspendTypeToStr(const nsSuspendedTypes& aSuspend);

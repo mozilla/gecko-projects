@@ -373,7 +373,7 @@ void DecodedStreamData::GetDebugInfo(dom::DecodedStreamDataDebugInfo& aInfo) {
 
 DecodedStream::DecodedStream(
     MediaDecoderStateMachine* aStateMachine,
-    nsTArray<RefPtr<ProcessedMediaTrack>> aOutputTracks, double aVolume,
+    CopyableTArray<RefPtr<ProcessedMediaTrack>> aOutputTracks, double aVolume,
     double aPlaybackRate, bool aPreservesPitch,
     MediaQueue<AudioData>& aAudioQueue, MediaQueue<VideoData>& aVideoQueue)
     : mOwnerThread(aStateMachine->OwnerThread()),
@@ -381,16 +381,13 @@ DecodedStream::DecodedStream(
       mPlaying(false, "DecodedStream::mPlaying"),
       mPrincipalHandle(aStateMachine->OwnerThread(), PRINCIPAL_HANDLE_NONE,
                        "DecodedStream::mPrincipalHandle (Mirror)"),
+      mCanonicalOutputPrincipal(aStateMachine->CanonicalOutputPrincipal()),
       mOutputTracks(std::move(aOutputTracks)),
       mVolume(aVolume),
       mPlaybackRate(aPlaybackRate),
       mPreservesPitch(aPreservesPitch),
       mAudioQueue(aAudioQueue),
-      mVideoQueue(aVideoQueue) {
-  mPrincipalHandle.Connect(aStateMachine->CanonicalOutputPrincipal());
-
-  mWatchManager.Watch(mPlaying, &DecodedStream::PlayingChanged);
-}
+      mVideoQueue(aVideoQueue) {}
 
 DecodedStream::~DecodedStream() {
   MOZ_ASSERT(mStartTime.isNothing(), "playback should've ended.");
@@ -421,6 +418,8 @@ nsresult DecodedStream::Start(const TimeUnit& aStartTime,
   mLastOutputTime = TimeUnit::Zero();
   mInfo = aInfo;
   mPlaying = true;
+  mPrincipalHandle.Connect(mCanonicalOutputPrincipal);
+  mWatchManager.Watch(mPlaying, &DecodedStream::PlayingChanged);
   ConnectListener();
 
   class R : public Runnable {
@@ -480,11 +479,10 @@ nsresult DecodedStream::Start(const TimeUnit& aStartTime,
   MozPromiseHolder<DecodedStream::EndedPromise> audioEndedHolder;
   MozPromiseHolder<DecodedStream::EndedPromise> videoEndedHolder;
   PlaybackInfoInit init{aStartTime, aInfo};
-  nsCOMPtr<nsIRunnable> r = new R(
-      std::move(init), nsTArray<RefPtr<ProcessedMediaTrack>>(mOutputTracks),
-      std::move(audioEndedHolder), std::move(videoEndedHolder));
-  SyncRunnable::DispatchToThread(
-      SystemGroup::EventTargetFor(TaskCategory::Other), r);
+  nsCOMPtr<nsIRunnable> r =
+      new R(std::move(init), mOutputTracks.Clone(), std::move(audioEndedHolder),
+            std::move(videoEndedHolder));
+  SyncRunnable::DispatchToThread(GetMainThreadSerialEventTarget(), r);
   mData = static_cast<R*>(r.get())->ReleaseData();
 
   if (mData) {
@@ -516,6 +514,9 @@ void DecodedStream::Stop() {
   // Clear mData immediately when this playback session ends so we won't
   // send data to the wrong track in SendData() in next playback session.
   DestroyData(std::move(mData));
+
+  mPrincipalHandle.DisconnectIfConnected();
+  mWatchManager.Unwatch(mPlaying, &DecodedStream::PlayingChanged);
 }
 
 bool DecodedStream::IsStarted() const {
@@ -653,6 +654,7 @@ void DecodedStream::SendAudio(double aVolume,
     LOG_DS(LogLevel::Verbose, "Queueing audio [%" PRId64 ",%" PRId64 "]",
            audio[i]->mTime.ToMicroseconds(),
            audio[i]->GetEndTime().ToMicroseconds());
+    CheckIsDataAudible(audio[i]);
     SendStreamAudio(mData.get(), mStartTime.ref(), audio[i], &output, rate,
                     aPrincipalHandle);
   }
@@ -666,6 +668,16 @@ void DecodedStream::SendAudio(double aVolume,
   if (mAudioQueue.IsFinished() && !mData->mHaveSentFinishAudio) {
     mData->mListener->EndTrackAt(mData->mAudioTrack, mData->mAudioTrackWritten);
     mData->mHaveSentFinishAudio = true;
+  }
+}
+
+void DecodedStream::CheckIsDataAudible(const AudioData* aData) {
+  MOZ_ASSERT(aData);
+
+  bool isAudible = aData->IsAudible();
+  if (isAudible != mIsAudioDataAudible) {
+    mIsAudioDataAudible = isAudible;
+    mAudibleEvent.Notify(mIsAudioDataAudible);
   }
 }
 

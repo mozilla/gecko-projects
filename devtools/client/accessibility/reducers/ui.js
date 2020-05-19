@@ -119,7 +119,7 @@ function onAudit(state, { response: ancestries, error }) {
 
 function onHighlight(state, { accessible, response: ancestry, error }) {
   if (error) {
-    console.warn("Error fetching ancestry", accessible, error);
+    console.warn("Error fetching ancestry", error);
     return state;
   }
 
@@ -129,7 +129,7 @@ function onHighlight(state, { accessible, response: ancestry, error }) {
 
 function onSelect(state, { accessible, response: ancestry, error }) {
   if (error) {
-    console.warn("Error fetching ancestry", accessible, error);
+    console.warn("Error fetching ancestry", error);
     return state;
   }
 
@@ -178,8 +178,7 @@ function onPrefChange(state, { name, value }) {
  * @param  {Object}  action  Redux action object
  * @return {Object}  updated state
  */
-function onReset(state, { accessibility, supports }) {
-  const { enabled, canBeDisabled, canBeEnabled } = accessibility;
+function onReset(state, { enabled, canBeDisabled, canBeEnabled, supports }) {
   const newState = {
     ...getInitialState(),
     enabled,

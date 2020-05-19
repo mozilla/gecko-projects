@@ -494,7 +494,8 @@ AddrHostRecord::DnsPriority AddrHostRecord::GetPriority(uint16_t aFlags) {
   return AddrHostRecord::DNS_PRIORITY_LOW;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(TypeHostRecord, nsHostRecord, TypeHostRecord)
+NS_IMPL_ISUPPORTS_INHERITED(TypeHostRecord, nsHostRecord, TypeHostRecord,
+                            nsIDNSTXTRecord, nsIDNSHTTPSSVCRecord)
 
 TypeHostRecord::TypeHostRecord(const nsHostKey& key)
     : nsHostRecord(key),
@@ -504,22 +505,32 @@ TypeHostRecord::TypeHostRecord(const nsHostKey& key)
 TypeHostRecord::~TypeHostRecord() { mCallbacks.clear(); }
 
 bool TypeHostRecord::HasUsableResultInternal() const {
-  return !mResults.IsEmpty();
+  return !mResults.is<Nothing>();
 }
 
-void TypeHostRecord::GetRecords(nsTArray<nsCString>& aRecords) {
-  // deep copy
-  MutexAutoLock lock(mResultsLock);
-  aRecords = mResults;
-}
-
-void TypeHostRecord::GetRecordsAsOneString(nsACString& aRecords) {
+NS_IMETHODIMP TypeHostRecord::GetRecords(CopyableTArray<nsCString>& aRecords) {
   // deep copy
   MutexAutoLock lock(mResultsLock);
 
-  for (uint32_t i = 0; i < mResults.Length(); i++) {
-    aRecords.Append(mResults[i]);
+  if (!mResults.is<TypeRecordTxt>()) {
+    return NS_ERROR_NOT_AVAILABLE;
   }
+  aRecords = mResults.as<CopyableTArray<nsCString>>();
+  return NS_OK;
+}
+
+NS_IMETHODIMP TypeHostRecord::GetRecordsAsOneString(nsACString& aRecords) {
+  // deep copy
+  MutexAutoLock lock(mResultsLock);
+
+  if (!mResults.is<TypeRecordTxt>()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  auto& results = mResults.as<CopyableTArray<nsCString>>();
+  for (uint32_t i = 0; i < results.Length(); i++) {
+    aRecords.Append(results[i]);
+  }
+  return NS_OK;
 }
 
 size_t TypeHostRecord::SizeOfIncludingThis(MallocSizeOf mallocSizeOf) const {
@@ -536,6 +547,40 @@ void TypeHostRecord::Cancel() {
     mTrr->Cancel();
     mTrr = nullptr;
   }
+}
+
+uint32_t TypeHostRecord::GetType() {
+  MutexAutoLock lock(mResultsLock);
+
+  return mResults.match(
+      [](TypeRecordEmpty&) {
+        MOZ_ASSERT(false, "This should never be the case");
+        return nsIDNSService::RESOLVE_TYPE_DEFAULT;
+      },
+      [](TypeRecordTxt&) { return nsIDNSService::RESOLVE_TYPE_TXT; },
+      [](TypeRecordHTTPSSVC&) { return nsIDNSService::RESOLVE_TYPE_HTTPSSVC; });
+}
+
+TypeRecordResultType TypeHostRecord::GetResults() {
+  MutexAutoLock lock(mResultsLock);
+  return mResults;
+}
+
+NS_IMETHODIMP
+TypeHostRecord::GetRecords(nsTArray<RefPtr<nsISVCBRecord>>& aRecords) {
+  MutexAutoLock lock(mResultsLock);
+  if (!mResults.is<TypeRecordHTTPSSVC>()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  auto& results = mResults.as<TypeRecordHTTPSSVC>();
+
+  for (const SVCB& r : results) {
+    RefPtr<nsISVCBRecord> rec = new mozilla::net::SVCBRecord(r);
+    aRecords.AppendElement(rec);
+  }
+
+  return NS_OK;
 }
 
 //----------------------------------------------------------------------------
@@ -660,7 +705,8 @@ void nsHostResolver::ClearPendingQueue(
         CompleteLookup(rec, NS_ERROR_ABORT, nullptr, rec->pb,
                        rec->originSuffix);
       } else {
-        CompleteLookupByType(rec, NS_ERROR_ABORT, nullptr, 0, rec->pb);
+        mozilla::net::TypeRecordResultType empty(Nothing{});
+        CompleteLookupByType(rec, NS_ERROR_ABORT, empty, 0, rec->pb);
       }
     }
   }
@@ -816,8 +862,10 @@ nsresult nsHostResolver::ResolveHost(const nsACString& aHost,
   nsAutoCString host(aHost);
   NS_ENSURE_TRUE(!host.IsEmpty(), NS_ERROR_UNEXPECTED);
 
-  LOG(("Resolving host [%s]%s%s type %d. [this=%p]\n", host.get(),
-       flags & RES_BYPASS_CACHE ? " - bypassing cache" : "",
+  nsAutoCString originSuffix;
+  aOriginAttributes.CreateSuffix(originSuffix);
+  LOG(("Resolving host [%s]<%s>%s%s type %d. [this=%p]\n", host.get(),
+       originSuffix.get(), flags & RES_BYPASS_CACHE ? " - bypassing cache" : "",
        flags & RES_REFRESH_CACHE ? " - refresh cache" : "", type, this));
 
   // ensure that we are working with a valid hostname before proceeding.  see
@@ -860,8 +908,6 @@ nsresult nsHostResolver::ResolveHost(const nsACString& aHost,
       // any pending callbacks, then add to pending callbacks queue,
       // and return.  otherwise, add ourselves as first pending
       // callback, and proceed to do the lookup.
-      nsAutoCString originSuffix;
-      aOriginAttributes.CreateSuffix(originSuffix);
 
       if (gTRRService && gTRRService->IsExcludedFromTRR(host)) {
         flags |= RES_DISABLE_TRR;
@@ -1200,7 +1246,7 @@ nsresult nsHostResolver::TrrLookup_unlocked(nsHostRecord* rec, TRR* pushedTRR) {
 // returns error if no TRR resolve is issued
 // it is impt this is not called while a native lookup is going on
 nsresult nsHostResolver::TrrLookup(nsHostRecord* aRec, TRR* pushedTRR) {
-  if (Mode() == MODE_TRROFF) {
+  if (Mode() == MODE_TRROFF || StaticPrefs::network_dns_disabled()) {
     return NS_ERROR_UNKNOWN_HOST;
   }
 
@@ -1272,7 +1318,7 @@ nsresult nsHostResolver::TrrLookup(nsHostRecord* aRec, TRR* pushedTRR) {
       RefPtr<TRR> trr;
       MutexAutoLock trrlock(addrRec->mTrrLock);
       trr = pushedTRR ? pushedTRR : new TRR(this, rec, rectype);
-      if (pushedTRR || NS_SUCCEEDED(NS_DispatchToMainThread(trr))) {
+      if (pushedTRR || NS_SUCCEEDED(gTRRService->DispatchTRRRequest(trr))) {
         addrRec->mResolving++;
         if (rectype == TRRTYPE_A) {
           MOZ_ASSERT(!addrRec->mTrrA);
@@ -1295,7 +1341,14 @@ nsresult nsHostResolver::TrrLookup(nsHostRecord* aRec, TRR* pushedTRR) {
     } while (sendAgain);
   } else {
     typeRec->mStart = TimeStamp::Now();
-    enum TrrType rectype = TRRTYPE_TXT;
+    enum TrrType rectype;
+
+    // XXX this could use a more extensible approach.
+    if (rec->type == nsIDNSService::RESOLVE_TYPE_TXT) {
+      rectype = TRRTYPE_TXT;
+    } else if (rec->type == nsIDNSService::RESOLVE_TYPE_HTTPSSVC) {
+      rectype = TRRTYPE_HTTPSSVC;
+    }
 
     if (pushedTRR) {
       rectype = pushedTRR->Type();
@@ -1305,7 +1358,8 @@ nsresult nsHostResolver::TrrLookup(nsHostRecord* aRec, TRR* pushedTRR) {
     RefPtr<TRR> trr;
     MutexAutoLock trrlock(typeRec->mTrrLock);
     trr = pushedTRR ? pushedTRR : new TRR(this, rec, rectype);
-    if (pushedTRR || NS_SUCCEEDED(NS_DispatchToMainThread(trr))) {
+    RefPtr<TRR> trrRequest = trr;
+    if (pushedTRR || NS_SUCCEEDED(gTRRService->DispatchTRRRequest(trr))) {
       typeRec->mResolving++;
       MOZ_ASSERT(!typeRec->mTrr);
       typeRec->mTrr = trr;
@@ -1331,6 +1385,10 @@ void nsHostResolver::AssertOnQ(nsHostRecord* rec,
 }
 
 nsresult nsHostResolver::NativeLookup(nsHostRecord* aRec) {
+  if (StaticPrefs::network_dns_disabled()) {
+    return NS_ERROR_UNKNOWN_HOST;
+  }
+
   // Only A/AAAA request are resolve natively.
   MOZ_ASSERT(aRec->IsAddrRecord());
   mLock.AssertCurrentThreadOwns();
@@ -1882,8 +1940,10 @@ nsHostResolver::LookupStatus nsHostResolver::CompleteLookup(
       if (addrRec->addr_info && newRRSet) {
         addrRec->addr_info->ttl = newRRSet->ttl;
         // Update trr timings
-        addrRec->addr_info->SetTrrFetchDuration(newRRSet->GetTrrFetchDuration());
-        addrRec->addr_info->SetTrrFetchDurationNetworkOnly(newRRSet->GetTrrFetchDurationNetworkOnly());
+        addrRec->addr_info->SetTrrFetchDuration(
+            newRRSet->GetTrrFetchDuration());
+        addrRec->addr_info->SetTrrFetchDurationNetworkOnly(
+            newRRSet->GetTrrFetchDurationNetworkOnly());
       }
       old_addr_info = std::move(newRRSet);
     }
@@ -1960,8 +2020,8 @@ nsHostResolver::LookupStatus nsHostResolver::CompleteLookup(
 }
 
 nsHostResolver::LookupStatus nsHostResolver::CompleteLookupByType(
-    nsHostRecord* rec, nsresult status, const nsTArray<nsCString>* aResult,
-    uint32_t aTtl, bool pb) {
+    nsHostRecord* rec, nsresult status,
+    mozilla::net::TypeRecordResultType& aResult, uint32_t aTtl, bool pb) {
   MutexAutoLock lock(mLock);
   MOZ_ASSERT(rec);
   MOZ_ASSERT(rec->pb == pb);
@@ -1983,18 +2043,23 @@ nsHostResolver::LookupStatus nsHostResolver::CompleteLookupByType(
     LOG(("nsHostResolver::CompleteLookupByType record %p [%s] status %x\n",
          typeRec.get(), typeRec->host.get(), (unsigned int)status));
     typeRec->SetExpiration(TimeStamp::NowLoRes(), NEGATIVE_RECORD_LIFETIME, 0);
-    MOZ_ASSERT(!aResult);
+    MOZ_ASSERT(aResult.is<TypeRecordEmpty>());
     status = NS_ERROR_UNKNOWN_HOST;
     typeRec->negative = true;
     Telemetry::Accumulate(Telemetry::DNS_BY_TYPE_FAILED_LOOKUP_TIME, duration);
   } else {
-    MOZ_ASSERT(aResult);
+    size_t recordCount = 0;
+    if (aResult.is<TypeRecordTxt>()) {
+      recordCount = aResult.as<TypeRecordTxt>().Length();
+    } else if (aResult.is<TypeRecordHTTPSSVC>()) {
+      recordCount = aResult.as<TypeRecordHTTPSSVC>().Length();
+    }
     LOG(
         ("nsHostResolver::CompleteLookupByType record %p [%s], number of "
          "records %zu\n",
-         typeRec.get(), typeRec->host.get(), aResult->Length()));
+         typeRec.get(), typeRec->host.get(), recordCount));
     MutexAutoLock typeLock(typeRec->mResultsLock);
-    typeRec->mResults = *aResult;
+    typeRec->mResults = aResult;
     typeRec->SetExpiration(TimeStamp::NowLoRes(), aTtl, mDefaultGracePeriod);
     typeRec->negative = false;
     Telemetry::Accumulate(Telemetry::DNS_BY_TYPE_SUCCEEDED_LOOKUP_TIME,
@@ -2235,7 +2300,7 @@ void nsHostResolver::GetDNSCacheEntries(nsTArray<DNSCacheEntries>* args) {
       info.TRR = addrRec->addr_info->IsTRR();
     }
 
-    args->AppendElement(info);
+    args->AppendElement(std::move(info));
   }
 }
 

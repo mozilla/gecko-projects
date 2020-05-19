@@ -9,9 +9,10 @@
 #include "nsIScriptContext.h"
 #include "nsDocShellLoadState.h"
 #include "nsIWebNavigation.h"
-#include "nsIURIFixup.h"
+#include "nsIOService.h"
 #include "nsIURL.h"
 #include "nsIJARURI.h"
+#include "nsIURIMutator.h"
 #include "nsNetUtil.h"
 #include "nsCOMPtr.h"
 #include "nsEscape.h"
@@ -45,7 +46,7 @@ Location::Location(nsPIDOMWindowInner* aWindow,
   }
 }
 
-Location::~Location() {}
+Location::~Location() = default;
 
 // QueryInterface implementation for Location
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Location)
@@ -103,10 +104,9 @@ nsresult Location::GetURI(nsIURI** aURI, bool aGetInnermostURI) {
   }
 
   NS_ASSERTION(uri, "nsJARURI screwed up?");
-
-  nsCOMPtr<nsIURIFixup> urifixup(components::URIFixup::Service());
-
-  return urifixup->CreateExposableURI(uri, aURI);
+  nsCOMPtr<nsIURI> exposableURI = net::nsIOService::CreateExposableURI(uri);
+  exposableURI.forget(aURI);
+  return NS_OK;
 }
 
 void Location::GetHash(nsAString& aHash, nsIPrincipal& aSubjectPrincipal,

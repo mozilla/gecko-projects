@@ -15,25 +15,36 @@ namespace dom {
 
 inline void NotfiyMediaSessionCreationOrDeconstruction(
     BrowsingContext* aContext, bool aIsCreated) {
-  if (!aContext || aContext->IsDiscarded()) {
-    return;
-  }
-
   if (XRE_IsContentProcess()) {
     ContentChild* contentChild = ContentChild::GetSingleton();
     Unused << contentChild->SendNotifyMediaSessionUpdated(aContext, aIsCreated);
     return;
   }
 
-  RefPtr<MediaController> controller =
+  RefPtr<IMediaInfoUpdater> updater =
       aContext->Canonical()->GetMediaController();
-  if (!controller) {
+  if (!updater) {
     return;
   }
   if (aIsCreated) {
-    controller->NotifySessionCreated(aContext->Id());
+    updater->NotifySessionCreated(aContext->Id());
   } else {
-    controller->NotifySessionDestroyed(aContext->Id());
+    updater->NotifySessionDestroyed(aContext->Id());
+  }
+}
+
+inline const char* ToMediaSessionPlaybackStateStr(
+    const MediaSessionPlaybackState& aState) {
+  switch (aState) {
+    case MediaSessionPlaybackState::None:
+      return "none";
+    case MediaSessionPlaybackState::Paused:
+      return "paused";
+    case MediaSessionPlaybackState::Playing:
+      return "playing";
+    default:
+      MOZ_ASSERT_UNREACHABLE("Invalid MediaSessionPlaybackState.");
+      return "Unknown";
   }
 }
 

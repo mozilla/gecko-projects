@@ -14,13 +14,14 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Casting.h"
 
-#include "nsCSSKeywords.h"
+#include "gfxPlatform.h"
 #include "nsLayoutUtils.h"
 #include "nsIWidget.h"
 #include "nsStyleConsts.h"  // For system widget appearance types
 
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/AnimationEffectBinding.h"  // for PlaybackDirection
+#include "mozilla/gfx/gfxVars.h"                 // for UseWebRender
 #include "mozilla/LookAndFeel.h"                 // for system colors
 
 #include "nsString.h"
@@ -30,8 +31,6 @@
 #include "mozilla/StaticPrefs_layout.h"
 
 using namespace mozilla;
-
-typedef nsCSSProps::KTableEntry KTableEntry;
 
 static int32_t gPropertyTableRefCount;
 static nsStaticCaseInsensitiveNameTable* gFontDescTable;
@@ -65,6 +64,22 @@ static nsStaticCaseInsensitiveNameTable* CreateStaticTable(
   return table;
 }
 
+void nsCSSProps::RecomputeEnabledState(const char* aPref, void*) {
+  DebugOnly<bool> foundPref = false;
+  for (const PropertyPref* pref = kPropertyPrefTable;
+       pref->mPropID != eCSSProperty_UNKNOWN; pref++) {
+    if (!aPref || !strcmp(aPref, pref->mPref)) {
+      foundPref = true;
+      gPropertyEnabled[pref->mPropID] = Preferences::GetBool(pref->mPref);
+      if (pref->mPropID == eCSSProperty_backdrop_filter) {
+        gPropertyEnabled[pref->mPropID] &=
+            gfxPlatform::Initialized() && gfx::gfxVars::UseWebRender();
+      }
+    }
+  }
+  MOZ_ASSERT(foundPref);
+}
+
 void nsCSSProps::AddRefTable(void) {
   if (0 == gPropertyTableRefCount++) {
     MOZ_ASSERT(!gFontDescTable, "pre existing array!");
@@ -89,11 +104,16 @@ void nsCSSProps::AddRefTable(void) {
       prefObserversInited = true;
       for (const PropertyPref* pref = kPropertyPrefTable;
            pref->mPropID != eCSSProperty_UNKNOWN; pref++) {
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1472523
+        // We need to use nsCString instead of substring because the preference
+        // callback code stores them. Using AssignLiteral prevents any
+        // unnecessary allocations.
         nsCString prefName;
         prefName.AssignLiteral(pref->mPref, strlen(pref->mPref));
-        bool* enabled = &gPropertyEnabled[pref->mPropID];
-        Preferences::AddBoolVarCache(enabled, prefName);
+        Preferences::RegisterCallback(nsCSSProps::RecomputeEnabledState,
+                                      prefName);
       }
+      RecomputeEnabledState(/* aPrefName = */ nullptr);
     }
   }
 }
@@ -163,99 +183,6 @@ const nsCString& nsCSSProps::GetStringValue(nsCSSCounterDesc aCounterDesc) {
     return sNullStr;
   }
 }
-
-/***************************************************************************/
-
-const KTableEntry nsCSSProps::kFontSmoothingKTable[] = {
-    {eCSSKeyword_auto, NS_FONT_SMOOTHING_AUTO},
-    {eCSSKeyword_grayscale, NS_FONT_SMOOTHING_GRAYSCALE},
-    {eCSSKeyword_UNKNOWN, nsCSSKTableEntry::SENTINEL_VALUE},
-};
-
-const KTableEntry nsCSSProps::kTextAlignKTable[] = {
-    {eCSSKeyword_left, NS_STYLE_TEXT_ALIGN_LEFT},
-    {eCSSKeyword_right, NS_STYLE_TEXT_ALIGN_RIGHT},
-    {eCSSKeyword_center, NS_STYLE_TEXT_ALIGN_CENTER},
-    {eCSSKeyword_justify, NS_STYLE_TEXT_ALIGN_JUSTIFY},
-    {eCSSKeyword__moz_center, NS_STYLE_TEXT_ALIGN_MOZ_CENTER},
-    {eCSSKeyword__moz_right, NS_STYLE_TEXT_ALIGN_MOZ_RIGHT},
-    {eCSSKeyword__moz_left, NS_STYLE_TEXT_ALIGN_MOZ_LEFT},
-    {eCSSKeyword_start, NS_STYLE_TEXT_ALIGN_START},
-    {eCSSKeyword_end, NS_STYLE_TEXT_ALIGN_END},
-    {eCSSKeyword_UNKNOWN, nsCSSKTableEntry::SENTINEL_VALUE},
-};
-
-const KTableEntry nsCSSProps::kTextDecorationStyleKTable[] = {
-    {eCSSKeyword__moz_none, NS_STYLE_TEXT_DECORATION_STYLE_NONE},
-    {eCSSKeyword_solid, NS_STYLE_TEXT_DECORATION_STYLE_SOLID},
-    {eCSSKeyword_double, NS_STYLE_TEXT_DECORATION_STYLE_DOUBLE},
-    {eCSSKeyword_dotted, NS_STYLE_TEXT_DECORATION_STYLE_DOTTED},
-    {eCSSKeyword_dashed, NS_STYLE_TEXT_DECORATION_STYLE_DASHED},
-    {eCSSKeyword_wavy, NS_STYLE_TEXT_DECORATION_STYLE_WAVY},
-    {eCSSKeyword_UNKNOWN, nsCSSKTableEntry::SENTINEL_VALUE},
-};
-
-int32_t nsCSSProps::FindIndexOfKeyword(nsCSSKeyword aKeyword,
-                                       const KTableEntry aTable[]) {
-  if (eCSSKeyword_UNKNOWN == aKeyword) {
-    // NOTE: we can have keyword tables where eCSSKeyword_UNKNOWN is used
-    // not only for the sentinel, but also in the middle of the table to
-    // knock out values that have been disabled by prefs, e.g. kDisplayKTable.
-    // So we deal with eCSSKeyword_UNKNOWN up front to avoid returning a valid
-    // index in the loop below.
-    return -1;
-  }
-  for (int32_t i = 0;; ++i) {
-    const KTableEntry& entry = aTable[i];
-    if (entry.IsSentinel()) {
-      break;
-    }
-    if (aKeyword == entry.mKeyword) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-bool nsCSSProps::FindKeyword(nsCSSKeyword aKeyword, const KTableEntry aTable[],
-                             int32_t& aResult) {
-  int32_t index = FindIndexOfKeyword(aKeyword, aTable);
-  if (index >= 0) {
-    aResult = aTable[index].mValue;
-    return true;
-  }
-  return false;
-}
-
-nsCSSKeyword nsCSSProps::ValueToKeywordEnum(int32_t aValue,
-                                            const KTableEntry aTable[]) {
-#ifdef DEBUG
-  typedef decltype(aTable[0].mValue) table_value_type;
-  NS_ASSERTION(table_value_type(aValue) == aValue, "Value out of range");
-#endif
-  for (int32_t i = 0;; ++i) {
-    const KTableEntry& entry = aTable[i];
-    if (entry.IsSentinel()) {
-      break;
-    }
-    if (aValue == entry.mValue) {
-      return entry.mKeyword;
-    }
-  }
-  return eCSSKeyword_UNKNOWN;
-}
-
-const nsCString& nsCSSProps::ValueToKeyword(int32_t aValue,
-                                            const KTableEntry aTable[]) {
-  nsCSSKeyword keyword = ValueToKeywordEnum(aValue, aTable);
-  if (keyword == eCSSKeyword_UNKNOWN) {
-    static nsDependentCString sNullStr("");
-    return sNullStr;
-  } else {
-    return nsCSSKeywords::GetStringValue(keyword);
-  }
-}
-
 const CSSPropFlags nsCSSProps::kFlagsTable[eCSSProperty_COUNT] = {
 #define CSS_PROP_LONGHAND(name_, id_, method_, flags_, ...) flags_,
 #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, ...) flags_,

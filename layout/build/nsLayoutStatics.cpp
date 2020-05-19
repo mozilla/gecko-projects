@@ -19,7 +19,6 @@
 #include "nsContentUtils.h"
 #include "nsCSSAnonBoxes.h"
 #include "mozilla/css/ErrorReporter.h"
-#include "nsCSSKeywords.h"
 #include "nsCSSProps.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
@@ -76,7 +75,6 @@
 #  include "nsXULPrototypeCache.h"
 #  include "nsXULTooltipListener.h"
 
-#  include "nsMenuBarListener.h"
 #endif
 
 #include "mozilla/dom/UIDirectionManager.h"
@@ -94,8 +92,7 @@
 #include "nsWindowMemoryReporter.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/ProcessPriorityManager.h"
-#include "nsPermissionManager.h"
-#include "nsCookieService.h"
+#include "mozilla/PermissionManager.h"
 #include "nsApplicationCacheService.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/EventDispatcher.h"
@@ -106,7 +103,6 @@
 #include "DecoderDoctorLogger.h"
 #include "MediaDecoder.h"
 #include "mozilla/ClearSiteData.h"
-#include "mozilla/dom/DOMSecurityManager.h"
 #include "mozilla/EditorController.h"
 #include "mozilla/Fuzzyfox.h"
 #include "mozilla/HTMLEditorController.h"
@@ -151,7 +147,6 @@ nsresult nsLayoutStatics::Initialize() {
 
   ContentParent::StartUp();
 
-  nsCSSKeywords::AddRefTable();
   nsCSSProps::AddRefTable();
   nsColorNames::AddRefTable();
 
@@ -165,7 +160,6 @@ nsresult nsLayoutStatics::Initialize() {
 
   nsGlobalWindowInner::Init();
   nsGlobalWindowOuter::Init();
-  Navigator::Init();
 
   rv = nsContentUtils::Init();
   if (NS_FAILED(rv)) {
@@ -251,11 +245,7 @@ nsresult nsLayoutStatics::Initialize() {
 
   ProcessPriorityManager::Init();
 
-  nsPermissionManager::Startup();
-
-#ifdef MOZ_XUL
-  nsMenuBarListener::InitializeStatics();
-#endif
+  PermissionManager::Startup();
 
   UIDirectionManager::Initialize();
 
@@ -295,8 +285,6 @@ nsresult nsLayoutStatics::Initialize() {
   mozilla::Fuzzyfox::Start();
 
   ClearSiteData::Initialize();
-
-  DOMSecurityManager::Initialize();
 
   // Reporting API.
   ReportingHeader::Initialize();
@@ -348,10 +336,8 @@ void nsLayoutStatics::Shutdown() {
   // Release all of our atoms
   nsColorNames::ReleaseTable();
   nsCSSProps::ReleaseTable();
-  nsCSSKeywords::ReleaseTable();
   nsRepeatService::Shutdown();
   nsStackLayout::Shutdown();
-  nsBox::Shutdown();
 
 #ifdef MOZ_XUL
   nsXULContentUtils::Finish();
@@ -420,6 +406,4 @@ void nsLayoutStatics::Shutdown() {
   css::ImageLoader::Shutdown();
 
   mozilla::net::UrlClassifierFeatureFactory::Shutdown();
-
-  gfxUserFontEntry::Shutdown();
 }

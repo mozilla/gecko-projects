@@ -65,12 +65,12 @@ void APZSampler::SetSamplerThread(const wr::WrWindowId& aWindowId) {
 }
 
 /*static*/
-void APZSampler::SampleForWebRender(const wr::WrWindowId& aWindowId,
-                                    wr::Transaction* aTransaction,
-                                    const wr::DocumentId& aRenderRootId) {
+void APZSampler::SampleForWebRender(
+    const wr::WrWindowId& aWindowId, wr::Transaction* aTransaction,
+    const wr::WrPipelineIdEpochs* aEpochsBeingRendered) {
   if (RefPtr<APZSampler> sampler = GetSampler(aWindowId)) {
     wr::TransactionWrapper txn(aTransaction);
-    sampler->SampleForWebRender(txn, wr::RenderRootFromId(aRenderRootId));
+    sampler->SampleForWebRender(txn, aEpochsBeingRendered);
   }
 }
 
@@ -80,8 +80,9 @@ void APZSampler::SetSampleTime(const TimeStamp& aSampleTime) {
   mSampleTime = aSampleTime;
 }
 
-void APZSampler::SampleForWebRender(wr::TransactionWrapper& aTxn,
-                                    wr::RenderRoot aRenderRoot) {
+void APZSampler::SampleForWebRender(
+    wr::TransactionWrapper& aTxn,
+    const wr::WrPipelineIdEpochs* aEpochsBeingRendered) {
   AssertOnSamplerThread();
   TimeStamp sampleTime;
   {  // scope lock
@@ -93,29 +94,13 @@ void APZSampler::SampleForWebRender(wr::TransactionWrapper& aTxn,
     // anyway, so using Timestamp::Now() should be fine.
     sampleTime = mSampleTime.IsNull() ? TimeStamp::Now() : mSampleTime;
   }
-  mApz->SampleForWebRender(aTxn, sampleTime, aRenderRoot);
+  mApz->SampleForWebRender(aTxn, sampleTime, aEpochsBeingRendered);
 }
 
-bool APZSampler::SampleAnimations(const LayerMetricsWrapper& aLayer,
-                                  const TimeStamp& aSampleTime) {
+bool APZSampler::AdvanceAnimations(const TimeStamp& aSampleTime) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   AssertOnSamplerThread();
-
-  // TODO: eventually we can drop the aLayer argument and just walk the APZ
-  // tree directly in mApz.
-
-  bool activeAnimations = false;
-
-  ForEachNodePostOrder<ForwardIterator>(
-      aLayer,
-      [&activeAnimations, &aSampleTime](LayerMetricsWrapper aLayerMetrics) {
-        if (AsyncPanZoomController* apzc = aLayerMetrics.GetApzc()) {
-          apzc->ReportCheckerboard(aSampleTime);
-          activeAnimations |= apzc->AdvanceAnimations(aSampleTime);
-        }
-      });
-
-  return activeAnimations;
+  return mApz->AdvanceAnimations(aSampleTime);
 }
 
 LayerToParentLayerMatrix4x4 APZSampler::ComputeTransformForScrollThumb(
@@ -266,11 +251,11 @@ void apz_register_sampler(mozilla::wr::WrWindowId aWindowId) {
   mozilla::layers::APZSampler::SetSamplerThread(aWindowId);
 }
 
-void apz_sample_transforms(mozilla::wr::WrWindowId aWindowId,
-                           mozilla::wr::Transaction* aTransaction,
-                           mozilla::wr::DocumentId aDocumentId) {
+void apz_sample_transforms(
+    mozilla::wr::WrWindowId aWindowId, mozilla::wr::Transaction* aTransaction,
+    const mozilla::wr::WrPipelineIdEpochs* aEpochsBeingRendered) {
   mozilla::layers::APZSampler::SampleForWebRender(aWindowId, aTransaction,
-                                                  aDocumentId);
+                                                  aEpochsBeingRendered);
 }
 
 void apz_deregister_sampler(mozilla::wr::WrWindowId aWindowId) {}

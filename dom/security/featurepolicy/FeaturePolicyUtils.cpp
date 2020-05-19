@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "FeaturePolicyUtils.h"
-#include "nsIURIFixup.h"
+#include "nsIOService.h"
 
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/ipc/IPDLParamTraits.h"
@@ -51,6 +51,8 @@ static FeatureMap sExperimentalFeatures[] = {
     // TODO: not supported yet!!!
     {"speaker", FeaturePolicyUtils::FeaturePolicyValue::eSelf},
     {"vr", FeaturePolicyUtils::FeaturePolicyValue::eAll},
+    // https://immersive-web.github.io/webxr/#feature-policy
+    {"xr-spatial-tracking", FeaturePolicyUtils::FeaturePolicyValue::eSelf},
 };
 
 /* static */
@@ -163,6 +165,7 @@ bool FeaturePolicyUtils::IsFeatureUnsafeAllowedAll(
   MOZ_ASSERT(policy);
 
   return policy->HasFeatureUnsafeAllowsAll(aFeatureName) &&
+         !policy->IsSameOriginAsSrc(aDocument->NodePrincipal()) &&
          !policy->AllowsFeatureExplicitlyInAncestorChain(
              aFeatureName, policy->DefaultOrigin()) &&
          !IsSameOriginAsTop(aDocument);
@@ -210,19 +213,9 @@ void FeaturePolicyUtils::ReportViolation(Document* aDocument,
 
   // Strip the URL of any possible username/password and make it ready to be
   // presented in the UI.
-  nsCOMPtr<nsIURIFixup> urifixup = services::GetURIFixup();
-  if (NS_WARN_IF(!urifixup)) {
-    return;
-  }
-
-  nsCOMPtr<nsIURI> exposableURI;
-  nsresult rv = urifixup->CreateExposableURI(uri, getter_AddRefs(exposableURI));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
-  }
-
+  nsCOMPtr<nsIURI> exposableURI = net::nsIOService::CreateExposableURI(uri);
   nsAutoCString spec;
-  rv = exposableURI->GetSpec(spec);
+  nsresult rv = exposableURI->GetSpec(spec);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
@@ -247,11 +240,11 @@ void FeaturePolicyUtils::ReportViolation(Document* aDocument,
   }
 
   RefPtr<FeaturePolicyViolationReportBody> body =
-      new FeaturePolicyViolationReportBody(window, aFeatureName, fileName,
-                                           lineNumber, columnNumber,
+      new FeaturePolicyViolationReportBody(window->AsGlobal(), aFeatureName,
+                                           fileName, lineNumber, columnNumber,
                                            NS_LITERAL_STRING("enforce"));
 
-  ReportingUtils::Report(window, nsGkAtoms::featurePolicyViolation,
+  ReportingUtils::Report(window->AsGlobal(), nsGkAtoms::featurePolicyViolation,
                          NS_LITERAL_STRING("default"),
                          NS_ConvertUTF8toUTF16(spec), body);
 }

@@ -25,6 +25,11 @@ ChromeUtils.defineModuleGetter(
   "FileUtils",
   "resource://gre/modules/FileUtils.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "DownloadLastDir",
+  "resource://gre/modules/DownloadLastDir.jsm"
+);
 
 var { EventEmitter, ignoreEvent } = ExtensionCommon;
 
@@ -689,7 +694,7 @@ this.downloads = class extends ExtensionAPI {
               let uri = Services.io.newURI(options.url);
               if (uri instanceof Ci.nsIURL) {
                 filename = DownloadPaths.sanitize(
-                  Services.textToSubURI.unEscapeURIForUI("UTF-8", uri.fileName)
+                  Services.textToSubURI.unEscapeURIForUI(uri.fileName)
                 );
               }
             }
@@ -741,16 +746,54 @@ this.downloads = class extends ExtensionAPI {
               return target;
             }
 
-            const window = Services.wm.getMostRecentWindow("navigator:browser");
+            if (!("windowTracker" in global)) {
+              return target;
+            }
+
+            // At this point we are committed to displaying the file picker.
+            const downloadLastDir = new DownloadLastDir(
+              null,
+              options.incognito
+            );
+
+            async function getLastDirectory() {
+              return new Promise(resolve => {
+                downloadLastDir.getFileAsync(extension.baseURI, file => {
+                  resolve(file);
+                });
+              });
+            }
+
+            function saveLastDirectory(lastDir) {
+              downloadLastDir.setFile(extension.baseURI, lastDir);
+            }
+
+            // Use windowTracker to find a window, rather than Services.wm,
+            // so that this doesn't break where navigator:browser isn't the
+            // main window (e.g. Thunderbird).
+            const window = global.windowTracker.getTopWindow().window;
             const basename = OS.Path.basename(target);
             const ext = basename.match(/\.([^.]+)$/);
+
+            // If the filename passed in by the extension is a simple name
+            // and not a path, we open the file picker so it displays the
+            // last directory that was chosen by the user.
+            const pathSep = AppConstants.platform === "win" ? "\\" : "/";
+            const lastFilePickerDirectory =
+              !filename || !filename.includes(pathSep)
+                ? await getLastDirectory()
+                : undefined;
 
             // Setup the file picker Save As dialog.
             const picker = Cc["@mozilla.org/filepicker;1"].createInstance(
               Ci.nsIFilePicker
             );
             picker.init(window, null, Ci.nsIFilePicker.modeSave);
-            picker.displayDirectory = new FileUtils.File(dir);
+            if (lastFilePickerDirectory) {
+              picker.displayDirectory = lastFilePickerDirectory;
+            } else {
+              picker.displayDirectory = new FileUtils.File(dir);
+            }
             picker.appendFilters(Ci.nsIFilePicker.filterAll);
             picker.defaultString = basename;
 
@@ -763,6 +806,7 @@ this.downloads = class extends ExtensionAPI {
                 if (result === Ci.nsIFilePicker.returnCancel) {
                   reject({ message: "Download canceled by the user" });
                 } else {
+                  saveLastDirectory(picker.file.parent);
                   resolve(picker.file.path);
                 }
               });
@@ -834,9 +878,7 @@ this.downloads = class extends ExtensionAPI {
             return OS.File.remove(item.filename, { ignoreAbsent: false }).catch(
               err => {
                 return Promise.reject({
-                  message: `Could not remove download id ${
-                    item.id
-                  } because the file doesn't exist`,
+                  message: `Could not remove download id ${item.id} because the file doesn't exist`,
                 });
               }
             );
@@ -862,9 +904,7 @@ this.downloads = class extends ExtensionAPI {
             }
             if (item.state != "in_progress") {
               return Promise.reject({
-                message: `Download ${id} cannot be paused since it is in state ${
-                  item.state
-                }`,
+                message: `Download ${id} cannot be paused since it is in state ${item.state}`,
               });
             }
 
@@ -916,9 +956,7 @@ this.downloads = class extends ExtensionAPI {
                 dirobj.launch();
               } else {
                 throw new Error(
-                  `Download directory ${
-                    dirobj.path
-                  } is not actually a directory`
+                  `Download directory ${dirobj.path} is not actually a directory`
                 );
               }
             })

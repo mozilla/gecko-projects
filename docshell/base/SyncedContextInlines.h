@@ -17,13 +17,32 @@ namespace dom {
 namespace syncedcontext {
 
 template <typename Context>
+static nsCString FormatValidationError(IndexSet aFailedFields,
+                                       const char* prefix) {
+  MOZ_ASSERT(!aFailedFields.isEmpty());
+  nsCString error(prefix);
+  bool first = true;
+  for (auto idx : aFailedFields) {
+    if (!first) {
+      error.Append(", ");
+    }
+    first = false;
+    error.Append(Context::FieldIndexToName(idx));
+  }
+  return error;
+}
+
+template <typename Context>
 nsresult Transaction<Context>::Commit(Context* aOwner) {
   if (NS_WARN_IF(aOwner->IsDiscarded())) {
     return NS_ERROR_FAILURE;
   }
 
-  if (!Validate(aOwner, nullptr)) {
-    MOZ_CRASH("Attempt to commit invalid transaction");
+  IndexSet failedFields = Validate(aOwner, nullptr);
+  if (!failedFields.isEmpty()) {
+    nsCString error = FormatValidationError<Context>(
+        failedFields, "CanSet failed for field(s): ");
+    MOZ_CRASH_UNSAFE_PRINTF("%s", error.get());
   }
 
   if (XRE_IsContentProcess()) {
@@ -56,48 +75,55 @@ nsresult Transaction<Context>::Commit(Context* aOwner) {
 
 template <typename Context>
 mozilla::ipc::IPCResult Transaction<Context>::CommitFromIPC(
-    Context* aOwner, ContentParent* aSource) {
+    const MaybeDiscarded<Context>& aOwner, ContentParent* aSource) {
   MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
-  if (!aOwner || aOwner->IsDiscarded()) {
+  if (aOwner.IsNullOrDiscarded()) {
     MOZ_LOG(Context::GetLog(), LogLevel::Debug,
             ("IPC: Trying to send a message to dead or detached context"));
     return IPC_OK();
   }
+  Context* owner = aOwner.get();
 
   // Validate that the set from content is allowed before continuing.
-  if (!Validate(aOwner, aSource)) {
-    return IPC_FAIL(aSource, "Invalid Transaction from Child");
+  IndexSet failedFields = Validate(owner, aSource);
+  if (!failedFields.isEmpty()) {
+    nsCString error = FormatValidationError<Context>(
+        failedFields,
+        "Invalid Transaction from Child - CanSet failed for field(s): ");
+    return IPC_FAIL(aSource, error.get());
   }
 
-  BrowsingContextGroup* group = aOwner->Group();
+  BrowsingContextGroup* group = owner->Group();
   group->EachOtherParent(aSource, [&](ContentParent* aParent) {
-    aOwner->SendCommitTransaction(aParent, *this,
-                                  aParent->GetBrowsingContextFieldEpoch());
+    owner->SendCommitTransaction(aParent, *this,
+                                 aParent->GetBrowsingContextFieldEpoch());
   });
 
-  Apply(aOwner);
+  Apply(owner);
   return IPC_OK();
 }
 
 template <typename Context>
 mozilla::ipc::IPCResult Transaction<Context>::CommitFromIPC(
-    Context* aOwner, uint64_t aEpoch, ContentChild* aSource) {
+    const MaybeDiscarded<Context>& aOwner, uint64_t aEpoch,
+    ContentChild* aSource) {
   MOZ_DIAGNOSTIC_ASSERT(XRE_IsContentProcess());
-  if (!aOwner || aOwner->IsDiscarded()) {
+  if (aOwner.IsNullOrDiscarded()) {
     MOZ_LOG(Context::GetLog(), LogLevel::Debug,
             ("ChildIPC: Trying to send a message to dead or detached context"));
     return IPC_OK();
   }
+  Context* owner = aOwner.get();
 
   // Clear any fields which have been obsoleted by the epoch.
   EachIndex([&](auto idx) {
     auto& field = GetAt(idx, mMaybeFields);
-    if (field && GetAt(idx, GetFieldStorage(aOwner).mEpochs) > aEpoch) {
+    if (field && GetAt(idx, GetFieldStorage(owner).mEpochs) > aEpoch) {
       field.reset();
     }
   });
 
-  Apply(aOwner);
+  Apply(owner);
   return IPC_OK();
 }
 
@@ -105,24 +131,27 @@ template <typename Context>
 void Transaction<Context>::Apply(Context* aOwner) {
   EachIndex([&](auto idx) {
     if (auto& txnField = GetAt(idx, mMaybeFields)) {
-      GetAt(idx, GetFieldStorage(aOwner).mFields) = std::move(*txnField);
+      auto& ownerField = GetAt(idx, GetFieldStorage(aOwner).mFields);
+      std::swap(ownerField, *txnField);
       aOwner->DidSet(idx);
+      aOwner->DidSet(idx, std::move(*txnField));
       txnField.reset();
     }
   });
 }
 
 template <typename Context>
-bool Transaction<Context>::Validate(Context* aOwner, ContentParent* aSource) {
-  bool ok = true;
+IndexSet Transaction<Context>::Validate(Context* aOwner,
+                                        ContentParent* aSource) {
+  IndexSet failedFields;
   // Validate that the set from content is allowed before continuing.
   EachIndex([&](auto idx) {
     const auto& field = GetAt(idx, mMaybeFields);
     if (field && NS_WARN_IF(!aOwner->CanSet(idx, *field, aSource))) {
-      ok = false;
+      failedFields += idx;
     }
   });
-  return ok;
+  return failedFields;
 }
 
 template <typename Context>

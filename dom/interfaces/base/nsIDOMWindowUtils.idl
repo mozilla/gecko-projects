@@ -944,8 +944,23 @@ interface nsIDOMWindowUtils : nsISupports {
 
   /**
    * Get the number of screen pixels per CSS pixel.
+   *
+   * This is the same as window.devicePixelRatio, except it bypasses
+   * the fingerprinting resistance efforts that window.devicePixelRatio
+   * does (which is fine as this is only exposed to browser internals).
    */
   readonly attribute float screenPixelsPerCSSPixel;
+
+  /**
+   * Get the number of screen pixels per CSS pixel,
+   * not taking into account any override of the device pixel scale
+   * that's imposed by Responsive Design Mode.
+   *
+   * This is needed to e.g. correctly translate "window.mozInnerScreenX/Y"
+   * into device pixels even when "window" is the window of a document
+   * inside an RDM pane.
+   */
+  readonly attribute float screenPixelsPerCSSPixelNoOverride;
 
   /**
    * Get the current zoom factor.
@@ -1282,7 +1297,7 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Is the window is in a modal state? [See enterModalState()]
    */
-  [noscript] boolean isInModalState();
+  boolean isInModalState();
 
   /**
    * Request set internal desktopMode flag change.
@@ -1442,6 +1457,15 @@ interface nsIDOMWindowUtils : nsISupports {
   bool flushApzRepaints();
 
   /**
+   * Sets a flag on the element to forcibly disable APZ on it. This affects
+   * the result of nsLayoutUtils::ShouldDisableApzForElement when called on
+   * this element. This function also schedules a repaint to ensure that the
+   * change takes effect. Note that this is not reversible; it is intended for
+   * use by test code only.
+   */
+  void disableApzForElement(in Element aElement);
+
+  /**
    * Ask APZ to pan and zoom to the focused input element.
    */
   [can_run_script] void zoomToFocusedInput();
@@ -1481,6 +1505,11 @@ interface nsIDOMWindowUtils : nsISupports {
    * Get the action hint of the currently focused html input, if any.
    */
   readonly attribute AString focusedActionHint;
+
+  /**
+   * Get the inputmode of the currently focused editing host, if any.
+   */
+  readonly attribute AString focusedInputMode;
 
   /**
    * Find the view ID for a given element. This is the reverse of
@@ -1544,16 +1573,9 @@ interface nsIDOMWindowUtils : nsISupports {
   boolean getFileReferences(in AString aDatabaseName, in long long aId,
                             [optional] in jsval aOptions,
                             [optional] out long aRefCnt,
-                            [optional] out long aDBRefCnt,
-                            [optional] out long aSliceRefCnt);
+                            [optional] out long aDBRefCnt);
 
   void flushPendingFileDeletions();
-
-  /**
-   * Return whether incremental GC has been disabled due to a binary add-on.
-   */
-  [implicit_jscontext]
-  boolean isIncrementalGCEnabled();
 
   /**
    * Begin opcode-level profiling of all JavaScript execution in the window's
@@ -1758,12 +1780,6 @@ interface nsIDOMWindowUtils : nsISupports {
   void postRestyleSelfEvent(in Element aElement);
 
   /**
-   * Used to pause or resume all media in this window. Use-cases are audio
-   * competing, remote media control and to prevent auto-playing media.
-   */
-  attribute uint32_t mediaSuspend;
-
-  /**
    * This method doesn't do anything useful.  It was solely added for the
    * purpose of the test for bug 503926.
    */
@@ -1924,6 +1940,14 @@ interface nsIDOMWindowUtils : nsISupports {
   void wrCapture();
 
   /**
+   * Start capturing the contents of the current WebRender frame and
+   * save them to a folder relative to the current working directory,
+   * as well as any frames generated from this point onward. If called
+   * again, it will stop capturing.
+   */
+  void wrToggleCaptureSequence();
+
+  /**
    * Toggle recording of composition on and off.
    *
    * This is equivalent to calling |startCompositionRecorder()| or
@@ -2024,6 +2048,15 @@ interface nsIDOMWindowUtils : nsISupports {
 
   // Returns true if we are using overlay scrollbars.
   readonly attribute bool usesOverlayScrollbars;
+
+  // Returns the ID for the underlying window widget, which can
+  // be compared against the rawId from a nsIMediaDevice to determine
+  // if the window is being shared.
+  //
+  // Using this only makes sense in the parent process, and the function
+  // will intentionally crash any non-parent process that tries to access
+  // it.
+  readonly attribute AString webrtcRawDeviceId;
 };
 
 [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]

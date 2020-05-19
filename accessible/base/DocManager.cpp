@@ -33,6 +33,7 @@
 #include "nsCoreUtils.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/BrowserChild.h"
+#include "xpcAccessibleDocument.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -127,7 +128,7 @@ xpcAccessibleDocument* DocManager::GetXPCDocument(DocAccessible* aDocument) {
   xpcAccessibleDocument* xpcDoc = mXPCDocumentCache.GetWeak(aDocument);
   if (!xpcDoc) {
     xpcDoc = new xpcAccessibleDocument(aDocument);
-    mXPCDocumentCache.Put(aDocument, xpcDoc);
+    mXPCDocumentCache.Put(aDocument, RefPtr{xpcDoc});
   }
   return xpcDoc;
 }
@@ -146,7 +147,7 @@ xpcAccessibleDocument* DocManager::GetXPCDocument(DocAccessibleParent* aDoc) {
 
   doc = new xpcAccessibleDocument(aDoc,
                                   Interfaces::DOCUMENT | Interfaces::HYPERTEXT);
-  sRemoteXPCDocumentCache->Put(aDoc, doc);
+  sRemoteXPCDocumentCache->Put(aDoc, RefPtr{doc});
 
   return doc;
 }
@@ -460,7 +461,7 @@ DocAccessible* DocManager::CreateDocOrRootAccessible(Document* aDocument) {
                 : new DocAccessibleWrap(aDocument, presShell);
 
   // Cache the document accessible into document cache.
-  mDocAccessibleCache.Put(aDocument, docAcc);
+  mDocAccessibleCache.Put(aDocument, RefPtr{docAcc});
 
   // Initialize the document accessible.
   docAcc->Init();

@@ -144,7 +144,7 @@ NS_IMPL_ISUPPORTS(nsSound, nsISound, nsIStreamLoaderObserver)
 ////////////////////////////////////////////////////////////////////////
 nsSound::nsSound() { mInited = false; }
 
-nsSound::~nsSound() {}
+nsSound::~nsSound() = default;
 
 NS_IMETHODIMP
 nsSound::Init() {
@@ -161,9 +161,10 @@ nsSound::Init() {
           libcanberra, "ca_context_create");
       if (!ca_context_create) {
 #ifdef MOZ_TSAN
-        // With TSan, we cannot unload libcanberra once we have loaded it because
-        // TSan does not support unloading libraries that are matched from its
-        // suppression list. Hence we just keep the library loaded in TSan builds.
+        // With TSan, we cannot unload libcanberra once we have loaded it
+        // because TSan does not support unloading libraries that are matched
+        // from its suppression list. Hence we just keep the library loaded in
+        // TSan builds.
         libcanberra = nullptr;
         return NS_OK;
 #endif

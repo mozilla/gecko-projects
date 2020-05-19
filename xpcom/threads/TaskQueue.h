@@ -62,9 +62,9 @@ class TaskQueue : public AbstractThread {
 
   TaskDispatcher& TailDispatcher() override;
 
-  MOZ_MUST_USE nsresult
-  Dispatch(already_AddRefed<nsIRunnable> aRunnable,
-           DispatchReason aReason = NormalDispatch) override {
+  [[nodiscard]] nsresult Dispatch(
+      already_AddRefed<nsIRunnable> aRunnable,
+      DispatchReason aReason = NormalDispatch) override {
     nsCOMPtr<nsIRunnable> r = aRunnable;
     {
       MonitorAutoLock mon(mQueueMonitor);
@@ -128,7 +128,7 @@ class TaskQueue : public AbstractThread {
   // Monitor that protects the queue and mIsRunning;
   Monitor mQueueMonitor;
 
-  typedef struct {
+  typedef struct TaskStruct {
     nsCOMPtr<nsIRunnable> event;
     uint32_t flags;
   } TaskStruct;

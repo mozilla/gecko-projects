@@ -171,6 +171,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsParser)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDTD)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSink)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mObserver)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsParser)
@@ -1298,7 +1299,7 @@ nsresult nsParser::OnDataAvailable(nsIRequest* request,
     ParserWriteStruct pws;
     pws.mNeedCharsetCheck = true;
     pws.mParser = this;
-    pws.mScanner = theContext->mScanner;
+    pws.mScanner = theContext->mScanner.get();
     pws.mRequest = request;
 
     rv = pIStream->ReadSegments(ParserWriteFunc, &pws, aLength, &totalRead);

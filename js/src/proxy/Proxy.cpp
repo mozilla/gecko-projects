@@ -13,7 +13,6 @@
 #include "jsapi.h"
 
 #include "js/PropertySpec.h"
-#include "js/StableStringChars.h"
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
 #include "proxy/ScriptedProxyHandler.h"
@@ -398,7 +397,7 @@ bool js::ProxySetProperty(JSContext* cx, HandleObject proxy, HandleId id,
   if (!Proxy::setInternal(cx, proxy, id, val, receiver, result)) {
     return false;
   }
-  return result.checkStrictErrorOrWarning(cx, proxy, id, strict);
+  return result.checkStrictModeError(cx, proxy, id, strict);
 }
 
 bool js::ProxySetPropertyByValue(JSContext* cx, HandleObject proxy,
@@ -414,7 +413,7 @@ bool js::ProxySetPropertyByValue(JSContext* cx, HandleObject proxy,
   if (!Proxy::setInternal(cx, proxy, id, val, receiver, result)) {
     return false;
   }
-  return result.checkStrictErrorOrWarning(cx, proxy, id, strict);
+  return result.checkStrictModeError(cx, proxy, id, strict);
 }
 
 bool Proxy::getOwnEnumerablePropertyKeys(JSContext* cx, HandleObject proxy,
@@ -793,7 +792,32 @@ JS_FRIEND_API JSObject* js::NewProxyObject(JSContext* cx,
     proto_ = TaggedProto::LazyProto;
   }
 
-  return ProxyObject::New(cx, handler, priv, TaggedProto(proto_), options);
+  return ProxyObject::New(cx, handler, priv, TaggedProto(proto_),
+                          options.clasp());
+}
+
+JS_FRIEND_API JSObject* js::NewSingletonProxyObject(
+    JSContext* cx, const BaseProxyHandler* handler, HandleValue priv,
+    JSObject* proto_, const ProxyOptions& options) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+
+  // This can be called from the compartment wrap hooks while in a realm with a
+  // gray global. Trigger the read barrier on the global to ensure this is
+  // unmarked.
+  cx->realm()->maybeGlobal();
+
+  if (proto_ != TaggedProto::LazyProto) {
+    cx->check(proto_);  // |priv| might be cross-compartment.
+  }
+
+  if (options.lazyProto()) {
+    MOZ_ASSERT(!proto_);
+    proto_ = TaggedProto::LazyProto;
+  }
+
+  return ProxyObject::NewSingleton(cx, handler, priv, TaggedProto(proto_),
+                                   options.clasp());
 }
 
 void ProxyObject::renew(const BaseProxyHandler* handler, const Value& priv) {

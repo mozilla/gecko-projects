@@ -4,10 +4,13 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+from collections import OrderedDict
+
+import os
 import platform
 import sys
-import os
 import subprocess
+import time
 
 # NOTE: This script is intended to be run with a vanilla Python install.  We
 # have to rely on the standard library instead of Python 2+3 helpers like
@@ -28,6 +31,7 @@ else:
 # list in bin/bootstrap.py!
 from mozboot.base import MODERN_RUST_VERSION
 from mozboot.centosfedora import CentOSFedoraBootstrapper
+from mozboot.opensuse import OpenSUSEBootstrapper
 from mozboot.debian import DebianBootstrapper
 from mozboot.freebsd import FreeBSDBootstrapper
 from mozboot.gentoo import GentooBootstrapper
@@ -59,22 +63,12 @@ Please choose the version of Firefox you want to build:
 %s
 Your choice: '''
 
-APPLICATIONS_LIST = [
+APPLICATIONS = OrderedDict([
     ('Firefox for Desktop Artifact Mode', 'browser_artifact_mode'),
     ('Firefox for Desktop', 'browser'),
     ('GeckoView/Firefox for Android Artifact Mode', 'mobile_android_artifact_mode'),
     ('GeckoView/Firefox for Android', 'mobile_android'),
-]
-
-# TODO Legacy Python 2.6 code, can be removed.
-# This is a workaround for the fact that we must support python2.6 (which has
-# no OrderedDict)
-APPLICATIONS = dict(
-    browser_artifact_mode=APPLICATIONS_LIST[0],
-    browser=APPLICATIONS_LIST[1],
-    mobile_android_artifact_mode=APPLICATIONS_LIST[2],
-    mobile_android=APPLICATIONS_LIST[3],
-)
+])
 
 VCS_CHOICE = '''
 Firefox can be cloned using either Git or Mercurial.
@@ -214,6 +208,15 @@ install the review submission tool "moz-phab":
 '''
 
 
+OLD_REVISION_WARNING = '''
+WARNING! You appear to be running `mach bootstrap` from an old revision.
+bootstrap is meant primarily for getting developer environments up-to-date to
+build the latest version of tree. Running bootstrap on old revisions may fail
+and is not guaranteed to bring your machine to any working state in particular.
+Proceed at your own peril.
+'''
+
+
 def update_or_create_build_telemetry_config(path):
     """Write a mach config file enabling build telemetry to `path`. If the file does not exist,
     create it. If it exists, add the new setting to the existing data.
@@ -265,12 +268,15 @@ class Bootstrapper(object):
             elif dist_id in DEBIAN_DISTROS:
                 cls = DebianBootstrapper
                 args['distro'] = dist_id
+                args['codename'] = codename
             elif dist_id in ('gentoo', 'funtoo'):
                 cls = GentooBootstrapper
             elif dist_id in ('solus'):
                 cls = SolusBootstrapper
             elif dist_id in ('arch') or os.path.exists('/etc/arch-release'):
                 cls = ArchlinuxBootstrapper
+            elif os.path.exists('/etc/SUSE-brand'):
+                cls = OpenSUSEBootstrapper
             else:
                 raise NotImplementedError('Bootstrap support for this Linux '
                                           'distro not yet available: ' + dist_id)
@@ -386,6 +392,8 @@ class Bootstrapper(object):
 
         self.instance.state_dir = state_dir
         self.instance.ensure_node_packages(state_dir, checkout_root)
+        self.instance.ensure_fix_stacks_packages(state_dir, checkout_root)
+        self.instance.ensure_minidump_stackwalk_packages(state_dir, checkout_root)
         if not self.instance.artifact_mode:
             self.instance.ensure_stylo_packages(state_dir, checkout_root)
             self.instance.ensure_clang_static_analysis_package(state_dir, checkout_root)
@@ -412,15 +420,17 @@ class Bootstrapper(object):
     def bootstrap(self):
         if self.choice is None:
             # Like ['1. Firefox for Desktop', '2. Firefox for Android Artifact Mode', ...].
-            labels = ['%s. %s' % (i + 1, name) for (i, (name, _)) in enumerate(APPLICATIONS_LIST)]
+            labels = ['%s. %s' % (i, name) for i, name in enumerate(APPLICATIONS.keys(), 1)]
             prompt = APPLICATION_CHOICE % '\n'.join('  {}'.format(label) for label in labels)
             prompt_choice = self.instance.prompt_int(prompt=prompt, low=1, high=len(APPLICATIONS))
-            name, application = APPLICATIONS_LIST[prompt_choice-1]
-        elif self.choice not in APPLICATIONS.keys():
+            name, application = list(APPLICATIONS.items())[prompt_choice-1]
+        elif self.choice in APPLICATIONS.keys():
+            name, application = self.choice, APPLICATIONS[self.choice]
+        elif self.choice in APPLICATIONS.values():
+            name, application = next((k, v) for k, v in APPLICATIONS.items() if v == self.choice)
+        else:
             raise Exception('Please pick a valid application choice: (%s)' %
                             '/'.join(APPLICATIONS.keys()))
-        else:
-            name, application = APPLICATIONS[self.choice]
 
         self.instance.application = application
         self.instance.artifact_mode = 'artifact_mode' in application
@@ -682,6 +692,7 @@ def current_firefox_checkout(check_output, env, hg=None):
                                     env=env,
                                     universal_newlines=True)
                 if node in HG_ROOT_REVISIONS:
+                    _warn_if_risky_revision(path)
                     return ('hg', path)
                 # Else the root revision is different. There could be nested
                 # repos. So keep traversing the parents.
@@ -694,6 +705,7 @@ def current_firefox_checkout(check_output, env, hg=None):
         elif os.path.exists(git_dir):
             moz_configure = os.path.join(path, 'moz.configure')
             if os.path.exists(moz_configure):
+                _warn_if_risky_revision(path)
                 return ('git', path)
 
         path, child = os.path.split(path)
@@ -802,3 +814,15 @@ def git_clone_firefox(git, dest, watchman=None):
 
     print('Firefox source code available at %s' % dest)
     return True
+
+
+def _warn_if_risky_revision(path):
+    # Warn the user if they're trying to bootstrap from an obviously old
+    # version of tree as reported by the version control system (a month in
+    # this case). This is an approximate calculation but is probably good
+    # enough for our purposes.
+    NUM_SECONDS_IN_MONTH = 60 * 60 * 24 * 30
+    from mozversioncontrol import get_repository_object
+    repo = get_repository_object(path)
+    if (time.time() - repo.get_commit_time()) >= NUM_SECONDS_IN_MONTH:
+        print(OLD_REVISION_WARNING)

@@ -8,7 +8,9 @@
 #define MOZILLA_DOMPOINT_H_
 
 #include "js/StructuredClone.h"
+#include "DOMMatrix.h"
 #include "nsWrapperCache.h"
+#include "nsIGlobalObject.h"
 #include "nsISupports.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
@@ -22,6 +24,7 @@ namespace mozilla {
 namespace dom {
 
 class GlobalObject;
+class DOMPoint;
 struct DOMPointInit;
 struct DOMMatrixInit;
 
@@ -59,7 +62,7 @@ class DOMPointReadOnly : public nsWrapperCache {
       JSStructuredCloneReader* aReader);
 
  protected:
-  virtual ~DOMPointReadOnly() {}
+  virtual ~DOMPointReadOnly() = default;
 
   // Shared implementation of ReadStructuredClone for DOMPoint and
   // DOMPointReadOnly.

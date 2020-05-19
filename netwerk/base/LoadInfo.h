@@ -20,7 +20,7 @@
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
 
-class nsICookieSettings;
+class nsICookieJarSettings;
 class nsINode;
 class nsPIDOMWindowOuter;
 
@@ -29,6 +29,8 @@ namespace mozilla {
 namespace dom {
 class PerformanceStorage;
 class XMLHttpRequestMainThread;
+class CanonicalBrowsingContext;
+class WindowGlobalParent;
 }  // namespace dom
 
 namespace net {
@@ -40,8 +42,7 @@ namespace ipc {
 // we have to forward declare that function so we can use it as a friend.
 nsresult LoadInfoArgsToLoadInfo(
     const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
-    nsINode* aLoadingContext, nsINode* aCspToInheritLoadingContext,
-    net::LoadInfo** outLoadInfo);
+    nsINode* aCspToInheritLoadingContext, net::LoadInfo** outLoadInfo);
 }  // namespace ipc
 
 namespace net {
@@ -56,6 +57,7 @@ class LoadInfo final : public nsILoadInfo {
   NS_DECL_ISUPPORTS
   NS_DECL_NSILOADINFO
 
+  // Used for TYPE_SUBDOCUMENT load.
   // aLoadingPrincipal MUST NOT BE NULL.
   LoadInfo(nsIPrincipal* aLoadingPrincipal, nsIPrincipal* aTriggeringPrincipal,
            nsINode* aLoadingContext, nsSecurityFlags aSecurityFlags,
@@ -65,6 +67,10 @@ class LoadInfo final : public nsILoadInfo {
            const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController =
                Maybe<mozilla::dom::ServiceWorkerDescriptor>(),
            uint32_t aSandboxFlags = 0);
+  // Used for TYPE_SUBDOCUMENT load.
+  LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
+           nsIPrincipal* aTriggeringPrincipal, uint64_t aFrameOuterWindowID,
+           nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
   // Constructor used for TYPE_DOCUMENT loads which have a different
   // loadingContext than other loads. This ContextForTopLevelLoad is
@@ -72,6 +78,10 @@ class LoadInfo final : public nsILoadInfo {
   LoadInfo(nsPIDOMWindowOuter* aOuterWindow, nsIPrincipal* aTriggeringPrincipal,
            nsISupports* aContextForTopLevelLoad, nsSecurityFlags aSecurityFlags,
            uint32_t aSandboxFlags);
+  LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
+           nsIPrincipal* aTriggeringPrincipal,
+           const OriginAttributes& aOriginAttributes, uint64_t aOuterWindowID,
+           nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
   // create an exact copy of the loadinfo
   already_AddRefed<nsILoadInfo> Clone() const;
@@ -128,7 +138,8 @@ class LoadInfo final : public nsILoadInfo {
            nsIPrincipal* aSandboxedLoadingPrincipal,
            nsIPrincipal* aTopLevelPrincipal,
            nsIPrincipal* aTopLevelStorageAreaPrincipal,
-           nsIURI* aResultPrincipalURI, nsICookieSettings* aCookieSettings,
+           nsIURI* aResultPrincipalURI,
+           nsICookieJarSettings* aCookieJarSettings,
            nsIContentSecurityPolicy* aCspToInherit,
            const Maybe<mozilla::dom::ClientInfo>& aClientInfo,
            const Maybe<mozilla::dom::ClientInfo>& aReservedClientInfo,
@@ -146,7 +157,8 @@ class LoadInfo final : public nsILoadInfo {
            uint64_t aTopOuterWindowID, uint64_t aFrameOuterWindowID,
            uint64_t aBrowsingContextID, uint64_t aFrameBrowsingContextID,
            bool aInitialSecurityCheckDone, bool aIsThirdPartyRequest,
-           bool aIsFormSubmission, bool aSendCSPViolationEvents,
+           bool aIsThirdPartyContextToTopWindow, bool aIsFormSubmission,
+           bool aSendCSPViolationEvents,
            const OriginAttributes& aOriginAttributes,
            RedirectHistoryArray& aRedirectChainIncludingInternalRedirects,
            RedirectHistoryArray& aRedirectChain,
@@ -158,7 +170,10 @@ class LoadInfo final : public nsILoadInfo {
            bool aDocumentHasUserInteracted, bool aDocumentHasLoaded,
            bool aAllowListFutureDocumentsCreatedFromThisRedirectChain,
            const nsAString& aCspNonce, bool aSkipContentSniffing,
-           uint32_t aRequestBlockingReason, nsINode* aLoadingContext);
+           uint32_t aHttpsOnlyStatus, bool aHasValidUserGestureActivation,
+           bool aAllowDeprecatedSystemRequests, bool aParserCreatedScript,
+           bool aHasStoragePermission, uint32_t aRequestBlockingReason,
+           nsINode* aLoadingContext);
   LoadInfo(const LoadInfo& rhs);
 
   NS_IMETHOD GetRedirects(JSContext* aCx,
@@ -167,12 +182,12 @@ class LoadInfo final : public nsILoadInfo {
 
   friend nsresult mozilla::ipc::LoadInfoArgsToLoadInfo(
       const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
-      nsINode* aLoadingContext, nsINode* aCspToInheritLoadingContext,
-      net::LoadInfo** outLoadInfo);
+      nsINode* aCspToInheritLoadingContext, net::LoadInfo** outLoadInfo);
 
   ~LoadInfo() = default;
 
   void ComputeIsThirdPartyContext(nsPIDOMWindowOuter* aOuterWindow);
+  void ComputeIsThirdPartyContext(dom::WindowGlobalParent* aGlobal);
 
   // This function is the *only* function which can change the securityflags
   // of a loadinfo. It only exists because of the XHR code. Don't call it
@@ -201,7 +216,7 @@ class LoadInfo final : public nsILoadInfo {
   nsCOMPtr<nsIPrincipal> mTopLevelStorageAreaPrincipal;
   nsCOMPtr<nsIURI> mResultPrincipalURI;
   nsCOMPtr<nsICSPEventListener> mCSPEventListener;
-  nsCOMPtr<nsICookieSettings> mCookieSettings;
+  nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
   nsCOMPtr<nsIContentSecurityPolicy> mCspToInherit;
 
   Maybe<mozilla::dom::ClientInfo> mClientInfo;
@@ -236,6 +251,7 @@ class LoadInfo final : public nsILoadInfo {
   uint64_t mFrameBrowsingContextID;
   bool mInitialSecurityCheckDone;
   bool mIsThirdPartyContext;
+  bool mIsThirdPartyContextToTopWindow;
   bool mIsFormSubmission;
   bool mSendCSPViolationEvents;
   OriginAttributes mOriginAttributes;
@@ -254,6 +270,11 @@ class LoadInfo final : public nsILoadInfo {
   bool mAllowListFutureDocumentsCreatedFromThisRedirectChain;
   nsString mCspNonce;
   bool mSkipContentSniffing;
+  uint32_t mHttpsOnlyStatus;
+  bool mHasValidUserGestureActivation;
+  bool mAllowDeprecatedSystemRequests;
+  bool mParserCreatedScript;
+  bool mHasStoragePermission;
 
   // Is true if this load was triggered by processing the attributes of the
   // browsing context container.

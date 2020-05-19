@@ -141,7 +141,8 @@ class gfxUserFontFamily : public gfxFontFamily {
  public:
   friend class gfxUserFontSet;
 
-  explicit gfxUserFontFamily(const nsACString& aName) : gfxFontFamily(aName) {}
+  explicit gfxUserFontFamily(const nsACString& aName)
+      : gfxFontFamily(aName, FontVisibility::Webfont) {}
 
   virtual ~gfxUserFontFamily();
 
@@ -327,7 +328,7 @@ class gfxUserFontSet {
     // Memory-reporting support.
     class MemoryReporter final : public nsIMemoryReporter {
      private:
-      ~MemoryReporter() {}
+      ~MemoryReporter() = default;
 
      public:
       NS_DECL_ISUPPORTS
@@ -348,7 +349,7 @@ class gfxUserFontSet {
      public:
       NS_DECL_ISUPPORTS
       NS_DECL_NSIOBSERVER
-      Flusher() {}
+      Flusher() = default;
     };
 
     // Key used to look up entries in the user-font cache.
@@ -391,7 +392,7 @@ class gfxUserFontSet {
             mFontEntry(std::move(aOther.mFontEntry)),
             mPrivate(std::move(aOther.mPrivate)) {}
 
-      ~Entry() {}
+      ~Entry() = default;
 
       bool KeyEquals(const KeyTypePointer aKey) const;
 
@@ -641,8 +642,6 @@ class gfxUserFontEntry : public gfxFontEntry {
     MOZ_ASSERT_UNREACHABLE("not meaningful for a userfont placeholder");
   }
 
-  static void Shutdown() { sFontLoadingThread = nullptr; }
-
  protected:
   struct OTSMessage {
     nsCString mMessage;
@@ -679,8 +678,8 @@ class gfxUserFontEntry : public gfxFontEntry {
   void LoadPlatformFontAsync(const uint8_t* aFontData, uint32_t aLength,
                              nsIFontLoadCompleteCallback* aCallback);
 
-  // helper method for LoadPlatformFontAsync; runs on the FontLoader thread
-  void StartPlatformFontLoadOnWorkerThread(
+  // helper method for LoadPlatformFontAsync; runs on a background thread
+  void StartPlatformFontLoadOnBackgroundThread(
       const uint8_t* aFontData, uint32_t aLength,
       nsMainThreadPtrHandle<nsIFontLoadCompleteCallback> aCallback);
 
@@ -749,8 +748,6 @@ class gfxUserFontEntry : public gfxFontEntry {
   gfxUserFontSet* MOZ_NON_OWNING_REF
       mFontSet;  // font-set which owns this userfont entry
   RefPtr<gfxFontSrcPrincipal> mPrincipal;
-
-  static mozilla::StaticRefPtr<mozilla::LazyIdleThread> sFontLoadingThread;
 };
 
 #endif /* GFX_USER_FONT_SET_H */

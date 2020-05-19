@@ -18,6 +18,8 @@ export type SearchModifiers = {
   regexMatch: boolean,
 };
 
+export type URL = string;
+
 export type Mode =
   | String
   | {
@@ -61,7 +63,7 @@ export type QueuedSourceData =
 
 export type OriginalSourceData = {|
   id: string,
-  url: string,
+  url: URL,
 |};
 
 export type GeneratedSourceData = {
@@ -115,20 +117,6 @@ export type PendingLocation = {
   +line: number,
   +column?: number,
   +sourceUrl?: string,
-};
-
-export type ExecutionPoint = {
-  +checkpoint: number,
-  +location: PendingLocation,
-  +position: ExecutionPointPosition,
-  +progress: number,
-};
-
-export type ExecutionPointPosition = {
-  +frameIndex: number,
-  +kind: string,
-  +offset: number,
-  +script: number,
 };
 
 // Type of location used when setting breakpoints in the server. Exactly one of
@@ -261,6 +249,7 @@ export type Frame = {
   library?: string,
   index: number,
   asyncCause: null | string,
+  state: "on-stack" | "suspended" | "dead",
 };
 
 export type ChromeFrame = {
@@ -424,12 +413,10 @@ export type SourceWithContentAndType<+Content: SourceContent> = $ReadOnly<{
 
 export type Source = {
   +id: SourceId,
-  +url: string,
+  +url: URL,
   +isBlackBoxed: boolean,
   +isPrettyPrinted: boolean,
-  +relativeUrl: string,
-  +introductionUrl: ?string,
-  +introductionType: ?string,
+  +relativeUrl: URL,
   +extensionName: ?string,
   +isExtension: boolean,
   +isWasm: boolean,
@@ -488,7 +475,7 @@ export type Scope = {|
 export type ThreadType = "mainThread" | "worker" | "contentProcess";
 export type Thread = {
   +actor: ThreadId,
-  +url: string,
+  +url: URL,
   +type: ThreadType,
   +name: string,
   serviceWorkerStatus?: string,

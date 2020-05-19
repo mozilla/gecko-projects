@@ -127,11 +127,6 @@ const ActorRegistry = {
       constructor: "PreferenceActor",
       type: { global: true },
     });
-    this.registerModule("devtools/server/actors/actor-registry", {
-      prefix: "actorRegistry",
-      constructor: "ActorRegistryActor",
-      type: { global: true },
-    });
     this.registerModule("devtools/server/actors/addon/addons", {
       prefix: "addons",
       constructor: "AddonsActor",
@@ -156,6 +151,19 @@ const ActorRegistry = {
       constructor: "PerfActor",
       type: { global: true },
     });
+    /**
+     * Always register parent accessibility actor as a global module. This
+     * actor is responsible for all top level accessibility actor functionality
+     * that relies on the parent process.
+     */
+    this.registerModule(
+      "devtools/server/actors/accessibility/parent-accessibility",
+      {
+        prefix: "parentAccessibility",
+        constructor: "ParentAccessibilityActor",
+        type: { global: true },
+      }
+    );
   },
 
   /**
@@ -255,6 +263,14 @@ const ActorRegistry = {
         type: { target: true },
       }
     );
+    this.registerModule(
+      "devtools/server/actors/network-monitor/eventsource-actor",
+      {
+        prefix: "eventSource",
+        constructor: "EventSourceActor",
+        type: { target: true },
+      }
+    );
     this.registerModule("devtools/server/actors/manifest", {
       prefix: "manifest",
       constructor: "ManifestActor",
@@ -265,9 +281,8 @@ const ActorRegistry = {
   /**
    * Registers handlers for new target-scoped request types defined dynamically.
    *
-   * Note that the name or actorPrefix of the request type is not allowed to clash with
-   * existing protocol packet properties, like 'title', 'url' or 'actor', since that would
-   * break the protocol.
+   * Note that the name of the request type is not allowed to clash with existing protocol
+   * packet properties, like 'title', 'url' or 'actor', since that would break the protocol.
    *
    * @param options object
    *        - constructorName: (required)
@@ -337,9 +352,8 @@ const ActorRegistry = {
   /**
    * Registers handlers for new browser-scoped request types defined dynamically.
    *
-   * Note that the name or actorPrefix of the request type is not allowed to clash with
-   * existing protocol packet properties, like 'from', 'tabs' or 'selected', since that
-   * would break the protocol.
+   * Note that the name of the request type is not allowed to clash with existing protocol
+   * packet properties, like 'from', 'tabs' or 'selected', since that would break the protocol.
    *
    * @param options object
    *        - constructorName: (required)

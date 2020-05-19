@@ -12,9 +12,11 @@
 #include "mozilla/BasicEvents.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/DataTransfer.h"
+#include "mozilla/dom/StaticRange.h"
 #include "mozilla/EventForwards.h"  // for KeyNameIndex, temporarily
 #include "mozilla/FontRange.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/OwningNonNull.h"
 #include "mozilla/TextRange.h"
 #include "mozilla/WritingModes.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
@@ -292,9 +294,12 @@ class WidgetKeyboardEvent : public WidgetInputEvent {
     WidgetKeyboardEvent* result =
         new WidgetKeyboardEvent(false, mMessage, nullptr);
     result->AssignKeyEventData(*this, true);
-    result->mEditCommandsForSingleLineEditor = mEditCommandsForSingleLineEditor;
-    result->mEditCommandsForMultiLineEditor = mEditCommandsForMultiLineEditor;
-    result->mEditCommandsForRichTextEditor = mEditCommandsForRichTextEditor;
+    result->mEditCommandsForSingleLineEditor =
+        mEditCommandsForSingleLineEditor.Clone();
+    result->mEditCommandsForMultiLineEditor =
+        mEditCommandsForMultiLineEditor.Clone();
+    result->mEditCommandsForRichTextEditor =
+        mEditCommandsForRichTextEditor.Clone();
     result->mFlags = mFlags;
     return result;
   }
@@ -363,7 +368,7 @@ class WidgetKeyboardEvent : public WidgetInputEvent {
 
   // OS translated Unicode chars which are used for accesskey and accelkey
   // handling. The handlers will try from first character to last character.
-  nsTArray<AlternativeCharCode> mAlternativeCharCodes;
+  CopyableTArray<AlternativeCharCode> mAlternativeCharCodes;
   // DOM KeyboardEvent.key only when mKeyNameIndex is KEY_NAME_INDEX_USE_STRING.
   nsString mKeyValue;
   // DOM KeyboardEvent.code only when mCodeNameIndex is
@@ -677,7 +682,7 @@ class WidgetKeyboardEvent : public WidgetInputEvent {
     mCharCode = aEvent.mCharCode;
     mPseudoCharCode = aEvent.mPseudoCharCode;
     mLocation = aEvent.mLocation;
-    mAlternativeCharCodes = aEvent.mAlternativeCharCodes;
+    mAlternativeCharCodes = aEvent.mAlternativeCharCodes.Clone();
     mIsRepeat = aEvent.mIsRepeat;
     mIsComposing = aEvent.mIsComposing;
     mKeyNameIndex = aEvent.mKeyNameIndex;
@@ -718,21 +723,23 @@ class WidgetKeyboardEvent : public WidgetInputEvent {
         aEvent.mEditCommandsForSingleLineEditorInitialized;
     if (mEditCommandsForSingleLineEditorInitialized) {
       mEditCommandsForSingleLineEditor =
-          aEvent.mEditCommandsForSingleLineEditor;
+          aEvent.mEditCommandsForSingleLineEditor.Clone();
     } else {
       mEditCommandsForSingleLineEditor.Clear();
     }
     mEditCommandsForMultiLineEditorInitialized =
         aEvent.mEditCommandsForMultiLineEditorInitialized;
     if (mEditCommandsForMultiLineEditorInitialized) {
-      mEditCommandsForMultiLineEditor = aEvent.mEditCommandsForMultiLineEditor;
+      mEditCommandsForMultiLineEditor =
+          aEvent.mEditCommandsForMultiLineEditor.Clone();
     } else {
       mEditCommandsForMultiLineEditor.Clear();
     }
     mEditCommandsForRichTextEditorInitialized =
         aEvent.mEditCommandsForRichTextEditorInitialized;
     if (mEditCommandsForRichTextEditorInitialized) {
-      mEditCommandsForRichTextEditor = aEvent.mEditCommandsForRichTextEditor;
+      mEditCommandsForRichTextEditor =
+          aEvent.mEditCommandsForRichTextEditor.Clone();
     } else {
       mEditCommandsForRichTextEditor.Clear();
     }
@@ -751,9 +758,9 @@ class WidgetKeyboardEvent : public WidgetInputEvent {
   // with InitEditCommandsFor().
   // XXX Ideally, this should be array of Command rather than CommandInt.
   //     However, ParamTraits isn't aware of enum array.
-  nsTArray<CommandInt> mEditCommandsForSingleLineEditor;
-  nsTArray<CommandInt> mEditCommandsForMultiLineEditor;
-  nsTArray<CommandInt> mEditCommandsForRichTextEditor;
+  CopyableTArray<CommandInt> mEditCommandsForSingleLineEditor;
+  CopyableTArray<CommandInt> mEditCommandsForMultiLineEditor;
+  CopyableTArray<CommandInt> mEditCommandsForRichTextEditor;
 
   nsTArray<CommandInt>& EditCommandsRef(
       nsIWidget::NativeKeyBindingsType aType) {
@@ -1107,9 +1114,9 @@ class WidgetQueryContentEvent : public WidgetGUIEvent {
     // Used by eQuerySelectionAsTransferable
     nsCOMPtr<nsITransferable> mTransferable;
     // Used by eQueryTextContent with font ranges requested
-    AutoTArray<mozilla::FontRange, 1> mFontRanges;
+    CopyableAutoTArray<mozilla::FontRange, 1> mFontRanges;
     // Used by eQueryTextRectArray
-    nsTArray<mozilla::LayoutDeviceIntRect> mRectArray;
+    CopyableTArray<mozilla::LayoutDeviceIntRect> mRectArray;
     // true if selection is reversed (end < start)
     bool mReversed;
     // true if the selection exists
@@ -1225,6 +1232,7 @@ class InternalEditorInputEvent : public InternalUIEvent {
 
   nsString mData;
   RefPtr<dom::DataTransfer> mDataTransfer;
+  OwningNonNullStaticRangeArray mTargetRanges;
 
   EditorInputType mInputType;
 
@@ -1236,6 +1244,7 @@ class InternalEditorInputEvent : public InternalUIEvent {
 
     mData = aEvent.mData;
     mDataTransfer = aEvent.mDataTransfer;
+    mTargetRanges = aEvent.mTargetRanges.Clone();
     mInputType = aEvent.mInputType;
     mIsComposing = aEvent.mIsComposing;
   }

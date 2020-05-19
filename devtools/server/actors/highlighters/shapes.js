@@ -1087,9 +1087,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
     newCy = round(newCy * ratioY, unitY);
 
     const centerStr = `${newCx}${unitX} ${newCy}${unitY}`;
-    const ellipseDef = `ellipse(${rx} ${ry} at ${centerStr}) ${
-      this.geometryBox
-    }`.trim();
+    const ellipseDef = `ellipse(${rx} ${ry} at ${centerStr}) ${this.geometryBox}`.trim();
     this.emit("highlighter-event", { type: "shape-change", value: ellipseDef });
   }
 
@@ -1121,9 +1119,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
     newBottom = `${newBottom}${bottom.unit}`;
 
     let insetDef = this.insetRound
-      ? `inset(${newTop} ${newRight} ${newBottom} ${newLeft} round ${
-          this.insetRound
-        })`
+      ? `inset(${newTop} ${newRight} ${newBottom} ${newLeft} round ${this.insetRound})`
       : `inset(${newTop} ${newRight} ${newBottom} ${newLeft})`;
     insetDef += this.geometryBox ? this.geometryBox : "";
 
@@ -1317,9 +1313,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
       const newCx = `${round(valueX + deltaX, unitX)}${unitX}`;
       const newCy = `${round(valueY + deltaY, unitY)}${unitY}`;
       // if not defined by the user, geometryBox will be an empty string; trim() cleans up
-      const circleDef = `circle(${radius} at ${newCx} ${newCy}) ${
-        this.geometryBox
-      }`.trim();
+      const circleDef = `circle(${radius} at ${newCx} ${newCy}) ${this.geometryBox}`.trim();
 
       this.emit("highlighter-event", {
         type: "shape-change",
@@ -1337,9 +1331,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
       const delta = (newRadiusPx - origRadius) * ratio;
       const newRadius = `${round(value + delta, unit)}${unit}`;
 
-      const circleDef = `circle(${newRadius} at ${cx} ${cy}) ${
-        this.geometryBox
-      }`.trim();
+      const circleDef = `circle(${newRadius} at ${cx} ${cy}) ${this.geometryBox}`.trim();
 
       this.emit("highlighter-event", {
         type: "shape-change",
@@ -1433,9 +1425,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
       const deltaY = (pageY - y) * ratioY;
       const newCx = `${round(valueX + deltaX, unitX)}${unitX}`;
       const newCy = `${round(valueY + deltaY, unitY)}${unitY}`;
-      const ellipseDef = `ellipse(${rx} ${ry} at ${newCx} ${newCy}) ${
-        this.geometryBox
-      }`.trim();
+      const ellipseDef = `ellipse(${rx} ${ry} at ${newCx} ${newCy}) ${this.geometryBox}`.trim();
 
       this.emit("highlighter-event", {
         type: "shape-change",
@@ -1448,9 +1438,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
       const delta = ((newRadiusPercent / 100) * width - origRadius) * ratio;
       const newRadius = `${round(value + delta, unit)}${unit}`;
 
-      const ellipseDef = `ellipse(${newRadius} ${ry} at ${cx} ${cy}) ${
-        this.geometryBox
-      }`.trim();
+      const ellipseDef = `ellipse(${newRadius} ${ry} at ${cx} ${cy}) ${this.geometryBox}`.trim();
 
       this.emit("highlighter-event", {
         type: "shape-change",
@@ -1463,9 +1451,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
       const delta = ((newRadiusPercent / 100) * height - origRadius) * ratio;
       const newRadius = `${round(value + delta, unit)}${unit}`;
 
-      const ellipseDef = `ellipse(${rx} ${newRadius} at ${cx} ${cy}) ${
-        this.geometryBox
-      }`.trim();
+      const ellipseDef = `ellipse(${rx} ${newRadius} at ${cx} ${cy}) ${this.geometryBox}`.trim();
 
       this.emit("highlighter-event", {
         type: "shape-change",
@@ -2659,13 +2645,25 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
       // Shape renders for "circle()" and "ellipse()" use the same SVG nodes.
       this._updateEllipseShape(width, height, zoom);
       // Draw markers for center and radius points.
-      this._drawMarkers([[cx, cy], [cx + rx, cy]], width, height, zoom);
+      this._drawMarkers(
+        [
+          [cx, cy],
+          [cx + rx, cy],
+        ],
+        width,
+        height,
+        zoom
+      );
     } else if (this.shapeType === "ellipse") {
       const { rx, ry, cx, cy } = this.coordinates;
       this._updateEllipseShape(width, height, zoom);
       // Draw markers for center, horizontal radius and vertical radius points.
       this._drawMarkers(
-        [[cx, cy], [cx + rx, cy], [cx, cy + ry]],
+        [
+          [cx, cy],
+          [cx + rx, cy],
+          [cx, cy + ry],
+        ],
         width,
         height,
         zoom

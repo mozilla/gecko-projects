@@ -7,6 +7,7 @@
 #include "PerformanceMainThread.h"
 #include "PerformanceNavigation.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_privacy.h"
 
 namespace mozilla {
 namespace dom {
@@ -72,7 +73,8 @@ PerformanceMainThread::PerformanceMainThread(nsPIDOMWindowInner* aWindow,
                                              bool aPrincipal)
     : Performance(aWindow, aPrincipal),
       mDOMTiming(aDOMTiming),
-      mChannel(aChannel) {
+      mChannel(aChannel),
+      mCrossOriginIsolated(aWindow->AsGlobal()->CrossOriginIsolated()) {
   MOZ_ASSERT(aWindow, "Parent window object should be provided");
   CreateNavigationTimingEntry();
 }
@@ -256,8 +258,9 @@ DOMHighResTimeStamp PerformanceMainThread::GetPerformanceTimingFromString(
         "out "
         "of sync");
   }
-  return nsRFPService::ReduceTimePrecisionAsMSecs(retValue,
-                                                  GetRandomTimelineSeed());
+  return nsRFPService::ReduceTimePrecisionAsMSecs(
+      retValue, GetRandomTimelineSeed(), /* aIsSystemPrinciapl */ false,
+      CrossOriginIsolated());
 }
 
 void PerformanceMainThread::InsertUserEntry(PerformanceEntry* aEntry) {
@@ -303,7 +306,8 @@ DOMHighResTimeStamp PerformanceMainThread::CreationTime() const {
 void PerformanceMainThread::CreateNavigationTimingEntry() {
   MOZ_ASSERT(!mDocEntry, "mDocEntry should be null.");
 
-  if (!StaticPrefs::dom_enable_performance_navigation_timing()) {
+  if (!StaticPrefs::dom_enable_performance_navigation_timing() ||
+      StaticPrefs::privacy_resistFingerprinting()) {
     return;
   }
 
@@ -335,6 +339,10 @@ void PerformanceMainThread::QueueNavigationTimingEntry() {
   QueueEntry(mDocEntry);
 }
 
+bool PerformanceMainThread::CrossOriginIsolated() const {
+  return mCrossOriginIsolated;
+}
+
 void PerformanceMainThread::GetEntries(
     nsTArray<RefPtr<PerformanceEntry>>& aRetval) {
   // We return an empty list when 'privacy.resistFingerprinting' is on.
@@ -343,7 +351,7 @@ void PerformanceMainThread::GetEntries(
     return;
   }
 
-  aRetval = mResourceEntries;
+  aRetval = mResourceEntries.Clone();
   aRetval.AppendElements(mUserEntries);
 
   if (mDocEntry) {

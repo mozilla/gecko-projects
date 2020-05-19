@@ -15,7 +15,6 @@
 #include "PlayingRefChangeHandler.h"
 #include "blink/HRTFPanner.h"
 #include "blink/HRTFDatabaseLoader.h"
-#include "nsAutoPtr.h"
 
 using WebCore::HRTFDatabaseLoader;
 using WebCore::HRTFPanner;
@@ -102,8 +101,8 @@ class PannerNodeEngine final : public AudioNodeEngine {
     RefPtr<HRTFDatabaseLoader> loader =
         HRTFDatabaseLoader::createAndLoadAsynchronouslyIfNecessary(
             NodeMainThread()->Context()->SampleRate());
-    mHRTFPanner = new HRTFPanner(NodeMainThread()->Context()->SampleRate(),
-                                 loader.forget());
+    mHRTFPanner = MakeUnique<HRTFPanner>(
+        NodeMainThread()->Context()->SampleRate(), loader.forget());
   }
 
   void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override {
@@ -246,7 +245,7 @@ class PannerNodeEngine final : public AudioNodeEngine {
   // This member is set on the main thread, but is not accessed on the rendering
   // thread untile mPanningModelFunction has changed, and this happens strictly
   // later, via a MediaTrackGraph ControlMessage.
-  nsAutoPtr<HRTFPanner> mHRTFPanner;
+  UniquePtr<HRTFPanner> mHRTFPanner;
   RefPtr<AudioListenerEngine> mListenerEngine;
   typedef void (PannerNodeEngine::*PanningModelFunction)(
       const AudioBlock& aInput, AudioBlock* aOutput, TrackTime tick);
@@ -282,14 +281,14 @@ PannerNode::PannerNode(AudioContext* aContext)
       mConeInnerAngle(360.),
       mConeOuterAngle(360.),
       mConeOuterGain(0.) {
-  CreateAudioParam(mPositionX, PannerNode::POSITIONX, this->NodeType(), 0.f);
-  CreateAudioParam(mPositionY, PannerNode::POSITIONY, this->NodeType(), 0.f);
-  CreateAudioParam(mPositionZ, PannerNode::POSITIONZ, this->NodeType(), 0.f);
-  CreateAudioParam(mOrientationX, PannerNode::ORIENTATIONX, this->NodeType(),
+  CreateAudioParam(mPositionX, PannerNode::POSITIONX, u"PositionX", 0.f);
+  CreateAudioParam(mPositionY, PannerNode::POSITIONY, u"PositionY", 0.f);
+  CreateAudioParam(mPositionZ, PannerNode::POSITIONZ, u"PositionZ", 0.f);
+  CreateAudioParam(mOrientationX, PannerNode::ORIENTATIONX, u"OrientationX",
                    1.0f);
-  CreateAudioParam(mOrientationY, PannerNode::ORIENTATIONY, this->NodeType(),
+  CreateAudioParam(mOrientationY, PannerNode::ORIENTATIONY, u"OrientationY",
                    0.f);
-  CreateAudioParam(mOrientationZ, PannerNode::ORIENTATIONZ, this->NodeType(),
+  CreateAudioParam(mOrientationZ, PannerNode::ORIENTATIONZ, u"OrientationZ",
                    0.f);
   mTrack = AudioNodeTrack::Create(
       aContext,

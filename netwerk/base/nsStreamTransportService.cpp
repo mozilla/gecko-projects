@@ -31,9 +31,7 @@ namespace net {
 
 class nsInputStreamTransport : public nsITransport, public nsIInputStream {
  public:
-  // Record refcount changes to ensure that stream transports are destroyed
-  // on consistent threads when recording/replaying.
-  NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITRANSPORT
   NS_DECL_NSIINPUTSTREAM
 
@@ -93,9 +91,11 @@ nsInputStreamTransport::OpenInputStream(uint32_t flags, uint32_t segsize,
   // startup async copy process...
   rv = NS_AsyncCopy(this, pipeOut, target, NS_ASYNCCOPY_VIA_WRITESEGMENTS,
                     segsize);
-  if (NS_SUCCEEDED(rv)) NS_ADDREF(*result = mPipeIn);
-
-  return rv;
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  *result = do_AddRef(mPipeIn).take();
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -253,10 +253,9 @@ NS_IMETHODIMP
 nsStreamTransportService::CreateInputTransport(nsIInputStream* stream,
                                                bool closeWhenDone,
                                                nsITransport** result) {
-  nsInputStreamTransport* trans =
+  RefPtr<nsInputStreamTransport> trans =
       new nsInputStreamTransport(stream, closeWhenDone);
-  if (!trans) return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF(*result = trans);
+  trans.forget(result);
   return NS_OK;
 }
 

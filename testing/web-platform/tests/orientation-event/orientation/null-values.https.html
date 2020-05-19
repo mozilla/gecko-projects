@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script src="/resources/testdriver.js"></script>
+<script src="/resources/testdriver-vendor.js"></script>
+<script src="../resources/orientation-event-helpers.js"></script>
+<script>
+'use strict';
+
+sensor_test(async (t, sensorProvider) => {
+  const orientationData1 = generateOrientationData(1.1, null, null, false);
+  const orientationData2 = generateOrientationData(null, 2.2, null, false);
+  const orientationData3 = generateOrientationData(null, null, 3.3, false);
+  // The all null event is last because DeviceSingleWindowEventController
+  // will stop updating the sensor when it sees a null event.
+  const orientationData4 = generateOrientationData(null, null, null, false);
+
+  const watcher = new EventWatcher(t, window, ['deviceorientation']);
+  setMockOrientationData(sensorProvider, orientationData1);
+  const firstEvent = await watcher.wait_for('deviceorientation');
+  assertEventEquals(firstEvent, getExpectedOrientationEvent(orientationData1));
+
+  setMockOrientationData(sensorProvider, orientationData2);
+  const secondEvent = await watcher.wait_for('deviceorientation');
+  assertEventEquals(secondEvent, getExpectedOrientationEvent(orientationData2));
+
+  setMockOrientationData(sensorProvider, orientationData3);
+  const thirdEvent = await watcher.wait_for('deviceorientation');
+  assertEventEquals(thirdEvent, getExpectedOrientationEvent(orientationData3));
+
+  setMockOrientationData(sensorProvider, orientationData4);
+  const fourthEvent = await watcher.wait_for('deviceorientation');
+  assertEventEquals(fourthEvent, getExpectedOrientationEvent(orientationData4));
+}, 'Tests using null values for some of the event properties.');
+</script>

@@ -367,11 +367,6 @@ bool DebugState::debugGetLocalTypes(uint32_t funcIndex, ValTypeVector* locals,
   return DecodeValidatedLocalEntries(d, locals);
 }
 
-bool DebugState::debugGetResultTypes(uint32_t funcIndex,
-                                     ValTypeVector* results) {
-  return results->appendAll(metadata().debugFuncReturnTypes[funcIndex]);
-}
-
 bool DebugState::getGlobal(Instance& instance, uint32_t globalIndex,
                            MutableHandleValue vp) {
   const GlobalDesc& global = metadata().globals[globalIndex];
@@ -391,6 +386,16 @@ bool DebugState::getGlobal(Instance& instance, uint32_t globalIndex,
         break;
       case ValType::F64:
         vp.set(NumberValue(JS::CanonicalizeNaN(value.f64())));
+        break;
+      case ValType::Ref:
+        // It's possible to do better.  We could try some kind of hashing
+        // scheme, to make the pointer recognizable without revealing it.
+        vp.set(MagicValue(JS_OPTIMIZED_OUT));
+        break;
+      case ValType::V128:
+        // Debugger must be updated to handle this, and should be updated to
+        // handle i64 in any case.
+        vp.set(MagicValue(JS_OPTIMIZED_OUT));
         break;
       default:
         MOZ_CRASH("Global constant type");
@@ -421,9 +426,20 @@ bool DebugState::getGlobal(Instance& instance, uint32_t globalIndex,
       vp.set(NumberValue(JS::CanonicalizeNaN(*static_cast<double*>(dataPtr))));
       break;
     }
-    default:
+    case ValType::Ref: {
+      // Just hide it.  See above.
+      vp.set(MagicValue(JS_OPTIMIZED_OUT));
+      break;
+    }
+    case ValType::V128: {
+      // Just hide it.  See above.
+      vp.set(MagicValue(JS_OPTIMIZED_OUT));
+      break;
+    }
+    default: {
       MOZ_CRASH("Global variable type");
       break;
+    }
   }
   return true;
 }

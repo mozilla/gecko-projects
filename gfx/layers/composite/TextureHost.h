@@ -232,7 +232,7 @@ class TextureSource : public RefCounted<TextureSource> {
 template <typename T>
 class CompositableTextureRef {
  public:
-  CompositableTextureRef() {}
+  CompositableTextureRef() = default;
 
   explicit CompositableTextureRef(const CompositableTextureRef& aOther) {
     *this = aOther;
@@ -648,6 +648,14 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
         "No CreateRenderTexture() implementation for this TextureHost type.");
   }
 
+  void EnsureRenderTexture(const wr::ExternalImageId& aExternalImageId);
+
+  // Destroy RenderTextureHost when it was created by the TextureHost.
+  // It is called in TextureHost::Finalize().
+  virtual void MaybeDestroyRenderTexture();
+
+  static void DestroyRenderTexture(const wr::ExternalImageId& aExternalImageId);
+
   /// Returns the number of actual textures that will be used to render this.
   /// For example in a lot of YUV cases it will be 3
   virtual uint32_t NumSubTextures() { return 1; }
@@ -661,8 +669,7 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
   virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
                                    ResourceUpdateOp aOp,
                                    const Range<wr::ImageKey>& aImageKeys,
-                                   const wr::ExternalImageId& aExtID,
-                                   const bool aPreferCompositorSurface) {
+                                   const wr::ExternalImageId& aExtID) {
     MOZ_ASSERT_UNREACHABLE("Unimplemented");
   }
 
@@ -672,7 +679,8 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
                                 const wr::LayoutRect& aBounds,
                                 const wr::LayoutRect& aClip,
                                 wr::ImageRendering aFilter,
-                                const Range<wr::ImageKey>& aKeys) {
+                                const Range<wr::ImageKey>& aKeys,
+                                const bool aPreferCompositorSurface) {
     MOZ_ASSERT_UNREACHABLE(
         "No PushDisplayItems() implementation for this TextureHost type.");
   }
@@ -715,11 +723,14 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
   int mCompositableCount;
   uint64_t mFwdTransactionId;
   bool mReadLocked;
+  wr::MaybeExternalImageId mExternalImageId;
 
   friend class Compositor;
   friend class TextureParent;
   friend class TiledLayerBufferComposite;
   friend class TextureSourceProvider;
+  friend class GPUVideoTextureHost;
+  friend class WebRenderTextureHost;
 };
 
 /**
@@ -793,13 +804,13 @@ class BufferTextureHost : public TextureHost {
   void PushResourceUpdates(wr::TransactionBuilder& aResources,
                            ResourceUpdateOp aOp,
                            const Range<wr::ImageKey>& aImageKeys,
-                           const wr::ExternalImageId& aExtID,
-                           const bool aPreferCompositorSurface) override;
+                           const wr::ExternalImageId& aExtID) override;
 
   void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
                         const wr::LayoutRect& aBounds,
                         const wr::LayoutRect& aClip, wr::ImageRendering aFilter,
-                        const Range<wr::ImageKey>& aImageKeys) override;
+                        const Range<wr::ImageKey>& aImageKeys,
+                        const bool aPreferCompositorSurface) override;
 
   void ReadUnlock() override;
   bool IsDirectMap() override {

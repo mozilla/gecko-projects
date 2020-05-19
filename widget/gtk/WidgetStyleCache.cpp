@@ -8,6 +8,11 @@
 #include <gtk/gtk.h>
 #include "WidgetStyleCache.h"
 #include "gtkdrawing.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/PodOperations.h"
+#include "nsDebug.h"
+#include "nsPrintfCString.h"
+#include "nsString.h"
 
 #define STATE_FLAG_DIR_LTR (1U << 7)
 #define STATE_FLAG_DIR_RTL (1U << 8)
@@ -758,11 +763,9 @@ GtkWidget* GetWidget(WidgetNodeType aAppearance) {
   if (!widget) {
     widget = CreateWidget(aAppearance);
     // Some widgets (MOZ_GTK_COMBOBOX_SEPARATOR for instance) may not be
-    // available or implemented. Use GtkInvisible as a fallback to avoid
-    // potential crashes.
+    // available or implemented.
     if (!widget) {
-      NS_WARNING(nsPrintfCString("Missing GtkWidget %d\n", aAppearance).get());
-      widget = gtk_invisible_new();
+      return nullptr;
     }
     // In GTK versions prior to 3.18, automatic invalidation of style contexts
     // for widgets was delayed until the next resize event.  Gecko however,
@@ -1438,5 +1441,7 @@ void StyleContextSetScale(GtkStyleContext* style, gint aScaleFactor) {
   static auto sGtkStyleContextSetScalePtr =
       (void (*)(GtkStyleContext*, gint))dlsym(RTLD_DEFAULT,
                                               "gtk_style_context_set_scale");
-  sGtkStyleContextSetScalePtr(style, aScaleFactor);
+  if (sGtkStyleContextSetScalePtr && style) {
+    sGtkStyleContextSetScalePtr(style, aScaleFactor);
+  }
 }

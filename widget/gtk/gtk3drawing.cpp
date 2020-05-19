@@ -243,13 +243,10 @@ static gint moz_gtk_get_focus_outline_size(GtkStyleContext* style,
                                            gint* focus_h_width,
                                            gint* focus_v_width) {
   GtkBorder border;
-  GtkBorder padding;
   gtk_style_context_get_border(style, gtk_style_context_get_state(style),
                                &border);
-  gtk_style_context_get_padding(style, gtk_style_context_get_state(style),
-                                &padding);
-  *focus_h_width = border.left + padding.left;
-  *focus_v_width = border.top + padding.top;
+  *focus_h_width = border.left;
+  *focus_v_width = border.top;
   return MOZ_GTK_SUCCESS;
 }
 
@@ -404,13 +401,15 @@ int GetGtkHeaderBarButtonLayout(WidgetNodeType* aButtonLayout,
   }
 #endif
 
-  const gchar* decorationLayout = nullptr;
+  gchar* decorationLayoutSetting = nullptr;
   GtkSettings* settings = gtk_settings_get_for_screen(gdk_screen_get_default());
-  g_object_get(settings, "gtk-decoration-layout", &decorationLayout, nullptr);
+  g_object_get(settings, "gtk-decoration-layout", &decorationLayoutSetting,
+               nullptr);
 
   // Use a default layout
-  if (!decorationLayout) {
-    decorationLayout = "menu:minimize,maximize,close";
+  const gchar* decorationLayout = "menu:minimize,maximize,close";
+  if (decorationLayoutSetting) {
+    decorationLayout = decorationLayoutSetting;
   }
 
   // "minimize,maximize,close:" layout means buttons are on the opposite
@@ -446,6 +445,7 @@ int GetGtkHeaderBarButtonLayout(WidgetNodeType* aButtonLayout,
   if (aReversedButtonsPlacement) {
     *aReversedButtonsPlacement = reversedButtonsPlacement;
   }
+  g_free(decorationLayoutSetting);
 
   return activeButtonNums;
 }

@@ -8,18 +8,16 @@ add_task(async function test_tokenizer() {
     {
       desc: "Single word string",
       searchString: "test",
-      expectedTokens: [
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-      ],
+      expectedTokens: [{ value: "test", type: UrlbarTokenizer.TYPE.TEXT }],
     },
     {
       desc: "Multi word string with mixed whitespace types",
       searchString: " test1 test2\u1680test3\u2004test4\u1680",
       expectedTokens: [
-        { value: "test1", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-        { value: "test2", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-        { value: "test3", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-        { value: "test4", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test1", type: UrlbarTokenizer.TYPE.TEXT },
+        { value: "test2", type: UrlbarTokenizer.TYPE.TEXT },
+        { value: "test3", type: UrlbarTokenizer.TYPE.TEXT },
+        { value: "test4", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
@@ -30,14 +28,14 @@ add_task(async function test_tokenizer() {
           value: UrlbarTokenizer.RESTRICT.BOOKMARK,
           type: UrlbarTokenizer.TYPE.RESTRICT_BOOKMARK,
         },
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
       desc: "separate restriction char at end",
       searchString: `test ${UrlbarTokenizer.RESTRICT.BOOKMARK}`,
       expectedTokens: [
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
         {
           value: UrlbarTokenizer.RESTRICT.BOOKMARK,
           type: UrlbarTokenizer.TYPE.RESTRICT_BOOKMARK,
@@ -48,7 +46,7 @@ add_task(async function test_tokenizer() {
       desc: "boundary restriction char at end",
       searchString: `test${UrlbarTokenizer.RESTRICT.BOOKMARK}`,
       expectedTokens: [
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
         {
           value: UrlbarTokenizer.RESTRICT.BOOKMARK,
           type: UrlbarTokenizer.TYPE.RESTRICT_BOOKMARK,
@@ -59,12 +57,12 @@ add_task(async function test_tokenizer() {
       desc: "separate restriction char in the middle",
       searchString: `test ${UrlbarTokenizer.RESTRICT.BOOKMARK} test`,
       expectedTokens: [
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
         {
           value: UrlbarTokenizer.RESTRICT.BOOKMARK,
           type: UrlbarTokenizer.TYPE.TEXT,
         },
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
@@ -85,14 +83,12 @@ add_task(async function test_tokenizer() {
           value: `test${UrlbarTokenizer.RESTRICT.BOOKMARK}`,
           type: UrlbarTokenizer.TYPE.TEXT,
         },
-        { value: `test`, type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: `test`, type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
       desc: "double boundary restriction char",
-      searchString: `${UrlbarTokenizer.RESTRICT.BOOKMARK}test${
-        UrlbarTokenizer.RESTRICT.TITLE
-      }`,
+      searchString: `${UrlbarTokenizer.RESTRICT.BOOKMARK}test${UrlbarTokenizer.RESTRICT.TITLE}`,
       expectedTokens: [
         {
           value: UrlbarTokenizer.RESTRICT.BOOKMARK,
@@ -106,9 +102,7 @@ add_task(async function test_tokenizer() {
     },
     {
       desc: "double non-combinable restriction char, single char string",
-      searchString: `t${UrlbarTokenizer.RESTRICT.BOOKMARK}${
-        UrlbarTokenizer.RESTRICT.SEARCH
-      }`,
+      searchString: `t${UrlbarTokenizer.RESTRICT.BOOKMARK}${UrlbarTokenizer.RESTRICT.SEARCH}`,
       expectedTokens: [
         {
           value: `t${UrlbarTokenizer.RESTRICT.BOOKMARK}`,
@@ -122,9 +116,7 @@ add_task(async function test_tokenizer() {
     },
     {
       desc: "only boundary restriction chars",
-      searchString: `${UrlbarTokenizer.RESTRICT.BOOKMARK}${
-        UrlbarTokenizer.RESTRICT.TITLE
-      }`,
+      searchString: `${UrlbarTokenizer.RESTRICT.BOOKMARK}${UrlbarTokenizer.RESTRICT.TITLE}`,
       expectedTokens: [
         {
           value: UrlbarTokenizer.RESTRICT.BOOKMARK,
@@ -164,11 +156,9 @@ add_task(async function test_tokenizer() {
     },
     {
       desc: "multiple boundary restriction chars suffix",
-      searchString: `test ${UrlbarTokenizer.RESTRICT.HISTORY} ${
-        UrlbarTokenizer.RESTRICT.TAG
-      }`,
+      searchString: `test ${UrlbarTokenizer.RESTRICT.HISTORY} ${UrlbarTokenizer.RESTRICT.TAG}`,
       expectedTokens: [
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
         {
           value: UrlbarTokenizer.RESTRICT.HISTORY,
           type: UrlbarTokenizer.TYPE.TEXT,
@@ -181,9 +171,7 @@ add_task(async function test_tokenizer() {
     },
     {
       desc: "multiple boundary restriction chars prefix",
-      searchString: `${UrlbarTokenizer.RESTRICT.HISTORY} ${
-        UrlbarTokenizer.RESTRICT.TAG
-      } test`,
+      searchString: `${UrlbarTokenizer.RESTRICT.HISTORY} ${UrlbarTokenizer.RESTRICT.TAG} test`,
       expectedTokens: [
         {
           value: UrlbarTokenizer.RESTRICT.HISTORY,
@@ -193,7 +181,7 @@ add_task(async function test_tokenizer() {
           value: UrlbarTokenizer.RESTRICT.TAG,
           type: UrlbarTokenizer.TYPE.TEXT,
         },
-        { value: "test", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "test", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
@@ -217,6 +205,13 @@ add_task(async function test_tokenizer() {
       searchString: "test@mozilla.com",
       expectedTokens: [
         { value: "test@mozilla.com", type: UrlbarTokenizer.TYPE.TEXT },
+      ],
+    },
+    {
+      desc: "email2",
+      searchString: "test.test@mozilla.co.uk",
+      expectedTokens: [
+        { value: "test.test@mozilla.co.uk", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
@@ -341,53 +336,88 @@ add_task(async function test_tokenizer() {
     {
       desc: "Uppercase",
       searchString: "TEST",
-      expectedTokens: [
-        { value: "TEST", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-      ],
+      expectedTokens: [{ value: "TEST", type: UrlbarTokenizer.TYPE.TEXT }],
     },
     {
       desc: "Mixed case 1",
       searchString: "TeSt",
-      expectedTokens: [
-        { value: "TeSt", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-      ],
+      expectedTokens: [{ value: "TeSt", type: UrlbarTokenizer.TYPE.TEXT }],
     },
     {
       desc: "Mixed case 2",
       searchString: "tEsT",
-      expectedTokens: [
-        { value: "tEsT", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-      ],
+      expectedTokens: [{ value: "tEsT", type: UrlbarTokenizer.TYPE.TEXT }],
     },
     {
       desc: "Uppercase with spaces",
       searchString: "TEST EXAMPLE",
       expectedTokens: [
-        { value: "TEST", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-        { value: "EXAMPLE", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "TEST", type: UrlbarTokenizer.TYPE.TEXT },
+        { value: "EXAMPLE", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
     {
       desc: "Mixed case with spaces",
       searchString: "TeSt eXaMpLe",
       expectedTokens: [
-        { value: "TeSt", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
-        { value: "eXaMpLe", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        { value: "TeSt", type: UrlbarTokenizer.TYPE.TEXT },
+        { value: "eXaMpLe", type: UrlbarTokenizer.TYPE.TEXT },
       ],
     },
-    // This is not properly correct, an origin cannot be completely numeric,
-    // but we use this to check whether we should match against origins, thus
-    // whether an origin could start with this string.
-    // In the future we may evaluate reporting this as TEXT and instead
-    // introduce a "looksLikeStartOfOrigin".
     {
       desc: "plain number",
       searchString: "1001",
+      expectedTokens: [{ value: "1001", type: UrlbarTokenizer.TYPE.TEXT }],
+    },
+    {
+      desc: "data uri with spaces",
+      searchString: "data:text/html,oh hi?",
       expectedTokens: [
-        { value: "1001", type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN },
+        {
+          value: "data:text/html,oh hi?",
+          type: UrlbarTokenizer.TYPE.POSSIBLE_URL,
+        },
+      ],
+    },
+    {
+      desc: "data uri with spaces ignored with other tokens",
+      searchString: "hi data:text/html,oh hi?",
+      expectedTokens: [
+        {
+          value: "hi",
+          type: UrlbarTokenizer.TYPE.TEXT,
+        },
+        {
+          value: "data:text/html,oh",
+          type: UrlbarTokenizer.TYPE.POSSIBLE_URL,
+        },
+        {
+          value: "hi",
+          type: UrlbarTokenizer.TYPE.TEXT,
+        },
+        {
+          value: UrlbarTokenizer.RESTRICT.SEARCH,
+          type: UrlbarTokenizer.TYPE.RESTRICT_SEARCH,
+        },
+      ],
+    },
+    {
+      desc: "whitelisted host",
+      searchString: "test whitelisted",
+      expectedTokens: [
+        {
+          value: "test",
+          type: UrlbarTokenizer.TYPE.TEXT,
+        },
+        {
+          value: "whitelisted",
+          type: UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN,
+        },
       ],
     },
   ];
+
+  Services.prefs.setBoolPref("browser.fixup.domainwhitelist.whitelisted", true);
 
   for (let queryContext of testContexts) {
     info(queryContext.desc);

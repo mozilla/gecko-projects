@@ -91,9 +91,9 @@ class ServoStyleSet {
 
   // We assert that these match the Servo ones in the definition of this array.
   static constexpr Origin kOrigins[] = {
-    Origin(static_cast<uint8_t>(OriginFlags::UserAgent)),
-    Origin(static_cast<uint8_t>(OriginFlags::User)),
-    Origin(static_cast<uint8_t>(OriginFlags::Author)),
+      Origin(static_cast<uint8_t>(OriginFlags::UserAgent)),
+      Origin(static_cast<uint8_t>(OriginFlags::User)),
+      Origin(static_cast<uint8_t>(OriginFlags::Author)),
   };
 
  public:
@@ -231,19 +231,16 @@ class ServoStyleSet {
       ComputedStyle* aParentStyle, const AtomArray& aInputWord);
 #endif
 
-  // manage the set of style sheets in the style set
-  void AppendStyleSheet(Origin, StyleSheet*);
-  void RemoveStyleSheet(Origin, StyleSheet*);
-  void InsertStyleSheetBefore(Origin, StyleSheet*, StyleSheet* aReferenceSheet);
-
   size_t SheetCount(Origin) const;
   StyleSheet* SheetAt(Origin, size_t aIndex) const;
 
   void AppendAllNonDocumentAuthorSheets(nsTArray<StyleSheet*>& aArray) const;
 
-  void RemoveDocStyleSheet(StyleSheet* aSheet);
-
-  void AddDocStyleSheet(StyleSheet* aSheet);
+  // Manage the set of style sheets in the style set
+  void AppendStyleSheet(StyleSheet&);
+  void InsertStyleSheetBefore(StyleSheet&, StyleSheet& aReferenceSheet);
+  void RemoveStyleSheet(StyleSheet&);
+  void AddDocStyleSheet(StyleSheet&);
 
   /**
    * Performs a Servo traversal to compute style for all dirty nodes in the
@@ -606,7 +603,7 @@ class UACacheReporter final : public nsIMemoryReporter {
   NS_DECL_NSIMEMORYREPORTER
 
  private:
-  ~UACacheReporter() {}
+  ~UACacheReporter() = default;
 };
 
 }  // namespace mozilla

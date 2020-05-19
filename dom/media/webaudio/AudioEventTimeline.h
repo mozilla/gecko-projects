@@ -129,8 +129,8 @@ class AudioEventTimeline {
     }
     if (!WebAudioUtils::IsTimeValid(aEvent.mTimeConstant)) {
       aRv.ThrowRangeError(
-          u"The exponential constant passed to setTargetAtTime must be "
-          u"non-negative.");
+          "The exponential constant passed to setTargetAtTime must be "
+          "non-negative.");
       return false;
     }
 
@@ -141,8 +141,8 @@ class AudioEventTimeline {
       }
       if (aEvent.mDuration <= 0) {
         aRv.ThrowRangeError(
-            u"The curve duration for setValueCurveAtTime must be strictly "
-            u"positive.");
+            "The curve duration for setValueCurveAtTime must be strictly "
+            "positive.");
         return false;
       }
     }
@@ -177,8 +177,8 @@ class AudioEventTimeline {
     if (aEvent.mType == AudioTimelineEvent::ExponentialRamp) {
       if (aEvent.mValue <= 0.f) {
         aRv.ThrowRangeError(
-            u"The value passed to exponentialRampToValueAtTime must be "
-            u"positive.");
+            "The value passed to exponentialRampToValueAtTime must be "
+            "positive.");
         return false;
       }
       const AudioTimelineEvent* previousEvent =
@@ -339,6 +339,10 @@ class AudioEventTimeline {
             mEvents[1].Time<TimeType>(), &mEvents[0], nullptr);
       }
 
+      MOZ_ASSERT(!mEvents[0].mTrack,
+                 "AudioParam tracks should never be destroyed on the real-time "
+                 "thread.");
+      JS::AutoSuppressGCAnalysis suppress;
       mEvents.RemoveElementAt(0);
     }
   }

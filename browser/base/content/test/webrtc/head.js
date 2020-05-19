@@ -53,7 +53,7 @@ function promiseIndicatorWindow() {
         function() {
           if (
             win.location.href !==
-            "chrome://browser/content/webrtcIndicator.xhtml"
+            "chrome://browser/content/webrtcLegacyIndicator.xhtml"
           ) {
             info("ignoring a window with this url: " + win.location.href);
             return;
@@ -378,7 +378,7 @@ async function getMediaCaptureState() {
   function gatherBrowsingContexts(aBrowsingContext) {
     let list = [aBrowsingContext];
 
-    let children = aBrowsingContext.getChildren();
+    let children = aBrowsingContext.children;
     for (let child of children) {
       list.push(...gatherBrowsingContexts(child));
     }
@@ -421,6 +421,7 @@ async function getMediaCaptureState() {
       let hasScreenShare = {};
       let hasWindowShare = {};
       let hasBrowserShare = {};
+      let devices = {};
       mediaManagerService.mediaCaptureWindowState(
         content,
         hasCamera,
@@ -428,6 +429,7 @@ async function getMediaCaptureState() {
         hasScreenShare,
         hasWindowShare,
         hasBrowserShare,
+        devices,
         false
       );
 

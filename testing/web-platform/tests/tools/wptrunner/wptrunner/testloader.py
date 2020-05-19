@@ -17,6 +17,7 @@ manifest = None
 manifest_update = None
 download_from_github = None
 
+
 def do_delayed_imports():
     # This relies on an already loaded module having set the sys.path correctly :(
     global manifest, manifest_update, download_from_github
@@ -26,12 +27,13 @@ def do_delayed_imports():
 
 
 class TestChunker(object):
-    def __init__(self, total_chunks, chunk_number):
+    def __init__(self, total_chunks, chunk_number, **kwargs):
         self.total_chunks = total_chunks
         self.chunk_number = chunk_number
         assert self.chunk_number <= self.total_chunks
         self.logger = structured.get_default_logger()
         assert self.logger
+        self.kwargs = kwargs
 
     def __call__(self, manifest):
         raise NotImplementedError
@@ -42,7 +44,7 @@ class Unchunked(TestChunker):
         TestChunker.__init__(self, *args, **kwargs)
         assert self.total_chunks == 1
 
-    def __call__(self, manifest):
+    def __call__(self, manifest, **kwargs):
         for item in manifest:
             yield item
 
@@ -64,8 +66,13 @@ class DirectoryHashChunker(TestChunker):
     """
     def __call__(self, manifest):
         chunk_index = self.chunk_number - 1
+        depth = self.kwargs.get("depth")
         for test_type, test_path, tests in manifest:
-            h = int(hashlib.md5(ensure_binary(os.path.dirname(test_path))).hexdigest(), 16)
+            if depth:
+                hash_path = os.path.sep.join(os.path.dirname(test_path).split(os.path.sep, depth)[:depth])
+            else:
+                hash_path = os.path.dirname(test_path)
+            h = int(hashlib.md5(ensure_binary(hash_path)).hexdigest(), 16)
             if h % self.total_chunks == chunk_index:
                 yield test_type, test_path, tests
 
@@ -161,7 +168,9 @@ class TestLoader(object):
                  total_chunks=1,
                  chunk_number=1,
                  include_https=True,
-                 skip_timeout=False):
+                 skip_timeout=False,
+                 skip_implementation_status=None,
+                 chunker_kwargs=None):
 
         self.test_types = test_types
         self.run_info = run_info
@@ -173,15 +182,19 @@ class TestLoader(object):
         self.disabled_tests = None
         self.include_https = include_https
         self.skip_timeout = skip_timeout
+        self.skip_implementation_status = skip_implementation_status
 
         self.chunk_type = chunk_type
         self.total_chunks = total_chunks
         self.chunk_number = chunk_number
 
+        if chunker_kwargs is None:
+            chunker_kwargs = {}
         self.chunker = {"none": Unchunked,
                         "hash": HashChunker,
                         "dir_hash": DirectoryHashChunker}[chunk_type](total_chunks,
-                                                                      chunk_number)
+                                                                      chunk_number,
+                                                                      **chunker_kwargs)
 
         self._test_ids = None
 
@@ -256,6 +269,8 @@ class TestLoader(object):
                 enabled = False
             if self.skip_timeout and test.expected() == "TIMEOUT":
                 enabled = False
+            if self.skip_implementation_status and test.implementation_status() in self.skip_implementation_status:
+                enabled = False
             key = "enabled" if enabled else "disabled"
             tests[key][test_type].append(test)
 
@@ -284,6 +299,10 @@ class TestSource(object):
     @abstractmethod
     #@classmethod (doesn't compose with @abstractmethod in < 3.3)
     def make_queue(cls, tests, **kwargs):  # noqa: N805
+        pass
+
+    @abstractmethod
+    def tests_by_group(cls, tests, **kwargs):  # noqa: N805
         pass
 
     @classmethod
@@ -324,6 +343,17 @@ class GroupedSource(TestSource):
             test_queue.put(item)
         return test_queue
 
+    @classmethod
+    def tests_by_group(cls, tests, **kwargs):
+        groups = defaultdict(list)
+        state = {}
+        current = None
+        for test in tests:
+            if cls.new_group(state, test, **kwargs):
+                current = cls.group_metadata(state)['scope']
+            groups[current].append(test.id)
+        return groups
+
 
 class SingleTestSource(TestSource):
     @classmethod
@@ -343,6 +373,10 @@ class SingleTestSource(TestSource):
             test_queue.put(item)
 
         return test_queue
+
+    @classmethod
+    def tests_by_group(cls, tests, **kwargs):
+        return {cls.group_metadata(None)['scope']: [t.id for t in tests]}
 
 
 class PathGroupedSource(GroupedSource):

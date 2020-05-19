@@ -54,6 +54,7 @@ html|input.findbar-textbox {
   border: 1px solid var(--lwt-toolbar-field-border-color, ThreeDShadow);
   border-start-start-radius: 2px;
   border-end-start-radius: 2px;
+  outline: none;
   margin: 0;
   padding: 2px 5px;
   width: 14em;
@@ -110,8 +111,7 @@ html|input.findbar-textbox.minimal {
 
 .findbar-find-previous {
   list-style-image: url(chrome://global/skin/icons/find-previous-arrow.svg);
-  border-right-width: 0;
-  border-left-width: 0;
+  border-inline-width: 0;
   margin-inline-end: 0;
 }
 

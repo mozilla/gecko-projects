@@ -18,13 +18,12 @@ class Document;
 }  // namespace dom
 }  // namespace mozilla
 
-typedef mozilla::Pair<nsCString, mozilla::Maybe<nsString>>
-    FilenameTypeAndDetails;
+typedef std::pair<nsCString, mozilla::Maybe<nsString>> FilenameTypeAndDetails;
 
 class nsContentSecurityUtils {
  public:
   static FilenameTypeAndDetails FilenameToFilenameType(
-      const nsString& fileName);
+      const nsString& fileName, bool collectAdditionalExtensionData);
   static bool IsEvalAllowed(JSContext* cx, bool aIsSystemPrincipal,
                             const nsAString& aScript);
   static void NotifyEvalUsage(bool aIsSystemPrincipal,
@@ -36,6 +35,12 @@ class nsContentSecurityUtils {
   // multi-part channel. Mostly used for querying response headers
   static nsresult GetHttpChannelFromPotentialMultiPart(
       nsIChannel* aChannel, nsIHttpChannel** aHttpChannel);
+
+  // Helper function which performs the following framing checks
+  // * CSP frame-ancestors
+  // * x-frame-options
+  // If any of the two disallows framing, the channel will be cancelled.
+  static void PerformCSPFrameAncestorAndXFOCheck(nsIChannel* aChannel);
 
 #if defined(DEBUG)
   static void AssertAboutPageHasCSP(mozilla::dom::Document* aDocument);

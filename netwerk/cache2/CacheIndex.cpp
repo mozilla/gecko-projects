@@ -1254,6 +1254,25 @@ nsresult CacheIndex::GetEntryForEviction(bool aIgnoreEmptyEntries,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
+  if (index->mIndexStats.Size() == 0) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  int32_t mediaUsage =
+      round(static_cast<double>(index->mIndexStats.SizeByType(
+                nsICacheEntry::CONTENT_TYPE_MEDIA)) *
+            100.0 / static_cast<double>(index->mIndexStats.Size()));
+  int32_t mediaUsageLimit =
+      StaticPrefs::browser_cache_disk_content_type_media_limit();
+  bool evictMedia = false;
+  if (mediaUsage > mediaUsageLimit) {
+    LOG(
+        ("CacheIndex::GetEntryForEviction() - media content type is over the "
+         "limit [mediaUsage=%d, mediaUsageLimit=%d]",
+         mediaUsage, mediaUsageLimit));
+    evictMedia = true;
+  }
+
   SHA1Sum::Hash hash;
   CacheIndexRecord* foundRecord = nullptr;
   uint32_t skipped = 0;
@@ -1267,6 +1286,11 @@ nsresult CacheIndex::GetEntryForEviction(bool aIgnoreEmptyEntries,
     memcpy(&hash, rec->mHash, sizeof(SHA1Sum::Hash));
 
     ++skipped;
+
+    if (evictMedia && CacheIndexEntry::GetContentType(rec) !=
+                          nsICacheEntry::CONTENT_TYPE_MEDIA) {
+      continue;
+    }
 
     if (IsForcedValidEntry(&hash)) {
       continue;
@@ -1290,9 +1314,10 @@ nsresult CacheIndex::GetEntryForEviction(bool aIgnoreEmptyEntries,
   *aCnt = skipped;
 
   LOG(
-      ("CacheIndex::GetEntryForEviction() - returning entry from frecency "
-       "array [hash=%08x%08x%08x%08x%08x, cnt=%u, frecency=%u]",
-       LOGSHA1(&hash), *aCnt, foundRecord->mFrecency));
+      ("CacheIndex::GetEntryForEviction() - returning entry "
+       "[hash=%08x%08x%08x%08x%08x, cnt=%u, frecency=%u, contentType=%u]",
+       LOGSHA1(&hash), *aCnt, foundRecord->mFrecency,
+       CacheIndexEntry::GetContentType(foundRecord)));
 
   memcpy(aHash, &hash, sizeof(SHA1Sum::Hash));
 
@@ -1862,32 +1887,22 @@ nsresult CacheIndex::GetFile(const nsACString& aName, nsIFile** _retval) {
   return NS_OK;
 }
 
-nsresult CacheIndex::RemoveFile(const nsACString& aName) {
+void CacheIndex::RemoveFile(const nsACString& aName) {
   MOZ_ASSERT(mState == SHUTDOWN);
 
   nsresult rv;
 
   nsCOMPtr<nsIFile> file;
   rv = GetFile(aName, getter_AddRefs(file));
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS_VOID(rv);
 
-  bool exists;
-  rv = file->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (exists) {
-    rv = file->Remove(false);
-    if (NS_FAILED(rv)) {
-      LOG(
-          ("CacheIndex::RemoveFile() - Cannot remove old entry file from disk."
-           "[name=%s]",
-           PromiseFlatCString(aName).get()));
-      NS_WARNING("Cannot remove old entry file from the disk");
-      return rv;
-    }
+  rv = file->Remove(false);
+  if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND) {
+    LOG(
+        ("CacheIndex::RemoveFile() - Cannot remove old entry file from disk "
+         "[rv=0x%08" PRIx32 ", name=%s]",
+         static_cast<uint32_t>(rv), PromiseFlatCString(aName).get()));
   }
-
-  return NS_OK;
 }
 
 void CacheIndex::RemoveAllIndexFiles() {
@@ -3894,46 +3909,19 @@ void CacheIndex::DoTelemetryReport() {
           NS_LITERAL_CSTRING("MEDIA"),      NS_LITERAL_CSTRING("STYLESHEET"),
           NS_LITERAL_CSTRING("WASM")};
 
-  // size in kB of all entries
-  uint32_t size = 0;
-  // count of all entries
-  uint32_t count = 0;
-
-  // the same stats as above split by content type
-  uint32_t sizeByType[nsICacheEntry::CONTENT_TYPE_LAST];
-  uint32_t countByType[nsICacheEntry::CONTENT_TYPE_LAST];
-
-  memset(&sizeByType, 0, sizeof(sizeByType));
-  memset(&countByType, 0, sizeof(countByType));
-
-  for (auto iter = mIndex.Iter(); !iter.Done(); iter.Next()) {
-    CacheIndexEntry* entry = iter.Get();
-    if (entry->IsRemoved() || !entry->IsInitialized() || entry->IsFileEmpty()) {
-      continue;
-    }
-
-    uint32_t entrySize = entry->GetFileSize();
-    uint8_t contentType = entry->GetContentType();
-
-    ++count;
-    ++countByType[contentType];
-    size += entrySize;
-    sizeByType[contentType] += entrySize;
-  }
-
   for (uint32_t i = 0; i < nsICacheEntry::CONTENT_TYPE_LAST; ++i) {
-    if (size > 0) {
-      Telemetry::Accumulate(Telemetry::NETWORK_CACHE_SIZE_SHARE,
-                            contentTypeNames[i],
-                            round(static_cast<double>(sizeByType[i]) * 100.0 /
-                                  static_cast<double>(size)));
+    if (mIndexStats.Size() > 0) {
+      Telemetry::Accumulate(
+          Telemetry::NETWORK_CACHE_SIZE_SHARE, contentTypeNames[i],
+          round(static_cast<double>(mIndexStats.SizeByType(i)) * 100.0 /
+                static_cast<double>(mIndexStats.Size())));
     }
 
-    if (count > 0) {
-      Telemetry::Accumulate(Telemetry::NETWORK_CACHE_ENTRY_COUNT_SHARE,
-                            contentTypeNames[i],
-                            round(static_cast<double>(countByType[i]) * 100.0 /
-                                  static_cast<double>(count)));
+    if (mIndexStats.Count() > 0) {
+      Telemetry::Accumulate(
+          Telemetry::NETWORK_CACHE_ENTRY_COUNT_SHARE, contentTypeNames[i],
+          round(static_cast<double>(mIndexStats.CountByType(i)) * 100.0 /
+                static_cast<double>(mIndexStats.Count())));
     }
   }
 
@@ -3943,8 +3931,10 @@ void CacheIndex::DoTelemetryReport() {
   } else {
     probeKey = NS_LITERAL_CSTRING("USERDEFINEDSIZE");
   }
-  Telemetry::Accumulate(Telemetry::NETWORK_CACHE_ENTRY_COUNT, probeKey, count);
-  Telemetry::Accumulate(Telemetry::NETWORK_CACHE_SIZE, probeKey, size >> 10);
+  Telemetry::Accumulate(Telemetry::NETWORK_CACHE_ENTRY_COUNT, probeKey,
+                        mIndexStats.Count());
+  Telemetry::Accumulate(Telemetry::NETWORK_CACHE_SIZE, probeKey,
+                        mIndexStats.Size() >> 10);
 }
 
 // static

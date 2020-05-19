@@ -5,9 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jit/JitOptions.h"
-#include "mozilla/TypeTraits.h"
 
 #include <cstdlib>
+#include <type_traits>
 
 #include "vm/JSFunction.h"
 
@@ -25,11 +25,6 @@ static void Warn(const char* env, const char* value) {
   fprintf(stderr, "Warning: I didn't understand %s=\"%s\"\n", env, value);
 }
 
-template <typename T>
-struct IsBool : mozilla::FalseType {};
-template <>
-struct IsBool<bool> : mozilla::TrueType {};
-
 static Maybe<int> ParseInt(const char* str) {
   char* endp;
   int retval = strtol(str, &endp, 0);
@@ -45,7 +40,7 @@ T overrideDefault(const char* param, T dflt) {
   if (!str) {
     return dflt;
   }
-  if (IsBool<T>::value) {
+  if constexpr (std::is_same_v<T, bool>) {
     if (strcmp(str, "true") == 0 || strcmp(str, "yes") == 0) {
       return true;
     }
@@ -140,6 +135,9 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(typeInference, true);
 #endif
 
+  // Whether Ion uses WarpBuilder as MIR builder.
+  SET_DEFAULT(warpBuilder, false);
+
   // Whether the IonMonkey and Baseline JITs are enabled for Trusted Principals.
   // (Ignored if ion or baselineJit is set to true.)
   SET_DEFAULT(jitForTrustedPrincipals, false);
@@ -177,6 +175,12 @@ DefaultJitOptions::DefaultJitOptions() {
   // are compiled with the Ion compiler at OptimizationLevel::Full.
   // Duplicated in all.js - ensure both match.
   SET_DEFAULT(fullIonWarmUpThreshold, 100'000);
+
+#ifdef ENABLE_NEW_REGEXP
+  // How many invocations are needed before regexps are compiled to
+  // native code.
+  SET_DEFAULT(regexpWarmUpThreshold, 10);
+#endif
 
   // Number of exception bailouts (resuming into catch/finally block) before
   // we invalidate and forbid Ion compilation.
@@ -282,6 +286,17 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(enableTraceLogger, false);
 #endif
 
+#ifdef ENABLE_NEW_REGEXP
+  // Dumps a representation of parsed regexps to stderr
+  SET_DEFAULT(traceRegExpParser, false);
+  // Dumps the calls made to the regexp assembler to stderr
+  SET_DEFAULT(traceRegExpAssembler, false);
+  // Dumps the bytecodes interpreted by the regexp engine to stderr
+  SET_DEFAULT(traceRegExpInterpreter, false);
+  // Dumps the changes made by the regexp peephole optimizer to stderr
+  SET_DEFAULT(traceRegExpPeephole, false);
+#endif
+
   SET_DEFAULT(enableWasmJitExit, true);
   SET_DEFAULT(enableWasmJitEntry, true);
   SET_DEFAULT(enableWasmIonFastCalls, true);
@@ -300,6 +315,9 @@ void DefaultJitOptions::enableGvn(bool enable) { disableGvn = !enable; }
 void DefaultJitOptions::setEagerBaselineCompilation() {
   baselineInterpreterWarmUpThreshold = 0;
   baselineJitWarmUpThreshold = 0;
+#ifdef ENABLE_NEW_REGEXP
+  regexpWarmUpThreshold = 0;
+#endif
 }
 
 void DefaultJitOptions::setEagerIonCompilation() {

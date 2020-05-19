@@ -17,7 +17,7 @@ use crate::values::{specified, CSSFloat};
 use crate::Zero;
 use app_units::Au;
 use std::fmt::{self, Write};
-use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 use style_traits::{CSSPixel, CssWriter, ToCss};
 
 pub use super::image::Image;
@@ -80,7 +80,7 @@ macro_rules! computed_length_percentage_or_auto {
                 generics::GenericLengthPercentageOrAuto::Auto => None,
                 generics::GenericLengthPercentageOrAuto::LengthPercentage(ref lp) => {
                     Some(lp.to_used_value(percentage_basis))
-                }
+                },
             }
         }
 
@@ -93,7 +93,7 @@ macro_rules! computed_length_percentage_or_auto {
                 Auto => false,
             }
         }
-    }
+    };
 }
 
 /// A computed type for `<length-percentage> | auto`.
@@ -109,8 +109,19 @@ impl LengthPercentageOrAuto {
         }
     }
 
-    computed_length_percentage_or_auto!(LengthPercentage);
+    /// Convert to have a borrow inside the enum
+    pub fn as_ref(&self) -> generics::GenericLengthPercentageOrAuto<&LengthPercentage> {
+        use values::generics::length::LengthPercentageOrAuto::*;
+        match *self {
+            LengthPercentage(ref lp) => LengthPercentage(lp),
+            Auto => Auto,
+        }
+    }
 
+    computed_length_percentage_or_auto!(LengthPercentage);
+}
+
+impl generics::GenericLengthPercentageOrAuto<&LengthPercentage> {
     /// Resolves the percentage.
     #[inline]
     pub fn percentage_relative_to(&self, basis: Length) -> LengthOrAuto {
@@ -192,6 +203,7 @@ impl Size {
     Serialize,
     ToAnimatedValue,
     ToAnimatedZero,
+    ToComputedValue,
     ToResolvedValue,
     ToShmem,
 )]
@@ -317,6 +329,13 @@ impl Div<CSSFloat> for CSSPixelLength {
     #[inline]
     fn div(self, other: CSSFloat) -> Self {
         Self::new(self.px() / other)
+    }
+}
+
+impl MulAssign<CSSFloat> for CSSPixelLength {
+    #[inline]
+    fn mul_assign(&mut self, other: CSSFloat) {
+        self.0 *= other;
     }
 }
 

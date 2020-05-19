@@ -22,6 +22,16 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 const { debug, warn } = GeckoViewUtils.initLogging("Startup"); // eslint-disable-line no-unused-vars
 
 const ACTORS = {
+  BrowserTab: {
+    parent: {
+      moduleURI: "resource:///actors/BrowserTabParent.jsm",
+    },
+  },
+  GeckoViewContent: {
+    child: {
+      moduleURI: "resource:///actors/GeckoViewContentChild.jsm",
+    },
+  },
   LoadURIDelegate: {
     child: {
       moduleURI: "resource:///actors/LoadURIDelegateChild.jsm",
@@ -31,6 +41,7 @@ const ACTORS = {
     child: {
       moduleURI: "resource:///actors/WebBrowserChromeChild.jsm",
     },
+    includeChrome: true,
   },
 };
 
@@ -77,11 +88,13 @@ GeckoViewStartup.prototype = {
             "GeckoView:WebExtension:Get",
             "GeckoView:WebExtension:Disable",
             "GeckoView:WebExtension:Enable",
+            "GeckoView:WebExtension:CancelInstall",
             "GeckoView:WebExtension:Install",
             "GeckoView:WebExtension:InstallBuiltIn",
             "GeckoView:WebExtension:List",
             "GeckoView:WebExtension:PortDisconnect",
             "GeckoView:WebExtension:PortMessageFromApp",
+            "GeckoView:WebExtension:SetPBAllowed",
             "GeckoView:WebExtension:Uninstall",
             "GeckoView:WebExtension:Update",
           ],
@@ -212,6 +225,14 @@ GeckoViewStartup.prototype = {
         Services.obs.notifyObservers(null, "geckoview-startup-complete");
         break;
       }
+      case "browser-idle-startup-tasks-finished": {
+        // This only needs to happen once during startup.
+        Services.obs.removeObserver(this, aTopic);
+        // Notify the start up crash tracker that the browser has successfully
+        // started up so the startup cache isn't rebuilt on next startup.
+        Services.startup.trackStartupCrashEnd();
+        break;
+      }
     }
   },
 
@@ -239,7 +260,7 @@ GeckoViewStartup.prototype = {
         if (aData.requestedLocales) {
           Services.locale.requestedLocales = aData.requestedLocales;
         }
-        let pls = Cc["@mozilla.org/pref-localizedstring;1"].createInstance(
+        const pls = Cc["@mozilla.org/pref-localizedstring;1"].createInstance(
           Ci.nsIPrefLocalizedString
         );
         pls.data = aData.acceptLanguages;

@@ -17,6 +17,7 @@
 #include "nsCSSAnonBoxes.h"
 #include "nsHTMLParts.h"
 #include "nsIFormControl.h"
+#include "nsILayoutHistoryState.h"
 #include "nsNameSpaceManager.h"
 #include "nsListControlFrame.h"
 #include "nsPIDOMWindow.h"
@@ -88,7 +89,7 @@ nsComboboxControlFrame::RedisplayTextEvent::Run() {
  */
 class nsComboButtonListener final : public nsIDOMEventListener {
  private:
-  virtual ~nsComboButtonListener() {}
+  virtual ~nsComboButtonListener() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -374,7 +375,7 @@ class nsResizeDropdownAtFinalPosition final : public nsIReflowCallback,
       : mozilla::Runnable("nsResizeDropdownAtFinalPosition"), mFrame(aFrame) {}
 
  protected:
-  ~nsResizeDropdownAtFinalPosition() {}
+  ~nsResizeDropdownAtFinalPosition() = default;
 
  public:
   virtual bool ReflowFinished() override {
@@ -465,7 +466,8 @@ nsPoint nsComboboxControlFrame::GetCSSTransformTranslation() {
   Matrix transform;
   while (frame) {
     nsIFrame* parent;
-    Matrix4x4Flagged ctm = frame->GetTransformMatrix(nullptr, &parent);
+    Matrix4x4Flagged ctm = frame->GetTransformMatrix(
+        ViewportType::Layout, RelativeTo{nullptr}, &parent);
     Matrix matrix;
     if (ctm.Is2D(&matrix)) {
       transform = transform * matrix;
@@ -698,9 +700,11 @@ static void printSize(char* aDesc, nscoord aSize) {
 
 bool nsComboboxControlFrame::HasDropDownButton() const {
   const nsStyleDisplay* disp = StyleDisplay();
+  // FIXME(emilio): Blink also shows this for menulist-button and such... Seems
+  // more similar to our mac / linux implementation.
   return disp->mAppearance == StyleAppearance::Menulist &&
          (!IsThemed(disp) ||
-          PresContext()->GetTheme()->ThemeNeedsComboboxDropmarker());
+          PresContext()->Theme()->ThemeNeedsComboboxDropmarker());
 }
 
 nscoord nsComboboxControlFrame::GetIntrinsicISize(
@@ -1150,7 +1154,7 @@ nsresult nsComboboxControlFrame::CreateAnonymousContent(
 
   nsNodeInfoManager* nimgr = mContent->NodeInfo()->NodeInfoManager();
 
-  mDisplayContent = new nsTextNode(nimgr);
+  mDisplayContent = new (nimgr) nsTextNode(nimgr);
 
   // set the value of the text node
   mDisplayedIndex = mListControlFrame->GetSelectedIndex();
@@ -1160,7 +1164,9 @@ nsresult nsComboboxControlFrame::CreateAnonymousContent(
   }
   ActuallyDisplayText(false);
 
-  if (!aElements.AppendElement(mDisplayContent)) return NS_ERROR_OUT_OF_MEMORY;
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  aElements.AppendElement(mDisplayContent);
 
   mButtonContent = mContent->OwnerDoc()->CreateHTMLElement(nsGkAtoms::button);
   if (!mButtonContent) return NS_ERROR_OUT_OF_MEMORY;
@@ -1185,7 +1191,9 @@ nsresult nsComboboxControlFrame::CreateAnonymousContent(
                             false);
   }
 
-  if (!aElements.AppendElement(mButtonContent)) return NS_ERROR_OUT_OF_MEMORY;
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  aElements.AppendElement(mButtonContent);
 
   return NS_OK;
 }
@@ -1468,7 +1476,7 @@ class nsDisplayComboboxFocus : public nsPaintedDisplayItem {
   }
   MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayComboboxFocus)
 
-  virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
+  void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("ComboboxFocus", TYPE_COMBOBOX_FOCUS)
 };
 
@@ -1491,18 +1499,13 @@ void nsComboboxControlFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   }
 
   // draw a focus indicator only when focus rings should be drawn
-  if (Document* doc = mContent->GetComposedDoc()) {
-    nsPIDOMWindowOuter* window = doc->GetWindow();
-    if (window && window->ShouldShowFocusRing()) {
-      nsPresContext* presContext = PresContext();
-      const nsStyleDisplay* disp = StyleDisplay();
-      if ((!IsThemed(disp) ||
-           !presContext->GetTheme()->ThemeDrawsFocusForWidget(
-               disp->mAppearance)) &&
-          mDisplayFrame && IsVisibleForPainting()) {
-        aLists.Content()->AppendNewToTop<nsDisplayComboboxFocus>(aBuilder,
-                                                                 this);
-      }
+  if (mContent->AsElement()->State().HasState(NS_EVENT_STATE_FOCUSRING)) {
+    nsPresContext* pc = PresContext();
+    const nsStyleDisplay* disp = StyleDisplay();
+    if (IsThemed(disp) &&
+        pc->Theme()->ThemeWantsButtonInnerFocusRing(disp->mAppearance) &&
+        mDisplayFrame && IsVisibleForPainting()) {
+      aLists.Content()->AppendNewToTop<nsDisplayComboboxFocus>(aBuilder, this);
     }
   }
 

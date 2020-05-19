@@ -28,7 +28,7 @@ class TouchList final : public nsISupports, public nsWrapperCache {
     nsJSContext::LikelyShortLivingObjectCreated();
   }
   TouchList(nsISupports* aParent, const WidgetTouchEvent::TouchArray& aTouches)
-      : mParent(aParent), mPoints(aTouches) {
+      : mParent(aParent), mPoints(aTouches.Clone()) {
     nsJSContext::LikelyShortLivingObjectCreated();
   }
 
@@ -54,7 +54,7 @@ class TouchList final : public nsISupports, public nsWrapperCache {
   void Clear() { mPoints.Clear(); }
 
  protected:
-  ~TouchList() {}
+  ~TouchList() = default;
 
   nsCOMPtr<nsISupports> mParent;
   WidgetTouchEvent::TouchArray mPoints;
@@ -105,7 +105,7 @@ class TouchEvent : public UIEvent {
                                                   const TouchEventInit& aParam);
 
  protected:
-  ~TouchEvent() {}
+  ~TouchEvent() = default;
 
   void AssignTouchesToWidgetEvent(TouchList* aList, bool aCheckDuplicates);
 

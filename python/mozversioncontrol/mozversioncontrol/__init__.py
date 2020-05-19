@@ -13,9 +13,7 @@ import subprocess
 import sys
 
 from mozbuild.util import ensure_subprocess_env
-
-from distutils.spawn import find_executable
-from distutils.version import LooseVersion
+from mozfile import which
 
 
 class MissingVCSTool(Exception):
@@ -57,7 +55,7 @@ def get_tool_path(tool):
     if os.path.isabs(tool) and os.path.exists(tool):
         return tool
 
-    path = find_executable(tool)
+    path = which(tool)
     if not path:
         raise MissingVCSTool('Unable to obtain %s path. Try running '
                              '|mach bootstrap| to ensure your environment is up to '
@@ -122,7 +120,7 @@ class Repository(object):
 
     @property
     def tool_version(self):
-        '''Return the version of the VCS tool in use as a `LooseVersion`.'''
+        '''Return the version of the VCS tool in use as a string.'''
         if self._version:
             return self._version
         info = self._run('--version').strip()
@@ -130,7 +128,7 @@ class Repository(object):
         if not match:
             raise Exception('Unable to identify tool version.')
 
-        self.version = LooseVersion(match.group(1))
+        self.version = match.group(1)
         return self.version
 
     @property
@@ -151,6 +149,11 @@ class Repository(object):
         """Hash of revision the current topic branch is based on."""
 
     @abc.abstractmethod
+    def get_commit_time(self):
+        """Return the Unix time of the HEAD revision.
+        """
+
+    @abc.abstractmethod
     def sparse_checkout_present(self):
         """Whether the working directory is using a sparse checkout.
 
@@ -165,7 +168,7 @@ class Repository(object):
         """Reference to the upstream remote."""
 
     @abc.abstractmethod
-    def get_changed_files(self, diff_filter, mode='unstaged'):
+    def get_changed_files(self, diff_filter, mode='unstaged', rev=None):
         """Return a list of files that are changed in this repository's
         working copy.
 
@@ -179,7 +182,10 @@ class Repository(object):
         By default, all three will be included.
 
         ``mode`` can be one of 'unstaged', 'staged' or 'all'. Only has an
-        affect on git. Defaults to 'unstaged'.
+        effect on git. Defaults to 'unstaged'.
+
+        ``rev`` is a specifier for which changesets to consider for
+        changes. The exact meaning depends on the vcs system being used.
         """
 
     @abc.abstractmethod
@@ -193,13 +199,13 @@ class Repository(object):
         """
 
     @abc.abstractmethod
-    def add_remove_files(self, path):
-        '''Add and remove files under `path` in this repository's working copy.
+    def add_remove_files(self, *paths):
+        '''Add and remove files under `paths` in this repository's working copy.
         '''
 
     @abc.abstractmethod
-    def forget_add_remove_files(self, path):
-        '''Undo the effects of a previous add_remove_files call for `path`.
+    def forget_add_remove_files(self, *paths):
+        '''Undo the effects of a previous add_remove_files call for `paths`.
         '''
 
     @abc.abstractmethod
@@ -276,6 +282,9 @@ class HgRepository(Repository):
         self._client = hglib.client.hgclient(self.path, encoding=b'UTF-8',
                                              configs=None, connect=False)
 
+        # Work around py3 compat issues in python-hglib
+        self._client._env = ensure_subprocess_env(self._client._env)
+
     @property
     def name(self):
         return 'hg'
@@ -312,6 +321,11 @@ class HgRepository(Repository):
         args = [a.encode('utf-8') if not isinstance(a, bytes) else a for a in args]
         return self._client.rawcommand(args).decode('utf-8')
 
+    def get_commit_time(self):
+        return int(self._run(
+            'log', '--rev', 'heads(ancestors(.) and not draft())',
+            '--template', '{word(0, date|hgdate)}', '--limit', '1').strip())
+
     def sparse_checkout_present(self):
         # We assume a sparse checkout is enabled if the .hg/sparse file
         # has data. Strictly speaking, we should look for a requirement in
@@ -332,57 +346,67 @@ class HgRepository(Repository):
     def get_upstream(self):
         return 'default'
 
-    def _format_diff_filter(self, diff_filter):
+    def _format_diff_filter(self, diff_filter, for_status=False):
         df = diff_filter.lower()
         assert all(f in self._valid_diff_filter for f in df)
 
-        # Mercurial uses 'r' to denote removed files whereas git uses 'd'.
-        if 'd' in df:
-            df.replace('d', 'r')
+        # When looking at the changes in the working directory, the hg status
+        # command uses 'd' for files that have been deleted with a non-hg
+        # command, and 'r' for files that have been `hg rm`ed. Use both.
+        return df.replace('d', 'dr') if for_status else df
 
-        return df.lower()
-
-    def get_changed_files(self, diff_filter='ADM', mode='unstaged'):
+    def _files_template(self, diff_filter):
+        template = ''
         df = self._format_diff_filter(diff_filter)
+        if 'a' in df:
+            template += "{file_adds % '{file}\\n'}"
+        if 'd' in df:
+            template += "{file_dels % '{file}\\n'}"
+        if 'm' in df:
+            template += "{file_mods % '{file}\\n'}"
+        return template
 
-        # Use --no-status to print just the filename.
-        return self._run('status', '--no-status', '-{}'.format(df)).splitlines()
+    def get_changed_files(self, diff_filter='ADM', mode='unstaged', rev=None):
+        if rev is None:
+            # Use --no-status to print just the filename.
+            df = self._format_diff_filter(diff_filter, for_status=True)
+            return self._run('status', '--no-status', '-{}'.format(df)).splitlines()
+        else:
+            template = self._files_template(diff_filter)
+            return self._run('log', '-r', rev, '-T', template).splitlines()
 
     def get_outgoing_files(self, diff_filter='ADM', upstream='default'):
-        df = self._format_diff_filter(diff_filter)
-
-        template = ''
-        if 'a' in df:
-            template += "{file_adds % '\\n{file}'}"
-        if 'd' in df:
-            template += "{file_dels % '\\n{file}'}"
-        if 'm' in df:
-            template += "{file_mods % '\\n{file}'}"
-
+        template = self._files_template(diff_filter)
         return self._run('outgoing', '-r', '.', '--quiet',
                          '--template', template, upstream, return_codes=(1,)).split()
 
-    def add_remove_files(self, path):
-        args = ['addremove', path]
-        if self.tool_version >= str('3.9'):
+    def add_remove_files(self, *paths):
+        if not paths:
+            return
+        args = ['addremove'] + list(paths)
+        m = re.search(r'\d+\.\d+', self.tool_version)
+        simplified_version = float(m.group(0)) if m else 0
+        if simplified_version >= 3.9:
             args = ['--config', 'extensions.automv='] + args
         self._run(*args)
 
-    def forget_add_remove_files(self, path):
-        self._run('forget', path)
+    def forget_add_remove_files(self, *paths):
+        if not paths:
+            return
+        self._run('forget', *paths)
 
     def get_files_in_working_directory(self):
         # Can return backslashes on Windows. Normalize to forward slashes.
         return list(p.replace('\\', '/') for p in
-                    self._run(b'files', b'-0').split(b'\0') if p)
+                    self._run(b'files', b'-0').split('\0') if p)
 
     def working_directory_clean(self, untracked=False, ignored=False):
-        args = [b'status', b'--modified', b'--added', b'--removed',
-                b'--deleted']
+        args = ['status', '--modified', '--added', '--removed',
+                '--deleted']
         if untracked:
-            args.append(b'--unknown')
+            args.append('--unknown')
         if ignored:
-            args.append(b'--ignored')
+            args.append('--ignored')
 
         # If output is empty, there are no entries of requested status, which
         # means we are clean.
@@ -401,7 +425,7 @@ class HgRepository(Repository):
     def push_to_try(self, message):
         try:
             subprocess.check_call((self._tool, 'push-to-try', '-m', message), cwd=self.path,
-                                  env=self._env)
+                                  env=ensure_subprocess_env(self._env))
         except subprocess.CalledProcessError:
             try:
                 self._run('showconfig', 'extensions.push-to-try')
@@ -442,6 +466,9 @@ class GitRepository(Repository):
             return False
         return True
 
+    def get_commit_time(self):
+        return int(self._run('log', '-1', '--format=%ct').strip())
+
     def sparse_checkout_present(self):
         # Not yet implemented.
         return False
@@ -455,36 +482,46 @@ class GitRepository(Repository):
 
         return upstream
 
-    def get_changed_files(self, diff_filter='ADM', mode='unstaged'):
+    def get_changed_files(self, diff_filter='ADM', mode='unstaged', rev=None):
         assert all(f.lower() in self._valid_diff_filter for f in diff_filter)
 
-        cmd = ['diff', '--diff-filter={}'.format(diff_filter.upper()), '--name-only']
-        if mode == 'staged':
-            cmd.append('--cached')
-        elif mode == 'all':
-            cmd.append('HEAD')
+        if rev is None:
+            cmd = ['diff']
+            if mode == 'staged':
+                cmd.append('--cached')
+            elif mode == 'all':
+                cmd.append('HEAD')
+        else:
+            cmd = ['diff-tree', '-r', '--no-commit-id', rev]
+
+        cmd.append('--name-only')
+        cmd.append('--diff-filter=' + diff_filter.upper())
 
         return self._run(*cmd).splitlines()
 
     def get_outgoing_files(self, diff_filter='ADM', upstream='default'):
         assert all(f.lower() in self._valid_diff_filter for f in diff_filter)
 
-        if upstream == 'default':
-            upstream = self.base_ref
+        not_condition = '--remotes' if upstream == 'default' else upstream
 
-        compare = '{}..HEAD'.format(upstream)
-        files = self._run('log', '--name-only', '--diff-filter={}'.format(diff_filter.upper()),
-                          '--oneline', '--pretty=format:', compare).splitlines()
+        files = self._run(
+                    'log', '--name-only', '--diff-filter={}'.format(diff_filter.upper()),
+                    '--oneline', '--pretty=format:', 'HEAD', '--not', not_condition
+                ).splitlines()
         return [f for f in files if f]
 
-    def add_remove_files(self, path):
-        self._run('add', path)
+    def add_remove_files(self, *paths):
+        if not paths:
+            return
+        self._run('add', *paths)
 
-    def forget_add_remove_files(self, path):
-        self._run('reset', path)
+    def forget_add_remove_files(self, *paths):
+        if not paths:
+            return
+        self._run('reset', *paths)
 
     def get_files_in_working_directory(self):
-        return self._run('ls-files', '-z').split(b'\0')
+        return self._run('ls-files', '-z').split('\0')
 
     def working_directory_clean(self, untracked=False, ignored=False):
         args = ['status', '--porcelain']

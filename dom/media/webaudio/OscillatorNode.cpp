@@ -372,10 +372,10 @@ OscillatorNode::OscillatorNode(AudioContext* aContext)
                                ChannelInterpretation::Speakers),
       mType(OscillatorType::Sine),
       mStartCalled(false) {
-  CreateAudioParam(mFrequency, OscillatorNodeEngine::FREQUENCY, "frequency",
+  CreateAudioParam(mFrequency, OscillatorNodeEngine::FREQUENCY, u"frequency",
                    440.0f, -(aContext->SampleRate() / 2),
                    aContext->SampleRate() / 2);
-  CreateAudioParam(mDetune, OscillatorNodeEngine::DETUNE, "detune", 0.0f);
+  CreateAudioParam(mDetune, OscillatorNodeEngine::DETUNE, u"detune", 0.0f);
   OscillatorNodeEngine* engine =
       new OscillatorNodeEngine(this, aContext->Destination());
   mTrack = AudioNodeTrack::Create(aContext, engine,
@@ -464,7 +464,7 @@ void OscillatorNode::SendPeriodicWaveToTrack() {
 
 void OscillatorNode::Start(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"start time");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("start time");
     return;
   }
 
@@ -488,7 +488,7 @@ void OscillatorNode::Start(double aWhen, ErrorResult& aRv) {
 
 void OscillatorNode::Stop(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"stop time");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("stop time");
     return;
   }
 

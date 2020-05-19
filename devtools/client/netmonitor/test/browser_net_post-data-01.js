@@ -12,7 +12,9 @@ add_task(async function() {
   // Set a higher panel height in order to get full CodeMirror content
   Services.prefs.setIntPref("devtools.toolbox.footer.height", 600);
 
-  const { tab, monitor } = await initNetMonitor(POST_DATA_URL);
+  const { tab, monitor } = await initNetMonitor(POST_DATA_URL, {
+    requestCount: 1,
+  });
   info("Starting test... ");
 
   const { document, store, windowRequire } = monitor.panelWin;
@@ -66,14 +68,14 @@ add_task(async function() {
   );
 
   // Wait for all accordion items updated by react
-  const wait = waitForDOM(document, "#params-panel .accordion-item", 3);
+  const wait = waitForDOM(document, "#request-panel .accordion-item", 3);
   EventUtils.sendMouseEvent(
     { type: "mousedown" },
     document.querySelectorAll(".request-list-item")[0]
   );
   EventUtils.sendMouseEvent(
     { type: "click" },
-    document.querySelector("#params-tab")
+    document.querySelector("#request-tab")
   );
   await wait;
   await testParamsTab("urlencoded");
@@ -81,12 +83,12 @@ add_task(async function() {
   // Wait for all accordion items and editor updated by react
   const waitForAccordionItems = waitForDOM(
     document,
-    "#params-panel .accordion-item",
+    "#request-panel .accordion-item",
     2
   );
   const waitForSourceEditor = waitForDOM(
     document,
-    "#params-panel .CodeMirror-code"
+    "#request-panel .CodeMirror-code"
   );
   EventUtils.sendMouseEvent(
     { type: "mousedown" },
@@ -98,12 +100,12 @@ add_task(async function() {
   return teardown(monitor);
 
   async function testParamsTab(type) {
-    const tabpanel = document.querySelector("#params-panel");
+    const tabpanel = document.querySelector("#request-panel");
 
     function checkVisibility(box) {
       is(
         !tabpanel.querySelector(".treeTable"),
-        !box.includes("params"),
+        !box.includes("request"),
         "The request params doesn't have the intended visibility."
       );
       is(
@@ -175,7 +177,7 @@ add_task(async function() {
     );
 
     if (type == "urlencoded") {
-      checkVisibility("params");
+      checkVisibility("request");
       is(
         labels.length,
         5,
@@ -202,7 +204,7 @@ add_task(async function() {
         "The second post param value was incorrect."
       );
     } else {
-      checkVisibility("params editor");
+      checkVisibility("request editor");
 
       is(
         labels.length,

@@ -177,8 +177,8 @@ def strip_unwanted_langpacks_from_worker(config, jobs):
     This explicitly deletes langpacks from upstream artifacts and from artifact-maps.
     Due to limitations in declarative artifacts, doing this was our easiest way right now.
     """
-    ALWAYS_OK_PLATFORMS = {'linux64-shippable', 'linux64-devedition-nightly', 'linux64-devedition'}
-    OSX_OK_PLATFORMS = {'macosx64-shippable', 'macosx64-devedition-nightly', 'macosx64-devedition'}
+    ALWAYS_OK_PLATFORMS = {'linux64-shippable', 'linux64-devedition'}
+    OSX_OK_PLATFORMS = {'macosx64-shippable', 'macosx64-devedition'}
     for job in jobs:
         platform = job['attributes'].get('build_platform')
         if platform in ALWAYS_OK_PLATFORMS:
@@ -193,7 +193,9 @@ def strip_unwanted_langpacks_from_worker(config, jobs):
                 # This locale should only exist on mac
                 assert platform in OSX_OK_PLATFORMS
                 continue
-            for path in map['paths'].keys():
+            # map[paths] is being modified while iterating, so we need to resolve the
+            # ".keys()" iterator up front by throwing it into a list.
+            for path in list(map['paths'].keys()):
                 if path.endswith('target.langpack.xpi'):
                     del map['paths'][path]
             if map['paths'] == {}:

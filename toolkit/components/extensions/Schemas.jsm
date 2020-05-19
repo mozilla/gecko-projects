@@ -2222,18 +2222,14 @@ class ArrayType extends Type {
 
     if (result.length < this.minItems) {
       return context.error(
-        `Array requires at least ${this.minItems} items; you have ${
-          result.length
-        }`,
+        `Array requires at least ${this.minItems} items; you have ${result.length}`,
         `have at least ${this.minItems} items`
       );
     }
 
     if (result.length > this.maxItems) {
       return context.error(
-        `Array requires at most ${this.maxItems} items; you have ${
-          result.length
-        }`,
+        `Array requires at most ${this.maxItems} items; you have ${result.length}`,
         `have at most ${this.maxItems} items`
       );
     }
@@ -2988,9 +2984,7 @@ class Namespace extends Map {
         );
       } else if (!(targetType instanceof ChoiceType)) {
         throw new Error(
-          `Internal error: Attempt to extend a non-extensible type ${
-            type.$extend
-          }`
+          `Internal error: Attempt to extend a non-extensible type ${type.$extend}`
         );
       }
     }
@@ -3551,6 +3545,32 @@ this.Schemas = {
    */
   checkPermissions(namespace, wrapperFuncs) {
     return this.rootSchema.checkPermissions(namespace, wrapperFuncs);
+  },
+
+  /**
+   * Returns a sorted array of permission names for the given permission types.
+   *
+   * @param {Array} types An array of permission types, defaults to all permissions.
+   * @returns {Array} sorted array of permission names
+   */
+  getPermissionNames(
+    types = [
+      "Permission",
+      "OptionalPermission",
+      "PermissionNoPrompt",
+      "OptionalPermissionNoPrompt",
+    ]
+  ) {
+    const ns = this.getNamespace("manifest");
+    let names = [];
+    for (let typeName of types) {
+      for (let choice of ns
+        .get(typeName)
+        .choices.filter(choice => choice.enumeration)) {
+        names = names.concat(choice.enumeration);
+      }
+    }
+    return names.sort();
   },
 
   exportLazyGetter,

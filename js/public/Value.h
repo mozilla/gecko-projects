@@ -401,7 +401,6 @@ class alignas(8) Value {
 
   static Value fromDouble(double d) { return fromRawBits(bitsFromDouble(d)); }
 
- public:
   /**
    * Returns false if creating a NumberValue containing the given type would
    * be lossy, true otherwise.
@@ -767,7 +766,7 @@ class alignas(8) Value {
     return uint32_t(asBits_);
   }
 
-  uint64_t asRawBits() const { return asBits_; }
+  constexpr uint64_t asRawBits() const { return asBits_; }
 
   JSValueType extractNonDoubleType() const {
     uint32_t type = toTag() & 0xF;
@@ -1328,6 +1327,7 @@ extern JS_PUBLIC_DATA const HandleValue NullHandleValue;
 extern JS_PUBLIC_DATA const HandleValue UndefinedHandleValue;
 extern JS_PUBLIC_DATA const HandleValue TrueHandleValue;
 extern JS_PUBLIC_DATA const HandleValue FalseHandleValue;
+extern JS_PUBLIC_DATA const Handle<mozilla::Maybe<Value>> NothingHandleValue;
 
 }  // namespace JS
 

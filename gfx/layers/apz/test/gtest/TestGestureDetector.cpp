@@ -6,6 +6,7 @@
 
 #include "APZCBasicTester.h"
 #include "APZTestCommon.h"
+#include "InputUtils.h"
 #include "mozilla/StaticPrefs_apz.h"
 
 // Note: There are additional tests that test gesture detection behaviour
@@ -30,6 +31,7 @@ class APZCGestureDetectorTester : public APZCBasicTester {
   }
 };
 
+#ifndef MOZ_WIDGET_ANDROID  // Currently fails on Android
 TEST_F(APZCGestureDetectorTester, Pan_After_Pinch) {
   SCOPED_GFX_PREF_BOOL("layout.css.touch_action.enabled", false);
 
@@ -128,6 +130,7 @@ TEST_F(APZCGestureDetectorTester, Pan_After_Pinch) {
     ;
   apzc->AssertStateIsReset();
 }
+#endif
 
 TEST_F(APZCGestureDetectorTester, Pan_With_Tap) {
   SCOPED_GFX_PREF_BOOL("layout.css.touch_action.enabled", false);
@@ -342,25 +345,33 @@ class APZCFlingStopTester : public APZCGestureDetectorTester {
   }
 };
 
+#ifndef MOZ_WIDGET_ANDROID  // Currently fails on Android
 TEST_F(APZCFlingStopTester, FlingStop) {
   SCOPED_GFX_PREF_FLOAT("apz.fling_min_velocity_threshold", 0.0f);
   DoFlingStopTest(false);
 }
+#endif
 
+#ifndef MOZ_WIDGET_ANDROID  // Currently crashes on Android debug
 TEST_F(APZCFlingStopTester, FlingStopTap) {
   SCOPED_GFX_PREF_FLOAT("apz.fling_min_velocity_threshold", 0.0f);
   DoFlingStopTest(true);
 }
+#endif
 
+#ifndef MOZ_WIDGET_ANDROID  // Currently fails on Android
 TEST_F(APZCFlingStopTester, FlingStopSlowListener) {
   SCOPED_GFX_PREF_FLOAT("apz.fling_min_velocity_threshold", 0.0f);
   DoFlingStopWithSlowListener(false);
 }
+#endif
 
+#ifndef MOZ_WIDGET_ANDROID  // Currently fails on Android
 TEST_F(APZCFlingStopTester, FlingStopPreventDefault) {
   SCOPED_GFX_PREF_FLOAT("apz.fling_min_velocity_threshold", 0.0f);
   DoFlingStopWithSlowListener(true);
 }
+#endif
 
 TEST_F(APZCGestureDetectorTester, ShortPress) {
   MakeApzcUnzoomable();

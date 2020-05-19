@@ -226,8 +226,9 @@ nsCellMap* nsTableCellMap::GetMapFor(const nsTableRowGroupFrame* aRowGroup,
     if (auto* rgOrig = findOtherRowGroupOfType(&mTableFrame)) {
       return GetMapFor(rgOrig, aStartHint);
     }
-    MOZ_ASSERT_UNREACHABLE("A repeated header/footer should always have an "
-                           "original header/footer it was repeated from");
+    MOZ_ASSERT_UNREACHABLE(
+        "A repeated header/footer should always have an "
+        "original header/footer it was repeated from");
   }
 
   return nullptr;
@@ -253,12 +254,9 @@ void nsTableCellMap::Synchronize(nsTableFrame* aTableFrame) {
     map = GetMapFor(static_cast<nsTableRowGroupFrame*>(rgFrame->FirstInFlow()),
                     map);
     if (map) {
-      if (!maps.AppendElement(map)) {
-        delete map;
-        map = nullptr;
-        NS_WARNING("Could not AppendElement");
-        break;
-      }
+      // XXX(Bug 1631371) Check if this should use a fallible operation as it
+      // pretended earlier, or change the return type to void.
+      maps.AppendElement(map);
     }
   }
   if (maps.IsEmpty()) {
@@ -381,13 +379,13 @@ CellData* nsTableCellMap::GetDataAt(int32_t aRowIndex,
 }
 
 void nsTableCellMap::AddColsAtEnd(uint32_t aNumCols) {
-  if (!mCols.AppendElements(aNumCols)) {
-    NS_WARNING("Could not AppendElement");
-  }
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  mCols.AppendElements(aNumCols);
   if (mBCInfo) {
-    if (!mBCInfo->mBEndBorders.AppendElements(aNumCols)) {
-      NS_WARNING("Could not AppendElement");
-    }
+    // XXX(Bug 1631371) Check if this should use a fallible operation as it
+    // pretended earlier.
+    mBCInfo->mBEndBorders.AppendElements(aNumCols);
   }
 }
 
@@ -1176,7 +1174,10 @@ bool nsCellMap::Grow(nsTableCellMap& aMap, int32_t aNumRows,
   uint32_t startRowIndex = (aRowIndex >= 0) ? aRowIndex : mRows.Length();
   NS_ASSERTION(startRowIndex <= mRows.Length(), "Missing grow call inbetween");
 
-  return mRows.InsertElementsAt(startRowIndex, aNumRows, numCols) != nullptr;
+  // XXX Change the return type of this function to void, or use a fallible
+  // operation.
+  mRows.InsertElementsAt(startRowIndex, aNumRows, numCols);
+  return true;
 }
 
 void nsCellMap::GrowRow(CellDataArray& aRow, int32_t aNumCols)
@@ -1644,16 +1645,8 @@ void nsCellMap::ExpandWithCells(nsTableCellMap& aMap,
       if (insertionIndex > startColIndex) {
         insertionIndex = startColIndex;
       }
-      if (!row.InsertElementsAt(insertionIndex,
-                                endColIndex - insertionIndex + 1,
-                                (CellData*)nullptr) &&
-          rowX == aRowIndex) {
-        // Failed to insert the slots, and this is the very first row.  That
-        // means that we need to clean up |origData| before returning, since
-        // the cellmap doesn't own it yet.
-        DestroyCellData(origData);
-        return;
-      }
+      row.InsertElementsAt(insertionIndex, endColIndex - insertionIndex + 1,
+                           (CellData*)nullptr);
 
       for (int32_t colX = startColIndex; colX <= endColIndex; colX++) {
         CellData* data = origData;
@@ -1823,13 +1816,16 @@ int32_t nsCellMap::GetRowSpanForNewCell(nsTableCellFrame* aCellFrameToAdd,
 bool nsCellMap::HasMoreThanOneCell(int32_t aRowIndex) const {
   const CellDataArray& row = mRows.SafeElementAt(aRowIndex, *sEmptyRow);
   uint32_t maxColIndex = row.Length();
-  uint32_t count = 0;
   uint32_t colIndex;
+  bool foundOne = false;
   for (colIndex = 0; colIndex < maxColIndex; colIndex++) {
     CellData* cellData = row[colIndex];
-    if (cellData && (cellData->GetCellFrame() || cellData->IsRowSpan()))
-      count++;
-    if (count > 1) return true;
+    if (cellData && (cellData->GetCellFrame() || cellData->IsRowSpan())) {
+      if (foundOne) {
+        return true;
+      }
+      foundOne = true;
+    }
   }
   return false;
 }
@@ -2151,8 +2147,11 @@ void nsCellMap::RemoveCell(nsTableCellMap& aMap, nsTableCellFrame* aCellFrame,
   // originating cells, we need to assume that this the only such cell, and
   // rebuild so that there are no extraneous cols at the end. The same is true
   // for removing rows.
-  if (!aCellFrame->GetRowSpan() || !aCellFrame->GetColSpan())
-    spansCauseRebuild = true;
+  if (!spansCauseRebuild) {
+    if (!aCellFrame->GetRowSpan() || !aCellFrame->GetColSpan()) {
+      spansCauseRebuild = true;
+    }
+  }
 
   if (spansCauseRebuild) {
     aMap.RebuildConsideringCells(this, nullptr, aRowIndex, startColIndex, false,
@@ -2459,7 +2458,7 @@ nsTableCellFrame* nsCellMapColumnIterator::GetNextFrame(int32_t* aRow,
     return nullptr;
   }
 
-  while (1) {
+  while (true) {
     NS_ASSERTION(mCurMapRow < mCurMapRelevantRowCount, "Bogus mOrigCells?");
     // Safe to just get the row (which is faster than calling GetDataAt(), but
     // there may not be that many cells in it, so have to use SafeElementAt for

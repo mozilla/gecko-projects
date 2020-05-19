@@ -25,6 +25,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/WebrtcProxyConfig.h"
 #include "MediaManager.h"
 #include "WebrtcGmpVideoCodec.h"
 
@@ -68,7 +69,7 @@ void PeerConnectionMedia::StunAddrsHandler::OnStunAddrsAvailable(
   CSFLogInfo(LOGTAG, "%s: receiving (%d) stun addrs", __FUNCTION__,
              (int)addrs.Length());
   if (pcm_) {
-    pcm_->mStunAddrs = addrs;
+    pcm_->mStunAddrs = addrs.Clone();
     pcm_->mLocalAddrsRequestState = STUN_ADDR_REQUEST_COMPLETE;
     pcm_->FlushIceCtxOperationQueueIfReady();
     // If parent process returns 0 STUN addresses, change ICE connection
@@ -165,7 +166,8 @@ nsresult PeerConnectionMedia::Init() {
 }
 
 void PeerConnectionMedia::EnsureTransports(const JsepSession& aSession) {
-  for (const auto& transceiver : aSession.GetTransceivers()) {
+  for (const auto& [id, transceiver] : aSession.GetTransceivers()) {
+    (void)id;  // Lame, but no better way to do this right now.
     if (transceiver->HasOwnTransport()) {
       mTransportHandler->EnsureProvisionalTransport(
           transceiver->mTransport.mTransportId,
@@ -181,7 +183,8 @@ void PeerConnectionMedia::EnsureTransports(const JsepSession& aSession) {
 nsresult PeerConnectionMedia::UpdateTransports(const JsepSession& aSession,
                                                const bool forceIceTcp) {
   std::set<std::string> finalTransports;
-  for (const auto& transceiver : aSession.GetTransceivers()) {
+  for (const auto& [id, transceiver] : aSession.GetTransceivers()) {
+    (void)id;  // Lame, but no better way to do this right now.
     if (transceiver->HasOwnTransport()) {
       finalTransports.insert(transceiver->mTransport.mTransportId);
       UpdateTransport(*transceiver, forceIceTcp);
@@ -470,7 +473,7 @@ void PeerConnectionMedia::AddIceCandidate(const std::string& aCandidate,
                   self->mStunAddrsRequest->SendQueryMDNSHostname(
                       nsCString(nsAutoCString(addr.c_str())));
                 }
-                NS_ReleaseOnMainThreadSystemGroup(
+                NS_ReleaseOnMainThread(
                     "PeerConnectionMedia::SendQueryMDNSHostname",
                     self.forget());
               }));
@@ -687,17 +690,16 @@ void PeerConnectionMedia::ShutdownMediaTransport_s() {
 }
 
 nsresult PeerConnectionMedia::AddTransceiver(
-    JsepTransceiver* aJsepTransceiver, dom::MediaStreamTrack& aReceiveTrack,
-    dom::MediaStreamTrack* aSendTrack, const PrincipalHandle& aPrincipalHandle,
+    JsepTransceiver* aJsepTransceiver, dom::MediaStreamTrack* aSendTrack,
     RefPtr<TransceiverImpl>* aTransceiverImpl) {
   if (!mCall) {
     mCall = WebRtcCallWrapper::Create(mParent->GetTimestampMaker());
   }
 
   RefPtr<TransceiverImpl> transceiver = new TransceiverImpl(
-      mParent->GetHandle(), mTransportHandler, aJsepTransceiver,
-      mMainThread.get(), mSTSThread.get(), &aReceiveTrack, aSendTrack,
-      mCall.get(), aPrincipalHandle);
+      mParent->GetWindow(), mParent->PrivacyNeeded(), mParent->GetHandle(),
+      mTransportHandler, aJsepTransceiver, mMainThread.get(), mSTSThread.get(),
+      aSendTrack, mCall.get());
 
   if (!transceiver->IsValid()) {
     return NS_ERROR_FAILURE;
@@ -731,52 +733,14 @@ void PeerConnectionMedia::GetTransmitPipelinesMatching(
   }
 }
 
-void PeerConnectionMedia::GetReceivePipelinesMatching(
-    const MediaStreamTrack* aTrack,
-    nsTArray<RefPtr<MediaPipelineReceive>>* aPipelines) {
-  for (RefPtr<TransceiverImpl>& transceiver : mTransceivers) {
-    if (transceiver->HasReceiveTrack(aTrack)) {
-      aPipelines->AppendElement(transceiver->GetReceivePipeline());
-    }
-  }
-}
-
-std::string PeerConnectionMedia::GetTransportIdMatching(
+std::string PeerConnectionMedia::GetTransportIdMatchingSendTrack(
     const dom::MediaStreamTrack& aTrack) const {
   for (const RefPtr<TransceiverImpl>& transceiver : mTransceivers) {
-    if (transceiver->HasReceiveTrack(&aTrack) ||
-        transceiver->HasSendTrack(&aTrack)) {
+    if (transceiver->HasSendTrack(&aTrack)) {
       return transceiver->GetTransportId();
     }
   }
   return std::string();
-}
-
-nsresult PeerConnectionMedia::AddRIDExtension(MediaStreamTrack& aRecvTrack,
-                                              unsigned short aExtensionId) {
-  DebugOnly<bool> trackFound = false;
-  for (RefPtr<TransceiverImpl>& transceiver : mTransceivers) {
-    if (transceiver->HasReceiveTrack(&aRecvTrack)) {
-      transceiver->AddRIDExtension(aExtensionId);
-      trackFound = true;
-    }
-  }
-  MOZ_ASSERT(trackFound);
-  return NS_OK;
-}
-
-nsresult PeerConnectionMedia::AddRIDFilter(MediaStreamTrack& aRecvTrack,
-                                           const nsAString& aRid) {
-  DebugOnly<bool> trackFound = false;
-  for (RefPtr<TransceiverImpl>& transceiver : mTransceivers) {
-    MOZ_ASSERT(transceiver->HasReceiveTrack(&aRecvTrack));
-    if (transceiver->HasReceiveTrack(&aRecvTrack)) {
-      transceiver->AddRIDFilter(aRid);
-      trackFound = true;
-    }
-  }
-  MOZ_ASSERT(trackFound);
-  return NS_OK;
 }
 
 void PeerConnectionMedia::IceGatheringStateChange_s(

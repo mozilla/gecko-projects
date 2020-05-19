@@ -98,8 +98,6 @@ SPConsoleListener.prototype = {
       isScriptError: false,
       isConsoleEvent: false,
       isWarning: false,
-      isException: false,
-      isStrict: false,
     };
     if (msg instanceof Ci.nsIScriptError) {
       m.errorMessage = msg.errorMessage;
@@ -113,8 +111,6 @@ SPConsoleListener.prototype = {
       m.innerWindowID = msg.innerWindowID;
       m.isScriptError = true;
       m.isWarning = (msg.flags & Ci.nsIScriptError.warningFlag) === 1;
-      m.isException = (msg.flags & Ci.nsIScriptError.exceptionFlag) === 1;
-      m.isStrict = (msg.flags & Ci.nsIScriptError.strictFlag) === 1;
     } else if (topic === "console-api-log-event") {
       // This is a dom/console event.
       let unwrapped = msg.wrappedJSObject;
@@ -667,6 +663,10 @@ class SpecialPowersChild extends JSWindowActorChild {
   }
   get Cr() {
     return WrapPrivileged.wrap(this.getFullComponents().results);
+  }
+
+  get addProfilerMarker() {
+    return ChromeUtils.addProfilerMarker;
   }
 
   getDOMWindowUtils(aWindow) {
@@ -1318,19 +1318,20 @@ class SpecialPowersChild extends JSWindowActorChild {
   }
 
   getFullZoom(window) {
-    return this._getMUDV(window).fullZoom;
+    return BrowsingContext.getFromWindow(window).fullZoom;
   }
+
   getDeviceFullZoom(window) {
-    return this._getMUDV(window).deviceFullZoom;
+    return this._getMUDV(window).deviceFullZoomForTest;
   }
   setFullZoom(window, zoom) {
-    this._getMUDV(window).fullZoom = zoom;
+    BrowsingContext.getFromWindow(window).fullZoom = zoom;
   }
   getTextZoom(window) {
-    return this._getMUDV(window).textZoom;
+    return BrowsingContext.getFromWindow(window).textZoom;
   }
   setTextZoom(window, zoom) {
-    this._getMUDV(window).textZoom = zoom;
+    BrowsingContext.getFromWindow(window).textZoom = zoom;
   }
 
   getOverrideDPPX(window) {
@@ -1496,7 +1497,13 @@ class SpecialPowersChild extends JSWindowActorChild {
     try {
       Cc["@mozilla.org/memory-reporter-manager;1"]
         .getService(Ci.nsIMemoryReporterManager)
-        .getReports(() => {}, null, () => {}, null, false);
+        .getReports(
+          () => {},
+          null,
+          () => {},
+          null,
+          false
+        );
     } catch (e) {}
   }
 
@@ -1689,6 +1696,21 @@ class SpecialPowersChild extends JSWindowActorChild {
     });
   }
 
+  /**
+   * Like `spawn`, but spawns a chrome task in the parent process,
+   * instead. The task additionally has access to `windowGlobalParent`
+   * and `browsingContext` globals corresponding to the window from
+   * which the task was spawned.
+   */
+  spawnChrome(args, task) {
+    return this.sendQuery("SpawnChrome", {
+      args,
+      task: String(task),
+      caller: Cu.getFunctionSourceLocation(task),
+      imports: this._spawnTaskImports,
+    });
+  }
+
   snapshotContext(target, rect, background) {
     let browsingContext = this._browsingContextForTarget(target);
 
@@ -1860,13 +1882,6 @@ class SpecialPowersChild extends JSWindowActorChild {
   assertionCount() {
     var debugsvc = Cc["@mozilla.org/xpcom/debug;1"].getService(Ci.nsIDebug2);
     return debugsvc.assertionCount;
-  }
-
-  /**
-   * Get the message manager associated with an <iframe mozbrowser>.
-   */
-  getBrowserFrameMessageManager(aFrameElement) {
-    return this.wrap(aFrameElement.frameLoader.messageManager);
   }
 
   _getPrincipalFromArg(arg) {

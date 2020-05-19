@@ -15,6 +15,7 @@ import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.content.res.Configuration;
@@ -22,6 +23,7 @@ import android.os.Build;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.Process;
+import android.provider.Settings;
 import android.support.annotation.AnyThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -38,7 +40,6 @@ import org.mozilla.gecko.GeckoThread;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.util.BundleEventListener;
-import org.mozilla.gecko.util.ContextUtils;
 import org.mozilla.gecko.util.DebugConfig;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
@@ -192,7 +193,7 @@ public final class GeckoRuntime implements Parcelable {
 
 
     /**
-     * Called by mozilla::dom::ClientOpenWindowInCurrentProcess to retrieve the window id to use
+     * Called by mozilla::dom::ClientOpenWindow to retrieve the window id to use
      * for a ServiceWorkerClients.openWindow() request.
      * @param baseUrl The base Url for the request.
      * @param url Url being requested to be opened in a new window.
@@ -204,7 +205,7 @@ public final class GeckoRuntime implements Parcelable {
             final URI actual = URI.create(baseUrl).resolve(url);
             GeckoResult<String> result = new GeckoResult<>();
             // perform the onOpenWindow call in the UI thread
-            ThreadUtils.postToUiThread(() -> {
+            ThreadUtils.runOnUiThread(() -> {
                 sRuntime
                     .mServiceWorkerDelegate
                     .onOpenWindow(actual.toString())
@@ -352,7 +353,7 @@ public final class GeckoRuntime implements Parcelable {
             // Default to /data/local/tmp/$PACKAGE-geckoview-config.yaml if android:debuggable="true"
             // or if this application is the current Android "debug_app", and to not read configuration
             // from a file otherwise.
-            if (ContextUtils.isApplicationDebuggable(context) || ContextUtils.isApplicationCurrentDebugApp(context)) {
+            if (isApplicationDebuggable(context) || isApplicationCurrentDebugApp(context)) {
                 configFilePath = String.format(CONFIG_FILE_PATH_TEMPLATE, context.getApplicationInfo().packageName);
             }
         }
@@ -392,6 +393,25 @@ public final class GeckoRuntime implements Parcelable {
         // Add process lifecycle listener to react to backgrounding events.
         ProcessLifecycleOwner.get().getLifecycle().addObserver(new LifecycleListener());
         return true;
+    }
+
+    private boolean isApplicationDebuggable(final @NonNull Context context) {
+        final ApplicationInfo applicationInfo = context.getApplicationInfo();
+        return (applicationInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    private boolean isApplicationCurrentDebugApp(final @NonNull Context context) {
+        final ApplicationInfo applicationInfo = context.getApplicationInfo();
+
+        final String currentDebugApp;
+        if (Build.VERSION.SDK_INT >= 17) {
+            currentDebugApp = Settings.Global.getString(context.getContentResolver(),
+                    Settings.Global.DEBUG_APP);
+        } else {
+            currentDebugApp = Settings.System.getString(context.getContentResolver(),
+                    Settings.System.DEBUG_APP);
+        }
+        return applicationInfo.packageName.equals(currentDebugApp);
     }
 
     /* package */ void setDefaultPrefs(final GeckoBundle prefs) {
@@ -465,7 +485,11 @@ public final class GeckoRuntime implements Parcelable {
      *
      * @return A {@link GeckoResult} that will complete when the WebExtension
      * has been installed.
+     *
+     * @deprecated Use {@link WebExtensionController#installBuiltIn} instead. This method will
+     * be removed in GeckoView 81.
      */
+    @Deprecated // Bug 1634504
     @UiThread
     public @NonNull GeckoResult<Void> registerWebExtension(
             final @NonNull WebExtension webExtension) {
@@ -498,7 +522,11 @@ public final class GeckoRuntime implements Parcelable {
      *
      * @return A {@link GeckoResult} that will complete when the WebExtension
      * has been unregistered.
+     *
+     * @deprecated Use {@link WebExtensionController#uninstall} instead. This method will
+     * be removed in GeckoView 81.
      */
+    @Deprecated // Bug 1634504
     @UiThread
     public @NonNull GeckoResult<Void> unregisterWebExtension(
             final @NonNull WebExtension webExtension) {
@@ -512,11 +540,12 @@ public final class GeckoRuntime implements Parcelable {
         final GeckoBundle bundle = new GeckoBundle(1);
         bundle.putString("id", webExtension.id);
 
-        mWebExtensionController.unregisterWebExtension(webExtension);
-
         EventDispatcher.getInstance().dispatch("GeckoView:UnregisterWebExtension", bundle, result);
 
-        return result;
+        return result.then(success -> {
+            mWebExtensionController.unregisterWebExtension(webExtension);
+            return GeckoResult.fromValue(success);
+        });
     }
 
     /**
@@ -671,9 +700,9 @@ public final class GeckoRuntime implements Parcelable {
     }
 
     @WrapForJNI
-    @UiThread
+    @AnyThread
     private void notifyOnShow(final WebNotification notification) {
-        ThreadUtils.getUiHandler().post(() -> {
+        ThreadUtils.runOnUiThread(() -> {
             if (mNotificationDelegate != null) {
                 mNotificationDelegate.onShowNotification(notification);
             }
@@ -681,9 +710,9 @@ public final class GeckoRuntime implements Parcelable {
     }
 
     @WrapForJNI
-    @UiThread
+    @AnyThread
     private void notifyOnClose(final WebNotification notification) {
-        ThreadUtils.getUiHandler().post(() -> {
+        ThreadUtils.runOnUiThread(() -> {
             if (mNotificationDelegate != null) {
                 mNotificationDelegate.onCloseNotification(notification);
             }
@@ -792,6 +821,23 @@ public final class GeckoRuntime implements Parcelable {
         }
 
         return mPushController;
+    }
+
+    /**
+     * Appends notes to crash report.
+     * @param notes The application notes to append to the crash report.
+     */
+    @AnyThread
+    public void appendAppNotesToCrashReport(@NonNull final String notes) {
+        final String notesWithNewLine = notes + "\n";
+        if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
+            GeckoAppShell.nativeAppendAppNotesToCrashReport(notesWithNewLine);
+        } else {
+            GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY, GeckoAppShell.class,
+                    "nativeAppendAppNotesToCrashReport", String.class, notesWithNewLine);
+        }
+        // This function already adds a newline
+        GeckoAppShell.appendAppNotesToCrashReport(notes);
     }
 
     @Override // Parcelable

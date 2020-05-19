@@ -17,14 +17,13 @@
 #include "nsViewportInfo.h"
 #include "UnitTransforms.h"
 
-#define MVM_LOG(...)
-// #define MVM_LOG(...) printf_stderr("MVM: " __VA_ARGS__)
+static mozilla::LazyLogModule sApzMvmLog("apz.mobileviewport");
+#define MVM_LOG(...) MOZ_LOG(sApzMvmLog, LogLevel::Debug, (__VA_ARGS__))
 
 NS_IMPL_ISUPPORTS(MobileViewportManager, nsIDOMEventListener, nsIObserver)
 
 #define DOM_META_ADDED NS_LITERAL_STRING("DOMMetaAdded")
 #define DOM_META_CHANGED NS_LITERAL_STRING("DOMMetaChanged")
-#define FULL_ZOOM_CHANGE NS_LITERAL_STRING("FullZoomChange")
 #define LOAD NS_LITERAL_STRING("load")
 #define BEFORE_FIRST_PAINT NS_LITERAL_CSTRING("before-first-paint")
 
@@ -36,24 +35,22 @@ MobileViewportManager::MobileViewportManager(MVMContext* aContext)
     : mContext(aContext), mIsFirstPaint(false), mPainted(false) {
   MOZ_ASSERT(mContext);
 
-  MVM_LOG("%p: creating with context %p\n", this, mContext);
+  MVM_LOG("%p: creating with context %p\n", this, mContext.get());
 
   mContext->AddEventListener(DOM_META_ADDED, this, false);
   mContext->AddEventListener(DOM_META_CHANGED, this, false);
-  mContext->AddEventListener(FULL_ZOOM_CHANGE, this, false);
   mContext->AddEventListener(LOAD, this, true);
 
   mContext->AddObserver(this, BEFORE_FIRST_PAINT.Data(), false);
 }
 
-MobileViewportManager::~MobileViewportManager() {}
+MobileViewportManager::~MobileViewportManager() = default;
 
 void MobileViewportManager::Destroy() {
   MVM_LOG("%p: destroying\n", this);
 
   mContext->RemoveEventListener(DOM_META_ADDED, this, false);
   mContext->RemoveEventListener(DOM_META_CHANGED, this, false);
-  mContext->RemoveEventListener(FULL_ZOOM_CHANGE, this, false);
   mContext->RemoveEventListener(LOAD, this, true);
 
   mContext->RemoveObserver(this, BEFORE_FIRST_PAINT.Data());
@@ -132,9 +129,6 @@ MobileViewportManager::HandleEvent(dom::Event* event) {
   } else if (type.Equals(DOM_META_CHANGED)) {
     MVM_LOG("%p: got a dom-meta-changed event\n", this);
     RefreshViewportSize(mPainted);
-  } else if (type.Equals(FULL_ZOOM_CHANGE)) {
-    MVM_LOG("%p: got a full-zoom-change event\n", this);
-    RefreshViewportSize(false);
   } else if (type.Equals(LOAD)) {
     MVM_LOG("%p: got a load event\n", this);
     if (!mPainted) {
@@ -584,6 +578,10 @@ void MobileViewportManager::RefreshViewportSize(bool aForceAdjustResolution) {
   ScreenIntSize displaySize = ViewAs<ScreenPixel>(
       mDisplaySize, PixelCastJustification::LayoutDeviceIsScreenForBounds);
   nsViewportInfo viewportInfo = mContext->GetViewportInfo(displaySize);
+  MVM_LOG("%p: viewport info has zooms min=%f max=%f default=%f,valid=%d\n",
+          this, viewportInfo.GetMinZoom().scale,
+          viewportInfo.GetMaxZoom().scale, viewportInfo.GetDefaultZoom().scale,
+          viewportInfo.IsDefaultZoomValid());
 
   CSSSize viewport = viewportInfo.GetSize();
   MVM_LOG("%p: Computed CSS viewport %s\n", this, Stringify(viewport).c_str());

@@ -13,9 +13,9 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_intl.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/ToString.h"
@@ -76,15 +76,9 @@ InputContext::Origin IMEStateManager::sOrigin = InputContext::ORIGIN_MAIN;
 InputContext IMEStateManager::sActiveChildInputContext;
 bool IMEStateManager::sInstalledMenuKeyboardListener = false;
 bool IMEStateManager::sIsGettingNewIMEState = false;
-bool IMEStateManager::sCheckForIMEUnawareWebApps = false;
 
 // static
 void IMEStateManager::Init() {
-  Preferences::AddBoolVarCache(
-      &sCheckForIMEUnawareWebApps,
-      "intl.ime.hack.on_ime_unaware_apps.fire_key_events_for_composition",
-      false);
-
   sOrigin = XRE_IsParentProcess() ? InputContext::ORIGIN_MAIN
                                   : InputContext::ORIGIN_CONTENT;
   ResetActiveChildInputContext();
@@ -1133,7 +1127,8 @@ static bool IsNextFocusableElementTextControl(Element* aInputContent) {
   nsCOMPtr<nsIContent> nextContent;
   nsresult rv = fm->DetermineElementToMoveFocus(
       aInputContent->OwnerDoc()->GetWindow(), aInputContent,
-      nsIFocusManager::MOVEFOCUS_FORWARD, true, getter_AddRefs(nextContent));
+      nsIFocusManager::MOVEFOCUS_FORWARD, true, false,
+      getter_AddRefs(nextContent));
   if (NS_WARN_IF(NS_FAILED(rv)) || !nextContent) {
     return false;
   }
@@ -1262,9 +1257,11 @@ void IMEStateManager::SetIMEState(const IMEState& aState,
   InputContext context;
   context.mIMEState = aState;
   context.mOrigin = aOrigin;
-  context.mMayBeIMEUnaware = context.mIMEState.IsEditable() &&
-                             sCheckForIMEUnawareWebApps &&
-                             MayBeIMEUnawareWebApp(aContent);
+  context.mMayBeIMEUnaware =
+      context.mIMEState.IsEditable() &&
+      StaticPrefs::
+          intl_ime_hack_on_ime_unaware_apps_fire_key_events_for_composition() &&
+      MayBeIMEUnawareWebApp(aContent);
 
   context.mHasHandledUserInput =
       aPresContext && aPresContext->PresShell()->HasHandledUserInput();
@@ -1273,27 +1270,31 @@ void IMEStateManager::SetIMEState(const IMEState& aState,
       aPresContext &&
       nsContentUtils::IsInPrivateBrowsing(aPresContext->Document());
 
-  if (aContent &&
-      aContent->IsAnyOfHTMLElements(nsGkAtoms::input, nsGkAtoms::textarea)) {
-    if (!aContent->IsHTMLElement(nsGkAtoms::textarea)) {
-      aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::type,
-                                     context.mHTMLInputType);
-    } else {
+  if (aContent) {
+    if (aContent->IsHTMLElement(nsGkAtoms::input)) {
+      HTMLInputElement::FromNode(aContent)->GetType(context.mHTMLInputType);
+      GetActionHint(*aContent, context.mActionHint);
+    } else if (aContent->IsHTMLElement(nsGkAtoms::textarea)) {
       context.mHTMLInputType.Assign(nsGkAtoms::textarea->GetUTF16String());
+      GetActionHint(*aContent, context.mActionHint);
     }
 
-    if (StaticPrefs::dom_forms_inputmode() ||
-        nsContentUtils::IsChromeDoc(aContent->OwnerDoc())) {
+    if (aContent->IsHTMLElement() && aState.IsEditable() &&
+        (StaticPrefs::dom_forms_inputmode() ||
+         nsContentUtils::IsChromeDoc(aContent->OwnerDoc()))) {
       aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::inputmode,
                                      context.mHTMLInputInputmode);
-      if (context.mHTMLInputInputmode.EqualsLiteral("mozAwesomebar") &&
-          !nsContentUtils::IsChromeDoc(aContent->OwnerDoc())) {
-        // mozAwesomebar should be allowed only in chrome
-        context.mHTMLInputInputmode.Truncate();
+      if (aContent->IsHTMLElement(nsGkAtoms::input) &&
+          context.mHTMLInputInputmode.EqualsLiteral("mozAwesomebar")) {
+        if (!nsContentUtils::IsChromeDoc(aContent->OwnerDoc())) {
+          // mozAwesomebar should be allowed only in chrome
+          context.mHTMLInputInputmode.Truncate();
+        }
+      } else {
+        // Except to mozAwesomebar, inputmode should be lower case.
+        ToLowerCase(context.mHTMLInputInputmode);
       }
     }
-
-    GetActionHint(*aContent, context.mActionHint);
   }
 
   if (aAction.mCause == InputContextAction::CAUSE_UNKNOWN &&
@@ -1741,7 +1742,7 @@ bool IMEStateManager::IsEditable(nsINode* node) {
   }
   // |node| might be readwrite (for example, a text control)
   if (node->IsElement() &&
-      node->AsElement()->State().HasState(NS_EVENT_STATE_MOZ_READWRITE)) {
+      node->AsElement()->State().HasState(NS_EVENT_STATE_READWRITE)) {
     return true;
   }
   return false;

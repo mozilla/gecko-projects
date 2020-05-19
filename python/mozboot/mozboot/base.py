@@ -77,7 +77,7 @@ the $PATH environment variable.
 
 We recommend the following tools for installing Python:
 
-    pyenv   -- https://github.com/yyuu/pyenv)
+    pyenv   -- https://github.com/yyuu/pyenv
     pythonz -- https://github.com/saghul/pythonz
     official installers -- http://www.python.org/
 '''
@@ -158,7 +158,7 @@ MODERN_MERCURIAL_VERSION = LooseVersion('4.8')
 MODERN_PYTHON_VERSION = LooseVersion('2.7.3')
 
 # Upgrade rust older than this.
-MODERN_RUST_VERSION = LooseVersion('1.41.0')
+MODERN_RUST_VERSION = LooseVersion('1.41.1')
 
 # Upgrade nasm older than this.
 MODERN_NASM_VERSION = LooseVersion('2.14')
@@ -315,6 +315,18 @@ class BaseBootstrapper(object):
     def ensure_dump_syms_packages(self, state_dir, checkout_root):
         '''
         Install dump_syms.
+        '''
+        pass
+
+    def ensure_fix_stacks_packages(self, state_dir, checkout_root):
+        '''
+        Install fix-stacks.
+        '''
+        pass
+
+    def ensure_minidump_stackwalk_packages(self, state_dir, checkout_root):
+        '''
+        Install minidump_stackwalk.
         '''
         pass
 

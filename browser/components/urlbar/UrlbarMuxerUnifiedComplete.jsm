@@ -16,6 +16,7 @@ const { XPCOMUtils } = ChromeUtils.import(
 XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
   UrlbarMuxer: "resource:///modules/UrlbarUtils.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
@@ -25,6 +26,9 @@ XPCOMUtils.defineLazyGetter(this, "logger", () =>
 );
 
 function groupFromResult(result) {
+  if (result.heuristic) {
+    return UrlbarUtils.RESULT_GROUP.HEURISTIC;
+  }
   switch (result.type) {
     case UrlbarUtils.RESULT_TYPE.SEARCH:
       return result.payload.suggestion
@@ -52,88 +56,143 @@ class MuxerUnifiedComplete extends UrlbarMuxer {
 
   /**
    * Sorts results in the given UrlbarQueryContext.
-   * @param {UrlbarQueryContext} context The query context.
+   *
+   * @param {UrlbarQueryContext} context
+   *   The query context.
+   * @returns {boolean}
+   *   True if the muxer sorted the results and false if not.  The muxer may
+   *   decide it can't sort if there aren't yet enough results to make good
+   *   decisions, for example to avoid flicker in the view.
    */
   sort(context) {
-    // A Search in a Private Window result should only be shown when there are
-    // other results, and all of them are searches. It should also not be shown
-    // if the user typed an alias, because it's an explicit search engine choice.
-    let searchInPrivateWindowIndex = context.results.findIndex(
-      r => r.type == UrlbarUtils.RESULT_TYPE.SEARCH && r.payload.inPrivateWindow
-    );
-    if (
-      searchInPrivateWindowIndex != -1 &&
-      (context.results.length == 1 ||
-        context.results.some(
-          r =>
-            r.type != UrlbarUtils.RESULT_TYPE.SEARCH ||
-            r.payload.keywordOffer ||
-            (r.heuristic && r.payload.keyword)
-        ))
-    ) {
-      // Remove the result.
-      context.results.splice(searchInPrivateWindowIndex, 1);
+    // This method is called multiple times per keystroke, so it should be as
+    // fast and efficient as possible.  We do one pass through active providers
+    // and two passes through the results: one to collect info for the second
+    // pass, and then a second to build the unsorted list of results.  If you
+    // find yourself writing something like context.results.find(), filter(),
+    // sort(), etc., modify one or both passes instead.
+
+    // Collect info from the active providers.
+    for (let providerName of context.activeProviders) {
+      let provider = UrlbarProvidersManager.getProvider(providerName);
+
+      // If the provider of the heuristic result is still active and the result
+      // hasn't been created yet, bail.  Otherwise we may show another result
+      // first and then later replace it with the heuristic, causing flicker.
+      if (
+        provider.type == UrlbarUtils.PROVIDER_TYPE.HEURISTIC &&
+        !context.heuristicResult
+      ) {
+        return false;
+      }
     }
 
-    if (!context.results.length) {
-      return;
+    let heuristicResultQuery;
+    if (
+      context.heuristicResult &&
+      context.heuristicResult.type == UrlbarUtils.RESULT_TYPE.SEARCH &&
+      context.heuristicResult.payload.query
+    ) {
+      heuristicResultQuery = context.heuristicResult.payload.query.toLocaleLowerCase();
     }
-    // Look for an heuristic result.  If it's a search result, use search
-    // buckets, otherwise use normal buckets.
-    let heuristicResult = context.results.find(r => r.heuristic);
+
+    // We update canShowPrivateSearch below too.  This is its initial value.
+    let canShowPrivateSearch = context.results.length > 1;
+    let resultsWithSuggestedIndex = [];
+
+    // Do the first pass through the results.  We only collect info for the
+    // second pass here.
+    for (let result of context.results) {
+      // The "Search in a Private Window" result should only be shown when there
+      // are other results and all of them are searches.  It should not be shown
+      // if the user typed an alias because that's an explicit engine choice.
+      if (
+        result.type != UrlbarUtils.RESULT_TYPE.SEARCH ||
+        result.payload.keywordOffer ||
+        (result.heuristic && result.payload.keyword)
+      ) {
+        canShowPrivateSearch = false;
+        break;
+      }
+    }
+
+    // Do the second pass through results to build the list of unsorted results.
+    let unsortedResults = [];
+    for (let result of context.results) {
+      // Exclude "Search in a Private Window" as determined in the first pass.
+      if (
+        result.type == UrlbarUtils.RESULT_TYPE.SEARCH &&
+        result.payload.inPrivateWindow &&
+        !canShowPrivateSearch
+      ) {
+        continue;
+      }
+
+      // Save suggestedIndex results for later.
+      if (result.suggestedIndex >= 0) {
+        resultsWithSuggestedIndex.push(result);
+        continue;
+      }
+
+      // Exclude remote search suggestions that dupe the heuristic result.
+      if (
+        result.type == UrlbarUtils.RESULT_TYPE.SEARCH &&
+        result.payload.suggestion &&
+        result.payload.suggestion.toLocaleLowerCase() === heuristicResultQuery
+      ) {
+        continue;
+      }
+
+      // Include this result.
+      unsortedResults.push(result);
+    }
+
+    // If the heuristic result is a search result, use search buckets, otherwise
+    // use normal buckets.
     let buckets =
-      heuristicResult && heuristicResult.type == UrlbarUtils.RESULT_TYPE.SEARCH
+      context.heuristicResult &&
+      context.heuristicResult.type == UrlbarUtils.RESULT_TYPE.SEARCH
         ? UrlbarPrefs.get("matchBucketsSearch")
         : UrlbarPrefs.get("matchBuckets");
     logger.debug(`Buckets: ${buckets}`);
+
+    // Finally, build the sorted list of results.  Fill each bucket in turn.
+    let sortedResults = [];
+    let handledResults = new Set();
+    let count = Math.min(unsortedResults.length, context.maxResults);
+    for (let b = 0; handledResults.size < count && b < buckets.length; b++) {
+      let [group, slotCount] = buckets[b];
+      // Search all the available results to fill this bucket.
+      for (
+        let i = 0;
+        slotCount && handledResults.size < count && i < unsortedResults.length;
+        i++
+      ) {
+        let result = unsortedResults[i];
+        if (!handledResults.has(result) && group == groupFromResult(result)) {
+          sortedResults.push(result);
+          handledResults.add(result);
+          slotCount--;
+        }
+      }
+    }
+
     // These results have a suggested index and should be moved if possible.
     // The sorting is important, to avoid messing up indices later when we'll
     // insert these results.
-    let reshuffleResults = context.results
-      .filter(r => r.suggestedIndex >= 0)
-      .sort((a, b) => a.suggestedIndex - b.suggestedIndex);
-    let sortedResults = [];
-    // Track which results have been inserted already.
-    let handled = new Set();
-    for (let [group, slots] of buckets) {
-      // Search all the available results to fill this bucket.
-      for (let result of context.results) {
-        if (slots == 0) {
-          // There's no more space in this bucket.
-          break;
-        }
-        if (handled.has(result)) {
-          // Already handled.
-          continue;
-        }
+    resultsWithSuggestedIndex.sort(
+      (a, b) => a.suggestedIndex - b.suggestedIndex
+    );
+    for (let result of resultsWithSuggestedIndex) {
+      let index =
+        result.suggestedIndex <= sortedResults.length
+          ? result.suggestedIndex
+          : sortedResults.length;
+      sortedResults.splice(index, 0, result);
+    }
 
-        if (
-          group == UrlbarUtils.RESULT_GROUP.HEURISTIC &&
-          result == heuristicResult
-        ) {
-          // Handle the heuristic result.
-          sortedResults.unshift(result);
-          handled.add(result);
-          slots--;
-        } else if (group == groupFromResult(result)) {
-          // If there's no suggestedIndex, insert the result now, otherwise
-          // we'll handle it later.
-          if (result.suggestedIndex < 0) {
-            sortedResults.push(result);
-          }
-          handled.add(result);
-          slots--;
-        }
-      }
-    }
-    for (let result of reshuffleResults) {
-      if (sortedResults.length >= result.suggestedIndex) {
-        sortedResults.splice(result.suggestedIndex, 0, result);
-      } else {
-        sortedResults.push(result);
-      }
-    }
     context.results = sortedResults;
+    return true;
   }
 }
 

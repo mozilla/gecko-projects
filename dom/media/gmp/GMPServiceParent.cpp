@@ -24,10 +24,8 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/SyncRunnable.h"
-#include "mozilla/SystemGroup.h"
 #include "mozilla/Unused.h"
 #include "nsAppDirectoryServiceDefs.h"
-#include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -81,10 +79,10 @@ GeckoMediaPluginServiceParent::GeckoMediaPluginServiceParent()
       mScannedPluginOnDisk(false),
       mWaitingForPluginsSyncShutdown(false),
       mInitPromiseMonitor("GeckoMediaPluginServiceParent::mInitPromiseMonitor"),
+      mInitPromise(&mInitPromiseMonitor),
       mLoadPluginsFromDiskComplete(false),
-      mMainThread(SystemGroup::AbstractMainThreadFor(TaskCategory::Other)) {
+      mMainThread(AbstractThread::MainThread()) {
   MOZ_ASSERT(NS_IsMainThread());
-  mInitPromise.SetMonitor(&mInitPromiseMonitor);
 }
 
 GeckoMediaPluginServiceParent::~GeckoMediaPluginServiceParent() {
@@ -342,8 +340,8 @@ GeckoMediaPluginServiceParent::GetContentParent(
       thread, __func__,
       [self = RefPtr<GeckoMediaPluginServiceParent>(this),
        nodeIdString = nsCString(aNodeIdString), api = nsCString(aAPI),
-       tags = nsTArray<nsCString>(aTags),
-       helper = RefPtr<GMPCrashHelper>(aHelper), holder = std::move(holder)](
+       tags = aTags.Clone(), helper = RefPtr<GMPCrashHelper>(aHelper),
+       holder = std::move(holder)](
           const GenericPromise::ResolveOrRejectValue& aValue) mutable -> void {
         if (aValue.IsReject()) {
           NS_WARNING("GMPService::EnsureInitialized failed.");
@@ -528,7 +526,7 @@ class NotifyObserversTask final : public mozilla::Runnable {
   }
 
  private:
-  ~NotifyObserversTask() {}
+  ~NotifyObserversTask() = default;
   const char* mTopic;
   const nsString mData;
 };
@@ -917,7 +915,7 @@ void GeckoMediaPluginServiceParent::RemoveOnGMPThread(
 }
 
 // May remove when Bug 1043671 is fixed
-static void Dummy(RefPtr<GMPParent>& aOnDeathsDoor) {
+static void Dummy(RefPtr<GMPParent> aOnDeathsDoor) {
   // exists solely to do nothing and let the Runnable kill the GMPParent
   // when done.
 }
@@ -1046,7 +1044,7 @@ already_AddRefed<GMPStorage> GeckoMediaPluginServiceParent::GetMemoryStorageFor(
   RefPtr<GMPStorage> s;
   if (!mTempGMPStorage.Get(aNodeId, getter_AddRefs(s))) {
     s = CreateGMPMemoryStorage();
-    mTempGMPStorage.Put(aNodeId, s);
+    mTempGMPStorage.Put(aNodeId, RefPtr{s});
   }
   return s.forget();
 }
@@ -1735,11 +1733,12 @@ bool GMPServiceParent::Create(Endpoint<PGMPServiceParent>&& aGMPService) {
   nsresult rv = gmp->GetThread(getter_AddRefs(gmpThread));
   NS_ENSURE_SUCCESS(rv, false);
 
-  nsAutoPtr<GMPServiceParent> serviceParent(new GMPServiceParent(gmp));
+  UniquePtr<GMPServiceParent> serviceParent(new GMPServiceParent(gmp));
   bool ok;
-  rv = gmpThread->Dispatch(
-      new OpenPGMPServiceParent(serviceParent, std::move(aGMPService), &ok),
-      NS_DISPATCH_SYNC);
+  rv =
+      gmpThread->Dispatch(new OpenPGMPServiceParent(
+                              serviceParent.get(), std::move(aGMPService), &ok),
+                          NS_DISPATCH_SYNC);
 
   if (NS_WARN_IF(NS_FAILED(rv) || !ok)) {
     return false;
@@ -1747,7 +1746,7 @@ bool GMPServiceParent::Create(Endpoint<PGMPServiceParent>&& aGMPService) {
 
   // Now that the service parent is set up, it will be destroyed by
   // ActorDestroy.
-  Unused << serviceParent.forget();
+  Unused << serviceParent.release();
 
   return true;
 }

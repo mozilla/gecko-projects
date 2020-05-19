@@ -78,6 +78,7 @@ class Presentation;
 class LegacyMozTCPSocket;
 class VRDisplay;
 class VRServiceTest;
+class XRSystem;
 class StorageManager;
 class MediaCapabilities;
 class MediaSession;
@@ -90,8 +91,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Navigator)
-
-  static void Init();
 
   void Invalidate();
   nsPIDOMWindowInner* GetWindow() const { return mWindow; }
@@ -125,8 +124,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
                                    ErrorResult& aRv);
   void RegisterProtocolHandler(const nsAString& aScheme, const nsAString& aURL,
                                const nsAString& aTitle, ErrorResult& aRv);
-  void RegisterContentHandler(const nsAString& aMIMEType, const nsAString& aURL,
-                              const nsAString& aTitle, ErrorResult& aRv);
   nsMimeTypeArray* GetMimeTypes(ErrorResult& aRv);
   nsPluginArray* GetPlugins(ErrorResult& aRv);
   Permissions* GetPermissions(ErrorResult& aRv);
@@ -187,6 +184,7 @@ class Navigator final : public nsISupports, public nsWrapperCache {
   bool IsWebVRContentDetected() const;
   bool IsWebVRContentPresenting() const;
   void RequestVRPresentation(VRDisplay& aDisplay);
+  XRSystem* GetXr(ErrorResult& aRv);
   already_AddRefed<Promise> RequestMIDIAccess(const MIDIOptions& aOptions,
                                               ErrorResult& aRv);
 
@@ -283,6 +281,7 @@ class Navigator final : public nsISupports, public nsWrapperCache {
   RefPtr<GamepadServiceTest> mGamepadServiceTest;
   nsTArray<RefPtr<Promise>> mVRGetDisplaysPromises;
   RefPtr<VRServiceTest> mVRServiceTest;
+  RefPtr<XRSystem> mXRSystem;
   nsTArray<uint32_t> mRequestedVibrationPattern;
   RefPtr<StorageManager> mStorageManager;
   RefPtr<dom::MediaCapabilities> mMediaCapabilities;

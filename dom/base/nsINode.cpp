@@ -82,6 +82,7 @@
 #include "nsObjectLoadingContent.h"
 #include "nsPIDOMWindow.h"
 #include "nsPresContext.h"
+#include "nsPrintfCString.h"
 #include "nsRange.h"
 #include "nsString.h"
 #include "nsStyleConsts.h"
@@ -102,6 +103,7 @@
 #include "nsChildContentList.h"
 #include "mozilla/dom/NodeBinding.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/AncestorIterator.h"
 #include "xpcprivate.h"
 
 #include "XPathGenerator.h"
@@ -113,17 +115,23 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
+void* nsINode::operator new(size_t aSize, nsNodeInfoManager* aManager) {
+  if (StaticPrefs::dom_arena_allocator_enabled_AtStartup()) {
+    MOZ_ASSERT(aManager, "nsNodeInfoManager needs to be initialized");
+    return aManager->Allocate(aSize);
+  }
+  return ::operator new(aSize);
+}
+void nsINode::operator delete(void* aPtr) { free_impl(aPtr); }
+
 bool nsINode::IsInclusiveDescendantOf(const nsINode* aNode) const {
   MOZ_ASSERT(aNode, "The node is nullptr.");
 
-  const nsINode* node = this;
-  do {
+  for (nsINode* node : InclusiveAncestors(*this)) {
     if (node == aNode) {
       return true;
     }
-    node = node->GetParentNode();
-  } while (node);
-
+  }
   return false;
 }
 
@@ -297,7 +305,9 @@ bool nsINode::IsSelected(const uint32_t aStartOffset,
   MOZ_ASSERT(aStartOffset <= aEndOffset);
 
   const nsINode* n = GetClosestCommonInclusiveAncestorForRangeInSelection(this);
-  NS_ASSERTION(n || !IsSelectionDescendant(), "orphan selection descendant");
+  NS_ASSERTION(n || !IsMaybeSelected(),
+               "A node without a common inclusive ancestor for a range in "
+               "Selection is for sure not selected.");
 
   // Collect the selection objects for potential ranges.
   nsTHashtable<nsPtrHashKey<Selection>> ancestorSelections;
@@ -382,11 +392,8 @@ nsIContent* nsINode::GetTextEditorRootContent(TextEditor** aTextEditor) {
   if (aTextEditor) {
     *aTextEditor = nullptr;
   }
-  for (nsINode* node = this; node; node = node->GetParentNode()) {
-    if (!node->IsElement() || !node->IsHTMLElement()) continue;
-
-    RefPtr<TextEditor> textEditor =
-        static_cast<nsGenericHTMLElement*>(node)->GetTextEditorInternal();
+  for (auto* element : InclusiveAncestorsOfType<nsGenericHTMLElement>(*this)) {
+    RefPtr<TextEditor> textEditor = element->GetTextEditorInternal();
     if (!textEditor) {
       continue;
     }
@@ -728,10 +735,36 @@ void nsINode::GetNodeValueInternal(nsAString& aNodeValue) {
   SetDOMStringToNull(aNodeValue);
 }
 
+static const char* NodeTypeAsString(nsINode* aNode) {
+  static const char* NodeTypeStrings[] = {
+      "",  // No nodes of type 0
+      "an Element",
+      "an Attribute",
+      "a Text",
+      "a CDATASection",
+      "an EntityReference",
+      "an Entity",
+      "a ProcessingInstruction",
+      "a Comment",
+      "a Document",
+      "a DocumentType",
+      "a DocumentFragment",
+      "a Notation",
+  };
+  static_assert(ArrayLength(NodeTypeStrings) == nsINode::MAX_NODE_TYPE + 1,
+                "Max node type out of range for our array");
+
+  uint16_t nodeType = aNode->NodeType();
+  MOZ_RELEASE_ASSERT(nodeType < ArrayLength(NodeTypeStrings),
+                     "Uknown out-of-range node type");
+  return NodeTypeStrings[nodeType];
+}
+
 nsINode* nsINode::RemoveChild(nsINode& aOldChild, ErrorResult& aError) {
   if (!aOldChild.IsContent()) {
     // aOldChild can't be one of our children.
-    aError.Throw(NS_ERROR_DOM_NOT_FOUND_ERR);
+    aError.ThrowNotFoundError(
+        "The node to be removed is not a child of this node");
     return nullptr;
   }
 
@@ -744,7 +777,8 @@ nsINode* nsINode::RemoveChild(nsINode& aOldChild, ErrorResult& aError) {
   if (aOldChild.AsContent()->IsRootOfAnonymousSubtree() ||
       aOldChild.GetParentNode() != this) {
     // aOldChild isn't one of our children.
-    aError.Throw(NS_ERROR_DOM_NOT_FOUND_ERR);
+    aError.ThrowNotFoundError(
+        "The node to be removed is not a child of this node");
     return nullptr;
   }
 
@@ -868,20 +902,13 @@ void nsINode::GetBaseURIFromJS(nsAString& aURI, CallerType aCallerType,
 nsIURI* nsINode::GetBaseURIObject() const { return GetBaseURI(true); }
 
 void nsINode::LookupPrefix(const nsAString& aNamespaceURI, nsAString& aPrefix) {
-  Element* element = GetNameSpaceElement();
-  if (element) {
+  if (Element* nsElement = GetNameSpaceElement()) {
     // XXX Waiting for DOM spec to list error codes.
 
     // Trace up the content parent chain looking for the namespace
     // declaration that defines the aNamespaceURI namespace. Once found,
     // return the prefix (i.e. the attribute localName).
-    for (nsIContent* content = element; content;
-         content = content->GetParent()) {
-      if (!content->IsElement()) {
-        continue;
-      }
-
-      Element* element = content->AsElement();
+    for (Element* element : InclusiveAncestorsOfType<Element>(*nsElement)) {
       uint32_t attrCount = element->GetAttrCount();
 
       for (uint32_t i = 0; i < attrCount; ++i) {
@@ -1225,6 +1252,12 @@ void nsINode::GetBoxQuads(const BoxQuadOptions& aOptions,
                           nsTArray<RefPtr<DOMQuad>>& aResult,
                           CallerType aCallerType, mozilla::ErrorResult& aRv) {
   mozilla::GetBoxQuads(this, aOptions, aResult, aCallerType, aRv);
+}
+
+void nsINode::GetBoxQuadsFromWindowOrigin(const BoxQuadOptions& aOptions,
+                                          nsTArray<RefPtr<DOMQuad>>& aResult,
+                                          mozilla::ErrorResult& aRv) {
+  mozilla::GetBoxQuadsFromWindowOrigin(this, aOptions, aResult, aRv);
 }
 
 already_AddRefed<DOMQuad> nsINode::ConvertQuadFromNode(
@@ -1941,10 +1974,9 @@ static bool MatchAttribute(Element* aElement, int32_t aNamespaceID,
 already_AddRefed<nsIHTMLCollection> nsINode::GetElementsByAttribute(
     const nsAString& aAttribute, const nsAString& aValue) {
   RefPtr<nsAtom> attrAtom(NS_Atomize(aAttribute));
-  nsAutoPtr<nsString> attrValue(new nsString(aValue));
   RefPtr<nsContentList> list = new nsContentList(
       this, MatchAttribute, nsContentUtils::DestroyMatchString,
-      attrValue.forget(), true, attrAtom, kNameSpaceID_Unknown);
+      new nsString(aValue), true, attrAtom, kNameSpaceID_Unknown);
 
   return list.forget();
 }
@@ -1953,7 +1985,6 @@ already_AddRefed<nsIHTMLCollection> nsINode::GetElementsByAttributeNS(
     const nsAString& aNamespaceURI, const nsAString& aAttribute,
     const nsAString& aValue, ErrorResult& aRv) {
   RefPtr<nsAtom> attrAtom(NS_Atomize(aAttribute));
-  nsAutoPtr<nsString> attrValue(new nsString(aValue));
 
   int32_t nameSpaceId = kNameSpaceID_Wildcard;
   if (!aNamespaceURI.EqualsLiteral("*")) {
@@ -1967,7 +1998,7 @@ already_AddRefed<nsIHTMLCollection> nsINode::GetElementsByAttributeNS(
 
   RefPtr<nsContentList> list = new nsContentList(
       this, MatchAttribute, nsContentUtils::DestroyMatchString,
-      attrValue.forget(), true, attrAtom, nameSpaceId);
+      new nsString(aValue), true, attrAtom, nameSpaceId);
   return list.forget();
 }
 
@@ -1980,7 +2011,6 @@ void nsINode::Prepend(const Sequence<OwningNodeOrString>& aNodes,
   }
 
   nsCOMPtr<nsIContent> refNode = mFirstChild;
-  ;
   InsertBefore(*node, refNode, aRv);
 }
 
@@ -2059,19 +2089,33 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
         (aNewChild->IsElement() && aNewChild->AsElement()->GetShadowRoot())) &&
        nsContentUtils::ContentIsHostIncludingDescendantOf(aParent,
                                                           aNewChild))) {
-    aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+    aRv.ThrowHierarchyRequestError(
+        "The new child is an ancestor of the parent");
     return;
   }
 
   // Step 3.
   if (aRefChild && aRefChild->GetParentNode() != aParent) {
-    aRv.Throw(NS_ERROR_DOM_NOT_FOUND_ERR);
+    if (aIsReplace) {
+      if (aNewChild->GetParentNode() == aParent) {
+        aRv.ThrowNotFoundError(
+            "New child already has this parent and old child does not. Please "
+            "check the order of replaceChild's arguments.");
+      } else {
+        aRv.ThrowNotFoundError(
+            "Child to be replaced is not a child of this node");
+      }
+    } else {
+      aRv.ThrowNotFoundError(
+          "Child to insert before is not a child of this node");
+    }
     return;
   }
 
   // Step 4.
   if (!aNewChild->IsContent()) {
-    aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+    aRv.ThrowHierarchyRequestError(nsPrintfCString(
+        "May not add %s as a child", NodeTypeAsString(aNewChild)));
     return;
   }
 
@@ -2087,7 +2131,9 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
     case nsINode::ENTITY_REFERENCE_NODE:
       // Allowed under Elements and DocumentFragments
       if (aParent->NodeType() == nsINode::DOCUMENT_NODE) {
-        aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aRv.ThrowHierarchyRequestError(
+            nsPrintfCString("Cannot insert %s as a child of a Document",
+                            NodeTypeAsString(aNewChild)));
       }
       return;
     case nsINode::ELEMENT_NODE: {
@@ -2102,7 +2148,8 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
         // Already have a documentElement, so this is only OK if we're
         // replacing it.
         if (!aIsReplace || rootElement != aRefChild) {
-          aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+          aRv.ThrowHierarchyRequestError(
+              "Cannot have more than one Element child of a Document");
         }
         return;
       }
@@ -2129,14 +2176,17 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
       bool ok = aIsReplace ? (insertIndex >= doctypeIndex)
                            : insertIndex > doctypeIndex;
       if (!ok) {
-        aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aRv.ThrowHierarchyRequestError(
+            "Cannot insert a root element before the doctype");
       }
       return;
     }
     case nsINode::DOCUMENT_TYPE_NODE: {
       if (!aParent->IsDocument()) {
         // doctypes only allowed under documents
-        aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aRv.ThrowHierarchyRequestError(
+            nsPrintfCString("Cannot insert a DocumentType as a child of %s",
+                            NodeTypeAsString(aParent)));
         return;
       }
 
@@ -2145,7 +2195,8 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
       if (docTypeContent) {
         // Already have a doctype, so this is only OK if we're replacing it
         if (!aIsReplace || docTypeContent != aRefChild) {
-          aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+          aRv.ThrowHierarchyRequestError(
+              "Cannot have more than one DocumentType child of a Document");
         }
         return;
       }
@@ -2160,7 +2211,8 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
 
       if (!aRefChild) {
         // Trying to append a doctype, but have a documentElement
-        aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aRv.ThrowHierarchyRequestError(
+            "Cannot have a DocumentType node after the root element");
         return;
       }
 
@@ -2171,7 +2223,8 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
       // we end up replacing aRefChild or we end up before it.  Either one is
       // ok as long as aRefChild is not after rootElement.
       if (insertIndex > rootIndex) {
-        aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aRv.ThrowHierarchyRequestError(
+            "Cannot have a DocumentType node after the root element");
       }
       return;
     }
@@ -2192,7 +2245,8 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
         if (child->IsElement()) {
           if (sawElement) {
             // Can't put two elements into a document
-            aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+            aRv.ThrowHierarchyRequestError(
+                "Cannot have more than one Element child of a Document");
             return;
           }
           sawElement = true;
@@ -2215,7 +2269,10 @@ static void EnsureAllowedAsChild(nsINode* aNewChild, nsINode* aParent,
       break;
   }
 
-  aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+  // XXXbz when can we reach this?
+  aRv.ThrowHierarchyRequestError(nsPrintfCString("Cannot insert %s inside %s",
+                                                 NodeTypeAsString(aNewChild),
+                                                 NodeTypeAsString(aParent)));
 }
 
 // Implements
@@ -2235,7 +2292,8 @@ void nsINode::EnsurePreInsertionValidity(nsINode& aNewChild, nsINode* aRefChild,
 // evaluated before ever looking at the child nodes (step 1 in both cases).
 void nsINode::EnsurePreInsertionValidity1(ErrorResult& aError) {
   if (!IsDocument() && !IsDocumentFragment() && !IsElement()) {
-    aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+    aError.ThrowHierarchyRequestError(
+        nsPrintfCString("Cannot add children to %s", NodeTypeAsString(this)));
     return;
   }
 }
@@ -2248,7 +2306,8 @@ void nsINode::EnsurePreInsertionValidity2(bool aReplace, nsINode& aNewChild,
     // This is anonymous content.  Don't allow its insertion
     // anywhere, since it might have UnbindFromTree calls coming
     // its way.
-    aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    aError.ThrowNotSupportedError(
+        "Inserting anonymous content manually is not supported");
     return;
   }
 
@@ -2365,7 +2424,8 @@ nsINode* nsINode::ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
 
       // Verify that newContent has no parent.
       if (newContent->GetParentNode()) {
-        aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aError.ThrowHierarchyRequestError(
+            "New child was inserted somewhere else");
         return nullptr;
       }
 
@@ -2434,14 +2494,15 @@ nsINode* nsINode::ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
       // Verify that nodeToInsertBefore, if non-null, is still our child.  If
       // it's not, there's no way we can do this insert sanely; just bail out.
       if (nodeToInsertBefore && nodeToInsertBefore->GetParent() != this) {
-        aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aError.ThrowHierarchyRequestError("Don't know where to insert child");
         return nullptr;
       }
 
       // Verify that all the things in fragChildren have no parent.
       for (uint32_t i = 0; i < count; ++i) {
         if (fragChildren->ElementAt(i)->GetParentNode()) {
-          aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+          aError.ThrowHierarchyRequestError(
+              "New child was inserted somewhere else");
           return nullptr;
         }
       }
@@ -2453,7 +2514,7 @@ nsINode* nsINode::ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
 
       // Verify that our aRefChild is still sensible
       if (aRefChild && aRefChild->GetParent() != this) {
-        aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+        aError.ThrowHierarchyRequestError("Don't know where to insert child");
         return nullptr;
       }
 
@@ -2476,7 +2537,8 @@ nsINode* nsINode::ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
           if (child->IsElement()) {
             if (sawElement) {
               // No good
-              aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+              aError.ThrowHierarchyRequestError(
+                  "Cannot have more than one Element child of a Document");
               return nullptr;
             }
             sawElement = true;
@@ -3180,6 +3242,19 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
         }
       }
     }
+
+    // At this point, a new node is added to the document, and this
+    // node isn't allocated by the NodeInfoManager of this document,
+    // so we need to do this SetArenaAllocator logic to bypass
+    // the !HasChildren() check in NodeInfoManager::Allocate.
+    if (mozilla::StaticPrefs::dom_arena_allocator_enabled_AtStartup()) {
+      if (!newDoc->NodeInfoManager()->HasAllocated()) {
+        if (DocGroup* docGroup = newDoc->GetDocGroup()) {
+          newDoc->NodeInfoManager()->SetArenaAllocator(
+              docGroup->ArenaAllocator());
+        }
+      }
+    }
   }
 
   if (aDeep && (!aClone || !aNode->IsAttr())) {
@@ -3198,6 +3273,12 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
   if (aDeep && aNode->IsElement()) {
     if (aClone) {
       if (clone->OwnerDoc()->IsStaticDocument()) {
+        // Clone any animations to the node in the static document, including
+        // the current timing. They will need to be paused later after the new
+        // document's pres shell gets initialized.
+        clone->AsElement()->CloneAnimationsFrom(*aNode->AsElement());
+
+        // Clone the Shadow DOM
         ShadowRoot* originalShadowRoot = aNode->AsElement()->GetShadowRoot();
         if (originalShadowRoot) {
           RefPtr<ShadowRoot> newShadowRoot =
@@ -3274,6 +3355,13 @@ void nsINode::Adopt(nsNodeInfoManager* aNewNodeInfoManager,
         return aError.ThrowSecurityError(
             "Adopting nodes across docgroups in chrome documents "
             "is unsupported");
+      } else {
+        if (StaticPrefs::dom_arena_allocator_enabled_AtStartup()) {
+          if (DOMArena* arena =
+                  NodeInfo()->NodeInfoManager()->GetArenaAllocator()) {
+            nsContentUtils::AddEntryToDOMArenaTable(this, arena);
+          }
+        }
       }
     }
   }

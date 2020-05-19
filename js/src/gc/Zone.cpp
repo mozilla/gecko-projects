@@ -6,6 +6,8 @@
 
 #include "gc/Zone-inl.h"
 
+#include <type_traits>
+
 #include "gc/FreeOp.h"
 #include "gc/GCLock.h"
 #include "gc/Policy.h"
@@ -35,8 +37,7 @@ ZoneAllocator::ZoneAllocator(JSRuntime* rt)
       gcHeapSize(&rt->gc.heapSize),
       mallocHeapSize(nullptr),
       jitHeapSize(nullptr),
-      jitHeapThreshold(jit::MaxCodeBytesPerProcess * 0.8) {
-}
+      jitHeapThreshold(jit::MaxCodeBytesPerProcess * 0.8) {}
 
 ZoneAllocator::~ZoneAllocator() {
 #ifdef DEBUG
@@ -58,18 +59,27 @@ void js::ZoneAllocator::updateMemoryCountersOnGCStart() {
   mallocHeapSize.updateOnGCStart();
 }
 
-void js::ZoneAllocator::updateGCThresholds(GCRuntime& gc,
-                                           JSGCInvocationKind invocationKind,
-                                           const js::AutoLockGC& lock) {
-  // This is called repeatedly during a GC to update thresholds as memory is
-  // freed.
+void js::ZoneAllocator::updateGCStartThresholds(
+    GCRuntime& gc, JSGCInvocationKind invocationKind,
+    const js::AutoLockGC& lock) {
   bool isAtomsZone = JS::Zone::from(this)->isAtomsZone();
-  gcHeapThreshold.updateAfterGC(gcHeapSize.retainedBytes(), invocationKind,
-                                gc.tunables, gc.schedulingState, isAtomsZone,
-                                lock);
-  mallocHeapThreshold.updateAfterGC(mallocHeapSize.retainedBytes(),
-                                    gc.tunables.mallocThresholdBase(),
-                                    gc.tunables.mallocGrowthFactor(), lock);
+  gcHeapThreshold.updateStartThreshold(gcHeapSize.retainedBytes(),
+                                       invocationKind, gc.tunables,
+                                       gc.schedulingState, isAtomsZone, lock);
+  mallocHeapThreshold.updateStartThreshold(mallocHeapSize.retainedBytes(),
+                                           gc.tunables, lock);
+}
+
+void js::ZoneAllocator::setGCSliceThresholds(GCRuntime& gc) {
+  gcHeapThreshold.setSliceThreshold(this, gcHeapSize, gc.tunables);
+  mallocHeapThreshold.setSliceThreshold(this, mallocHeapSize, gc.tunables);
+  jitHeapThreshold.setSliceThreshold(this, jitHeapSize, gc.tunables);
+}
+
+void js::ZoneAllocator::clearGCSliceThresholds() {
+  gcHeapThreshold.clearSliceThreshold();
+  mallocHeapThreshold.clearSliceThreshold();
+  jitHeapThreshold.clearSliceThreshold();
 }
 
 bool ZoneAllocator::addSharedMemory(void* mem, size_t nbytes, MemoryUse use) {
@@ -163,6 +173,7 @@ JS::Zone::Zone(JSRuntime* rt)
       baseShapes_(this, this),
       initialShapes_(this, this),
       nurseryShapes_(this),
+      finalizationRegistries_(this, this),
       finalizationRecordMap_(this, this),
       jitZone_(this, nullptr),
       gcScheduled_(false),
@@ -177,9 +188,9 @@ JS::Zone::Zone(JSRuntime* rt)
   MOZ_ASSERT(reinterpret_cast<JS::shadow::Zone*>(this) ==
              static_cast<JS::shadow::Zone*>(this));
 
-  // We can't call updateGCThresholds until the Zone has been constructed.
+  // We can't call updateGCStartThresholds until the Zone has been constructed.
   AutoLockGC lock(rt);
-  updateGCThresholds(rt->gc, GC_NORMAL, lock);
+  updateGCStartThresholds(rt->gc, GC_NORMAL, lock);
 }
 
 Zone::~Zone() {
@@ -395,11 +406,7 @@ void Zone::discardJitCode(JSFreeOp* fop,
     // Assert no JitScripts are marked as active.
     for (auto iter = cellIter<BaseScript>(); !iter.done(); iter.next()) {
       BaseScript* base = iter.unbarrieredGet();
-      if (base->isLazyScript()) {
-        continue;
-      }
-      JSScript* script = static_cast<JSScript*>(base);
-      if (jit::JitScript* jitScript = script->maybeJitScript()) {
+      if (jit::JitScript* jitScript = base->maybeJitScript()) {
         MOZ_ASSERT(!jitScript->active());
       }
     }
@@ -413,15 +420,12 @@ void Zone::discardJitCode(JSFreeOp* fop,
   jit::InvalidateAll(fop, this);
 
   for (auto base = cellIterUnsafe<BaseScript>(); !base.done(); base.next()) {
-    if (base->isLazyScript()) {
-      continue;
-    }
-    JSScript* script = static_cast<JSScript*>(base.get());
-    jit::JitScript* jitScript = script->maybeJitScript();
+    jit::JitScript* jitScript = base->maybeJitScript();
     if (!jitScript) {
       continue;
     }
 
+    JSScript* script = base->asJSScript();
     jit::FinishInvalidation(fop, script);
 
     // Discard baseline script if it's not marked as active.
@@ -478,6 +482,13 @@ void Zone::discardJitCode(JSFreeOp* fop,
     jitZone()->optimizedStubSpace()->freeAllAfterMinorGC(this);
     jitZone()->purgeIonCacheIRStubInfo();
   }
+}
+
+void JS::Zone::delegatePreWriteBarrierInternal(JSObject* obj,
+                                               JSObject* delegate) {
+  MOZ_ASSERT(js::gc::detail::GetDelegate(obj) == delegate);
+  MOZ_ASSERT(needsIncrementalBarrier());
+  GCMarker::fromTracer(barrierTracer())->severWeakDelegate(obj, delegate);
 }
 
 #ifdef JSGC_HASH_TABLE_CHECKS
@@ -790,8 +801,8 @@ JS_PUBLIC_API void JS::shadow::RegisterWeakCache(
 }
 
 void Zone::traceScriptTableRoots(JSTracer* trc) {
-  static_assert(mozilla::IsConvertible<JSScript*, gc::TenuredCell*>::value,
-                "JSScript must not be nursery-allocated for script-table "
+  static_assert(std::is_convertible_v<BaseScript*, gc::TenuredCell*>,
+                "BaseScript must not be nursery-allocated for script-table "
                 "tracing to work");
 
   // Performance optimization: the script-table keys are JSScripts, which
@@ -810,7 +821,7 @@ void Zone::traceScriptTableRoots(JSTracer* trc) {
   if (scriptCountsMap && trc->runtime()->profilingScripts) {
     for (ScriptCountsMap::Range r = scriptCountsMap->all(); !r.empty();
          r.popFront()) {
-      JSScript* script = const_cast<JSScript*>(r.front().key());
+      BaseScript* script = const_cast<BaseScript*>(r.front().key());
       MOZ_ASSERT(script->hasScriptCounts());
       TraceRoot(trc, &script, "profilingScripts");
       MOZ_ASSERT(script == r.front().key(), "const_cast is only a work-around");
@@ -819,12 +830,12 @@ void Zone::traceScriptTableRoots(JSTracer* trc) {
 }
 
 void Zone::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
-  // Map entries are removed by JSScript::finalize, but we need to update the
+  // Map entries are removed by BaseScript::finalize, but we need to update the
   // script pointers here in case they are moved by the GC.
 
   if (scriptCountsMap) {
     for (ScriptCountsMap::Enum e(*scriptCountsMap); !e.empty(); e.popFront()) {
-      JSScript* script = e.front().key();
+      BaseScript* script = e.front().key();
       TraceManuallyBarrieredEdge(trc, &script, "Realm::scriptCountsMap::key");
       if (script != e.front().key()) {
         e.rekeyFront(script);
@@ -834,7 +845,7 @@ void Zone::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
 
   if (scriptLCovMap) {
     for (ScriptLCovMap::Enum e(*scriptLCovMap); !e.empty(); e.popFront()) {
-      JSScript* script = e.front().key();
+      BaseScript* script = e.front().key();
       if (!IsAboutToBeFinalizedUnbarriered(&script) &&
           script != e.front().key()) {
         e.rekeyFront(script);
@@ -844,7 +855,7 @@ void Zone::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
 
   if (debugScriptMap) {
     for (DebugScriptMap::Enum e(*debugScriptMap); !e.empty(); e.popFront()) {
-      JSScript* script = e.front().key();
+      BaseScript* script = e.front().key();
       if (!IsAboutToBeFinalizedUnbarriered(&script) &&
           script != e.front().key()) {
         e.rekeyFront(script);
@@ -856,7 +867,7 @@ void Zone::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
   if (scriptVTuneIdMap) {
     for (ScriptVTuneIdMap::Enum e(*scriptVTuneIdMap); !e.empty();
          e.popFront()) {
-      JSScript* script = e.front().key();
+      BaseScript* script = e.front().key();
       if (!IsAboutToBeFinalizedUnbarriered(&script) &&
           script != e.front().key()) {
         e.rekeyFront(script);
@@ -870,7 +881,7 @@ void Zone::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
 void Zone::checkScriptMapsAfterMovingGC() {
   if (scriptCountsMap) {
     for (auto r = scriptCountsMap->all(); !r.empty(); r.popFront()) {
-      JSScript* script = r.front().key();
+      BaseScript* script = r.front().key();
       MOZ_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
       auto ptr = scriptCountsMap->lookup(script);
@@ -880,7 +891,7 @@ void Zone::checkScriptMapsAfterMovingGC() {
 
   if (scriptLCovMap) {
     for (auto r = scriptLCovMap->all(); !r.empty(); r.popFront()) {
-      JSScript* script = r.front().key();
+      BaseScript* script = r.front().key();
       MOZ_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
       auto ptr = scriptLCovMap->lookup(script);
@@ -890,7 +901,7 @@ void Zone::checkScriptMapsAfterMovingGC() {
 
   if (debugScriptMap) {
     for (auto r = debugScriptMap->all(); !r.empty(); r.popFront()) {
-      JSScript* script = r.front().key();
+      BaseScript* script = r.front().key();
       MOZ_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
       DebugScript* ds = r.front().value().get();
@@ -903,7 +914,7 @@ void Zone::checkScriptMapsAfterMovingGC() {
 #  ifdef MOZ_VTUNE
   if (scriptVTuneIdMap) {
     for (auto r = scriptVTuneIdMap->all(); !r.empty(); r.popFront()) {
-      JSScript* script = r.front().key();
+      BaseScript* script = r.front().key();
       MOZ_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
       auto ptr = scriptVTuneIdMap->lookup(script);
@@ -919,10 +930,10 @@ void Zone::clearScriptCounts(Realm* realm) {
     return;
   }
 
-  // Clear all hasScriptCounts_ flags of JSScript, in order to release all
+  // Clear all hasScriptCounts_ flags of BaseScript, in order to release all
   // ScriptCounts entries of the given realm.
   for (auto i = scriptCountsMap->modIter(); !i.done(); i.next()) {
-    JSScript* script = i.get().key();
+    BaseScript* script = i.get().key();
     if (script->realm() == realm) {
       script->clearHasScriptCounts();
       i.remove();
@@ -936,7 +947,7 @@ void Zone::clearScriptLCov(Realm* realm) {
   }
 
   for (auto i = scriptLCovMap->modIter(); !i.done(); i.next()) {
-    JSScript* script = i.get().key();
+    BaseScript* script = i.get().key();
     if (script->realm() == realm) {
       i.remove();
     }

@@ -52,9 +52,9 @@ const Accordion = createFactory(
 const RawData = createFactory(
   require("devtools/client/netmonitor/src/components/websockets/RawData")
 );
-loader.lazyGetter(this, "JSONPreview", function() {
+loader.lazyGetter(this, "PropertiesView", function() {
   return createFactory(
-    require("devtools/client/netmonitor/src/components/JSONPreview")
+    require("devtools/client/netmonitor/src/components/request-details/PropertiesView")
   );
 });
 
@@ -94,6 +94,7 @@ class FramePayload extends Component {
 
   updateFramePayload() {
     const { selectedFrame, connector } = this.props;
+
     getFramePayload(selectedFrame.payload, connector.getLongString).then(
       async payload => {
         const { formattedData, formattedDataTitle } = await this.parsePayload(
@@ -110,7 +111,19 @@ class FramePayload extends Component {
   }
 
   async parsePayload(payload) {
-    const { connector, request } = this.props;
+    const { connector, selectedFrame, request } = this.props;
+
+    // Don't apply formatting to control frames
+    // Control frame check can be done using opCode as specified here:
+    // https://tools.ietf.org/html/rfc6455
+    const controlFrames = [0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf];
+    const isControlFrame = controlFrames.includes(selectedFrame.opCode);
+    if (isControlFrame) {
+      return {
+        formattedData: null,
+        formattedDataTitle: "",
+      };
+    }
 
     // Make sure that request headers are fetched from the backend before
     // looking for `Sec-WebSocket-Protocol` header.
@@ -163,6 +176,13 @@ class FramePayload extends Component {
     // json payload
     const { json } = isJSON(payload);
     if (json) {
+      const actionCablePayload = this.parseActionCable(json);
+      if (actionCablePayload) {
+        return {
+          formattedData: actionCablePayload,
+          formattedDataTitle: "Action Cable",
+        };
+      }
       return {
         formattedData: json,
         formattedDataTitle: "JSON",
@@ -219,7 +239,7 @@ class FramePayload extends Component {
     try {
       decoder = new JsonHubProtocol();
       const msgs = decoder.parseMessages(payload, null);
-      if (msgs && msgs.length) {
+      if (msgs?.length) {
         return msgs;
       }
     } catch (err) {
@@ -237,8 +257,23 @@ class FramePayload extends Component {
     return null;
   }
 
+  parseActionCable(payload) {
+    const identifier = payload.identifier && isJSON(payload.identifier).json;
+    const data = payload.data && isJSON(payload.data).json;
+    if (!data && !identifier) {
+      return null;
+    }
+    if (identifier) {
+      payload.identifier = identifier;
+    }
+    if (data) {
+      payload.data = data;
+    }
+    return payload;
+  }
+
   render() {
-    let payload = this.state.payload;
+    let { payload } = this.state;
     let isTruncated = false;
     if (this.state.payload.length >= MESSAGE_DATA_LIMIT) {
       payload = payload.substring(0, MESSAGE_DATA_LIMIT);
@@ -266,17 +301,11 @@ class FramePayload extends Component {
        */
       items.unshift({
         className: "formattedData",
-        component: JSONPreview,
+        component: PropertiesView,
         componentProps: {
           object: this.state.formattedData,
-          columns: [
-            {
-              id: "value",
-              width: "100%",
-            },
-          ],
         },
-        header: `${this.state.formattedDataTitle}`,
+        header: this.state.formattedDataTitle,
         id: "ws-frame-formattedData",
         opened: true,
       });

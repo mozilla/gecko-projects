@@ -49,6 +49,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/ScopeExit.h"
@@ -266,6 +267,7 @@ bool perform(JSContext* cx, HandleValue objv, HandleValue idxv, Args... args) {
     case Scalar::Uint8Clamped:
     case Scalar::MaxTypedArrayViewType:
     case Scalar::Int64:
+    case Scalar::V128:
       break;
   }
   MOZ_CRASH("Unsupported TypedArray type");
@@ -462,7 +464,7 @@ bool js::atomics_isLockFree(JSContext* cx, unsigned argc, Value* vp) {
     if (!ToInteger(cx, v, &dsize)) {
       return false;
     }
-    if (!mozilla::NumberIsInt32(dsize, &size)) {
+    if (!mozilla::NumberEqualsInt32(dsize, &size)) {
       args.rval().setBoolean(false);
       return true;
     }
@@ -764,8 +766,7 @@ void js::FutexThread::lock() {
   lock->lock();
 }
 
-/* static */ mozilla::Atomic<js::Mutex*, mozilla::SequentiallyConsistent,
-                             mozilla::recordreplay::Behavior::DontPreserve>
+/* static */ mozilla::Atomic<js::Mutex*, mozilla::SequentiallyConsistent>
     FutexThread::lock_;
 
 /* static */
@@ -845,10 +846,27 @@ FutexThread::WaitResult js::FutexThread::wait(
 
     state_ = Waiting;
 
+    MOZ_ASSERT((cx->runtime()->beforeWaitCallback == nullptr) ==
+               (cx->runtime()->afterWaitCallback == nullptr));
+    mozilla::DebugOnly<bool> callbacksPresent =
+        cx->runtime()->beforeWaitCallback != nullptr;
+
+    void* cookie = nullptr;
+    uint8_t clientMemory[JS::WAIT_CALLBACK_CLIENT_MAXMEM];
+    if (cx->runtime()->beforeWaitCallback) {
+      cookie = (*cx->runtime()->beforeWaitCallback)(clientMemory);
+    }
+
     if (isTimed) {
       mozilla::Unused << cond_->wait_until(locked, *sliceEnd);
     } else {
       cond_->wait(locked);
+    }
+
+    MOZ_ASSERT((cx->runtime()->afterWaitCallback != nullptr) ==
+               callbacksPresent);
+    if (cx->runtime()->afterWaitCallback) {
+      (*cx->runtime()->afterWaitCallback)(cookie);
     }
 
     switch (state_) {
@@ -963,8 +981,7 @@ static JSObject* CreateAtomicsObject(JSContext* cx, JSProtoKey key) {
   if (!proto) {
     return nullptr;
   }
-  return NewObjectWithGivenProto(cx, &AtomicsObject::class_, proto,
-                                 SingletonObject);
+  return NewSingletonObjectWithGivenProto(cx, &AtomicsObject::class_, proto);
 }
 
 static const ClassSpec AtomicsClassSpec = {CreateAtomicsObject, nullptr,

@@ -25,7 +25,7 @@ class FileReaderSync final {
 
  private:
   // Private destructor, to discourage deletion outside of Release():
-  ~FileReaderSync() {}
+  ~FileReaderSync() = default;
 
   nsresult ConvertStream(nsIInputStream* aStream, const char* aCharset,
                          nsAString& aResult);
@@ -35,7 +35,7 @@ class FileReaderSync final {
       nsIInputStream** aSyncStream);
 
   nsresult SyncRead(nsIInputStream* aStream, char* aBuffer,
-                    uint32_t aBufferSize, uint32_t* aRead);
+                    uint32_t aBufferSize, uint32_t* aTotalBytesRead);
 
  public:
   static already_AddRefed<FileReaderSync> Constructor(

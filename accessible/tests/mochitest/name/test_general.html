@@ -239,6 +239,14 @@
       // But not if it is a weak (landmark) ARIA role
       testName("NoNameForTRBecauseWeakARIA", null);
 
+      // Name from sub tree of grouping if requested by other accessible.
+      testName("grouping", null);
+      testName("requested_name_from_grouping", "label");
+      testName("listitem_containing_block_tbody", "label");
+
+      // Name from subtree of grouping labelled by an ancestor.
+      testName("grouping_labelledby_ancestor", "label");
+
       SimpleTest.finish();
     }
 
@@ -667,5 +675,23 @@
   <!-- No name for tr because of weak (landmark) role -->
   <table><tr id="NoNameForTRBecauseWeakARIA" role="main"><th>a</th><td>b</td></tr></table>
 
+  <!-- Name from subtree of grouping if requested by other object -->
+  <div id="grouping" role="group">label</div>
+  <button id="requested_name_from_grouping"aria-labelledby="grouping"></button>
+  <!-- Name from sub tree of tbody marked as display:block;, which is also a grouping -->
+  <div id="listitem_containing_block_tbody" role="listitem">
+    <table>
+      <tbody style="display: block;">
+        <tr><td>label</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Name from subtree of grouping labelled by an ancestor. -->
+  <div id="grouping_ancestor_label">label
+    <div id="grouping_labelledby_ancestor" role="group" aria-labelledby="grouping_ancestor_label">
+      This content should not be included in the grouping's label.
+    </div>
+  </div>
 </body>
 </html>

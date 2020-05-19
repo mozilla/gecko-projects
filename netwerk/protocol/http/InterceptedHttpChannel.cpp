@@ -7,7 +7,13 @@
 #include "InterceptedHttpChannel.h"
 #include "nsContentSecurityManager.h"
 #include "nsEscape.h"
+#include "mozilla/SchedulerGroup.h"
+#include "mozilla/dom/ChannelInfo.h"
 #include "mozilla/dom/PerformanceStorage.h"
+#include "nsHttpChannel.h"
+#include "nsIRedirectResultListener.h"
+#include "nsStringStream.h"
+#include "nsStreamUtils.h"
 
 namespace mozilla {
 namespace net {
@@ -246,8 +252,7 @@ nsresult InterceptedHttpChannel::RedirectForResponseURL(
       CloneLoadInfoForRedirect(aResponseURI, flags);
 
   nsContentPolicyType contentPolicyType =
-      redirectLoadInfo ? redirectLoadInfo->GetExternalContentPolicyType()
-                       : nsIContentPolicy::TYPE_OTHER;
+      redirectLoadInfo->GetExternalContentPolicyType();
 
   rv = newChannel->Init(
       aResponseURI, mCaps, static_cast<nsProxyInfo*>(mProxyInfo.get()),
@@ -374,7 +379,8 @@ void InterceptedHttpChannel::MaybeCallStatusAndProgress() {
     nsCOMPtr<nsIRunnable> r = NewRunnableMethod(
         "InterceptedHttpChannel::MaybeCallStatusAndProgress", this,
         &InterceptedHttpChannel::MaybeCallStatusAndProgress);
-    MOZ_ALWAYS_SUCCEEDS(SystemGroup::Dispatch(TaskCategory::Other, r.forget()));
+    MOZ_ALWAYS_SUCCEEDS(
+        SchedulerGroup::Dispatch(TaskCategory::Other, r.forget()));
 
     return;
   }
@@ -409,10 +415,9 @@ void InterceptedHttpChannel::MaybeCallStatusAndProgress() {
     CopyUTF8toUTF16(host, mStatusHost);
   }
 
-  mProgressSink->OnStatus(this, nullptr, NS_NET_STATUS_READING,
-                          mStatusHost.get());
+  mProgressSink->OnStatus(this, NS_NET_STATUS_READING, mStatusHost.get());
 
-  mProgressSink->OnProgress(this, nullptr, progress, mSynthesizedStreamLength);
+  mProgressSink->OnProgress(this, progress, mSynthesizedStreamLength);
 
   mProgressReported = progress;
 }

@@ -1169,6 +1169,7 @@ class nsCycleCollector : public nsIMemoryReporter {
   bool Collect(ccType aCCType, SliceBudget& aBudget,
                nsICycleCollectorListener* aManualListener,
                bool aPreferShorterSlices = false);
+  MOZ_CAN_RUN_SCRIPT
   void Shutdown(bool aDoCollect);
 
   bool IsIdle() const { return mIncrementalPhase == IdlePhase; }
@@ -1183,6 +1184,7 @@ class nsCycleCollector : public nsIMemoryReporter {
 
  private:
   void CheckThreadSafety();
+  MOZ_CAN_RUN_SCRIPT
   void ShutdownCollect();
 
   void FixGrayBits(bool aForceGC, TimeLog& aTimeLog);
@@ -2361,7 +2363,7 @@ class JSPurpleBuffer {
   SegmentedVector<JSObject*, kSegmentSize, InfallibleAllocPolicy> mObjects;
 };
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(JSPurpleBuffer)
+NS_IMPL_CYCLE_COLLECTION_MULTI_ZONE_JSHOLDER_CLASS(JSPurpleBuffer)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(JSPurpleBuffer)
   tmp->Destroy();
@@ -2433,11 +2435,6 @@ class SnowWhiteKiller : public TraceCallbacks {
 
  public:
   bool Visit(nsPurpleBuffer& aBuffer, nsPurpleBufferEntry* aEntry) {
-    // The cycle collector does not collect anything when recording/replaying.
-    if (recordreplay::IsRecordingOrReplaying()) {
-      return true;
-    }
-
     if (mBudget) {
       if (mBudget->isOverBudget()) {
         return false;
@@ -2645,11 +2642,6 @@ void nsCycleCollector::ForgetSkippable(js::SliceBudget& aBudget,
   // If we remove things from the purple buffer during graph building, we may
   // lose track of an object that was mutated during graph building.
   MOZ_ASSERT(IsIdle());
-
-  // The cycle collector does not collect anything when recording/replaying.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return;
-  }
 
   if (mCCJSRuntime) {
     mCCJSRuntime->PrepareForForgetSkippable();
@@ -3350,14 +3342,19 @@ void nsCycleCollector::CleanupAfterCollection() {
 
 void nsCycleCollector::ShutdownCollect() {
   FinishAnyIncrementalGCInProgress();
-  JS::ShutdownAsyncTasks(CycleCollectedJSContext::Get()->Context());
+  CycleCollectedJSContext* ccJSContext = CycleCollectedJSContext::Get();
+  JS::ShutdownAsyncTasks(ccJSContext->Context());
 
   SliceBudget unlimitedBudget = SliceBudget::unlimited();
   uint32_t i;
-  for (i = 0; i < DEFAULT_SHUTDOWN_COLLECTIONS; ++i) {
-    if (!Collect(ShutdownCC, unlimitedBudget, nullptr)) {
-      break;
-    }
+  bool collectedAny = true;
+  for (i = 0; i < DEFAULT_SHUTDOWN_COLLECTIONS && collectedAny; ++i) {
+    collectedAny = Collect(ShutdownCC, unlimitedBudget, nullptr);
+    // Run any remaining tasks that may have been enqueued via RunInStableState
+    // or DispatchToMicroTask. These can hold alive CCed objects, and we want to
+    // clear them out before we run the CC again or finish shutting down.
+    ccJSContext->PerformMicroTaskCheckPoint(true);
+    ccJSContext->ProcessStableStateQueue();
   }
   NS_WARNING_ASSERTION(i < NORMAL_SHUTDOWN_COLLECTIONS, "Extra shutdown CC");
 }
@@ -3375,9 +3372,7 @@ bool nsCycleCollector::Collect(ccType aCCType, SliceBudget& aBudget,
   CheckThreadSafety();
 
   // This can legitimately happen in a few cases. See bug 383651.
-  // When recording/replaying we do not collect cycles.
-  if (mActivelyCollecting || mFreeingSnowWhite ||
-      recordreplay::IsRecordingOrReplaying()) {
+  if (mActivelyCollecting || mFreeingSnowWhite) {
     return false;
   }
   mActivelyCollecting = true;
@@ -3795,9 +3790,7 @@ uint32_t nsCycleCollector_suspectedCount() {
   // We should have started the cycle collector by now.
   MOZ_ASSERT(data);
 
-  // When recording/replaying we do not collect cycles. Return zero here so
-  // that callers behave consistently between recording and replaying.
-  if (!data->mCollector || recordreplay::IsRecordingOrReplaying()) {
+  if (!data->mCollector) {
     return 0;
   }
 
@@ -3958,15 +3951,12 @@ void nsCycleCollector_shutdown(bool aDoCollect) {
     MOZ_ASSERT(data->mCollector);
     AUTO_PROFILER_LABEL("nsCycleCollector_shutdown", OTHER);
 
-    data->mCollector->Shutdown(aDoCollect);
-    data->mCollector = nullptr;
-    if (data->mContext) {
-      // Run any remaining tasks that may have been enqueued via
-      // RunInStableState or DispatchToMicroTask during the final cycle
-      // collection.
-      data->mContext->ProcessStableStateQueue();
-      data->mContext->PerformMicroTaskCheckPoint(true);
+    {
+      RefPtr<nsCycleCollector> collector = data->mCollector;
+      collector->Shutdown(aDoCollect);
+      data->mCollector = nullptr;
     }
+
     if (!data->mContext) {
       delete data;
       sCollectorData.set(nullptr);

@@ -9,6 +9,8 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/ServiceWorkerRegistrarTypes.h"
+#include "nsCOMPtr.h"
+#include "nsIPrincipal.h"
 #include "nsIURL.h"
 
 namespace mozilla {
@@ -59,7 +61,7 @@ void CheckForSlashEscapedCharsInPath(nsIURI* aURI, const char* aURLDescription,
   ToLowerCase(path);
   if (path.Find("%2f") != kNotFound || path.Find("%5c") != kNotFound) {
     nsPrintfCString err("%s contains %%2f or %%5c", aURLDescription);
-    aRv.ThrowTypeError(NS_ConvertUTF8toUTF16(err));
+    aRv.ThrowTypeError(err);
   }
 }
 
@@ -71,15 +73,15 @@ void ServiceWorkerScopeAndScriptAreValid(const ClientInfo& aClientInfo,
   MOZ_DIAGNOSTIC_ASSERT(aScopeURI);
   MOZ_DIAGNOSTIC_ASSERT(aScriptURI);
 
-  nsCOMPtr<nsIPrincipal> principal = aClientInfo.GetPrincipal();
-  if (NS_WARN_IF(!principal)) {
+  auto principalOrErr = aClientInfo.GetPrincipal();
+  if (NS_WARN_IF(principalOrErr.isErr())) {
     aRv.ThrowInvalidStateError("Can't make security decisions about Client");
     return;
   }
 
   // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 3.
   if (!aScriptURI->SchemeIs("http") && !aScriptURI->SchemeIs("https")) {
-    aRv.ThrowTypeError(u"Script URL's scheme is not 'http' or 'https'");
+    aRv.ThrowTypeError("Script URL's scheme is not 'http' or 'https'");
     return;
   }
 
@@ -91,7 +93,7 @@ void ServiceWorkerScopeAndScriptAreValid(const ClientInfo& aClientInfo,
 
   // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 8.
   if (!aScopeURI->SchemeIs("http") && !aScopeURI->SchemeIs("https")) {
-    aRv.ThrowTypeError(u"Scope URL's scheme is not 'http' or 'https'");
+    aRv.ThrowTypeError("Scope URL's scheme is not 'http' or 'https'");
     return;
   }
 
@@ -115,6 +117,8 @@ void ServiceWorkerScopeAndScriptAreValid(const ClientInfo& aClientInfo,
     aRv.ThrowSecurityError("Non-empty fragment on script URL");
     return;
   }
+
+  nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
 
   // Unfortunately we don't seem to have an obvious window id here; in
   // particular ClientInfo does not have one.

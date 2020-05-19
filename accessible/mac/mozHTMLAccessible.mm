@@ -29,14 +29,14 @@
 }
 
 - (id)value {
-  uint32_t level = 0;
+  GroupPos groupPos;
   if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
-    level = accWrap->GetLevelInternal();
+    groupPos = accWrap->GroupPosition();
   } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
-    level = proxy->GetLevelInternal();
+    groupPos = proxy->GroupPosition();
   }
 
-  return [NSNumber numberWithInt:level];
+  return [NSNumber numberWithInt:groupPos.level];
 }
 
 @end
@@ -51,52 +51,32 @@
   // if we're expired, we don't support any attributes.
   if (![self getGeckoAccessible] && ![self getProxyAccessible]) return [NSArray array];
 
+  if (![self stateWithMask:states::LINKED]) {
+    // Only expose link semantics if this accessible has a LINKED state.
+    return [super accessibilityAttributeNames];
+  }
+
   static NSMutableArray* attributes = nil;
 
   if (!attributes) {
     attributes = [[super accessibilityAttributeNames] mutableCopy];
     [attributes addObject:NSAccessibilityURLAttribute];
+    [attributes addObject:@"AXVisited"];
   }
 
   return attributes;
 }
 
 - (id)accessibilityAttributeValue:(NSString*)attribute {
-  if ([attribute isEqualToString:NSAccessibilityURLAttribute]) return [self url];
+  if ([self stateWithMask:states::LINKED]) {
+    // Only expose link semantics if this accessible has a LINKED state.
+    if ([attribute isEqualToString:NSAccessibilityURLAttribute]) return [self url];
+    if ([attribute isEqualToString:@"AXVisited"]) {
+      return [NSNumber numberWithBool:[self stateWithMask:states::TRAVERSED] != 0];
+    }
+  }
 
   return [super accessibilityAttributeValue:attribute];
-}
-
-- (NSArray*)accessibilityActionNames {
-  // if we're expired, we don't support any attributes.
-  if (![self getGeckoAccessible] && ![self getProxyAccessible]) return [NSArray array];
-
-  static NSArray* actionNames = nil;
-
-  if (!actionNames) {
-    actionNames = [[NSArray alloc] initWithObjects:NSAccessibilityPressAction, nil];
-  }
-
-  return actionNames;
-}
-
-- (void)accessibilityPerformAction:(NSString*)action {
-  AccessibleWrap* accWrap = [self getGeckoAccessible];
-  ProxyAccessible* proxy = [self getProxyAccessible];
-  if (!accWrap && !proxy) {
-    return;
-  }
-
-  if ([action isEqualToString:NSAccessibilityPressAction]) {
-    if (accWrap) {
-      accWrap->DoAction(0);
-    } else if (proxy) {
-      proxy->DoAction(0);
-    }
-    return;
-  }
-
-  [super accessibilityPerformAction:action];
 }
 
 - (NSString*)customDescription {
@@ -119,6 +99,17 @@
   if (!urlString) return nil;
 
   return [NSURL URLWithString:urlString];
+}
+
+- (NSString*)role {
+  // If this is not LINKED, just expose this as a generic group accessible.
+  // Chrome and Safari expose this as a childless AXStaticText, but
+  // the HTML Accessibility API Mappings spec says this should be an AXGroup.
+  if (![self stateWithMask:states::LINKED]) {
+    return NSAccessibilityGroupRole;
+  }
+
+  return [super role];
 }
 
 @end

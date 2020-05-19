@@ -22,13 +22,13 @@
 namespace mozilla {
 namespace dom {
 // The global is used to extract the principal.
-already_AddRefed<InternalRequest> InternalRequest::GetRequestConstructorCopy(
+SafeRefPtr<InternalRequest> InternalRequest::GetRequestConstructorCopy(
     nsIGlobalObject* aGlobal, ErrorResult& aRv) const {
   MOZ_RELEASE_ASSERT(!mURLList.IsEmpty(),
                      "Internal Request's urlList should not be empty when "
                      "copied from constructor.");
-  RefPtr<InternalRequest> copy =
-      new InternalRequest(mURLList.LastElement(), mFragment);
+  auto copy =
+      MakeSafeRefPtr<InternalRequest>(mURLList.LastElement(), mFragment);
   copy->SetMethod(mMethod);
   copy->mHeaders = new InternalHeaders(*mHeaders);
   copy->SetUnsafeRequest();
@@ -53,14 +53,14 @@ already_AddRefed<InternalRequest> InternalRequest::GetRequestConstructorCopy(
   copy->mContentPolicyTypeOverridden = mContentPolicyTypeOverridden;
 
   copy->mPreferredAlternativeDataType = mPreferredAlternativeDataType;
-  return copy.forget();
+  return copy;
 }
 
-already_AddRefed<InternalRequest> InternalRequest::Clone() {
-  RefPtr<InternalRequest> clone = new InternalRequest(*this);
+SafeRefPtr<InternalRequest> InternalRequest::Clone() {
+  auto clone = MakeSafeRefPtr<InternalRequest>(*this, ConstructorGuard{});
 
   if (!mBodyStream) {
-    return clone.forget();
+    return clone;
   }
 
   nsCOMPtr<nsIInputStream> clonedBody;
@@ -76,7 +76,7 @@ already_AddRefed<InternalRequest> InternalRequest::Clone() {
   if (replacementBody) {
     mBodyStream.swap(replacementBody);
   }
-  return clone.forget();
+  return clone;
 }
 InternalRequest::InternalRequest(const nsACString& aURL,
                                  const nsACString& aFragment)
@@ -116,9 +116,10 @@ InternalRequest::InternalRequest(
   MOZ_ASSERT(!aURL.IsEmpty());
   AddURL(aURL, aFragment);
 }
-InternalRequest::InternalRequest(const InternalRequest& aOther)
+InternalRequest::InternalRequest(const InternalRequest& aOther,
+                                 ConstructorGuard)
     : mMethod(aOther.mMethod),
-      mURLList(aOther.mURLList),
+      mURLList(aOther.mURLList.Clone()),
       mHeaders(new InternalHeaders(*aOther.mHeaders)),
       mBodyLength(InternalResponse::UNKNOWN_BODY_SIZE),
       mContentPolicyType(aOther.mContentPolicyType),
@@ -143,7 +144,7 @@ InternalRequest::InternalRequest(const InternalRequest& aOther)
 
 InternalRequest::InternalRequest(const IPCInternalRequest& aIPCRequest)
     : mMethod(aIPCRequest.method()),
-      mURLList(aIPCRequest.urlList()),
+      mURLList(aIPCRequest.urlList().Clone()),
       mHeaders(new InternalHeaders(aIPCRequest.headers(),
                                    aIPCRequest.headersGuard())),
       mBodyStream(mozilla::ipc::DeserializeIPCStream(aIPCRequest.body())),
@@ -165,7 +166,7 @@ InternalRequest::InternalRequest(const IPCInternalRequest& aIPCRequest)
   }
 }
 
-InternalRequest::~InternalRequest() {}
+InternalRequest::~InternalRequest() = default;
 
 template void InternalRequest::ToIPC<mozilla::ipc::PBackgroundChild>(
     IPCInternalRequest* aIPCRequest, mozilla::ipc::PBackgroundChild* aManager,
@@ -180,7 +181,7 @@ void InternalRequest::ToIPC(
   MOZ_ASSERT(!mURLList.IsEmpty());
 
   aIPCRequest->method() = mMethod;
-  aIPCRequest->urlList() = mURLList;
+  aIPCRequest->urlList() = mURLList.Clone();
   mHeaders->ToIPC(aIPCRequest->headers(), aIPCRequest->headersGuard());
 
   if (mBodyStream) {
@@ -270,9 +271,6 @@ RequestDestination InternalRequest::MapContentPolicyTypeToRequestDestination(
     case nsIContentPolicy::TYPE_REFRESH:
       destination = RequestDestination::_empty;
       break;
-    case nsIContentPolicy::TYPE_XBL:
-      destination = RequestDestination::_empty;
-      break;
     case nsIContentPolicy::TYPE_PING:
       destination = RequestDestination::_empty;
       break;
@@ -292,6 +290,7 @@ RequestDestination InternalRequest::MapContentPolicyTypeToRequestDestination(
       destination = RequestDestination::_empty;
       break;
     case nsIContentPolicy::TYPE_FONT:
+    case nsIContentPolicy::TYPE_INTERNAL_FONT_PRELOAD:
       destination = RequestDestination::Font;
       break;
     case nsIContentPolicy::TYPE_MEDIA:
@@ -329,6 +328,12 @@ RequestDestination InternalRequest::MapContentPolicyTypeToRequestDestination(
       break;
     case nsIContentPolicy::TYPE_SPECULATIVE:
       destination = RequestDestination::_empty;
+      break;
+    case nsIContentPolicy::TYPE_INTERNAL_AUDIOWORKLET:
+      destination = RequestDestination::Audioworklet;
+      break;
+    case nsIContentPolicy::TYPE_INTERNAL_PAINTWORKLET:
+      destination = RequestDestination::Paintworklet;
       break;
     default:
       MOZ_ASSERT(false, "Unhandled nsContentPolicyType value");

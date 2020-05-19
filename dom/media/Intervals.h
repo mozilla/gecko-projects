@@ -20,8 +20,9 @@ class IntervalSet;
 }  // namespace mozilla
 
 template <class E>
-struct nsTArray_CopyChooser<mozilla::media::IntervalSet<E>> {
-  typedef nsTArray_CopyWithConstructors<mozilla::media::IntervalSet<E>> Type;
+struct nsTArray_RelocationStrategy<mozilla::media::IntervalSet<E>> {
+  typedef nsTArray_RelocateUsingMoveConstructor<mozilla::media::IntervalSet<E>>
+      Type;
 };
 
 namespace mozilla {
@@ -248,10 +249,10 @@ class IntervalSet {
   typedef AutoTArray<ElemType, 4> ContainerType;
   typedef typename ContainerType::index_type IndexType;
 
-  IntervalSet() {}
-  virtual ~IntervalSet() {}
+  IntervalSet() = default;
+  virtual ~IntervalSet() = default;
 
-  IntervalSet(const SelfType& aOther) : mIntervals(aOther.mIntervals) {}
+  IntervalSet(const SelfType& aOther) : mIntervals(aOther.mIntervals.Clone()) {}
 
   IntervalSet(SelfType&& aOther) {
     mIntervals.AppendElements(std::move(aOther.mIntervals));
@@ -278,7 +279,7 @@ class IntervalSet {
   }
 
   SelfType& operator=(const SelfType& aOther) {
-    mIntervals = aOther.mIntervals;
+    mIntervals = aOther.mIntervals.Clone();
     return *this;
   }
 

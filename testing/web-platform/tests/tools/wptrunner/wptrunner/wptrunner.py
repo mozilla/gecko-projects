@@ -45,7 +45,7 @@ def setup_logging(*args, **kwargs):
     return logger
 
 
-def get_loader(test_paths, product, debug=None, run_info_extras=None, **kwargs):
+def get_loader(test_paths, product, debug=None, run_info_extras=None, chunker_kwargs=None, **kwargs):
     if run_info_extras is None:
         run_info_extras = {}
 
@@ -78,7 +78,9 @@ def get_loader(test_paths, product, debug=None, run_info_extras=None, **kwargs):
                                         total_chunks=kwargs["total_chunks"],
                                         chunk_number=kwargs["this_chunk"],
                                         include_https=ssl_enabled,
-                                        skip_timeout=kwargs["skip_timeout"])
+                                        skip_timeout=kwargs["skip_timeout"],
+                                        skip_implementation_status=kwargs["skip_implementation_status"],
+                                        chunker_kwargs=chunker_kwargs)
     return run_info, test_loader
 
 
@@ -162,18 +164,23 @@ def run_tests(config, test_paths, product, **kwargs):
             ))
 
         recording.set(["startup", "load_tests"])
-        run_info, test_loader = get_loader(test_paths,
-                                           product.name,
-                                           run_info_extras=product.run_info_extras(**kwargs),
-                                           **kwargs)
 
         test_source_kwargs = {"processes": kwargs["processes"]}
+        chunker_kwargs = {}
         if kwargs["run_by_dir"] is False:
             test_source_cls = testloader.SingleTestSource
         else:
             # A value of None indicates infinite depth
             test_source_cls = testloader.PathGroupedSource
             test_source_kwargs["depth"] = kwargs["run_by_dir"]
+            chunker_kwargs["depth"] = kwargs["run_by_dir"]
+
+        run_info, test_loader = get_loader(test_paths,
+                                           product.name,
+                                           run_info_extras=product.run_info_extras(**kwargs),
+                                           chunker_kwargs=chunker_kwargs,
+                                           **kwargs)
+
 
         logger.info("Using %i client processes" % kwargs["processes"])
 
@@ -227,7 +234,12 @@ def run_tests(config, test_paths, product, **kwargs):
 
                 test_count = 0
                 unexpected_count = 0
-                logger.suite_start(test_loader.test_ids,
+
+                tests = []
+                for test_type in test_loader.test_types:
+                    tests.extend(test_loader.tests[test_type])
+
+                logger.suite_start(test_source_cls.tests_by_group(tests, **test_source_kwargs),
                                    name='web-platform-test',
                                    run_info=run_info,
                                    extra={"run_by_dir": kwargs["run_by_dir"]})
@@ -332,7 +344,7 @@ def run_tests(config, test_paths, product, **kwargs):
 
 
 def check_stability(**kwargs):
-    import stability
+    from . import stability
     if kwargs["stability"]:
         logger.warning("--stability is deprecated; please use --verify instead!")
         kwargs['verify_max_time'] = None

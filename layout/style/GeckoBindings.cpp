@@ -55,11 +55,11 @@
 #include "mozilla/ServoElementSnapshot.h"
 #include "mozilla/ShadowParts.h"
 #include "mozilla/StaticPresData.h"
+#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/SizeOfState.h"
 #include "mozilla/StyleAnimationValue.h"
-#include "mozilla/SystemGroup.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoTraversalStatistics.h"
 #include "mozilla/Telemetry.h"
@@ -486,8 +486,7 @@ bool Gecko_GetAnimationRule(const Element* aElement,
     return false;
   }
   nsPresContext* presContext = doc->GetPresContext();
-  if (!presContext || !presContext->IsDynamic()) {
-    // For print or print preview, ignore animations.
+  if (!presContext) {
     return false;
   }
 
@@ -1105,34 +1104,20 @@ const AnonymousCounterStyle* Gecko_CounterStyle_GetAnonymous(
   return aPtr->AsAnonymous();
 }
 
-void Gecko_SetCursorArrayCapacity(nsStyleUI* aUi, size_t aCapacity) {
-  aUi->mCursorImages.Clear();
-  aUi->mCursorImages.SetCapacity(aCapacity);
-}
-
-void Gecko_AppendCursorImage(nsStyleUI* aUi,
-                             const StyleComputedImageUrl* aUrl) {
-  aUi->mCursorImages.EmplaceBack(*aUrl);
-}
-
-void Gecko_CopyCursorArrayFrom(nsStyleUI* aDest, const nsStyleUI* aSrc) {
-  aDest->mCursorImages = aSrc->mCursorImages;
-}
-
 void Gecko_EnsureTArrayCapacity(void* aArray, size_t aCapacity,
                                 size_t aElemSize) {
-  auto base = reinterpret_cast<
-      nsTArray_base<nsTArrayInfallibleAllocator, nsTArray_CopyWithMemutils>*>(
-      aArray);
+  auto base =
+      reinterpret_cast<nsTArray_base<nsTArrayInfallibleAllocator,
+                                     nsTArray_RelocateUsingMemutils>*>(aArray);
 
   base->EnsureCapacity<nsTArrayInfallibleAllocator>(aCapacity, aElemSize);
 }
 
 void Gecko_ClearPODTArray(void* aArray, size_t aElementSize,
                           size_t aElementAlign) {
-  auto base = reinterpret_cast<
-      nsTArray_base<nsTArrayInfallibleAllocator, nsTArray_CopyWithMemutils>*>(
-      aArray);
+  auto base =
+      reinterpret_cast<nsTArray_base<nsTArrayInfallibleAllocator,
+                                     nsTArray_RelocateUsingMemutils>*>(aArray);
 
   base->template ShiftData<nsTArrayInfallibleAllocator>(
       0, base->Length(), 0, aElementSize, aElementAlign);
@@ -1263,15 +1248,6 @@ PropertyValuePair* Gecko_AppendPropertyValuePair(
   return aProperties->AppendElement(PropertyValuePair{aProperty});
 }
 
-void Gecko_nsStyleSVG_SetDashArrayLength(nsStyleSVG* aSvg, uint32_t aLen) {
-  aSvg->mStrokeDasharray.Clear();
-  aSvg->mStrokeDasharray.SetLength(aLen);
-}
-
-void Gecko_nsStyleSVG_CopyDashArray(nsStyleSVG* aDst, const nsStyleSVG* aSrc) {
-  aDst->mStrokeDasharray = aSrc->mStrokeDasharray;
-}
-
 void Gecko_GetComputedURLSpec(const StyleComputedUrl* aURL, nsCString* aOut) {
   MOZ_ASSERT(aURL);
   MOZ_ASSERT(aOut);
@@ -1377,9 +1353,10 @@ void Gecko_nsStyleFont_PrioritizeUserFonts(
 
 nscoord Gecko_nsStyleFont_ComputeMinSize(const nsStyleFont* aFont,
                                          const Document* aDocument) {
-  // Don't change font-size:0, since that would un-hide hidden text, nor chrome
-  // docs, we assume those know what they do.
-  if (aFont->mSize == 0 || nsContentUtils::IsChromeDoc(aDocument)) {
+  // Don't change font-size:0, since that would un-hide hidden text,
+  // or SVG text, or chrome docs, we assume those know what they do.
+  if (aFont->mSize == 0 || !aFont->mAllowZoomAndMinSize ||
+      nsContentUtils::IsChromeDoc(aDocument)) {
     return 0;
   }
 
@@ -1599,20 +1576,6 @@ void Gecko_LoadStyleSheetAsync(SheetLoadDataHolder* aParentData,
       }));
 }
 
-nsCSSKeyword Gecko_LookupCSSKeyword(const uint8_t* aString, uint32_t aLength) {
-  nsDependentCSubstring keyword(reinterpret_cast<const char*>(aString),
-                                aLength);
-  return nsCSSKeywords::LookupKeyword(keyword);
-}
-
-const char* Gecko_CSSKeywordString(nsCSSKeyword aKeyword, uint32_t* aLength) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aLength);
-  const nsCString& value = nsCSSKeywords::GetStringValue(aKeyword);
-  *aLength = value.Length();
-  return value.get();
-}
-
 void Gecko_AddPropertyToSet(nsCSSPropertyIDSet* aPropertySet,
                             nsCSSPropertyID aProperty) {
   aPropertySet->AddProperty(aProperty);
@@ -1682,20 +1645,24 @@ void Gecko_SetJemallocThreadLocalArena(bool enabled) {
 #undef STYLE_STRUCT
 
 bool Gecko_ErrorReportingEnabled(const StyleSheet* aSheet,
-                                 const Loader* aLoader) {
-  return ErrorReporter::ShouldReportErrors(aSheet, aLoader);
+                                 const Loader* aLoader,
+                                 uint64_t* aOutWindowId) {
+  if (!ErrorReporter::ShouldReportErrors(aSheet, aLoader)) {
+    return false;
+  }
+  *aOutWindowId = ErrorReporter::FindInnerWindowId(aSheet, aLoader);
+  return true;
 }
 
 void Gecko_ReportUnexpectedCSSError(
-    const StyleSheet* aSheet, const Loader* aLoader, nsIURI* aURI,
-    const char* message, const char* param, uint32_t paramLen,
-    const char* prefix, const char* prefixParam, uint32_t prefixParamLen,
-    const char* suffix, const char* source, uint32_t sourceLen,
-    const char* selectors, uint32_t selectorsLen, uint32_t lineNumber,
-    uint32_t colNumber) {
+    const uint64_t aWindowId, nsIURI* aURI, const char* message,
+    const char* param, uint32_t paramLen, const char* prefix,
+    const char* prefixParam, uint32_t prefixParamLen, const char* suffix,
+    const char* source, uint32_t sourceLen, const char* selectors,
+    uint32_t selectorsLen, uint32_t lineNumber, uint32_t colNumber) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  ErrorReporter reporter(aSheet, aLoader, aURI);
+  ErrorReporter reporter(aWindowId);
 
   if (prefix) {
     if (prefixParam) {
@@ -1722,7 +1689,8 @@ void Gecko_ReportUnexpectedCSSError(
   }
   nsDependentCSubstring sourceValue(source, sourceLen);
   nsDependentCSubstring selectorsValue(selectors, selectorsLen);
-  reporter.OutputError(lineNumber, colNumber, sourceValue, selectorsValue);
+  reporter.OutputError(sourceValue, selectorsValue, lineNumber, colNumber,
+                       aURI);
 }
 
 void Gecko_ContentList_AppendAll(nsSimpleContentList* aList,
@@ -1781,6 +1749,16 @@ bool Gecko_AssertClassAttrValueIsSane(const nsAttrValue* aValue) {
   return true;
 }
 
+void Gecko_GetSafeAreaInsets(const nsPresContext* aPresContext, float* aTop,
+                             float* aRight, float* aBottom, float* aLeft) {
+  MOZ_ASSERT(aPresContext);
+  ScreenIntMargin safeAreaInsets = aPresContext->GetSafeAreaInsets();
+  *aTop = aPresContext->DevPixelsToFloatCSSPixels(safeAreaInsets.top);
+  *aRight = aPresContext->DevPixelsToFloatCSSPixels(safeAreaInsets.right);
+  *aBottom = aPresContext->DevPixelsToFloatCSSPixels(safeAreaInsets.bottom);
+  *aLeft = aPresContext->DevPixelsToFloatCSSPixels(safeAreaInsets.left);
+}
+
 void Gecko_PrintfStderr(const nsCString* aStr) {
   printf_stderr("%s", aStr->get());
 }
@@ -1793,10 +1771,17 @@ nsAtom* Gecko_Element_ImportedPart(const nsAttrValue* aValue,
   return aValue->GetShadowPartsValue().GetReverse(aPartName);
 }
 
-nsAtom* Gecko_Element_ExportedPart(const nsAttrValue* aValue,
-                                   nsAtom* aPartName) {
+nsAtom** Gecko_Element_ExportedParts(const nsAttrValue* aValue,
+                                     nsAtom* aPartName, size_t* aOutLength) {
   if (aValue->Type() != nsAttrValue::eShadowParts) {
     return nullptr;
   }
-  return aValue->GetShadowPartsValue().Get(aPartName);
+  auto* parts = aValue->GetShadowPartsValue().Get(aPartName);
+  if (!parts) {
+    return nullptr;
+  }
+  *aOutLength = parts->Length();
+  static_assert(sizeof(RefPtr<nsAtom>) == sizeof(nsAtom*));
+  static_assert(alignof(RefPtr<nsAtom>) == alignof(nsAtom*));
+  return reinterpret_cast<nsAtom**>(parts->Elements());
 }

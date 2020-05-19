@@ -43,7 +43,10 @@
 #include "nsIObserverService.h"
 #include "WidgetUtils.h"
 
-#include "GeneratedJNIWrappers.h"
+#include "mozilla/java/EventDispatcherWrappers.h"
+#include "mozilla/java/GeckoAppShellWrappers.h"
+#include "mozilla/java/GeckoThreadWrappers.h"
+#include "mozilla/java/HardwareCodecCapabilityUtilsWrappers.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -571,7 +574,7 @@ jobject AndroidBridge::GetGlobalContextRef() {
 NS_IMPL_ISUPPORTS(nsAndroidBridge, nsIAndroidEventDispatcher, nsIAndroidBridge,
                   nsIObserver)
 
-nsAndroidBridge::nsAndroidBridge() : mAudibleWindowsNum(0) {
+nsAndroidBridge::nsAndroidBridge() {
   if (jni::IsAvailable()) {
     RefPtr<widget::EventDispatcher> dispatcher = new widget::EventDispatcher();
     dispatcher->Attach(java::EventDispatcher::GetInstance(),

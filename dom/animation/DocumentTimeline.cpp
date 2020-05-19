@@ -6,6 +6,7 @@
 
 #include "DocumentTimeline.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/DocumentTimelineBinding.h"
 #include "AnimationUtils.h"
 #include "nsContentUtils.h"
@@ -60,8 +61,7 @@ already_AddRefed<DocumentTimeline> DocumentTimeline::Constructor(
 
   if (originTime == TimeDuration::Forever() ||
       originTime == -TimeDuration::Forever()) {
-    aRv.ThrowTypeError<dom::MSG_TIME_VALUE_OUT_OF_RANGE>(
-        NS_LITERAL_STRING("Origin time"));
+    aRv.ThrowTypeError<dom::MSG_TIME_VALUE_OUT_OF_RANGE>("Origin time");
     return nullptr;
   }
   RefPtr<DocumentTimeline> timeline = new DocumentTimeline(doc, originTime);

@@ -65,6 +65,11 @@ nscolor AnimationValue::GetColor(nscolor aForegroundColor) const {
   return Servo_AnimationValue_GetColor(mServo, aForegroundColor);
 }
 
+bool AnimationValue::IsCurrentColor() const {
+  MOZ_ASSERT(mServo);
+  return Servo_AnimationValue_IsCurrentColor(mServo);
+}
+
 const StyleTranslate& AnimationValue::GetTranslateProperty() const {
   MOZ_ASSERT(mServo);
   return *Servo_AnimationValue_GetTranslate(mServo);
@@ -160,8 +165,7 @@ bool AnimationValue::IsInterpolableWith(nsCSSPropertyID aProperty,
 }
 
 double AnimationValue::ComputeDistance(nsCSSPropertyID aProperty,
-                                       const AnimationValue& aOther,
-                                       ComputedStyle* aComputedStyle) const {
+                                       const AnimationValue& aOther) const {
   if (IsNull() || aOther.IsNull()) {
     return 0.0;
   }

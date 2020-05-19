@@ -33,7 +33,7 @@ class nsDOMMutationObserver;
 using mozilla::dom::MutationObservingInfo;
 
 class nsDOMMutationRecord final : public nsISupports, public nsWrapperCache {
-  virtual ~nsDOMMutationRecord() {}
+  virtual ~nsDOMMutationRecord() = default;
 
  public:
   typedef nsTArray<RefPtr<mozilla::dom::Animation>> AnimationArray;
@@ -82,15 +82,15 @@ class nsDOMMutationRecord final : public nsISupports, public nsWrapperCache {
   }
 
   void GetAddedAnimations(AnimationArray& aRetVal) const {
-    aRetVal = mAddedAnimations;
+    aRetVal = mAddedAnimations.Clone();
   }
 
   void GetRemovedAnimations(AnimationArray& aRetVal) const {
-    aRetVal = mRemovedAnimations;
+    aRetVal = mRemovedAnimations.Clone();
   }
 
   void GetChangedAnimations(AnimationArray& aRetVal) const {
-    aRetVal = mChangedAnimations;
+    aRetVal = mChangedAnimations.Clone();
   }
 
   nsCOMPtr<nsINode> mTarget;
@@ -114,7 +114,7 @@ class nsDOMMutationRecord final : public nsISupports, public nsWrapperCache {
 // members to make sure we go through getters/setters.
 class nsMutationReceiverBase : public nsStubAnimationObserver {
  public:
-  virtual ~nsMutationReceiverBase() {}
+  virtual ~nsMutationReceiverBase() = default;
 
   nsDOMMutationObserver* Observer();
   nsINode* Target() { return mParent ? mParent->Target() : mTarget; }
@@ -400,7 +400,7 @@ class nsAnimationReceiver : public nsMutationReceiver {
   NS_DECL_NSIANIMATIONOBSERVER_ANIMATIONREMOVED
 
  protected:
-  virtual ~nsAnimationReceiver() {}
+  virtual ~nsAnimationReceiver() = default;
 
   nsAnimationReceiver(nsINode* aTarget, nsDOMMutationObserver* aObserver)
       : nsMutationReceiver(aTarget, aObserver) {}

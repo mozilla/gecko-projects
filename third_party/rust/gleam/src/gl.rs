@@ -74,22 +74,13 @@ pub struct DebugMessage {
     pub severity: GLenum,
 }
 
-mod private {
-    // Private marker trait extended by the Gl public trait so that no one
-    // else outside this crate can implement Gl. Why? So that adding new methods
-    // to it don't lead to a breaking change.
-    pub trait Sealed {}
-}
-use self::private::Sealed;
-
 macro_rules! declare_gl_apis {
     // garbo is a hack to handle unsafe methods.
     ($($(unsafe $([$garbo:expr])*)* fn $name:ident(&self $(, $arg:ident: $t:ty)* $(,)*) $(-> $retty:ty)* ;)+) => {
-        pub trait Gl: Sealed {
+        pub trait Gl {
             $($(unsafe $($garbo)*)* fn $name(&self $(, $arg:$t)*) $(-> $retty)* ;)+
         }
 
-        impl Sealed for ErrorCheckingGl {}
         impl Gl for ErrorCheckingGl {
             $($(unsafe $($garbo)*)* fn $name(&self $(, $arg:$t)*) $(-> $retty)* {
                 let rv = self.gl.$name($($arg,)*);
@@ -98,7 +89,6 @@ macro_rules! declare_gl_apis {
             })+
         }
 
-        impl<F> Sealed for ErrorReactingGl<F> {}
         impl<F: Fn(&dyn Gl, &str, GLenum)> Gl for ErrorReactingGl<F> {
             $($(unsafe $($garbo)*)* fn $name(&self $(, $arg:$t)*) $(-> $retty)* {
                 let rv = self.gl.$name($($arg,)*);
@@ -110,7 +100,6 @@ macro_rules! declare_gl_apis {
             })+
         }
 
-        impl<F> Sealed for ProfilingGl<F> {}
         impl<F: Fn(&str, Duration)> Gl for ProfilingGl<F> {
             $($(unsafe $($garbo)*)* fn $name(&self $(, $arg:$t)*) $(-> $retty)* {
                 let start = Instant::now();
@@ -617,6 +606,42 @@ declare_gl_apis! {
         dest_target: GLenum, dest_id: GLuint, dest_level: GLint,
         x_offset: GLint, y_offset: GLint, x: GLint, y: GLint, width: GLsizei, height: GLsizei,
         unpack_flip_y: GLboolean, unpack_premultiply_alpha: GLboolean, unpack_unmultiply_alpha: GLboolean);
+
+    // GL_ANGLE_copy_texture_3d
+    fn copy_texture_3d_angle(
+        &self,
+        source_id: GLuint,
+        source_level: GLint,
+        dest_target: GLenum,
+        dest_id: GLuint,
+        dest_level: GLint,
+        internal_format: GLint,
+        dest_type: GLenum,
+        unpack_flip_y: GLboolean,
+        unpack_premultiply_alpha: GLboolean,
+        unpack_unmultiply_alpha: GLboolean,
+    );
+
+    fn copy_sub_texture_3d_angle(
+        &self,
+        source_id: GLuint,
+        source_level: GLint,
+        dest_target: GLenum,
+        dest_id: GLuint,
+        dest_level: GLint,
+        x_offset: GLint,
+        y_offset: GLint,
+        z_offset: GLint,
+        x: GLint,
+        y: GLint,
+        z: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        depth: GLsizei,
+        unpack_flip_y: GLboolean,
+        unpack_premultiply_alpha: GLboolean,
+        unpack_unmultiply_alpha: GLboolean,
+    );
 }
 
 //#[deprecated(since = "0.6.11", note = "use ErrorReactingGl instead")]

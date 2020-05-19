@@ -45,7 +45,7 @@ function getPreferencesButtonAtDetailsView() {
 
 function isInlineOptionsVisible() {
   // The following button is used to open the inline options browser.
-  return !getHtmlElem("named-deck-button[name='preferences']").hidden;
+  return !getHtmlElem(".tab-button[name='preferences']").hidden;
 }
 
 function getPrivateBrowsingValue() {
@@ -284,8 +284,6 @@ add_task(async function test_badge_and_toggle_incognito() {
     ],
     { methods: ["action"] }
   );
-
-  Services.prefs.clearUserPref("extensions.allowPrivateBrowsingByDefault");
 });
 
 add_task(async function test_addon_preferences_button() {

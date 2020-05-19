@@ -68,7 +68,7 @@ template <typename T>
 struct BaseGCType {
   using type =
       typename MapTraceKindToType<JS::MapTypeToTraceKind<T>::kind>::Type;
-  static_assert(std::is_base_of<type, T>::value, "Failed to find base type");
+  static_assert(std::is_base_of_v<type, T>, "Failed to find base type");
 };
 
 // Our barrier templates are parameterized on the pointer types so that we can
@@ -114,9 +114,7 @@ inline void AssertRootMarkingPhase(JSTracer* trc) {}
 // Note that weak edges are handled separately. GC things with weak edges must
 // not trace those edges during marking tracing (which would keep the referent
 // alive) but instead arrange for the edge to be swept by calling
-// js::gc::IsAboutToBeFinalized or TraceWeakEdge during sweeping. For example,
-// see the treatment of the script_ edge in LazyScript::traceChildren and
-// js::gc::SweepLazyScripts.
+// js::gc::IsAboutToBeFinalized or TraceWeakEdge during sweeping.
 //
 // GC things that are weakly held in containers can use WeakMap or a container
 // wrapped in the WeakCache<> template to perform the appropriate sweeping.
@@ -131,6 +129,17 @@ inline void TraceEdge(JSTracer* trc, const WriteBarriered<T>* thingp,
 template <typename T>
 inline void TraceEdge(JSTracer* trc, WeakHeapPtr<T>* thingp, const char* name) {
   gc::TraceEdgeInternal(trc, gc::ConvertToBase(thingp->unsafeGet()), name);
+}
+
+template <class T>
+inline void TraceEdge(JSTracer* trc,
+                      gc::CellHeaderWithTenuredGCPointer<T>* thingp,
+                      const char* name) {
+  T* thing = thingp->ptr();
+  gc::TraceEdgeInternal(trc, gc::ConvertToBase(&thing), name);
+  if (thing != thingp->ptr()) {
+    thingp->unsafeSetPtr(thing);
+  }
 }
 
 // Trace through a possibly-null edge in the live object graph on behalf of
@@ -149,6 +158,19 @@ inline void TraceNullableEdge(JSTracer* trc, WeakHeapPtr<T>* thingp,
                               const char* name) {
   if (InternalBarrierMethods<T>::isMarkable(thingp->unbarrieredGet())) {
     TraceEdge(trc, thingp, name);
+  }
+}
+
+template <class T>
+inline void TraceNullableEdge(JSTracer* trc,
+                              gc::CellHeaderWithTenuredGCPointer<T>* thingp,
+                              const char* name) {
+  T* thing = thingp->ptr();
+  if (thing) {
+    gc::TraceEdgeInternal(trc, gc::ConvertToBase(&thing), name);
+    if (thing != thingp->ptr()) {
+      thingp->unsafeSetPtr(thing);
+    }
   }
 }
 

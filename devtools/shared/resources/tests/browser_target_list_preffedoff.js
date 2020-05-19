@@ -7,7 +7,7 @@
 
 const { TargetList } = require("devtools/shared/resources/target-list");
 
-const FISSION_TEST_URL = URL_ROOT + "/fission_document.html";
+const FISSION_TEST_URL = URL_ROOT_SSL + "/fission_document.html";
 
 add_task(async function() {
   // Disable the preloaded process as it gets created lazily and may interfere
@@ -18,7 +18,8 @@ add_task(async function() {
 
   const client = await createLocalClient();
   const mainRoot = client.mainRoot;
-  const mainProcess = await mainRoot.getMainProcess();
+  const targetDescriptor = await mainRoot.getMainProcess();
+  const mainProcess = await targetDescriptor.getTarget();
 
   // Assert the limited behavior of this API with fission preffed off
   await pushPref("devtools.browsertoolbox.fission", false);
@@ -59,7 +60,7 @@ async function testPreffedOffMainProcess(mainRoot, mainProcess) {
   );
 
   const processTargets = [];
-  const onProcessAvailable = ({ type, targetFront, isTopLevel }) => {
+  const onProcessAvailable = ({ targetFront }) => {
     processTargets.push(targetFront);
   };
   await targetList.watchTargets([TargetList.TYPES.PROCESS], onProcessAvailable);
@@ -67,13 +68,16 @@ async function testPreffedOffMainProcess(mainRoot, mainProcess) {
   targetList.unwatchTargets([TargetList.TYPES.PROCESS], onProcessAvailable);
 
   const frameTargets = [];
-  const onFrameAvailable = ({ type, targetFront, isTopLevel }) => {
+  const onFrameAvailable = ({ targetFront }) => {
     is(
-      type,
+      targetFront.targetType,
       TargetList.TYPES.FRAME,
       "We are only notified about frame targets"
     );
-    ok(isTopLevel, "We are only notified about the top level target");
+    ok(
+      targetFront.isTopLevel,
+      "We are only notified about the top level target"
+    );
     frameTargets.push(targetFront);
   };
   await targetList.watchTargets([TargetList.TYPES.FRAME], onFrameAvailable);
@@ -100,7 +104,8 @@ async function testPreffedOffTab(mainRoot) {
   // Create a TargetList for a given test tab
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   const tab = await addTab(FISSION_TEST_URL);
-  const target = await mainRoot.getTab({ tab });
+  const descriptor = await mainRoot.getTab({ tab });
+  const target = await descriptor.getTarget();
   const targetList = new TargetList(mainRoot, target);
 
   await targetList.startListening();
@@ -121,13 +126,16 @@ async function testPreffedOffTab(mainRoot) {
   targetList.unwatchTargets([TargetList.TYPES.PROCESS], onProcessAvailable);
 
   const frameTargets = [];
-  const onFrameAvailable = ({ type, targetFront, isTopLevel }) => {
+  const onFrameAvailable = ({ targetFront }) => {
     is(
-      type,
+      targetFront.targetType,
       TargetList.TYPES.FRAME,
       "We are only notified about frame targets"
     );
-    ok(isTopLevel, "We are only notified about the top level target");
+    ok(
+      targetFront.isTopLevel,
+      "We are only notified about the top level target"
+    );
     frameTargets.push(targetFront);
   };
   await targetList.watchTargets([TargetList.TYPES.FRAME], onFrameAvailable);

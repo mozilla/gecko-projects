@@ -167,8 +167,8 @@ panelview[mainview] > .panel-header {
 }
 
 #tabbrowser-tabs[hasadjacentnewtabbutton]:not([overflow="true"]) ~ #new-tab-button,
-#tabbrowser-tabs[overflow="true"] > .tabbrowser-arrowscrollbox > #tabs-newtab-button,
-#tabbrowser-tabs:not([hasadjacentnewtabbutton]) > .tabbrowser-arrowscrollbox > #tabs-newtab-button,
+#tabbrowser-tabs[overflow="true"] > #tabbrowser-arrowscrollbox > #tabs-newtab-button,
+#tabbrowser-tabs:not([hasadjacentnewtabbutton]) > #tabbrowser-arrowscrollbox > #tabs-newtab-button,
 #TabsToolbar[customizing="true"] #tabs-newtab-button {
   display: none;
 }
@@ -222,13 +222,13 @@ panelview[mainview] > .panel-header {
 }
 %endif
 
-#tabbrowser-tabs[positionpinnedtabs] > .tabbrowser-arrowscrollbox > .tabbrowser-tab[pinned] {
+#tabbrowser-tabs[positionpinnedtabs] > #tabbrowser-arrowscrollbox > .tabbrowser-tab[pinned] {
   position: fixed !important;
   display: block;
 }
 
-#tabbrowser-tabs[movingtab] > .tabbrowser-arrowscrollbox > .tabbrowser-tab[selected],
-#tabbrowser-tabs[movingtab] > .tabbrowser-arrowscrollbox > .tabbrowser-tab[multiselected] {
+#tabbrowser-tabs[movingtab] > #tabbrowser-arrowscrollbox > .tabbrowser-tab[selected],
+#tabbrowser-tabs[movingtab] > #tabbrowser-arrowscrollbox > .tabbrowser-tab[multiselected] {
   position: relative;
   z-index: 2;
   pointer-events: none; /* avoid blocking dragover events on scroll buttons */
@@ -324,6 +324,11 @@ toolbar[customizing] #whats-new-menu-button {
   }
 }
 %endif
+
+:root:not([sizemode=maximized]) .titlebar-restore,
+:root[sizemode=maximized] .titlebar-max {
+  display: none;
+}
 
 %ifdef MENUBAR_CAN_AUTOHIDE
 #toolbar-menubar[autohide=true]:not([inactive]) + #TabsToolbar > .titlebar-buttonbox-container {
@@ -529,14 +534,6 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   -moz-box-flex: 1;
 }
 
-#appMenu_historyMenu > .bookmark-item,
-#appMenu-library-recentlyClosedTabs > .panel-subview-body > .bookmark-item,
-#appMenu-library-recentlyClosedWindows > .panel-subview-body > .bookmark-item,
-#appMenu-library-recentHighlights > .bookmark-item,
-#panelMenu_bookmarksMenu > .bookmark-item {
-  max-width: none;
-}
-
 %ifdef XP_MACOSX
 :root[inFullscreen="true"] {
   padding-top: 0; /* override drawintitlebar="true" */
@@ -581,8 +578,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
  *
  * Attribute is controlled by browser.js:/gRemoteControl.
  */
-:root[remotecontrol] #urlbar:not(.megabar),
-:root[remotecontrol] #urlbar.megabar > #urlbar-background {
+:root[remotecontrol] #urlbar-background {
   background: repeating-linear-gradient(
     -45deg,
     transparent,
@@ -598,6 +594,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   position: relative;
   direction: ltr;
 }
+
 #urlbar-scheme {
   position: absolute;
   height: 100%;
@@ -606,31 +603,38 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   pointer-events: none;
 }
 
-/* Visible if the urlbar is not focused and it overflows at the start.
-   Uses the required-valid trick to check if it contains a value */
-#urlbar[textoverflow="left"][hasrtldomain]:not([focused]) > #urlbar-input-container > .urlbar-input-box > #urlbar-scheme:valid {
-  visibility: visible;
-}
-
-/* Fade out URL on overflow
-   This mask may be overriden when a Contextual Feature Recommendation is shown,
-   see browser/themes/shared/urlbar-searchbar.inc.css for details */
-#urlbar[textoverflow="right"]:not([focused]) > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
-  mask-image: linear-gradient(to left, transparent, black 3ch);
-}
-
-#urlbar[textoverflow="left"][rtltext]:not([focused]) > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
-  mask-image: linear-gradient(to right, transparent, black 3ch);
-}
-
-#urlbar[textoverflow="left"][hasrtldomain]:not([focused]) > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
-  mask-image: linear-gradient(to right, transparent var(--urlbar-scheme-size), black calc(var(--urlbar-scheme-size) + 3ch));
-}
-
 #urlbar-input {
   mask-repeat: no-repeat;
   unicode-bidi: plaintext;
   text-align: match-parent;
+}
+
+#urlbar:not([focused])[domaindir="ltr"]> #urlbar-input-container > .urlbar-input-box > #urlbar-input {
+  direction: ltr;
+  unicode-bidi: embed;
+}
+
+/* The following rules apply overflow masks to the unfocused urlbar
+   This mask may be overriden when a Contextual Feature Recommendation is shown,
+   see browser/themes/shared/urlbar-searchbar.inc.css for details */
+
+#urlbar:not([focused])[textoverflow="both"] > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
+  mask-image: linear-gradient(to right, transparent, black 3ch, black calc(100% - 3ch), transparent);
+}
+#urlbar:not([focused])[textoverflow="right"] > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
+  mask-image: linear-gradient(to left, transparent, black 3ch);
+}
+#urlbar:not([focused])[textoverflow="left"] > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
+  mask-image: linear-gradient(to right, transparent, black 3ch);
+}
+
+/* The protocol is visible if there is an RTL domain and we overflow to the left.
+   Uses the required-valid trick to check if it contains a value */
+#urlbar:not([focused])[textoverflow="left"][domaindir="rtl"] > #urlbar-input-container > .urlbar-input-box > #urlbar-scheme:valid {
+  visibility: visible;
+}
+#urlbar:not([focused])[textoverflow="left"][domaindir="rtl"] > #urlbar-input-container > .urlbar-input-box > #urlbar-input {
+  mask-image: linear-gradient(to right, transparent var(--urlbar-scheme-size), black calc(var(--urlbar-scheme-size) + 3ch));
 }
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
@@ -671,6 +675,10 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   min-width: 22em;
 }
 
+#PopupAutoComplete[resultstyles~="importableLogins"] {
+  min-width: 24em;
+}
+
 #PopupAutoComplete > richlistbox > richlistitem[originaltype="insecureWarning"] {
   height: auto;
 }
@@ -693,7 +701,6 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 #urlbar-input-container[pageproxystate=invalid] > #page-action-buttons > .urlbar-page-action,
 #identity-box.chromeUI ~ #page-action-buttons > .urlbar-page-action:not(#star-button-box),
 #urlbar[usertyping] > #urlbar-input-container > #page-action-buttons > #urlbar-zoom-button,
-#urlbar[usertyping] > #urlbar-input-container > .urlbar-history-dropmarker,
 #urlbar:not([usertyping]) > #urlbar-input-container > #urlbar-go-button,
 #urlbar:not([focused]) > #urlbar-input-container > #urlbar-go-button {
   display: none;
@@ -724,8 +731,8 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   min-width: 280px;
 }
 
-#identity-icon-labels {
-  max-width: 10em;
+#identity-box {
+  max-width: calc(30px + 10em);
 }
 
 @media (max-width: 770px) {
@@ -738,8 +745,8 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   :root[customizing] #urlbar-container {
     min-width: 245px;
   }
-  #identity-icon-labels {
-    max-width: 50px;
+  #identity-box {
+    max-width: 80px;
   }
   /* Contenxtual identity labels are user-customizable and can be very long,
      so we only show the colored icon when the window gets small. */
@@ -765,39 +772,33 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   #nav-bar[downloadsbuttonshown] #urlbar-container {
     min-width: 225px;
   }
-  #identity-icon-labels {
-    max-width: 40px;
+  #identity-box {
+    max-width: 70px;
   }
   #urlbar-zoom-button {
     display: none;
   }
 }
 
-#identity-icon-country-label {
-  direction: ltr;
-}
-
-#identity-box.verifiedIdentity > #identity-icon-labels > #identity-icon-label {
-  margin-inline-end: 0.25em !important;
-}
-
-/* Flexible spacer sizing (matching url bar) */
+/* Flexible spacer sizing (gets overridden in the navbar) */
 toolbarpaletteitem[place=toolbar][id^=wrapper-customizableui-special-spring],
 toolbarspring {
   -moz-box-flex: 1;
+  min-width: 28px;
   max-width: 112px;
-}
-
-:root[customizing] toolbarpaletteitem[place=toolbar][id^=wrapper-customizableui-special-spring],
-:root[customizing] toolbarspring {
-  /* At very small window widths, expand the springs slightly so that they
-     can be manipulated with the mouse. */
-  min-width: 10px;
 }
 
 #nav-bar toolbarpaletteitem[id^=wrapper-customizableui-special-spring],
 #nav-bar toolbarspring {
   -moz-box-flex: 80;
+  /* We shrink the flexible spacers, but not to nothing so they can be
+   * manipulated in customize mode; the next rule shrinks them further
+   * outside customize mode. */
+  min-width: 10px;
+}
+
+#nav-bar:not([customizing]) toolbarspring {
+  min-width: 1px;
 }
 
 #widget-overflow-list > toolbarspring {
@@ -972,7 +973,7 @@ browser[tabmodalPromptShowing] {
 }
 
 #statuspanel[type=overLink] {
-  transition: opacity 120ms ease-out;
+  transition: opacity 120ms ease-out, visibility 120ms;
 }
 
 #statuspanel[type=overLink] > #statuspanel-inner {
@@ -982,10 +983,11 @@ browser[tabmodalPromptShowing] {
 #statuspanel[inactive] {
   transition: none;
   opacity: 0;
+  visibility: hidden;
 }
 
 #statuspanel[inactive][previoustype=overLink] {
-  transition: opacity 200ms ease-out;
+  transition: opacity 200ms ease-out, visibility 200ms;
 }
 
 #statuspanel-inner {
@@ -1034,6 +1036,7 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbut
 }
 
 @supports -moz-bool-pref("xul.panel-animations.enabled") {
+@media (prefers-reduced-motion: no-preference) {
 %ifdef MOZ_WIDGET_COCOA
   /* On Mac, use the properties "-moz-window-transform" and "-moz-window-opacity"
      instead of "transform" and "opacity" for these animations.
@@ -1097,6 +1100,7 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbut
     transform: none;
   }
 %endif
+}
 }
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
@@ -1166,8 +1170,7 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbut
 }
 
 toolbarpaletteitem[dragover] {
-  border-left-color: transparent;
-  border-right-color: transparent;
+  border-inline-color: transparent;
 }
 
 #customization-palette-container {

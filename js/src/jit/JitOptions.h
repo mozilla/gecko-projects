@@ -19,7 +19,6 @@ namespace jit {
 enum IonRegisterAllocator {
   RegisterAllocator_Backtracking,
   RegisterAllocator_Testbed,
-  RegisterAllocator_Stupid
 };
 
 static inline mozilla::Maybe<IonRegisterAllocator> LookupRegisterAllocator(
@@ -29,9 +28,6 @@ static inline mozilla::Maybe<IonRegisterAllocator> LookupRegisterAllocator(
   }
   if (!strcmp(name, "testbed")) {
     return mozilla::Some(RegisterAllocator_Testbed);
-  }
-  if (!strcmp(name, "stupid")) {
-    return mozilla::Some(RegisterAllocator_Stupid);
   }
   return mozilla::Nothing();
 }
@@ -64,6 +60,7 @@ struct DefaultJitOptions {
 #ifdef NIGHTLY_BUILD
   bool typeInference;
 #endif
+  bool warpBuilder;
   bool jitForTrustedPrincipals;
   bool nativeRegExp;
   bool forceInlineCaches;
@@ -74,6 +71,12 @@ struct DefaultJitOptions {
   bool wasmDelayTier2;
 #ifdef JS_TRACE_LOGGING
   bool enableTraceLogger;
+#endif
+#ifdef ENABLE_NEW_REGEXP
+  bool traceRegExpParser;
+  bool traceRegExpAssembler;
+  bool traceRegExpInterpreter;
+  bool traceRegExpPeephole;
 #endif
   bool enableWasmJitExit;
   bool enableWasmJitEntry;
@@ -86,6 +89,9 @@ struct DefaultJitOptions {
   uint32_t baselineJitWarmUpThreshold;
   uint32_t normalIonWarmUpThreshold;
   uint32_t fullIonWarmUpThreshold;
+#ifdef ENABLE_NEW_REGEXP
+  uint32_t regexpWarmUpThreshold;
+#endif
   uint32_t exceptionBailoutThreshold;
   uint32_t frequentBailoutThreshold;
   uint32_t maxStackArgs;

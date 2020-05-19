@@ -53,39 +53,6 @@ NS_QUERYFRAME_HEAD(SVGGeometryFrame)
   NS_QUERYFRAME_ENTRY(SVGGeometryFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 
-//----------------------------------------------------------------------
-// Display list item:
-
-class nsDisplaySVGGeometry final : public nsPaintedDisplayItem {
-  typedef mozilla::image::imgDrawingParams imgDrawingParams;
-
- public:
-  nsDisplaySVGGeometry(nsDisplayListBuilder* aBuilder, SVGGeometryFrame* aFrame)
-      : nsPaintedDisplayItem(aBuilder, aFrame) {
-    MOZ_COUNT_CTOR(nsDisplaySVGGeometry);
-    MOZ_ASSERT(aFrame, "Must have a frame!");
-  }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplaySVGGeometry)
-#endif
-
-  NS_DISPLAY_DECL_NAME("nsDisplaySVGGeometry", TYPE_SVG_GEOMETRY)
-
-  virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-                       HitTestState* aState,
-                       nsTArray<nsIFrame*>* aOutFrames) override;
-  virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
-
-  nsDisplayItemGeometry* AllocateGeometry(
-      nsDisplayListBuilder* aBuilder) override {
-    return new nsDisplayItemGenericImageGeometry(this, aBuilder);
-  }
-
-  void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
-                                 const nsDisplayItemGeometry* aGeometry,
-                                 nsRegion* aInvalidRegion) const override;
-};
-
 void nsDisplaySVGGeometry::HitTest(nsDisplayListBuilder* aBuilder,
                                    const nsRect& aRect, HitTestState* aState,
                                    nsTArray<nsIFrame*>* aOutFrames) {
@@ -417,15 +384,17 @@ void SVGGeometryFrame::NotifySVGChanged(uint32_t aFlags) {
   // when it's not visible. See the complexities of GetBBoxContribution.
 
   if (aFlags & COORD_CONTEXT_CHANGED) {
+    auto* geom = static_cast<SVGGeometryElement*>(GetContent());
     // Stroke currently contributes to our mRect, which is why we have to take
     // account of stroke-width here. Note that we do not need to take account
     // of stroke-dashoffset since, although that can have a percentage value
     // that is resolved against our coordinate context, it does not affect our
     // mRect.
-    if (static_cast<SVGGeometryElement*>(GetContent())
-            ->GeometryDependsOnCoordCtx() ||
-        StyleSVG()->mStrokeWidth.HasPercent()) {
-      static_cast<SVGGeometryElement*>(GetContent())->ClearAnyCachedPath();
+    const auto& strokeWidth = StyleSVG()->mStrokeWidth;
+    if (geom->GeometryDependsOnCoordCtx() ||
+        (strokeWidth.IsLengthPercentage() &&
+         strokeWidth.AsLengthPercentage().HasPercent())) {
+      geom->ClearAnyCachedPath();
       nsSVGUtils::ScheduleReflowSVG(this);
     }
   }
@@ -673,7 +642,7 @@ void SVGGeometryFrame::Render(gfxContext* aContext, uint32_t aRenderComponents,
     // masking will dwarf Path creation overhead anyway.
     RefPtr<Path> path = element->GetOrBuildPath(drawTarget, fillRule);
     if (path) {
-      ColorPattern white(ToDeviceColor(Color(1.0f, 1.0f, 1.0f, 1.0f)));
+      ColorPattern white(ToDeviceColor(sRGBColor(1.0f, 1.0f, 1.0f, 1.0f)));
       drawTarget->Fill(path, white,
                        DrawOptions(1.0f, CompositionOp::OP_OVER, aaMode));
     }

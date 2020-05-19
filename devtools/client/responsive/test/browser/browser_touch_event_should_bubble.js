@@ -23,11 +23,16 @@ addRDMTask(
         span.style["background-color"] = "green"; // rgb(0, 128, 0)
       });
 
+      const touchStartPromise = ContentTaskUtils.waitForEvent(
+        span,
+        "touchstart"
+      );
       await EventUtils.synthesizeMouseAtCenter(
         span,
         { type: "mousedown", isSynthesized: false },
         content
       );
+      await touchStartPromise;
 
       const win = content.document.defaultView;
       const bg = win
@@ -39,12 +44,17 @@ addRDMTask(
         "rgb(0, 128, 0)",
         `span's background color should be rgb(0, 128, 0): got ${bg}`
       );
+
+      await EventUtils.synthesizeMouseAtCenter(
+        span,
+        { type: "mouseup", isSynthesized: false },
+        content
+      );
     });
 
     info("Toggling off touch simulation.");
     await toggleTouchSimulation(ui);
     reloadOnTouchChange(false);
-  }
-  // XXX: Enable testing against new browser UI.
-  // true
+  },
+  { usingBrowserUI: true }
 );

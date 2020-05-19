@@ -424,21 +424,10 @@ class VisitedQuery final : public AsyncStatementCallback {
       return;
     }
 
-    if (mIsVisited || StaticPrefs::layout_css_notify_of_unvisited()) {
-      History* history = History::GetService();
-      if (!history) {
-        return;
-      }
+    if (History* history = History::GetService()) {
       auto status = mIsVisited ? IHistory::VisitedStatus::Visited
                                : IHistory::VisitedStatus::Unvisited;
       history->NotifyVisited(mURI, status);
-      if (BrowserTabsRemoteAutostart()) {
-        AutoTArray<VisitedQueryResult, 1> results;
-        VisitedQueryResult& result = *results.AppendElement();
-        result.visited() = mIsVisited;
-        SerializeURI(mURI, result.uri());
-        history->NotifyVisitedParent(results);
-      }
     }
 
     nsCOMPtr<nsIObserverService> observerService =
@@ -458,7 +447,7 @@ class VisitedQuery final : public AsyncStatementCallback {
       const nsMainThreadPtrHandle<mozIVisitedStatusCallback>& aCallback)
       : mURI(aURI), mCallback(aCallback), mIsVisited(false) {}
 
-  ~VisitedQuery() {}
+  ~VisitedQuery() = default;
 
   nsCOMPtr<nsIURI> mURI;
   nsMainThreadPtrHandle<mozIVisitedStatusCallback> mCallback;
@@ -576,30 +565,14 @@ class NotifyManyVisitsObservers : public Runnable {
 
     PRTime now = PR_Now();
     if (!mPlaces.IsEmpty()) {
-      nsTArray<VisitedQueryResult> results(mPlaces.Length());
       for (uint32_t i = 0; i < mPlaces.Length(); ++i) {
         nsresult rv =
             NotifyVisit(navHistory, obsService, now, uris[i], mPlaces[i]);
         NS_ENSURE_SUCCESS(rv, rv);
-
-        if (BrowserTabsRemoteAutostart()) {
-          VisitedQueryResult& result = *results.AppendElement();
-          SerializeURI(uris[i], result.uri());
-          result.visited() = true;
-        }
       }
-      mHistory->NotifyVisitedParent(results);
     } else {
-      AutoTArray<VisitedQueryResult, 1> results;
       nsresult rv = NotifyVisit(navHistory, obsService, now, uris[0], mPlace);
       NS_ENSURE_SUCCESS(rv, rv);
-
-      if (BrowserTabsRemoteAutostart()) {
-        VisitedQueryResult& result = *results.AppendElement();
-        SerializeURI(uris[0], result.uri());
-        result.visited() = true;
-        mHistory->NotifyVisitedParent(results);
-      }
     }
 
     return NS_OK;
@@ -1433,16 +1406,6 @@ History::~History() {
 
 void History::InitMemoryReporter() { RegisterWeakMemoryReporter(this); }
 
-void History::NotifyVisitedParent(const nsTArray<VisitedQueryResult>& aURIs) {
-  MOZ_ASSERT(XRE_IsParentProcess());
-  nsTArray<ContentParent*> cplist;
-  ContentParent::GetAll(cplist);
-
-  for (auto* cp : cplist) {
-    Unused << cp->SendNotifyVisited(aURIs);
-  }
-}
-
 class ConcurrentStatementsHolder final : public mozIStorageCompletionCallback {
  public:
   NS_DECL_ISUPPORTS
@@ -1509,7 +1472,7 @@ class ConcurrentStatementsHolder final : public mozIStorageCompletionCallback {
   }
 
  private:
-  ~ConcurrentStatementsHolder() {}
+  ~ConcurrentStatementsHolder() = default;
 
   nsCOMPtr<mozIStorageAsyncConnection> mReadOnlyDBConn;
   nsCOMPtr<mozIStorageAsyncStatement> mIsVisitedStatement;
@@ -1866,17 +1829,19 @@ History::VisitURI(nsIWidget* aWidget, nsIURI* aURI, nsIURI* aLastVisitedURI,
     return NS_OK;
   }
 
+  nsresult rv;
   if (XRE_IsContentProcess()) {
-    URIParams uri;
-    SerializeURI(aURI, uri);
-
-    Maybe<URIParams> lastVisitedURI;
-    SerializeURI(aLastVisitedURI, lastVisitedURI);
+    bool canAddURI = false;
+    rv = nsNavHistory::CanAddURIToHistory(aURI, &canAddURI);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!canAddURI) {
+      return NS_OK;
+    }
 
     NS_ENSURE_ARG(aWidget);
     BrowserChild* browserChild = aWidget->GetOwningBrowserChild();
     NS_ENSURE_TRUE(browserChild, NS_ERROR_FAILURE);
-    (void)browserChild->SendVisitURI(uri, lastVisitedURI, aFlags);
+    (void)browserChild->SendVisitURI(aURI, aLastVisitedURI, aFlags);
     return NS_OK;
   }
 
@@ -1885,7 +1850,7 @@ History::VisitURI(nsIWidget* aWidget, nsIURI* aURI, nsIURI* aLastVisitedURI,
 
   // Silently return if URI is something we shouldn't add to DB.
   bool canAdd;
-  nsresult rv = navHistory->CanAddURI(aURI, &canAdd);
+  rv = navHistory->CanAddURI(aURI, &canAdd);
   NS_ENSURE_SUCCESS(rv, rv);
   if (!canAdd) {
     return NS_OK;
@@ -1898,8 +1863,7 @@ History::VisitURI(nsIWidget* aWidget, nsIURI* aURI, nsIURI* aLastVisitedURI,
   }
 
   nsTArray<VisitData> placeArray(1);
-  NS_ENSURE_TRUE(placeArray.AppendElement(VisitData(aURI, aLastVisitedURI)),
-                 NS_ERROR_OUT_OF_MEMORY);
+  placeArray.AppendElement(VisitData(aURI, aLastVisitedURI));
   VisitData& place = placeArray.ElementAt(0);
   NS_ENSURE_FALSE(place.spec.IsEmpty(), NS_ERROR_INVALID_ARG);
 
@@ -1999,12 +1963,9 @@ History::SetURITitle(nsIURI* aURI, const nsAString& aTitle) {
   }
 
   if (XRE_IsContentProcess()) {
-    URIParams uri;
-    SerializeURI(aURI, uri);
-
     auto* cpc = dom::ContentChild::GetSingleton();
     MOZ_ASSERT(cpc, "Content Protocol is NULL!");
-    Unused << cpc->SendSetURITitle(uri, PromiseFlatString(aTitle));
+    Unused << cpc->SendSetURITitle(aURI, PromiseFlatString(aTitle));
     return NS_OK;
   }
 
@@ -2212,9 +2173,9 @@ History::IsURIVisited(nsIURI* aURI, mozIVisitedStatusCallback* aCallback) {
 void History::StartPendingVisitedQueries(
     const PendingVisitedQueries& aQueries) {
   if (XRE_IsContentProcess()) {
-    nsTArray<URIParams> uris(aQueries.Count());
+    nsTArray<RefPtr<nsIURI>> uris(aQueries.Count());
     for (auto iter = aQueries.ConstIter(); !iter.Done(); iter.Next()) {
-      SerializeURI(iter.Get()->GetKey(), *uris.AppendElement());
+      uris.AppendElement(iter.Get()->GetKey());
     }
     auto* cpc = mozilla::dom::ContentChild::GetSingleton();
     MOZ_ASSERT(cpc, "Content Protocol is NULL!");

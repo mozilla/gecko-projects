@@ -16,12 +16,14 @@
 
 #include "debugger/DebugAPI.h"
 #include "gc/Marking.h"
+#include "gc/MaybeRooted.h"
 #include "jit/BaselineIC.h"
 #include "js/CharacterEncoding.h"
 #include "js/Result.h"
 #include "js/Value.h"
 #include "util/Memory.h"
 #include "vm/EqualityOperations.h"  // js::SameValue
+#include "vm/PlainObject.h"         // js::PlainObject
 #include "vm/TypedArrayObject.h"
 
 #include "gc/Nursery-inl.h"
@@ -143,7 +145,7 @@ bool ObjectElements::PreventExtensions(JSContext* cx, NativeObject* obj) {
 }
 
 /* static */
-void ObjectElements::FreezeOrSeal(JSContext* cx, NativeObject* obj,
+bool ObjectElements::FreezeOrSeal(JSContext* cx, HandleNativeObject obj,
                                   IntegrityLevel level) {
   MOZ_ASSERT_IF(level == IntegrityLevel::Frozen && obj->is<ArrayObject>(),
                 !obj->as<ArrayObject>().lengthIsWritable());
@@ -152,7 +154,14 @@ void ObjectElements::FreezeOrSeal(JSContext* cx, NativeObject* obj,
   MOZ_ASSERT(obj->getElementsHeader()->numShiftedElements() == 0);
 
   if (obj->hasEmptyElements() || obj->denseElementsAreFrozen()) {
-    return;
+    return true;
+  }
+
+  if (level == IntegrityLevel::Frozen) {
+    if (!JSObject::setFlags(cx, obj, BaseShape::FROZEN_ELEMENTS,
+                            JSObject::GENERATE_SHAPE)) {
+      return false;
+    }
   }
 
   if (!obj->denseElementsAreSealed()) {
@@ -162,12 +171,13 @@ void ObjectElements::FreezeOrSeal(JSContext* cx, NativeObject* obj,
   if (level == IntegrityLevel::Frozen) {
     obj->getElementsHeader()->freeze();
   }
+
+  return true;
 }
 
 #ifdef DEBUG
-static mozilla::Atomic<bool, mozilla::Relaxed,
-                       mozilla::recordreplay::Behavior::DontPreserve>
-    gShapeConsistencyChecksEnabled(false);
+static mozilla::Atomic<bool, mozilla::Relaxed> gShapeConsistencyChecksEnabled(
+    false);
 
 /* static */
 void js::NativeObject::enableShapeConsistencyChecks() {
@@ -424,15 +434,15 @@ bool NativeObject::addDenseElementPure(JSContext* cx, NativeObject* obj) {
   return true;
 }
 
-static inline void FreeSlots(JSContext* cx, NativeObject* obj,
-                             HeapSlot* slots) {
+static inline void FreeSlots(JSContext* cx, NativeObject* obj, HeapSlot* slots,
+                             size_t nbytes) {
   if (cx->isHelperThreadContext()) {
     js_free(slots);
   } else if (obj->isTenured()) {
     MOZ_ASSERT(!cx->nursery().isInside(slots));
     js_free(slots);
   } else {
-    cx->nursery().freeBuffer(slots);
+    cx->nursery().freeBuffer(slots, nbytes);
   }
 }
 
@@ -441,9 +451,9 @@ void NativeObject::shrinkSlots(JSContext* cx, uint32_t oldCount,
   MOZ_ASSERT(newCount < oldCount);
 
   if (newCount == 0) {
-    RemoveCellMemory(this, numDynamicSlots() * sizeof(HeapSlot),
-                     MemoryUse::ObjectSlots);
-    FreeSlots(cx, this, slots_);
+    size_t nbytes = numDynamicSlots() * sizeof(HeapSlot);
+    RemoveCellMemory(this, nbytes, MemoryUse::ObjectSlots);
+    FreeSlots(cx, this, slots_, nbytes);
     slots_ = nullptr;
     return;
   }
@@ -1345,77 +1355,47 @@ void js::AddPropertyTypesAfterProtoChange(JSContext* cx, NativeObject* obj,
   }
 }
 
-static bool PurgeProtoChain(JSContext* cx, JSObject* objArg, HandleId id) {
-  /* Root locally so we can re-assign. */
-  RootedObject obj(cx, objArg);
-
-  RootedShape shape(cx);
-  while (obj) {
-    /* Lookups will not be cached through non-native protos. */
-    if (!obj->isNative()) {
-      break;
-    }
-
-    shape = obj->as<NativeObject>().lookup(cx, id);
-    if (shape) {
-      return NativeObject::reshapeForShadowedProp(cx, obj.as<NativeObject>());
-    }
-
-    obj = obj->staticPrototype();
-  }
-
-  return true;
-}
-
-static bool PurgeEnvironmentChainHelper(JSContext* cx, HandleObject objArg,
-                                        HandleId id) {
-  /* Re-root locally so we can re-assign. */
-  RootedObject obj(cx, objArg);
-
-  MOZ_ASSERT(obj->isNative());
+static bool ReshapeForShadowedPropSlow(JSContext* cx, HandleNativeObject obj,
+                                       HandleId id) {
   MOZ_ASSERT(obj->isDelegate());
 
-  /* Lookups on integer ids cannot be cached through prototypes. */
+  // Lookups on integer ids cannot be cached through prototypes.
   if (JSID_IS_INT(id)) {
     return true;
   }
 
-  if (!PurgeProtoChain(cx, obj->staticPrototype(), id)) {
-    return false;
-  }
-
-  /*
-   * We must purge the environment chain only for Call objects as they are
-   * the only kind of cacheable non-global object that can gain properties
-   * after outer properties with the same names have been cached or
-   * traced. Call objects may gain such properties via eval introducing new
-   * vars; see bug 490364.
-   */
-  if (obj->is<CallObject>()) {
-    while ((obj = obj->enclosingEnvironment()) != nullptr) {
-      if (!PurgeProtoChain(cx, obj, id)) {
-        return false;
-      }
+  RootedObject proto(cx, obj->staticPrototype());
+  while (proto) {
+    // Lookups will not be cached through non-native protos.
+    if (!proto->isNative()) {
+      break;
     }
+
+    if (proto->as<NativeObject>().contains(cx, id)) {
+      return NativeObject::reshapeForShadowedProp(cx, proto.as<NativeObject>());
+    }
+
+    proto = proto->staticPrototype();
   }
 
   return true;
 }
 
-/*
- * ReshapeForShadowedProp does nothing if obj is not itself a prototype or
- * parent environment, else it reshapes the scope and prototype chains it
- * links. It calls PurgeEnvironmentChainHelper, which asserts that obj is
- * flagged as a delegate (i.e., obj has ever been on a prototype or parent
- * chain).
- */
 static MOZ_ALWAYS_INLINE bool ReshapeForShadowedProp(JSContext* cx,
                                                      HandleObject obj,
                                                      HandleId id) {
-  if (obj->isDelegate() && obj->isNative()) {
-    return PurgeEnvironmentChainHelper(cx, obj, id);
+  // If |obj| is a prototype of another object, check if we're shadowing a
+  // property on its proto chain. In this case we need to reshape that object
+  // for shape teleporting to work correctly.
+  //
+  // See also the 'Shape Teleporting Optimization' comment in jit/CacheIR.cpp.
+
+  // Inlined fast path for non-prototype/non-native objects.
+  if (!obj->isDelegate() || !obj->isNative()) {
+    return true;
   }
-  return true;
+
+  return ReshapeForShadowedPropSlow(cx, obj.as<NativeObject>(), id);
 }
 
 /* static */
@@ -2149,7 +2129,7 @@ bool js::AddOrUpdateSparseElementHelper(JSContext* cx, HandleArrayObject obj,
   RootedValue receiver(cx, ObjectValue(*obj));
   JS::ObjectOpResult result;
   return SetProperty(cx, obj, id, v, receiver, result) &&
-         result.checkStrictErrorOrWarning(cx, obj, id, strict);
+         result.checkStrictModeError(cx, obj, id, strict);
 }
 
 /*** [[HasProperty]] ********************************************************/
@@ -2327,14 +2307,11 @@ static MOZ_ALWAYS_INLINE bool GetExistingProperty(
     }
   }
 
-  if (!allowGC) {
+  if constexpr (!allowGC) {
     return false;
+  } else {
+    return CallGetter(cx, obj, receiver, shape, vp);
   }
-
-  return CallGetter(cx, MaybeRooted<JSObject*, allowGC>::toHandle(obj),
-                    MaybeRooted<Value, allowGC>::toHandle(receiver),
-                    MaybeRooted<Shape*, allowGC>::toHandle(shape),
-                    MaybeRooted<Value, allowGC>::toMutableHandle(vp));
 }
 
 bool js::NativeGetExistingProperty(JSContext* cx, HandleObject receiver,
@@ -2344,72 +2321,6 @@ bool js::NativeGetExistingProperty(JSContext* cx, HandleObject receiver,
   return GetExistingProperty<CanGC>(cx, receiverValue, obj, shape, vp);
 }
 
-/*
- * Given pc pointing after a property accessing bytecode, return true if the
- * access is "property-detecting". Caller will use this value to determine
- * whether or not to warn that an undefined object property *may* be used in
- * a way that the programmer does not expect. In other words, we do not want
- * to warn the programmer if he/she/they are doing something like
- *
- * if (obj.property) { }
- * or
- * if (obj.property == undefined) {}
- * or
- * if (obj.property == null) {}
- */
-static bool Detecting(JSContext* cx, JSScript* script, jsbytecode* pc) {
-  MOZ_ASSERT(script->containsPC(pc));
-
-  BytecodeIterator scriptIterator =
-      BytecodeIterator(BytecodeLocation(script, pc));
-  BytecodeIterator endIter = BytecodeIterator(script->endLocation());
-
-  // Skip over jump targets and duplication operations.
-  while (scriptIterator->isJumpTarget() || scriptIterator->is(JSOp::Dup)) {
-    if (++scriptIterator == endIter) {
-      // If we are at the end of the script, we cannot be detecting
-      // the property.
-      return false;
-    }
-  }
-
-  // General case: Do not warn if the operation branches on or tests
-  // the equality of the property.
-  if (scriptIterator->isDetectingOp()) {
-    return true;
-  }
-
-  // Special case: Do not warn if we are checking whether the property is null.
-  if (scriptIterator->is(JSOp::Null)) {
-    if (++scriptIterator == endIter) {
-      return false;
-    }
-    return scriptIterator->isEqualityOp() &&
-           !scriptIterator->isStrictEqualityOp();
-  }
-
-  // Special case #2: Do not warn if we are checking whether the property is
-  // undefined.
-  if (scriptIterator->is(JSOp::GetGName) || scriptIterator->is(JSOp::GetName) ||
-      scriptIterator->is(JSOp::Undefined)) {
-    // If we using the result of a variable lookup to use in the comparison
-    // against the property and that lookup does not result in 'undefined',
-    // the type of subsequent operations do not matter -- we always warn.
-    if (scriptIterator->isNameOp() &&
-        scriptIterator->getPropertyName(script) != cx->names().undefined) {
-      return false;
-    }
-    // Because we know that the top of the stack is 'undefined', if the next
-    // operation exists and it is a comparison operation (of any kind) we
-    // supress a warning.
-    if (++scriptIterator == endIter) {
-      return false;
-    }
-    return scriptIterator->isEqualityOp();
-  }
-  return false;
-}
-
 enum IsNameLookup { NotNameLookup = false, NameLookup = true };
 
 /*
@@ -2417,15 +2328,10 @@ enum IsNameLookup { NotNameLookup = false, NameLookup = true };
  * the prototype chain and not finding any such property.
  *
  * Per the spec, this should just set the result to `undefined` and call it a
- * day. However:
- *
- * 1.  This function also runs when we're evaluating an expression that's an
- *     Identifier (that is, an unqualified name lookup), so we need to figure
- *     out if that's what's happening and throw a ReferenceError if so.
- *
- * 2.  We also emit an optional warning for this. (It's not super useful on the
- *     web, as there are too many false positives, but anecdotally useful in
- *     Gecko code.)
+ * day. However this function also runs when we're evaluating an
+ * expression that's an Identifier (that is, an unqualified name lookup),
+ * so we need to figure out if that's what's happening and throw
+ * a ReferenceError if so.
  */
 static bool GetNonexistentProperty(JSContext* cx, HandleId id,
                                    IsNameLookup nameLookup,
@@ -2438,55 +2344,8 @@ static bool GetNonexistentProperty(JSContext* cx, HandleId id,
     return false;
   }
 
-  // Give a strict warning if foo.bar is evaluated by a script for an object
-  // foo with no property named 'bar'.
-  //
-  // Don't warn if extra warnings not enabled or for random getprop
-  // operations.
-  if (MOZ_LIKELY(!cx->realm()->behaviors().extraWarnings(cx))) {
-    return true;
-  }
-
-  jsbytecode* pc;
-  RootedScript script(cx, cx->currentScript(&pc));
-  if (!script) {
-    return true;
-  }
-
-  if (JSOp(*pc) != JSOp::GetProp && JSOp(*pc) != JSOp::GetElem) {
-    return true;
-  }
-
-  // Don't warn repeatedly for the same script.
-  if (script->warnedAboutUndefinedProp()) {
-    return true;
-  }
-
-  // Don't warn in self-hosted code (where the further presence of
-  // JS::RuntimeOptions::werror() would result in impossible-to-avoid
-  // errors to entirely-innocent client code).
-  if (script->selfHosted()) {
-    return true;
-  }
-
-  // Do not warn about tests like (obj[prop] == undefined).
-  pc += GetBytecodeLength(pc);
-  if (Detecting(cx, script, pc)) {
-    return true;
-  }
-
-  unsigned flags = JSREPORT_WARNING | JSREPORT_STRICT;
-  script->setWarnedAboutUndefinedProp();
-
-  // Ok, bad undefined property reference: whine about it.
-  UniqueChars bytes =
-      IdToPrintableUTF8(cx, id, IdToPrintableBehavior::IdIsPropertyKey);
-  if (!bytes) {
-    return false;
-  }
-
-  return JS_ReportErrorFlagsAndNumberUTF8(cx, flags, GetErrorMessage, nullptr,
-                                          JSMSG_UNDEFINED_PROP, bytes.get());
+  // Otherwise, just return |undefined|.
+  return true;
 }
 
 // The NoGC version of GetNonexistentProperty, present only to make types line
@@ -2682,7 +2541,6 @@ bool js::GetNameBoundInEnvironment(JSContext* cx, HandleObject envArg,
 /*** [[Set]] ****************************************************************/
 
 static bool MaybeReportUndeclaredVarAssignment(JSContext* cx, HandleId id) {
-  unsigned flags;
   {
     jsbytecode* pc;
     JSScript* script =
@@ -2691,13 +2549,7 @@ static bool MaybeReportUndeclaredVarAssignment(JSContext* cx, HandleId id) {
       return true;
     }
 
-    // If the code is not strict and extra warnings aren't enabled, then no
-    // check is needed.
-    if (IsStrictSetPC(pc)) {
-      flags = JSREPORT_ERROR;
-    } else if (cx->realm()->behaviors().extraWarnings(cx)) {
-      flags = JSREPORT_WARNING | JSREPORT_STRICT;
-    } else {
+    if (!IsStrictSetPC(pc)) {
       return true;
     }
   }
@@ -2707,8 +2559,9 @@ static bool MaybeReportUndeclaredVarAssignment(JSContext* cx, HandleId id) {
   if (!bytes) {
     return false;
   }
-  return JS_ReportErrorFlagsAndNumberUTF8(cx, flags, GetErrorMessage, nullptr,
-                                          JSMSG_UNDECLARED_VAR, bytes.get());
+  JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_UNDECLARED_VAR,
+                           bytes.get());
+  return false;
 }
 
 /*
@@ -3102,7 +2955,7 @@ bool js::NativeDeleteProperty(JSContext* cx, HandleNativeObject obj,
 
 bool js::CopyDataPropertiesNative(JSContext* cx, HandlePlainObject target,
                                   HandleNativeObject from,
-                                  HandlePlainObject excludedItems,
+                                  Handle<PlainObject*> excludedItems,
                                   bool* optimized) {
   MOZ_ASSERT(
       !target->isDelegate(),

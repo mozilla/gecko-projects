@@ -48,7 +48,7 @@ class VisibilityChangeListener final : public nsIDOMEventListener {
   already_AddRefed<nsIContentPermissionRequestCallback> GetCallback();
 
  private:
-  virtual ~VisibilityChangeListener() {}
+  virtual ~VisibilityChangeListener() = default;
 
   nsWeakPtr mWindow;
   nsCOMPtr<nsIContentPermissionRequestCallback> mCallback;
@@ -155,7 +155,7 @@ ContentPermissionRequestParent::ContentPermissionRequestParent(
   mPrincipal = aPrincipal;
   mTopLevelPrincipal = aTopLevelPrincipal;
   mElement = aElement;
-  mRequests = aRequests;
+  mRequests = aRequests.Clone();
   mIsHandlingUserInput = aIsHandlingUserInput;
   mMaybeUnsafePermissionDelegate = aMaybeUnsafePermissionDelegate;
 }
@@ -205,10 +205,10 @@ NS_IMPL_ISUPPORTS(ContentPermissionType, nsIContentPermissionType)
 ContentPermissionType::ContentPermissionType(
     const nsACString& aType, const nsTArray<nsString>& aOptions) {
   mType = aType;
-  mOptions = aOptions;
+  mOptions = aOptions.Clone();
 }
 
-ContentPermissionType::~ContentPermissionType() {}
+ContentPermissionType::~ContentPermissionType() = default;
 
 NS_IMETHODIMP
 ContentPermissionType::GetType(nsACString& aType) {
@@ -845,7 +845,7 @@ nsContentPermissionRequestProxy::~nsContentPermissionRequestProxy() = default;
 
 nsresult nsContentPermissionRequestProxy::Init(
     const nsTArray<PermissionRequest>& requests) {
-  mPermissionRequests = requests;
+  mPermissionRequests = requests.Clone();
   mRequester = new nsContentPermissionRequesterProxy(mParent);
 
   nsCOMPtr<nsIContentPermissionPrompt> prompt =

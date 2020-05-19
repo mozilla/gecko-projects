@@ -19,7 +19,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
@@ -57,7 +56,7 @@ MOZ_FORMAT_PRINTF(1, 2) void fail(const char* msg, ...) {
 
 //-----------------------------------------------------------------------------
 
-class ScopedXPCOM : public nsIDirectoryServiceProvider2 {
+class ScopedXPCOM final : public nsIDirectoryServiceProvider2 {
  public:
   NS_DECL_ISUPPORTS
 

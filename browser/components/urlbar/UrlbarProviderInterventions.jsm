@@ -5,6 +5,7 @@
 "use strict";
 
 var EXPORTED_SYMBOLS = ["UrlbarProviderInterventions", "QueryScorer"];
+var gGlobalScope = this;
 
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
@@ -31,27 +32,36 @@ XPCOMUtils.defineLazyGetter(this, "logger", () =>
 
 XPCOMUtils.defineLazyGetter(this, "appUpdater", () => new AppUpdater());
 
-// The possible tips to show.
+// The possible tips to show.  These names (except NONE) are used in the names
+// of keys in the `urlbar.tips` keyed scalar telemetry (see telemetry.rst).
+// Don't modify them unless you've considered that.  If you do modify them or
+// add new tips, then you are also adding new `urlbar.tips` keys and therefore
+// need an expanded data collection review.
 const TIPS = {
   NONE: "",
-  CLEAR: "clear",
-  REFRESH: "refresh",
+  CLEAR: "intervention_clear",
+  REFRESH: "intervention_refresh",
 
   // There's an update available, but the user's pref says we should ask them to
   // download and apply it.
-  UPDATE_ASK: "update_ask",
+  UPDATE_ASK: "intervention_update_ask",
+
+  // The updater is currently checking.  We don't actually show a tip for this,
+  // but we use it to tell whether we should wait for the check to complete in
+  // startQuery.  See startQuery for details.
+  UPDATE_CHECKING: "intervention_update_checking",
 
   // The user's browser is up to date, but they triggered the update
   // intervention. We show this special refresh intervention instead.
-  UPDATE_REFRESH: "update_refresh",
+  UPDATE_REFRESH: "intervention_update_refresh",
 
   // There's an update and it's been downloaded and applied. The user needs to
   // restart to finish.
-  UPDATE_RESTART: "update_restart",
+  UPDATE_RESTART: "intervention_update_restart",
 
   // We can't update the browser or possibly even check for updates for some
   // reason, so the user should download the latest version from the web.
-  UPDATE_WEB: "update_web",
+  UPDATE_WEB: "intervention_update_web",
 };
 
 const EN_LOCALE_MATCH = /^en(-.*)$/;
@@ -434,6 +444,8 @@ class ProviderInterventions extends UrlbarProvider {
     // The tip we should currently show.
     this.currentTip = TIPS.NONE;
 
+    this.tipsShownInCurrentEngagement = new Set();
+
     // This object is used to match the user's queries to tips.
     XPCOMUtils.defineLazyGetter(this, "queryScorer", () => {
       let queryScorer = new QueryScorer({
@@ -454,6 +466,13 @@ class ProviderInterventions extends UrlbarProvider {
   }
 
   /**
+   * Enum of the types of intervention tips.
+   */
+  get TIP_TYPE() {
+    return TIPS;
+  }
+
+  /**
    * Unique name for the provider, used by the context to filter on providers.
    */
   get name() {
@@ -464,7 +483,7 @@ class ProviderInterventions extends UrlbarProvider {
    * The type of the provider, must be one of UrlbarUtils.PROVIDER_TYPE.
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.IMMEDIATE;
+    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
   }
 
   /**
@@ -478,7 +497,8 @@ class ProviderInterventions extends UrlbarProvider {
     if (
       !UrlbarPrefs.get("update1.interventions") ||
       !queryContext.searchString ||
-      !EN_LOCALE_MATCH.test(Services.locale.appLocaleAsBCP47)
+      !EN_LOCALE_MATCH.test(Services.locale.appLocaleAsBCP47) ||
+      !Services.policies.isAllowed("urlbarinterventions")
     ) {
       return false;
     }
@@ -500,63 +520,70 @@ class ProviderInterventions extends UrlbarProvider {
       }
     }
 
+    // Determine the tip to show, if any. If there are multiple top-score docs,
+    // prefer them in the following order.
+    if (topDocIDs.has("update")) {
+      this._setCurrentTipFromAppUpdaterStatus();
+    } else if (topDocIDs.has("clear")) {
+      let window = BrowserWindowTracker.getTopWindow();
+      if (!PrivateBrowsingUtils.isWindowPrivate(window)) {
+        this.currentTip = TIPS.CLEAR;
+      }
+    } else if (topDocIDs.has("refresh")) {
+      // Note that the "update" case can set currentTip to TIPS.REFRESH too.
+      this.currentTip = TIPS.REFRESH;
+    }
+
+    return (
+      this.currentTip != TIPS.NONE &&
+      (this.currentTip != TIPS.REFRESH ||
+        Services.policies.isAllowed("profileRefresh"))
+    );
+  }
+
+  async _setCurrentTipFromAppUpdaterStatus(waitForCheck) {
     // The update tips depend on the app's update status, so check for updates
     // now (if we haven't already checked within the update-check period).  If
     // we're running in an xpcshell test, then checkForBrowserUpdate's attempt
     // to use appUpdater will throw an exception because it won't be available.
     // In that case, return false to disable the provider.
+    //
+    // This causes synchronous IO within the updater the first time it's called
+    // (at least) so be careful not to do it the first time the urlbar is used.
     try {
       this.checkForBrowserUpdate();
     } catch (ex) {
-      return false;
+      return;
     }
 
-    // Determine the tip to show, if any. If there are multiple top-score docs,
-    // prefer them in the following order.
-    if (topDocIDs.has("update")) {
-      // There are several update tips. Figure out which one to show.
-      switch (appUpdater.status) {
-        case AppUpdater.STATUS.DOWNLOADING:
-        case AppUpdater.STATUS.STAGING:
-        case AppUpdater.STATUS.READY_FOR_RESTART:
-          // Prompt the user to restart.
-          this.currentTip = TIPS.UPDATE_RESTART;
-          break;
-        case AppUpdater.STATUS.DOWNLOAD_AND_INSTALL:
-          // There's an update available, but the user's pref says we should ask
-          // them to download and apply it.
-          this.currentTip = TIPS.UPDATE_ASK;
-          break;
-        case AppUpdater.STATUS.NO_UPDATES_FOUND:
-          // We show a special refresh tip when the browser is up to date.
-          this.currentTip = TIPS.UPDATE_REFRESH;
-          break;
-        case AppUpdater.STATUS.CHECKING:
-          // The browser is checking for an update. There's not much we can do
-          // in this case without implementing a decent self-updating progress
-          // UI, so just don't show anything.
-          return false;
-        default:
-          // Give up and ask the user to download the latest version from the
-          // web.
-          this.currentTip = TIPS.UPDATE_WEB;
-          break;
-      }
-    } else if (topDocIDs.has("clear")) {
-      let window = BrowserWindowTracker.getTopWindow();
-      if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-        return false;
-      }
-
-      this.currentTip = TIPS.CLEAR;
-    } else if (topDocIDs.has("refresh")) {
-      this.currentTip = TIPS.REFRESH;
-    } else {
-      // No tip.
-      return false;
+    // There are several update tips. Figure out which one to show.
+    switch (appUpdater.status) {
+      case AppUpdater.STATUS.READY_FOR_RESTART:
+        // Prompt the user to restart.
+        this.currentTip = TIPS.UPDATE_RESTART;
+        break;
+      case AppUpdater.STATUS.DOWNLOAD_AND_INSTALL:
+        // There's an update available, but the user's pref says we should ask
+        // them to download and apply it.
+        this.currentTip = TIPS.UPDATE_ASK;
+        break;
+      case AppUpdater.STATUS.NO_UPDATES_FOUND:
+        // We show a special refresh tip when the browser is up to date.
+        this.currentTip = TIPS.UPDATE_REFRESH;
+        break;
+      case AppUpdater.STATUS.CHECKING:
+        // This will be the case the first time we check.  See startQuery for
+        // how this special tip is handled.
+        this.currentTip = TIPS.UPDATE_CHECKING;
+        break;
+      default:
+        // Give up and ask the user to download the latest version from the
+        // web. We default to this case when the update is still downloading
+        // because an update doesn't actually occur if the user were to
+        // restart the browser. See bug 1625241.
+        this.currentTip = TIPS.UPDATE_WEB;
+        break;
     }
-
-    return true;
   }
 
   /**
@@ -568,6 +595,50 @@ class ProviderInterventions extends UrlbarProvider {
   async startQuery(queryContext, addCallback) {
     let instance = {};
     this.queries.set(queryContext, instance);
+
+    // TIPS.UPDATE_CHECKING is special, and we never actually show a tip that
+    // reflects a "checking" status.  Instead it's handled like this.  We call
+    // appUpdater.check() to start an update check.  If we haven't called it
+    // before, then when it returns, appUpdater.status will be
+    // AppUpdater.STATUS.CHECKING, and it will remain CHECKING until the check
+    // finishes.  We can add a listener to appUpdater to be notified when the
+    // check finishes.  We don't want to wait for it to finish in isActive
+    // because that would block other providers from adding their results, so
+    // instead we wait here in startQuery.  The results from other providers
+    // will be added while we're waiting.  When the check finishes, we call
+    // addCallback and add our result.  It doesn't matter how long the check
+    // takes because if another query starts, the view is closed, or the user
+    // changes the selection, the query will be canceled.
+    if (this.currentTip == TIPS.UPDATE_CHECKING) {
+      // First check the status because it may have changed between the time
+      // isActive was called and now.
+      this._setCurrentTipFromAppUpdaterStatus();
+      if (this.currentTip == TIPS.UPDATE_CHECKING) {
+        // The updater is still checking, so wait for it to finish.
+        await new Promise(resolve => {
+          this._appUpdaterListener = () => {
+            appUpdater.removeListener(this._appUpdaterListener);
+            delete this._appUpdaterListener;
+            resolve();
+          };
+          appUpdater.addListener(this._appUpdaterListener);
+        });
+        if (!this.queries.has(queryContext)) {
+          // The query was canceled before the check finished.
+          return;
+        }
+        // Finally, set the tip from the updater status.  The updater should no
+        // longer be checking, but guard against it just in case by returning
+        // early.
+        this._setCurrentTipFromAppUpdaterStatus();
+        if (this.currentTip == TIPS.UPDATE_CHECKING) {
+          this.queries.delete(queryContext);
+          return;
+        }
+      }
+    }
+    // At this point, this.currentTip != TIPS.UPDATE_CHECKING because we
+    // returned early above if it was.
 
     let result = new UrlbarResult(
       UrlbarUtils.RESULT_TYPE.TIP,
@@ -585,6 +656,8 @@ class ProviderInterventions extends UrlbarProvider {
       return;
     }
 
+    this.tipsShownInCurrentEngagement.add(this.currentTip);
+
     addCallback(this, result);
     this.queries.delete(queryContext);
   }
@@ -597,6 +670,13 @@ class ProviderInterventions extends UrlbarProvider {
   cancelQuery(queryContext) {
     logger.info(`Canceling query for ${queryContext.searchString}`);
     this.queries.delete(queryContext);
+
+    // If we're waiting for appUpdater to finish its update check,
+    // this._appUpdaterListener will be defined.  We can stop listening now.
+    if (this._appUpdaterListener) {
+      appUpdater.removeListener(this._appUpdaterListener);
+      delete this._appUpdaterListener;
+    }
   }
 
   /**
@@ -632,6 +712,15 @@ class ProviderInterventions extends UrlbarProvider {
     }
   }
 
+  onEngagement(isPrivate, state) {
+    if (["engagement", "abandonment"].includes(state)) {
+      for (let tip of this.tipsShownInCurrentEngagement) {
+        Services.telemetry.keyedScalarAdd("urlbar.tips", `${tip}-shown`, 1);
+      }
+    }
+    this.tipsShownInCurrentEngagement.clear();
+  }
+
   /**
    * Checks for app updates.
    *
@@ -655,7 +744,10 @@ class ProviderInterventions extends UrlbarProvider {
    * is intended to be used by tests.
    */
   resetAppUpdater() {
-    appUpdater = new AppUpdater();
+    // Reset only if the object has already been initialized.
+    if (!Object.getOwnPropertyDescriptor(gGlobalScope, "appUpdater").get) {
+      appUpdater = new AppUpdater();
+    }
   }
 }
 

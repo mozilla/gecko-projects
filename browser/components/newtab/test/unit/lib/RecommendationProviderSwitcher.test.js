@@ -21,6 +21,20 @@ describe("RecommendationProviderSwitcher", () => {
 
   describe("#setAffinityProvider", () => {
     it("should setup proper affnity provider with modelKeys", async () => {
+      feed.setAffinityProvider();
+
+      assert.equal(feed.affinityProvider.modelKeys, undefined);
+
+      feed.affinityProvider = null;
+      feed.affinityProviderV2 = {
+        modelKeys: "1234",
+      };
+
+      feed.setAffinityProvider();
+
+      assert.equal(feed.affinityProvider.modelKeys, "1234");
+    });
+    it("should use old provider", async () => {
       feed.setAffinityProvider(
         undefined,
         undefined,
@@ -43,7 +57,7 @@ describe("RecommendationProviderSwitcher", () => {
         undefined
       );
 
-      assert.equal(feed.affinityProvider.modelKeys, "1234");
+      assert.equal(feed.affinityProvider.modelKeys, undefined);
     });
   });
 
@@ -138,12 +152,12 @@ describe("RecommendationProviderSwitcher", () => {
   });
 
   describe("#calculateItemRelevanceScore", () => {
-    it("should use personalized score with affinity provider", () => {
+    it("should use personalized score with affinity provider", async () => {
       const item = {};
       feed.affinityProvider = {
-        calculateItemRelevanceScore: () => 0.5,
+        calculateItemRelevanceScore: async () => 0.5,
       };
-      feed.calculateItemRelevanceScore(item);
+      await feed.calculateItemRelevanceScore(item);
       assert.equal(item.score, 0.5);
     });
   });

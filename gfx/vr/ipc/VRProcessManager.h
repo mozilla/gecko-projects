@@ -8,8 +8,14 @@
 
 #include "VRProcessParent.h"
 
+#include "mozilla/ipc/ProtocolUtils.h"
+
 namespace mozilla {
 class MemoryReportingProcess;
+namespace ipc {
+template <typename T>
+class Endpoint;
+}
 namespace gfx {
 
 class VRManagerChild;
@@ -67,7 +73,7 @@ class VRProcessManager final : public VRProcessParent::Listener {
     explicit Observer(VRProcessManager* aManager);
 
    protected:
-    ~Observer() {}
+    ~Observer() = default;
 
     VRProcessManager* mManager;
   };

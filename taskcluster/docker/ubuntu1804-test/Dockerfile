@@ -1,8 +1,4 @@
-# The base image is a last known working snapshot of this image. We do this
-# to work around problems rebuilding desktop1604-test. See bug 1503756 for
-# the ugly details. Bug 1511527 tracks undoing this hack and building from
-# a fresh ubuntu image.
-FROM          ubuntu:18.04
+FROM          ubuntu:bionic-20200112
 MAINTAINER    Edwin Takahashi <egao@mozilla.com>
 
 # Create necessary directories and worker user account
@@ -103,6 +99,8 @@ RUN     chmod +x /bin/taskcluster-interactive-shell
 # gnome-keyring-daemon without first clearing the capability, it would just exit with the message
 # "Operation not permitted". Luckily it doesn't actually require the capability.
 RUN     setcap -r /usr/bin/gnome-keyring-daemon
+
+COPY custom.conf /etc/gdm3/custom.conf
 
 # Ubuntu 18.04 (or any other GNOME3 based systems) needs dbus to have various
 # test function as expected. Use entrypoint to initialize dbus as root.

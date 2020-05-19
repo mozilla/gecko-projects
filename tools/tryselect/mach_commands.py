@@ -9,6 +9,7 @@ import importlib
 import os
 import sys
 
+import six
 from mach.decorators import (
     CommandProvider,
     Command,
@@ -101,14 +102,9 @@ class TrySelect(MachCommandBase):
         special preset handling. They can all save and load presets the same
         way.
         """
-        from tryselect.preset import migrate_old_presets
         from tryselect.util.dicttools import merge
 
         user_presets = self.presets.handlers[0]
-
-        # TODO: Remove after Jan 1, 2020.
-        migrate_old_presets(user_presets)
-
         if preset_action == 'list':
             self.presets.list()
             sys.exit()
@@ -161,7 +157,7 @@ class TrySelect(MachCommandBase):
     def handle_try_config(self, **kwargs):
         from tryselect.util.dicttools import merge
         kwargs.setdefault('try_config', {})
-        for cls in self.parser.task_configs.itervalues():
+        for cls in six.itervalues(self.parser.task_configs):
             try_config = cls.try_config(**kwargs)
             if try_config is not None:
                 kwargs['try_config'] = merge(kwargs['try_config'], try_config)
@@ -328,6 +324,15 @@ class TrySelect(MachCommandBase):
         path = os.path.join('tools', 'tryselect', 'selectors', 'chooser', 'requirements.txt')
         self.virtualenv_manager.install_pip_requirements(path, quiet=True)
 
+        return self.run(**kwargs)
+
+    @SubCommand('try',
+                'auto',
+                description='Automatically determine which tasks to run. This runs the same '
+                            'set of tasks that would be run on autoland. This '
+                            'selector is EXPERIMENTAL.',
+                parser=get_parser('auto'))
+    def try_auto(self, **kwargs):
         return self.run(**kwargs)
 
     @SubCommand('try',

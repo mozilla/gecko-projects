@@ -23,7 +23,7 @@ namespace mozilla {
 struct AudioChunk;
 class AudioSegment;
 }  // namespace mozilla
-DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioChunk)
+MOZ_DECLARE_RELOCATE_USING_MOVE_CONSTRUCTOR(mozilla::AudioChunk)
 
 /**
  * This allows compilation of nsTArray<AudioSegment> and
@@ -33,7 +33,7 @@ DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioChunk)
  * Note that AudioSegment(const AudioSegment&) is deleted, so this should
  * never come into effect.
  */
-DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioSegment)
+MOZ_DECLARE_RELOCATE_USING_MOVE_CONSTRUCTOR(mozilla::AudioSegment)
 
 namespace mozilla {
 
@@ -269,7 +269,7 @@ struct AudioChunk {
   RefPtr<ThreadSharedObject> mBuffer;  // the buffer object whose lifetime is
                                        // managed; null means data is all zeroes
   // one pointer per channel; empty if and only if mBuffer is null
-  AutoTArray<const void*, GUESS_AUDIO_CHANNELS> mChannelData;
+  CopyableAutoTArray<const void*, GUESS_AUDIO_CHANNELS> mChannelData;
   float mVolume = 1.0f;  // volume multiplier to apply
   // format of frames in mBuffer (or silence if mBuffer is null)
   SampleFormat mBufferFormat = AUDIO_FORMAT_SILENCE;
@@ -288,13 +288,12 @@ class AudioSegment : public MediaSegmentBase<AudioSegment, AudioChunk> {
 
   AudioSegment() : MediaSegmentBase<AudioSegment, AudioChunk>(AUDIO) {}
 
-  AudioSegment(AudioSegment&& aSegment)
-      : MediaSegmentBase<AudioSegment, AudioChunk>(std::move(aSegment)) {}
+  AudioSegment(AudioSegment&& aSegment) = default;
 
   AudioSegment(const AudioSegment&) = delete;
   AudioSegment& operator=(const AudioSegment&) = delete;
 
-  ~AudioSegment() {}
+  ~AudioSegment() = default;
 
   // Resample the whole segment in place.  `aResampler` is an instance of a
   // resampler, initialized with `aResamplerChannelCount` channels. If this
@@ -443,7 +442,7 @@ void WriteChunk(AudioChunk& aChunk, uint32_t aOutputChannels,
                 AudioDataValue* aOutputBuffer) {
   AutoTArray<const SrcT*, GUESS_AUDIO_CHANNELS> channelData;
 
-  channelData = aChunk.ChannelData<SrcT>();
+  channelData = aChunk.ChannelData<SrcT>().Clone();
 
   if (channelData.Length() < aOutputChannels) {
     // Up-mix. Note that this might actually make channelData have more

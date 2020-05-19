@@ -8,7 +8,6 @@
 #define vm_Scope_h
 
 #include "mozilla/Maybe.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/Variant.h"
 
 #include <stddef.h>
@@ -28,11 +27,12 @@ namespace js {
 
 namespace frontend {
 class ScopeCreationData;
-};
+class EnvironmentShapeCreationData;
+};  // namespace frontend
 
 class BaseScopeData;
 class ModuleObject;
-class AbstractScope;
+class AbstractScopePtr;
 
 enum class BindingKind : uint8_t {
   Import,
@@ -49,8 +49,6 @@ enum class BindingKind : uint8_t {
 static inline bool BindingKindIsLexical(BindingKind kind) {
   return kind == BindingKind::Let || kind == BindingKind::Const;
 }
-
-enum class IsFieldInitializer : bool { No, Yes };
 
 static inline bool ScopeKindIsCatch(ScopeKind kind) {
   return kind == ScopeKind::SimpleCatch || kind == ScopeKind::Catch;
@@ -245,8 +243,10 @@ class Scope : public js::gc::TenuredCell {
   friend class GCMarker;
   friend class frontend::ScopeCreationData;
 
+ protected:
   // The enclosing scope or nullptr.
-  const GCPtrScope enclosing_;
+  using HeaderWithScope = gc::CellHeaderWithTenuredGCPointer<Scope>;
+  HeaderWithScope headerAndEnclosingScope_;
 
   // The kind determines data_.
   const ScopeKind kind_;
@@ -255,11 +255,10 @@ class Scope : public js::gc::TenuredCell {
   // EnvironmentObject. Otherwise nullptr.
   const GCPtrShape environmentShape_;
 
- protected:
   BaseScopeData* data_;
 
   Scope(ScopeKind kind, Scope* enclosing, Shape* environmentShape)
-      : enclosing_(enclosing),
+      : headerAndEnclosingScope_(enclosing),
         kind_(kind),
         environmentShape_(environmentShape),
         data_(nullptr) {}
@@ -288,6 +287,7 @@ class Scope : public js::gc::TenuredCell {
       MutableHandle<UniquePtr<typename ConcreteScope::Data>> data);
 
   static const JS::TraceKind TraceKind = JS::TraceKind::Scope;
+  const gc::CellHeader& cellHeader() const { return headerAndEnclosingScope_; }
 
   template <typename T>
   bool is() const {
@@ -308,11 +308,11 @@ class Scope : public js::gc::TenuredCell {
 
   ScopeKind kind() const { return kind_; }
 
-  Scope* enclosing() const { return enclosing_; }
+  Scope* enclosing() const { return headerAndEnclosingScope_.ptr(); }
 
   Shape* environmentShape() const { return environmentShape_; }
 
-  static bool hasEnvironment(ScopeKind kind, Shape* environmentShape) {
+  static bool hasEnvironment(ScopeKind kind, bool environmentShape) {
     switch (kind) {
       case ScopeKind::With:
       case ScopeKind::Global:
@@ -320,12 +320,12 @@ class Scope : public js::gc::TenuredCell {
         return true;
       default:
         // If there's a shape, an environment must be created for this scope.
-        return environmentShape != nullptr;
+        return environmentShape;
     }
   }
 
   bool hasEnvironment() const {
-    return hasEnvironment(kind_, environmentShape_);
+    return hasEnvironment(kind_, environmentShape());
   }
 
   uint32_t chainLength() const;
@@ -369,7 +369,7 @@ class BaseScopeData {};
 
 template <class Data>
 inline size_t SizeOfData(uint32_t numBindings) {
-  static_assert(std::is_base_of<BaseScopeData, Data>::value,
+  static_assert(std::is_base_of_v<BaseScopeData, Data>,
                 "Data must be the correct sort of data, i.e. it must "
                 "inherit from BaseScopeData");
   return sizeof(Data) +
@@ -437,17 +437,18 @@ class LexicalScope : public Scope {
                                       uint32_t firstFrameSlot,
                                       HandleScope enclosing);
 
+  template <typename ShapeType>
   static bool prepareForScopeCreation(JSContext* cx, ScopeKind kind,
                                       uint32_t firstFrameSlot,
-                                      Handle<AbstractScope> enclosing,
+                                      Handle<AbstractScopePtr> enclosing,
                                       MutableHandle<UniquePtr<Data>> data,
-                                      MutableHandleShape envShape);
+                                      ShapeType envShape);
 
   Data& data() { return *static_cast<Data*>(data_); }
 
   const Data& data() const { return *static_cast<Data*>(data_); }
 
-  static uint32_t nextFrameSlot(const AbstractScope& scope);
+  static uint32_t nextFrameSlot(const AbstractScopePtr& scope);
 
  public:
   uint32_t firstFrameSlot() const;
@@ -490,7 +491,7 @@ class FunctionScope : public Scope {
   friend class BindingIter;
   friend class PositionalFormalParameterIter;
   friend class Scope;
-  friend class AbstractScope;
+  friend class AbstractScopePtr;
   static const ScopeKind classScopeKind_ = ScopeKind::Function;
 
  public:
@@ -509,9 +510,6 @@ class FunctionScope : public Scope {
     // If parameter expressions are present, parameters act like lexical
     // bindings.
     bool hasParameterExprs = false;
-
-    // Yes if the corresponding function is a field initializer lambda.
-    IsFieldInitializer isFieldInitializer = IsFieldInitializer::No;
 
     // Bindings are sorted by kind in both frames and environments.
     //
@@ -553,12 +551,21 @@ class FunctionScope : public Scope {
     void trace(JSTracer* trc);
   };
 
+  template <typename ShapeType>
   static bool prepareForScopeCreation(JSContext* cx,
                                       MutableHandle<UniquePtr<Data>> data,
                                       bool hasParameterExprs,
-                                      IsFieldInitializer isFieldInitializer,
                                       bool needsEnvironment, HandleFunction fun,
-                                      MutableHandleShape envShape);
+                                      ShapeType envShape);
+
+  static bool updateEnvShapeIfRequired(JSContext* cx, MutableHandleShape shape,
+                                       bool needsEnvironment,
+                                       bool hasParameterExprs);
+
+  static bool updateEnvShapeIfRequired(
+      JSContext* cx,
+      MutableHandle<frontend::EnvironmentShapeCreationData> shape,
+      bool needsEnvironment, bool hasParameterExprs);
 
   static FunctionScope* clone(JSContext* cx, Handle<FunctionScope*> scope,
                               HandleFunction fun, HandleScope enclosing);
@@ -568,10 +575,12 @@ class FunctionScope : public Scope {
                        HandleScope enclosing, MutableHandleScope scope);
 
  private:
-  static FunctionScope* createWithData(
-      JSContext* cx, MutableHandle<UniquePtr<Data>> data,
-      bool hasParameterExprs, IsFieldInitializer isFieldInitializer,
-      bool needsEnvironment, HandleFunction fun, HandleScope enclosing);
+  static FunctionScope* createWithData(JSContext* cx,
+                                       MutableHandle<UniquePtr<Data>> data,
+                                       bool hasParameterExprs,
+                                       bool needsEnvironment,
+                                       HandleFunction fun,
+                                       HandleScope enclosing);
 
   Data& data() { return *static_cast<Data*>(data_); }
 
@@ -585,10 +594,6 @@ class FunctionScope : public Scope {
   JSScript* script() const;
 
   bool hasParameterExprs() const { return data().hasParameterExprs; }
-
-  IsFieldInitializer isFieldInitializer() const {
-    return data().isFieldInitializer;
-  }
 
   uint32_t numPositionalFormalParameters() const {
     return data().nonPositionalFormalStart;
@@ -646,12 +651,20 @@ class VarScope : public Scope {
                                   uint32_t firstFrameSlot,
                                   bool needsEnvironment, HandleScope enclosing);
 
+  template <typename ShapeType>
   static bool prepareForScopeCreation(JSContext* cx, ScopeKind kind,
                                       MutableHandle<UniquePtr<Data>> data,
                                       uint32_t firstFrameSlot,
                                       bool needsEnvironment,
-                                      MutableHandleShape envShape);
+                                      ShapeType envShape);
 
+  static bool updateEnvShapeIfRequired(JSContext* cx,
+                                       MutableHandleShape envShape,
+                                       bool needsEnvironment);
+  static bool updateEnvShapeIfRequired(
+      JSContext* cx,
+      MutableHandle<frontend::EnvironmentShapeCreationData> envShape,
+      bool needsEnvironment);
   Data& data() { return *static_cast<Data*>(data_); }
 
   const Data& data() const { return *static_cast<Data*>(data_); }
@@ -755,7 +768,7 @@ inline bool Scope::is<GlobalScope>() const {
 // Corresponds to a WithEnvironmentObject on the environment chain.
 class WithScope : public Scope {
   friend class Scope;
-  friend class AbstractScope;
+  friend class AbstractScopePtr;
   static const ScopeKind classScopeKind_ = ScopeKind::With;
 
  public:
@@ -819,10 +832,18 @@ class EvalScope : public Scope {
                                    MutableHandle<UniquePtr<Data>> data,
                                    HandleScope enclosing);
 
+  template <typename ShapeType>
   static bool prepareForScopeCreation(JSContext* cx, ScopeKind scopeKind,
                                       MutableHandle<UniquePtr<Data>> data,
-                                      MutableHandleShape envShape);
+                                      ShapeType envShape);
 
+  static bool updateEnvShapeIfRequired(JSContext* cx,
+                                       MutableHandleShape envShape,
+                                       ScopeKind scopeKind);
+  static bool updateEnvShapeIfRequired(
+      JSContext* cx,
+      MutableHandle<frontend::EnvironmentShapeCreationData> envShape,
+      ScopeKind scopeKind);
   Data& data() { return *static_cast<Data*>(data_); }
 
   const Data& data() const { return *static_cast<Data*>(data_); }
@@ -865,7 +886,7 @@ class ModuleScope : public Scope {
   friend class GCMarker;
   friend class BindingIter;
   friend class Scope;
-  friend class AbstractScope;
+  friend class AbstractScopePtr;
   friend class frontend::ScopeCreationData;
   static const ScopeKind classScopeKind_ = ScopeKind::Module;
 
@@ -910,11 +931,17 @@ class ModuleScope : public Scope {
                                      MutableHandle<UniquePtr<Data>> data,
                                      Handle<ModuleObject*> module,
                                      HandleScope enclosing);
-
+  template <typename ShapeType>
   static bool prepareForScopeCreation(JSContext* cx,
                                       MutableHandle<UniquePtr<Data>> data,
                                       HandleModuleObject module,
-                                      MutableHandleShape envShape);
+                                      ShapeType envShape);
+
+  static bool updateEnvShapeIfRequired(JSContext* cx,
+                                       MutableHandleShape envShape);
+  static bool updateEnvShapeIfRequired(
+      JSContext* cx,
+      MutableHandle<frontend::EnvironmentShapeCreationData> envShape);
 
   Data& data() { return *static_cast<Data*>(data_); }
 
@@ -932,7 +959,7 @@ class WasmInstanceScope : public Scope {
   friend class BindingIter;
   friend class Scope;
   friend class GCMarker;
-  friend class AbstractScope;
+  friend class AbstractScopePtr;
   static const ScopeKind classScopeKind_ = ScopeKind::WasmInstance;
 
  public:
@@ -986,7 +1013,7 @@ class WasmFunctionScope : public Scope {
   friend class BindingIter;
   friend class Scope;
   friend class GCMarker;
-  friend class AbstractScope;
+  friend class AbstractScopePtr;
   static const ScopeKind classScopeKind_ = ScopeKind::WasmFunction;
 
  public:
@@ -1241,7 +1268,7 @@ class BindingIter {
 
   BindingIter(EvalScope::Data& data, bool strict) { init(data, strict); }
 
-  explicit BindingIter(const BindingIter& bi) = default;
+  MOZ_IMPLICIT BindingIter(const BindingIter& bi) = default;
 
   bool done() const { return index_ == length_; }
 
@@ -1404,7 +1431,7 @@ class MOZ_STACK_CLASS ScopeIter {
 
   explicit ScopeIter(JSScript* script);
 
-  explicit ScopeIter(const ScopeIter& si) : scope_(si.scope_) {}
+  explicit ScopeIter(const ScopeIter& si) = default;
 
   bool done() const { return !scope_; }
 
@@ -1505,6 +1532,13 @@ class MutableWrappedPtrOperations<ScopeIter, Wrapper>
  public:
   void operator++(int) { iter().operator++(1); }
 };
+
+Shape* CreateEnvironmentShape(JSContext* cx, BindingIter& bi,
+                              const JSClass* cls, uint32_t numSlots,
+                              uint32_t baseShapeFlags);
+
+Shape* EmptyEnvironmentShape(JSContext* cx, const JSClass* cls,
+                             uint32_t numSlots, uint32_t baseShapeFlags);
 
 }  // namespace js
 

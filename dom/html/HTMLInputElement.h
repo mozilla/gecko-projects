@@ -18,6 +18,14 @@
 #include "mozilla/dom/HTMLInputElementBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/dom/SingleLineTextInputTypes.h"
+#include "mozilla/dom/NumericInputTypes.h"
+#include "mozilla/dom/CheckableInputTypes.h"
+#include "mozilla/dom/ButtonInputTypes.h"
+#include "mozilla/dom/DateTimeInputTypes.h"
+#include "mozilla/dom/ColorInputType.h"
+#include "mozilla/dom/FileInputType.h"
+#include "mozilla/dom/HiddenInputType.h"
 #include "nsGenericHTMLElement.h"
 #include "nsImageLoadingContent.h"
 #include "nsCOMPtr.h"
@@ -25,26 +33,7 @@
 #include "nsIFilePicker.h"
 #include "nsIContentPrefService2.h"
 #include "nsContentUtils.h"
-#include "SingleLineTextInputTypes.h"
-#include "NumericInputTypes.h"
-#include "CheckableInputTypes.h"
-#include "ButtonInputTypes.h"
-#include "DateTimeInputTypes.h"
-#include "ColorInputType.h"
-#include "FileInputType.h"
-#include "HiddenInputType.h"
 
-static constexpr size_t INPUT_TYPE_SIZE = sizeof(
-    mozilla::Variant<TextInputType, SearchInputType, TelInputType, URLInputType,
-                     EmailInputType, PasswordInputType, NumberInputType,
-                     RangeInputType, RadioInputType, CheckboxInputType,
-                     ButtonInputType, ImageInputType, ResetInputType,
-                     SubmitInputType, DateInputType, TimeInputType,
-                     WeekInputType, MonthInputType, DateTimeLocalInputType,
-                     FileInputType, ColorInputType, HiddenInputType>);
-
-class InputType;
-struct DoNotDelete;
 class nsIRadioGroupContainer;
 class nsIRadioVisitor;
 
@@ -62,6 +51,7 @@ class File;
 class FileList;
 class FileSystemEntry;
 class GetFilesHelper;
+class InputType;
 
 /**
  * A class we use to create a singleton object that is used to keep track of
@@ -73,7 +63,7 @@ class GetFilesHelper;
  * page is being viewed in private browsing.
  */
 class UploadLastDir final : public nsIObserver, public nsSupportsWeakReference {
-  ~UploadLastDir() {}
+  ~UploadLastDir() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -100,7 +90,7 @@ class UploadLastDir final : public nsIObserver, public nsSupportsWeakReference {
   nsresult StoreLastUsedDirectory(Document* aDoc, nsIFile* aDir);
 
   class ContentPrefCallback final : public nsIContentPrefCallback2 {
-    virtual ~ContentPrefCallback() {}
+    virtual ~ContentPrefCallback() = default;
 
    public:
     ContentPrefCallback(nsIFilePicker* aFilePicker,
@@ -121,7 +111,7 @@ class HTMLInputElement final : public TextControlElement,
                                public nsIConstraintValidation {
   friend class AfterSetFilesOrDirectoriesCallback;
   friend class DispatchChangeEventCallback;
-  friend class ::InputType;
+  friend class InputType;
 
  public:
   using nsGenericHTMLFormElementWithState::GetForm;
@@ -151,7 +141,7 @@ class HTMLInputElement final : public TextControlElement,
 #endif
 
   // Element
-  virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
+  virtual bool IsInteractiveHTMLContent() const override;
 
   // EventTarget
   virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
@@ -238,7 +228,7 @@ class HTMLInputElement final : public TextControlElement,
   virtual bool GetPlaceholderVisibility() override;
   virtual bool GetPreviewVisibility() override;
   virtual void InitializeKeyboardEventListeners() override;
-  virtual void OnValueChanged(bool aNotify, ValueChangeKind) override;
+  virtual void OnValueChanged(ValueChangeKind) override;
   virtual void GetValueFromSetRangeText(nsAString& aValue) override;
   MOZ_CAN_RUN_SCRIPT virtual nsresult SetValueFromSetRangeText(
       const nsAString& aValue) override;
@@ -518,11 +508,6 @@ class HTMLInputElement final : public TextControlElement,
   bool IsDraggingRange() const { return mIsDraggingRange; }
   void SetIndeterminate(bool aValue);
 
-  void GetInputMode(nsAString& aValue);
-  void SetInputMode(const nsAString& aValue, ErrorResult& aRv) {
-    SetHTMLAttr(nsGkAtoms::inputmode, aValue, aRv);
-  }
-
   nsGenericHTMLElement* GetList() const;
 
   void GetMax(nsAString& aValue) { GetHTMLAttr(nsGkAtoms::max, aValue); }
@@ -531,6 +516,13 @@ class HTMLInputElement final : public TextControlElement,
   }
 
   int32_t MaxLength() const { return GetIntAttr(nsGkAtoms::maxlength, -1); }
+
+  int32_t UsedMaxLength() const final {
+    if (!mInputType->MinAndMaxLengthApply()) {
+      return -1;
+    }
+    return MaxLength();
+  }
 
   void SetMaxLength(int32_t aValue, ErrorResult& aRv) {
     int32_t minLength = MinLength();
@@ -669,6 +661,10 @@ class HTMLInputElement final : public TextControlElement,
    * @return the current step value.
    */
   Decimal GetStep() const;
+
+  // Returns whether the given keyboard event steps up or down the value of an
+  // <input> element.
+  bool StepsInputValue(const WidgetKeyboardEvent&) const;
 
   already_AddRefed<nsINodeList> GetLabels();
 
@@ -812,10 +808,8 @@ class HTMLInputElement final : public TextControlElement,
 
   bool MozIsTextField(bool aExcludePassword);
 
-  /**
-   * GetEditor() and HasEditor() for webidl bindings.
-   */
-  MOZ_CAN_RUN_SCRIPT nsIEditor* GetEditor();
+  MOZ_CAN_RUN_SCRIPT nsIEditor* GetEditorForBindings();
+  // For WebIDL bindings.
   bool HasEditor();
 
   bool IsInputEventTarget() const { return IsSingleLineTextControl(false); }
@@ -966,6 +960,8 @@ class HTMLInputElement final : public TextControlElement,
 
   virtual void AfterClearForm(bool aUnbindOrDelete) override;
 
+  virtual void ResultForDialogSubmit(nsAString& aResult) override;
+
   /**
    * Dispatch a select event. Returns true if the event was not cancelled.
    */
@@ -1084,12 +1080,14 @@ class HTMLInputElement final : public TextControlElement,
   MOZ_CAN_RUN_SCRIPT
   void HandleTypeChange(uint8_t aNewType, bool aNotify);
 
+  enum class ForValueGetter { No, Yes };
+
   /**
    * Sanitize the value of the element depending of its current type.
    * See:
    * http://www.whatwg.org/specs/web-apps/current-work/#value-sanitization-algorithm
    */
-  void SanitizeValue(nsAString& aValue);
+  void SanitizeValue(nsAString& aValue, ForValueGetter = ForValueGetter::No);
 
   /**
    * Returns whether the placeholder attribute applies for the current type.
@@ -1479,7 +1477,7 @@ class HTMLInputElement final : public TextControlElement,
    * Current value in the input box, in DateTimeValue dictionary format, see
    * HTMLInputElement.webidl for details.
    */
-  nsAutoPtr<DateTimeValue> mDateTimeInputBoxValue;
+  UniquePtr<DateTimeValue> mDateTimeInputBoxValue;
 
   /**
    * The triggering principal for the src attribute.
@@ -1489,7 +1487,16 @@ class HTMLInputElement final : public TextControlElement,
   /*
    * InputType object created based on input type.
    */
-  UniquePtr<InputType, DoNotDelete> mInputType;
+  UniquePtr<InputType, InputType::DoNotDelete> mInputType;
+
+  static constexpr size_t INPUT_TYPE_SIZE =
+      sizeof(mozilla::Variant<
+             TextInputType, SearchInputType, TelInputType, URLInputType,
+             EmailInputType, PasswordInputType, NumberInputType, RangeInputType,
+             RadioInputType, CheckboxInputType, ButtonInputType, ImageInputType,
+             ResetInputType, SubmitInputType, DateInputType, TimeInputType,
+             WeekInputType, MonthInputType, DateTimeLocalInputType,
+             FileInputType, ColorInputType, HiddenInputType>);
 
   // Memory allocated for mInputType, reused when type changes.
   char mInputTypeMem[INPUT_TYPE_SIZE];
@@ -1635,7 +1642,7 @@ class HTMLInputElement final : public TextControlElement,
   };
 
   class nsFilePickerShownCallback : public nsIFilePickerShownCallback {
-    virtual ~nsFilePickerShownCallback() {}
+    virtual ~nsFilePickerShownCallback() = default;
 
    public:
     nsFilePickerShownCallback(HTMLInputElement* aInput,

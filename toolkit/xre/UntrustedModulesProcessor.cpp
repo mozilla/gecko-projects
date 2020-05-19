@@ -86,6 +86,34 @@ class MOZ_RAII BackgroundPriorityRegion final {
   const BOOL mIsBackground;
 };
 
+// This class wraps a set of the executables's dependent modules
+// that is delay-initialized the first time Lookup() is called.
+class DependentModules final {
+  Maybe<nsTHashtable<nsStringCaseInsensitiveHashKey>> mDependentModules;
+
+ public:
+  bool Lookup(const nsString& aModulePath) {
+    if (aModulePath.IsEmpty()) {
+      return false;
+    }
+
+    if (mDependentModules.isNothing()) {
+      nt::PEHeaders executable(::GetModuleHandleW(nullptr));
+
+      // We generate a hash table only when the executable's import table is
+      // tampered.  If the import table is intact, all dependent modules are
+      // legit and we're not interested in any of them.  In such a case, we
+      // set an empty table so that this function returns false.
+      mDependentModules =
+          Some(executable.IsImportDirectoryTampered()
+                   ? executable.GenerateDependentModuleSet()
+                   : nsTHashtable<nsStringCaseInsensitiveHashKey>());
+    }
+
+    return !!mDependentModules.ref().GetEntry(nt::GetLeafName(aModulePath));
+  }
+};
+
 /* static */
 bool UntrustedModulesProcessor::IsSupportedProcessType() {
   switch (XRE_GetProcessType()) {
@@ -104,16 +132,12 @@ bool UntrustedModulesProcessor::IsSupportedProcessType() {
 
 /* static */
 RefPtr<UntrustedModulesProcessor> UntrustedModulesProcessor::Create() {
-#if defined(EARLY_BETA_OR_EARLIER)
   if (!IsSupportedProcessType()) {
     return nullptr;
   }
 
   RefPtr<UntrustedModulesProcessor> result(new UntrustedModulesProcessor());
   return result.forget();
-#else
-  return nullptr;
-#endif  // defined(EARLY_BETA_OR_EARLIER)
 }
 
 NS_IMPL_ISUPPORTS(UntrustedModulesProcessor, nsIObserver)
@@ -126,7 +150,8 @@ UntrustedModulesProcessor::UntrustedModulesProcessor()
                                  LazyIdleThread::ManualShutdown)),
       mUnprocessedMutex(
           "mozilla::UntrustedModulesProcessor::mUnprocessedMutex"),
-      mAllowProcessing(true) {
+      mAllowProcessing(true),
+      mIsFirstBatchProcessed(false) {
   AddObservers();
 }
 
@@ -572,8 +597,11 @@ void UntrustedModulesProcessor::ProcessModuleLoadQueue() {
     return;
   }
 
+  auto cleanup = MakeScopeExit([&]() { mIsFirstBatchProcessed = true; });
+
   Telemetry::BatchProcessedStackGenerator stackProcessor;
   ModulesMap modules;
+  DependentModules dependentModules;
 
   Maybe<double> maybeXulLoadDuration;
   Vector<Telemetry::ProcessedStack> processedStacks;
@@ -598,9 +626,18 @@ void UntrustedModulesProcessor::ProcessModuleLoadQueue() {
       return;
     }
 
+    bool isDependent = mIsFirstBatchProcessed
+                           ? false
+                           : dependentModules.Lookup(module->mSanitizedDllName);
+
+    if (!mAllowProcessing) {
+      return;
+    }
+
     glue::EnhancedModuleLoadInfo::BacktraceType backtrace =
         std::move(entry.mNtLoadInfo.mBacktrace);
-    ProcessedModuleLoadEvent event(std::move(entry), std::move(module));
+    ProcessedModuleLoadEvent event(std::move(entry), std::move(module),
+                                   isDependent);
 
     if (!event) {
       // We don't have a sanitized DLL path, so we cannot include this event
@@ -822,7 +859,10 @@ void UntrustedModulesProcessor::CompleteProcessing(
     return;
   }
 
+  auto cleanup = MakeScopeExit([&]() { mIsFirstBatchProcessed = true; });
+
   Telemetry::BatchProcessedStackGenerator stackProcessor;
+  DependentModules dependentModules;
 
   Maybe<double> maybeXulLoadDuration;
   Vector<Telemetry::ProcessedStack> processedStacks;
@@ -845,9 +885,19 @@ void UntrustedModulesProcessor::CompleteProcessing(
         return;
       }
 
+      bool isDependent =
+          mIsFirstBatchProcessed
+              ? false
+              : dependentModules.Lookup(module->mSanitizedDllName);
+
+      if (!mAllowProcessing) {
+        return;
+      }
+
       glue::EnhancedModuleLoadInfo::BacktraceType backtrace =
           std::move(item.mNtLoadInfo.mBacktrace);
-      ProcessedModuleLoadEvent event(std::move(item), std::move(module));
+      ProcessedModuleLoadEvent event(std::move(item), std::move(module),
+                                     isDependent);
 
       if (!mAllowProcessing) {
         return;
@@ -983,7 +1033,7 @@ RefPtr<ModulesTrustPromise> UntrustedModulesProcessor::GetModulesTrustInternal(
           NS_ERROR_ILLEGAL_DURING_SHUTDOWN, __func__);
     }
 
-    modMap.Put(resolvedNtPath, module.forget());
+    modMap.Put(resolvedNtPath, std::move(module));
   }
 
   return ModulesTrustPromise::CreateAndResolve(std::move(result), __func__);

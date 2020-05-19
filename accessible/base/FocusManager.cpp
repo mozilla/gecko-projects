@@ -17,6 +17,7 @@
 #include "mozilla/a11y/DocManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/BrowserParent.h"
 
 namespace mozilla {
@@ -214,6 +215,7 @@ void FocusManager::DispatchFocusEvent(DocAccessible* aDocument,
         new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, aTarget, eAutoDetect,
                      AccEvent::eCoalesceOfSameType);
     aDocument->FireDelayedEvent(event);
+    mLastFocus = aTarget;
 
 #ifdef A11Y_LOG
     if (logging::IsEnabled(logging::eFocus)) logging::FocusDispatched(aTarget);
@@ -353,7 +355,6 @@ void FocusManager::ProcessFocusEvent(AccEvent* aEvent) {
   RefPtr<AccEvent> focusEvent = new AccEvent(nsIAccessibleEvent::EVENT_FOCUS,
                                              target, aEvent->FromUserInput());
   nsEventShell::FireEvent(focusEvent);
-  mLastFocus = target;
 
   if (NS_WARN_IF(target->IsDefunct())) {
     // target died during nsEventShell::FireEvent.
@@ -392,8 +393,17 @@ nsINode* FocusManager::FocusedDOMNode() const {
   }
 
   // Otherwise the focus can be on DOM document.
-  nsPIDOMWindowOuter* focusedWnd = DOMFocusManager->GetFocusedWindow();
-  return focusedWnd ? focusedWnd->GetExtantDoc() : nullptr;
+  dom::BrowsingContext* context = DOMFocusManager->GetFocusedBrowsingContext();
+  if (context) {
+    // GetDocShell will return null if the document isn't in our process.
+    nsIDocShell* shell = context->GetDocShell();
+    if (shell) {
+      return shell->GetDocument();
+    }
+  }
+
+  // Focus isn't in this process.
+  return nullptr;
 }
 
 dom::Document* FocusManager::FocusedDOMDocument() const {

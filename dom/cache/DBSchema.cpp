@@ -294,7 +294,6 @@ static_assert(nsIContentPolicy::TYPE_INVALID == 0 &&
                   nsIContentPolicy::TYPE_DOCUMENT == 6 &&
                   nsIContentPolicy::TYPE_SUBDOCUMENT == 7 &&
                   nsIContentPolicy::TYPE_REFRESH == 8 &&
-                  nsIContentPolicy::TYPE_XBL == 9 &&
                   nsIContentPolicy::TYPE_PING == 10 &&
                   nsIContentPolicy::TYPE_XMLHTTPREQUEST == 11 &&
                   nsIContentPolicy::TYPE_DATAREQUEST == 11 &&
@@ -334,7 +333,10 @@ static_assert(nsIContentPolicy::TYPE_INVALID == 0 &&
                   nsIContentPolicy::TYPE_INTERNAL_MODULE == 45 &&
                   nsIContentPolicy::TYPE_INTERNAL_MODULE_PRELOAD == 46 &&
                   nsIContentPolicy::TYPE_INTERNAL_DTD == 47 &&
-                  nsIContentPolicy::TYPE_INTERNAL_FORCE_ALLOWED_DTD == 48,
+                  nsIContentPolicy::TYPE_INTERNAL_FORCE_ALLOWED_DTD == 48 &&
+                  nsIContentPolicy::TYPE_INTERNAL_AUDIOWORKLET == 49 &&
+                  nsIContentPolicy::TYPE_INTERNAL_PAINTWORKLET == 50 &&
+                  nsIContentPolicy::TYPE_INTERNAL_FONT_PRELOAD == 51,
               "nsContentPolicyType values are as expected");
 
 namespace {

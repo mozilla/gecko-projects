@@ -328,7 +328,9 @@ function watchRuntime(id) {
       await dispatch({ type: WATCH_RUNTIME_SUCCESS, runtime });
 
       dispatch(Actions.requestExtensions());
-      dispatch(Actions.requestTabs());
+      // we have to wait for tabs, otherwise the requests to getTarget may interfer
+      // with listProcesses
+      await dispatch(Actions.requestTabs());
       dispatch(Actions.requestWorkers());
 
       if (
@@ -463,8 +465,7 @@ function updateRemoteRuntimes(runtimes, type) {
     runtimes.forEach(runtime => {
       const existingRuntime = findRuntimeById(runtime.id, getState().runtimes);
       const isConnectionValid =
-        existingRuntime &&
-        existingRuntime.runtimeDetails &&
+        existingRuntime?.runtimeDetails &&
         !existingRuntime.runtimeDetails.clientWrapper.isClosed();
       runtime.runtimeDetails = isConnectionValid
         ? existingRuntime.runtimeDetails

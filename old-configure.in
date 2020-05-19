@@ -62,7 +62,6 @@ GTK3_VERSION=3.4.0
 GDK_VERSION_MAX_ALLOWED=GDK_VERSION_3_4
 W32API_VERSION=3.14
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.31.1
 
 dnl Set various checks
 dnl ========================================================
@@ -85,12 +84,6 @@ case "$target" in
     ;;
 *-linux*)
     AC_PATH_PROG(OBJCOPY,objcopy)
-    ;;
-esac
-
-case "$target" in
-*-apple-darwin*)
-    MOZ_IOS_SDK
     ;;
 esac
 
@@ -170,7 +163,7 @@ case "$target" in
           if test ! -d "$WIN_UCRT_REDIST_DIR"; then
             AC_MSG_ERROR([Invalid Windows UCRT Redist directory: ${WIN_UCRT_REDIST_DIR}])
           fi
-          WIN_UCRT_REDIST_DIR=`cd "$WIN_UCRT_REDIST_DIR" && pwd -W`
+          WIN_UCRT_REDIST_DIR=`cd "$WIN_UCRT_REDIST_DIR" && (pwd -W 2>/dev/null || pwd)`
         fi
 
         AC_SUBST(MSVC_C_RUNTIME_DLL)
@@ -182,7 +175,7 @@ case "$target" in
           if test ! -d "$WIN32_REDIST_DIR"; then
             AC_MSG_ERROR([Invalid Win32 Redist directory: ${WIN32_REDIST_DIR}])
           fi
-          WIN32_REDIST_DIR=`cd "$WIN32_REDIST_DIR" && pwd -W`
+          WIN32_REDIST_DIR=`cd "$WIN32_REDIST_DIR" && (pwd -W 2>/dev/null || pwd)`
         fi
 
         # Check linker version, except in lld builds
@@ -447,7 +440,6 @@ if test "$GNU_CC"; then
     fi
 
     _DEFINES_CFLAGS="-include $_objdir/mozilla-config.h -DMOZILLA_CLIENT"
-    _USE_CPP_INCLUDE_FLAG=1
 
     ASFLAGS="$ASFLAGS $_DEFINES_CFLAGS"
 fi
@@ -456,7 +448,6 @@ if test "$GNU_CXX"; then
     CXXFLAGS="$CXXFLAGS -fno-exceptions -fno-strict-aliasing"
 
     _DEFINES_CXXFLAGS="-DMOZILLA_CLIENT -include $_objdir/mozilla-config.h"
-    _USE_CPP_INCLUDE_FLAG=1
 fi
 
 # For profiling builds keep the symbol information
@@ -534,25 +525,10 @@ case "$target" in
     CXXFLAGS="$CXXFLAGS -stdlib=libc++"
     DSO_LDOPTS=''
     STRIP_FLAGS="$STRIP_FLAGS -x -S"
-    # Ensure that if we're targeting iOS an SDK was provided.
-    AC_CACHE_CHECK(for iOS target,
-                   ac_cv_ios_target,
-                   [AC_TRY_COMPILE([#include <TargetConditionals.h>
-#if !(TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR)
-#error not iOS
-#endif],
-                                   [],
-                                   ac_cv_ios_target="yes",
-                                   ac_cv_ios_target="no")])
-    if test "$ac_cv_ios_target" = "yes" -a -z $MOZ_IOS; then
-       AC_MSG_ERROR([targeting iOS but not using an iOS SDK?])
-    fi
-    if test -z "$MOZ_IOS"; then
-        # The ExceptionHandling framework is needed for Objective-C exception
-        # logging code in nsObjCExceptions.h. Currently we only use that in debug
-        # builds.
-        MOZ_DEBUG_LDFLAGS="$MOZ_DEBUG_LDFLAGS -framework ExceptionHandling";
-    fi
+    # The ExceptionHandling framework is needed for Objective-C exception
+    # logging code in nsObjCExceptions.h. Currently we only use that in debug
+    # builds.
+    MOZ_DEBUG_LDFLAGS="$MOZ_DEBUG_LDFLAGS -framework ExceptionHandling";
 
     dnl DTrace and -dead_strip don't interact well. See bug 403132.
     dnl ===================================================================
@@ -585,6 +561,25 @@ case "$target" in
     MOZ_GFX_OPTIMIZE_MOBILE=1
     if test -z "$CLANG_CC"; then
         MOZ_OPTIMIZE_FLAGS="-freorder-blocks -fno-reorder-functions -Os"
+    elif test -n "$RELEASE_OR_BETA"; then
+        # From https://github.com/android-ndk/ndk/issues/133#issuecomment-308549264
+        # -Oz is smaller than -Os on clang.
+        MOZ_OPTIMIZE_FLAGS="-Oz"
+        # Disable the outliner, which causes performance regressions, and is
+        # enabled on some platforms at -Oz.
+        if test -z "$MOZ_LTO"; then
+            DISABLE_OUTLINER="-mno-outline"
+            _SAVE_CFLAGS=$CFLAGS
+            CFLAGS="$CFLAGS $DISABLE_OUTLINER"
+            AC_TRY_COMPILE(,,[MOZ_OPTIMIZE_FLAGS="$MOZ_OPTIMIZE_FLAGS $DISABLE_OUTLINER"])
+            CFLAGS="$_SAVE_CFLAGS"
+        else
+            DISABLE_OUTLINER="-Wl,-plugin-opt=-enable-machine-outliner=never"
+            _SAVE_LDFLAGS=$LDFLAGS
+            LDFLAGS="$LDFLAGS $MOZ_LTO_LDFLAGS $DISABLE_OUTLINER"
+            AC_TRY_LINK(,,[MOZ_OPTIMIZE_LDFLAGS="$MOZ_OPTIMIZE_LDFLAGS $DISABLE_OUTLINER"])
+            LDFLAGS="$_SAVE_LDFLAGS"
+        fi
     else
         MOZ_OPTIMIZE_FLAGS="-O2"
     fi
@@ -650,7 +645,6 @@ case "$target" in
         WIN32_CONSOLE_EXE_LDFLAGS=-SUBSYSTEM:CONSOLE,$WIN32_SUBSYSTEM_VERSION
         WIN32_GUI_EXE_LDFLAGS=-SUBSYSTEM:WINDOWS,$WIN32_SUBSYSTEM_VERSION
         DSO_LDOPTS=-SUBSYSTEM:WINDOWS,$WIN32_SUBSYSTEM_VERSION
-        _USE_CPP_INCLUDE_FLAG=1
         _DEFINES_CFLAGS="-FI $_objdir/mozilla-config.h -DMOZILLA_CLIENT"
         _DEFINES_CXXFLAGS="-FI $_objdir/mozilla-config.h -DMOZILLA_CLIENT"
         CFLAGS="$CFLAGS -W3 -Gy -Zc:inline"
@@ -1191,6 +1185,7 @@ dnl availability attribute strict, so that compilation fails when the target is 
                                    clock_gettime(CLOCK_MONOTONIC, &ts); ],
                                  ac_cv_clock_monotonic=$libs
                                  LIBS="$_SAVE_LIBS"
+                                 CFLAGS="$_SAVE_CFLAGS"
                                  break,
                                  ac_cv_clock_monotonic=no)
                     LIBS="$_SAVE_LIBS"
@@ -1488,7 +1483,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.51, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.53, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 NSS_CFLAGS="$NSS_CFLAGS -I${DIST}/include/nss"
@@ -1568,16 +1563,12 @@ ENABLE_SYSTEM_EXTENSION_DIRS=1
 MOZ_BRANDING_DIRECTORY=
 MOZ_OFFICIAL_BRANDING=
 MOZ_AUTH_EXTENSION=1
-if test "$MOZ_IOS"; then
-   MOZ_AUTH_EXTENSION=
-fi
 MOZ_PREF_EXTENSIONS=1
 MOZ_SPELLCHECK=1
 MOZ_UNIVERSALCHARDET=1
 MOZ_XUL=1
 MOZ_ZIPWRITER=1
 MOZ_NO_SMART_CARDS=
-NECKO_COOKIES=1
 MOZ_USE_NATIVE_POPUP_WINDOWS=
 MOZ_EXCLUDE_HYPHENATION_DICTIONARIES=
 MOZ_SANDBOX=1
@@ -1628,12 +1619,6 @@ if test -f "${srcdir}/${MOZ_BUILD_APP}/confvars.sh" ; then
 else
   AC_MSG_RESULT([no])
 fi
-
-if test "$EARLY_BETA_OR_EARLIER"; then
-    MOZ_NEW_CERT_STORAGE=1
-    AC_DEFINE(MOZ_NEW_CERT_STORAGE)
-fi
-AC_SUBST(MOZ_NEW_CERT_STORAGE)
 
 # Allow someone to change MOZ_APP_NAME and MOZ_APP_BASENAME in mozconfig
 MOZ_ARG_WITH_STRING(app-name,
@@ -1887,10 +1872,6 @@ MOZ_ARG_DISABLE_BOOL(negotiateauth,
     MOZ_AUTH_EXTENSION=,
     MOZ_AUTH_EXTENSION=1 )
 
-if test -n "$MOZ_IOS" -a -n "$MOZ_AUTH_EXTENSION"; then
-   AC_MSG_ERROR([negotiateauth is not supported on iOS.])
-fi
-
 dnl ========================================================
 dnl Pref extensions (autoconfig)
 dnl ========================================================
@@ -1952,9 +1933,7 @@ i?86-*-mingw*|x86_64-*-mingw*|aarch64-*-mingw*)
   MOZ_CRASHREPORTER=1
   ;;
 i?86-apple-darwin*|x86_64-apple-darwin*)
-  if test -z "$MOZ_IOS"; then
-    MOZ_CRASHREPORTER=1
-  fi
+  MOZ_CRASHREPORTER=1
   ;;
 *-android*|*-linuxandroid*)
   dnl Android/arm is arm-unknown-linux-androideabi, so android condition should
@@ -2046,10 +2025,6 @@ dnl ========================================================
 dnl Updater
 dnl ========================================================
 
-if test "$MOZ_IOS"; then
-  MOZ_UPDATER=
-fi
-
 MOZ_ARG_DISABLE_BOOL(updater,
 [  --disable-updater       Disable building of updater],
     MOZ_UPDATER=,
@@ -2132,35 +2107,11 @@ dnl =
 dnl ========================================================
 MOZ_ARG_HEADER(Individual module options)
 
-dnl ========================================================
-dnl Check for sqlite
-dnl ========================================================
-
-MOZ_SYSTEM_SQLITE=
-MOZ_ARG_ENABLE_BOOL(system-sqlite,
-[  --enable-system-sqlite  Use system sqlite (located with pkgconfig)],
-MOZ_SYSTEM_SQLITE=1,
-MOZ_SYSTEM_SQLITE= )
-
-if test -n "$MOZ_SYSTEM_SQLITE"
-then
-    dnl ============================
-    dnl === SQLite Version check ===
-    dnl ============================
-    dnl Check to see if the system SQLite package is new enough.
-    PKG_CHECK_MODULES(SQLITE, sqlite3 >= $SQLITE_VERSION)
-else
-    dnl ==============================
-    dnl === SQLite fdatasync check ===
-    dnl ==============================
-    dnl Check to see if fdatasync is available
-    AC_CHECK_FUNC(fdatasync)
-fi
-
-if test -n "$MOZ_SYSTEM_SQLITE"; then
-    AC_DEFINE(MOZ_SYSTEM_SQLITE)
-fi
-AC_SUBST(MOZ_SYSTEM_SQLITE)
+dnl ==============================
+dnl === SQLite fdatasync check ===
+dnl ==============================
+dnl Check to see if fdatasync is available and make use of it
+AC_CHECK_FUNC(fdatasync)
 
 dnl ========================================================
 dnl = Disable zipwriter
@@ -2694,9 +2645,7 @@ if test "$MOZ_WIDGET_TOOLKIT"; then
 
   case "$OS_TARGET" in
     Darwin)
-      if test -z "$MOZ_IOS"; then
-	NECKO_WIFI=1
-      fi
+      NECKO_WIFI=1
       ;;
     DragonFly|FreeBSD|WINNT)
       NECKO_WIFI=1
@@ -2723,19 +2672,6 @@ if test "$NECKO_WIFI"; then
 fi
 AC_SUBST(NECKO_WIFI)
 AC_SUBST(NECKO_WIFI_DBUS)
-
-dnl
-dnl option to disable cookies
-dnl
-MOZ_ARG_DISABLE_BOOL(cookies,
-[  --disable-cookies       Disable cookie support],
-    NECKO_COOKIES=,
-    NECKO_COOKIES=1)
-AC_SUBST(NECKO_COOKIES)
-if test "$NECKO_COOKIES"; then
-    AC_DEFINE(NECKO_COOKIES)
-    _NON_GLOBAL_ACDEFINES="$_NON_GLOBAL_ACDEFINES NECKO_COOKIES"
-fi
 
 dnl ========================================================
 dnl =

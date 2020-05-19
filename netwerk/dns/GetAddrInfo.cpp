@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GetAddrInfo.h"
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/net/DNS.h"
 #include "prnetdb.h"
 #include "nsHostResolver.h"
@@ -14,6 +15,7 @@
 #include "prerror.h"
 
 #include "mozilla/Logging.h"
+#include "mozilla/StaticPrefs_network.h"
 
 #ifdef DNSQUERY_AVAILABLE
 // There is a bug in windns.h where the type of parameter ppQueryResultsSet for
@@ -28,6 +30,8 @@
 
 namespace mozilla {
 namespace net {
+
+static StaticRefPtr<NativeDNSResolverOverride> gOverrideService;
 
 static LazyLogModule gGetAddrInfoLog("GetAddrInfo");
 #define LOG(msg, ...) \
@@ -186,10 +190,49 @@ nsresult GetAddrInfoShutdown() {
   return NS_OK;
 }
 
+bool FindAddrOverride(const nsACString& aHost, uint16_t aAddressFamily,
+                      uint16_t aFlags, AddrInfo** aAddrInfo) {
+  RefPtr<NativeDNSResolverOverride> overrideService = gOverrideService;
+  if (!overrideService) {
+    return false;
+  }
+  AutoReadLock lock(overrideService->mLock);
+  nsTArray<PRNetAddr>* overrides = overrideService->mOverrides.GetValue(aHost);
+  if (!overrides) {
+    return false;
+  }
+  nsCString* cname = nullptr;
+  if (aFlags & nsHostResolver::RES_CANON_NAME) {
+    cname = overrideService->mCnames.GetValue(aHost);
+  }
+
+  RefPtr<AddrInfo> ai;
+
+  if (!cname) {
+    ai = new AddrInfo(aHost, 0);
+  } else {
+    ai = new AddrInfo(aHost, *cname, 0);
+  }
+
+  for (const auto& ip : *overrides) {
+    if (aAddressFamily != AF_UNSPEC && ip.raw.family != aAddressFamily) {
+      continue;
+    }
+    ai->AddAddress(new NetAddrElement(&ip));
+  }
+
+  ai.forget(aAddrInfo);
+  return true;
+}
+
 nsresult GetAddrInfo(const nsACString& aHost, uint16_t aAddressFamily,
                      uint16_t aFlags, AddrInfo** aAddrInfo, bool aGetTtl) {
   if (NS_WARN_IF(aHost.IsEmpty()) || NS_WARN_IF(!aAddrInfo)) {
     return NS_ERROR_NULL_POINTER;
+  }
+
+  if (StaticPrefs::network_dns_disabled()) {
+    return NS_ERROR_UNKNOWN_HOST;
   }
 
 #ifdef DNSQUERY_AVAILABLE
@@ -198,6 +241,12 @@ nsresult GetAddrInfo(const nsACString& aHost, uint16_t aAddressFamily,
     aFlags |= nsHostResolver::RES_CANON_NAME;
   }
 #endif
+
+  // If there is an override for this host, then we synthetize a result.
+  if (gOverrideService &&
+      FindAddrOverride(aHost, aAddressFamily, aFlags, aAddrInfo)) {
+    return NS_OK;
+  }
 
   nsAutoCString host(aHost);
   if (gNativeIsLocalhost) {
@@ -234,6 +283,71 @@ nsresult GetAddrInfo(const nsACString& aHost, uint16_t aAddressFamily,
 #endif
 
   return rv;
+}
+
+// static
+already_AddRefed<nsINativeDNSResolverOverride>
+NativeDNSResolverOverride::GetSingleton() {
+  if (gOverrideService) {
+    return do_AddRef(gOverrideService);
+  }
+
+  gOverrideService = new NativeDNSResolverOverride();
+  ClearOnShutdown(&gOverrideService);
+  return do_AddRef(gOverrideService);
+}
+
+NS_IMPL_ISUPPORTS(NativeDNSResolverOverride, nsINativeDNSResolverOverride)
+
+NS_IMETHODIMP NativeDNSResolverOverride::AddIPOverride(
+    const nsACString& aHost, const nsACString& aIPLiteral) {
+  PRNetAddr tempAddr;
+  // Unfortunately, PR_StringToNetAddr does not properly initialize
+  // the output buffer in the case of IPv6 input. See bug 223145.
+  memset(&tempAddr, 0, sizeof(PRNetAddr));
+
+  if (PR_StringToNetAddr(nsCString(aIPLiteral).get(), &tempAddr) !=
+      PR_SUCCESS) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  AutoWriteLock lock(mLock);
+  auto& overrides = mOverrides.GetOrInsert(aHost);
+  overrides.AppendElement(tempAddr);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP NativeDNSResolverOverride::SetCnameOverride(
+    const nsACString& aHost, const nsACString& aCNAME) {
+  if (aCNAME.IsEmpty()) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  AutoWriteLock lock(mLock);
+  mCnames.Put(aHost, nsCString(aCNAME));
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP NativeDNSResolverOverride::ClearHostOverride(
+    const nsACString& aHost) {
+  AutoWriteLock lock(mLock);
+  mCnames.Remove(aHost);
+  auto overrides = mOverrides.GetAndRemove(aHost);
+  if (!overrides) {
+    return NS_OK;
+  }
+
+  overrides->Clear();
+  return NS_OK;
+}
+
+NS_IMETHODIMP NativeDNSResolverOverride::ClearOverrides() {
+  AutoWriteLock lock(mLock);
+  mOverrides.Clear();
+  mCnames.Clear();
+  return NS_OK;
 }
 
 }  // namespace net

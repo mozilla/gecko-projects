@@ -32,6 +32,7 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/PeerIdentity.h"
+#include "mozilla/PermissionDelegateHandler.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/Telemetry.h"
@@ -55,11 +56,11 @@
 #include "nsProxyRelease.h"
 #include "nss.h"
 #include "nsVariant.h"
-#include "PermissionDelegateHandler.h"
 #include "pk11pub.h"
 #include "ThreadSafeRefcountingWithMainThreadDestruction.h"
 #include "VideoStreamTrack.h"
 #include "VideoUtils.h"
+#include "CubebDeviceEnumerator.h"
 
 /* Using WebRTC backend on Desktops (Mac, Windows, Linux), otherwise default */
 #include "MediaEngineDefault.h"
@@ -295,8 +296,8 @@ class SourceListener : public SupportsWeakPtr<SourceListener> {
       SourceListenerPromise;
 
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(SourceListener)
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION_AND_RECORDING(
-      SourceListener, recordreplay::Behavior::Preserve)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION(
+      SourceListener)
 
   SourceListener();
 
@@ -503,10 +504,10 @@ class GetUserMediaWindowListener {
   void RemoveAll() {
     MOZ_ASSERT(NS_IsMainThread());
 
-    for (auto& l : nsTArray<RefPtr<SourceListener>>(mInactiveListeners)) {
+    for (auto& l : mInactiveListeners.Clone()) {
       Remove(l);
     }
-    for (auto& l : nsTArray<RefPtr<SourceListener>>(mActiveListeners)) {
+    for (auto& l : mActiveListeners.Clone()) {
       Remove(l);
     }
     MOZ_ASSERT(mInactiveListeners.Length() == 0);
@@ -677,6 +678,17 @@ class GetUserMediaWindowListener {
     return result;
   }
 
+  void GetDevices(
+      const RefPtr<MediaManager::MediaDeviceSetRefCnt>& aOutDevices) {
+    for (auto& l : mActiveListeners) {
+      if (RefPtr<MediaDevice> device = l->GetAudioDevice()) {
+        aOutDevices->AppendElement(device);
+      } else if (RefPtr<MediaDevice> device = l->GetVideoDevice()) {
+        aOutDevices->AppendElement(device);
+      }
+    }
+  }
+
   uint64_t WindowID() const { return mWindowID; }
 
   PrincipalHandle GetPrincipalHandle() const { return mPrincipalHandle; }
@@ -839,7 +851,8 @@ MediaDevice::MediaDevice(const RefPtr<MediaEngineSource>& aSource,
       mName(aName),
       mID(aID),
       mGroupID(aGroupID),
-      mRawID(aRawID) {
+      mRawID(aRawID),
+      mRawName(aName) {
   MOZ_ASSERT(mSource);
 }
 
@@ -858,7 +871,8 @@ MediaDevice::MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
       mName(mSinkInfo->Name()),
       mID(aID),
       mGroupID(aGroupID),
-      mRawID(aRawID) {
+      mRawID(aRawID),
+      mRawName(mSinkInfo->Name()) {
   // For now this ctor is used only for Audiooutput.
   // It could be used for Audioinput and Videoinput
   // when we do not instantiate a MediaEngineSource
@@ -868,17 +882,25 @@ MediaDevice::MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
 }
 
 MediaDevice::MediaDevice(const RefPtr<MediaDevice>& aOther, const nsString& aID,
-                         const nsString& aGroupID, const nsString& aRawID)
+                         const nsString& aGroupID, const nsString& aRawID,
+                         const nsString& aRawGroupID)
+    : MediaDevice(aOther, aID, aGroupID, aRawID, aRawGroupID, aOther->mName) {}
+
+MediaDevice::MediaDevice(const RefPtr<MediaDevice>& aOther, const nsString& aID,
+                         const nsString& aGroupID, const nsString& aRawID,
+                         const nsString& aRawGroupID, const nsString& aName)
     : mSource(aOther->mSource),
       mSinkInfo(aOther->mSinkInfo),
       mKind(aOther->mKind),
       mScary(aOther->mScary),
       mIsFake(aOther->mIsFake),
       mType(aOther->mType),
-      mName(aOther->mName),
+      mName(aName),
       mID(aID),
       mGroupID(aGroupID),
-      mRawID(aRawID) {
+      mRawID(aRawID),
+      mRawGroupID(aRawGroupID),
+      mRawName(aOther->mRawName) {
   MOZ_ASSERT(aOther);
 }
 
@@ -966,6 +988,13 @@ MediaDevice::GetName(nsAString& aName) {
 }
 
 NS_IMETHODIMP
+MediaDevice::GetRawName(nsAString& aName) {
+  MOZ_ASSERT(NS_IsMainThread());
+  aName.Assign(mRawName);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 MediaDevice::GetType(nsAString& aType) {
   MOZ_ASSERT(NS_IsMainThread());
   aType.Assign(mType);
@@ -990,6 +1019,13 @@ NS_IMETHODIMP
 MediaDevice::GetGroupId(nsAString& aGroupID) {
   MOZ_ASSERT(NS_IsMainThread());
   aGroupID.Assign(mGroupID);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+MediaDevice::GetRawGroupId(nsAString& aRawGroupID) {
+  MOZ_ASSERT(NS_IsMainThread());
+  aRawGroupID.Assign(mRawGroupID);
   return NS_OK;
 }
 
@@ -1160,7 +1196,8 @@ class GetUserMediaStreamRunnable : public Runnable {
         mAudioDevice ? MediaTrackGraph::AUDIO_THREAD_DRIVER
                      : MediaTrackGraph::SYSTEM_THREAD_DRIVER;
     MediaTrackGraph* mtg = MediaTrackGraph::GetInstance(
-        graphDriverType, window, MediaTrackGraph::REQUEST_DEFAULT_SAMPLE_RATE);
+        graphDriverType, window, MediaTrackGraph::REQUEST_DEFAULT_SAMPLE_RATE,
+        MediaTrackGraph::DEFAULT_OUTPUT_DEVICE);
 
     auto domStream = MakeRefPtr<DOMMediaStream>(window);
     RefPtr<LocalTrackSource> audioTrackSource;
@@ -1298,7 +1335,7 @@ class GetUserMediaStreamRunnable : public Runnable {
                  }
                });
 
-    if (!IsPincipalInfoPrivate(mPrincipalInfo)) {
+    if (!IsPrincipalInfoPrivate(mPrincipalInfo)) {
       // Call GetPrincipalKey again, this time w/persist = true, to promote
       // deviceIds to persistent, in case they're not already. Fire'n'forget.
       media::GetPrincipalKey(mPrincipalInfo, true)
@@ -1358,9 +1395,9 @@ static void GetMediaDevices(MediaEngine* aEngine, uint64_t aWindowId,
       }
     }
   } else {
-    aResult = devices;
+    aResult = std::move(devices);
     if (MOZ_LOG_TEST(gMediaManagerLog, mozilla::LogLevel::Debug)) {
-      for (auto& device : devices) {
+      for (auto& device : aResult) {
         LOG("%s: appending device=%s", __func__,
             NS_ConvertUTF16toUTF8(device->mName).get());
       }
@@ -1661,8 +1698,8 @@ void MediaManager::GuessVideoDeviceGroupIDs(MediaDeviceSet& aDevices,
       }
     }
     if (updateGroupId) {
-      aVideo =
-          new MediaDevice(aVideo, aVideo->mID, newVideoGroupID, aVideo->mRawID);
+      aVideo = new MediaDevice(aVideo, aVideo->mID, newVideoGroupID,
+                               aVideo->mRawID, aVideo->mRawGroupID);
       return true;
     }
     return false;
@@ -1873,6 +1910,7 @@ MediaManager::MediaManager(UniquePtr<base::Thread> aMediaThread)
   mPrefs.mAecOn = false;
   mPrefs.mUseAecMobile = false;
   mPrefs.mAgcOn = false;
+  mPrefs.mHPFOn = false;
   mPrefs.mNoiseOn = false;
   mPrefs.mExtendedFilter = true;
   mPrefs.mDelayAgnostic = true;
@@ -1882,10 +1920,12 @@ MediaManager::MediaManager(UniquePtr<base::Thread> aMediaThread)
       webrtc::EchoCancellation::SuppressionLevel::kModerateSuppression;
   mPrefs.mAgc = webrtc::GainControl::Mode::kAdaptiveDigital;
   mPrefs.mNoise = webrtc::NoiseSuppression::Level::kModerate;
+  mPrefs.mRoutingMode = webrtc::EchoControlMobile::RoutingMode::kSpeakerphone;
 #else
   mPrefs.mAec = 0;
   mPrefs.mAgc = 0;
   mPrefs.mNoise = 0;
+  mPrefs.mRoutingMode = 0;
 #endif
   mPrefs.mFullDuplex = false;
   mPrefs.mChannels = 0;  // max channels default
@@ -1899,12 +1939,14 @@ MediaManager::MediaManager(UniquePtr<base::Thread> aMediaThread)
     }
   }
   LOG("%s: default prefs: %dx%d @%dfps, %dHz test tones, aec: %s,"
-      "agc: %s, noise: %s, aec level: %d, agc level: %d, noise level: %d,"
+      "agc: %s, hpf: %s, noise: %s, aec level: %d, agc level: %d, noise level: "
+      "%d, aec mobile routing mode: %d,"
       "%sfull_duplex, extended aec %s, delay_agnostic %s "
       "channels %d",
       __FUNCTION__, mPrefs.mWidth, mPrefs.mHeight, mPrefs.mFPS, mPrefs.mFreq,
       mPrefs.mAecOn ? "on" : "off", mPrefs.mAgcOn ? "on" : "off",
-      mPrefs.mNoiseOn ? "on" : "off", mPrefs.mAec, mPrefs.mAgc, mPrefs.mNoise,
+      mPrefs.mHPFOn ? "on" : "off", mPrefs.mNoiseOn ? "on" : "off", mPrefs.mAec,
+      mPrefs.mAgc, mPrefs.mNoise, mPrefs.mRoutingMode,
       mPrefs.mFullDuplex ? "" : "not ", mPrefs.mExtendedFilter ? "on" : "off",
       mPrefs.mDelayAgnostic ? "on" : "off", mPrefs.mChannels);
 }
@@ -2011,6 +2053,7 @@ MediaManager* MediaManager::Get() {
       prefs->AddObserver("media.getusermedia.aec", sSingleton, false);
       prefs->AddObserver("media.getusermedia.agc_enabled", sSingleton, false);
       prefs->AddObserver("media.getusermedia.agc", sSingleton, false);
+      prefs->AddObserver("media.getusermedia.hpf_enabled", sSingleton, false);
       prefs->AddObserver("media.getusermedia.noise_enabled", sSingleton, false);
       prefs->AddObserver("media.getusermedia.noise", sSingleton, false);
       prefs->AddObserver("media.ondevicechange.fakeDeviceChangeEvent.enabled",
@@ -2196,7 +2239,7 @@ void MediaManager::DeviceListChanged() {
                 l->StopRawID(id);
               }
             }
-            mDeviceIDs = deviceIDs;
+            mDeviceIDs = std::move(deviceIDs);
           },
           [](RefPtr<MediaMgrError>&& reason) {});
 }
@@ -2757,7 +2800,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
                 focusSource);
 
             // Store the task w/callbacks.
-            self->mActiveCallbacks.Put(callID, task.forget());
+            self->mActiveCallbacks.Put(callID, std::move(task));
 
             // Add a WindowID cross-reference so OnNavigation can tear
             // things down
@@ -2913,6 +2956,7 @@ void MediaManager::AnonymizeDevices(MediaDeviceSet& aDevices,
 
       nsString groupId;
       device->GetGroupId(groupId);
+      nsString rawGroupId = groupId;
       // Use window id to salt group id in order to make it session based as
       // required by the spec. This does not provide unique group ids through
       // out a browser restart. However, this is not agaist the spec.
@@ -2921,7 +2965,12 @@ void MediaManager::AnonymizeDevices(MediaDeviceSet& aDevices,
       groupId.AppendInt(aWindowId);
       AnonymizeId(groupId, aOriginKey);
 
-      device = new MediaDevice(device, id, groupId, rawId);
+      nsString name;
+      device->GetName(name);
+      if (name.Find(NS_LITERAL_STRING("AirPods")) != -1) {
+        name = NS_LITERAL_STRING("AirPods");
+      }
+      device = new MediaDevice(device, id, groupId, rawId, rawGroupId, name);
     }
   }
 }
@@ -3337,6 +3386,13 @@ void MediaManager::OnNavigation(uint64_t aWindowID) {
   if (mCallIds.Get(aWindowID, &callIDs)) {
     for (auto& callID : *callIDs) {
       mActiveCallbacks.Remove(callID);
+      for (auto& request : mPendingGUMRequest.Clone()) {
+        nsString id;
+        request->GetCallID(id);
+        if (id == callID) {
+          mPendingGUMRequest.RemoveElement(request);
+        }
+      }
     }
     mCallIds.Remove(aWindowID);
   }
@@ -3376,7 +3432,7 @@ void MediaManager::AddWindowID(uint64_t aWindowId,
     return;
   }
 
-  GetActiveWindows()->Put(aWindowId, aListener.forget());
+  GetActiveWindows()->Put(aWindowId, std::move(aListener));
 }
 
 void MediaManager::RemoveWindowID(uint64_t aWindowId) {
@@ -3445,11 +3501,14 @@ void MediaManager::GetPrefs(nsIPrefBranch* aBranch, const char* aData) {
 #ifdef MOZ_WEBRTC
   GetPrefBool(aBranch, "media.getusermedia.aec_enabled", aData, &mPrefs.mAecOn);
   GetPrefBool(aBranch, "media.getusermedia.agc_enabled", aData, &mPrefs.mAgcOn);
+  GetPrefBool(aBranch, "media.getusermedia.hpf_enabled", aData, &mPrefs.mHPFOn);
   GetPrefBool(aBranch, "media.getusermedia.noise_enabled", aData,
               &mPrefs.mNoiseOn);
   GetPref(aBranch, "media.getusermedia.aec", aData, &mPrefs.mAec);
   GetPref(aBranch, "media.getusermedia.agc", aData, &mPrefs.mAgc);
   GetPref(aBranch, "media.getusermedia.noise", aData, &mPrefs.mNoise);
+  GetPref(aBranch, "media.getusermedia.aecm_output_routing", aData,
+          &mPrefs.mRoutingMode);
   GetPrefBool(aBranch, "media.getusermedia.aec_extended_filter", aData,
               &mPrefs.mExtendedFilter);
   GetPrefBool(aBranch, "media.getusermedia.aec_aec_delay_agnostic", aData,
@@ -3501,6 +3560,7 @@ void MediaManager::Shutdown() {
     prefs->RemoveObserver("media.getusermedia.aec_enabled", this);
     prefs->RemoveObserver("media.getusermedia.aec", this);
     prefs->RemoveObserver("media.getusermedia.agc_enabled", this);
+    prefs->RemoveObserver("media.getusermedia.hpf_enabled", this);
     prefs->RemoveObserver("media.getusermedia.agc", this);
     prefs->RemoveObserver("media.getusermedia.noise_enabled", this);
     prefs->RemoveObserver("media.getusermedia.noise", this);
@@ -3813,11 +3873,10 @@ struct CaptureWindowStateData {
 };
 
 NS_IMETHODIMP
-MediaManager::MediaCaptureWindowState(nsIDOMWindow* aCapturedWindow,
-                                      uint16_t* aCamera, uint16_t* aMicrophone,
-                                      uint16_t* aScreen, uint16_t* aWindow,
-                                      uint16_t* aBrowser,
-                                      bool aIncludeDescendants) {
+MediaManager::MediaCaptureWindowState(
+    nsIDOMWindow* aCapturedWindow, uint16_t* aCamera, uint16_t* aMicrophone,
+    uint16_t* aScreen, uint16_t* aWindow, uint16_t* aBrowser,
+    nsTArray<RefPtr<nsIMediaDevice>>& aDevices, bool aIncludeDescendants) {
   MOZ_ASSERT(NS_IsMainThread());
 
   CaptureState camera = CaptureState::Off;
@@ -3825,12 +3884,13 @@ MediaManager::MediaCaptureWindowState(nsIDOMWindow* aCapturedWindow,
   CaptureState screen = CaptureState::Off;
   CaptureState window = CaptureState::Off;
   CaptureState browser = CaptureState::Off;
+  auto devices = MakeRefPtr<MediaDeviceSetRefCnt>();
 
   nsCOMPtr<nsPIDOMWindowInner> piWin = do_QueryInterface(aCapturedWindow);
   if (piWin) {
     auto combineCaptureState =
-        [&camera, &microphone, &screen, &window,
-         &browser](const RefPtr<GetUserMediaWindowListener>& aListener) {
+        [&camera, &microphone, &screen, &window, &browser,
+         &devices](const RefPtr<GetUserMediaWindowListener>& aListener) {
           camera = CombineCaptureState(
               camera, aListener->CapturingSource(MediaSourceEnum::Camera));
           microphone = CombineCaptureState(
@@ -3842,6 +3902,8 @@ MediaManager::MediaCaptureWindowState(nsIDOMWindow* aCapturedWindow,
               window, aListener->CapturingSource(MediaSourceEnum::Window));
           browser = CombineCaptureState(
               browser, aListener->CapturingSource(MediaSourceEnum::Browser));
+
+          aListener->GetDevices(devices);
         };
 
     if (aIncludeDescendants) {
@@ -3861,6 +3923,9 @@ MediaManager::MediaCaptureWindowState(nsIDOMWindow* aCapturedWindow,
   *aScreen = FromCaptureState(screen);
   *aWindow = FromCaptureState(window);
   *aBrowser = FromCaptureState(browser);
+  for (auto& device : *devices) {
+    aDevices.AppendElement(device);
+  }
 
   LOG("%s: window %" PRIu64 " capturing %s %s %s %s %s", __FUNCTION__,
       piWin ? piWin->WindowID() : -1,
@@ -4330,7 +4395,6 @@ void SourceListener::SetEnabledFor(MediaTrack* aTrack, bool aEnable) {
             if (mWindowListener) {
               mWindowListener->ChromeAffectingStateChanged();
             }
-
             if (!state.mOffWhileDisabled) {
               // If the feature to turn a device off while disabled is itself
               // disabled we shortcut the device operation and tell the
@@ -4338,9 +4402,42 @@ void SourceListener::SetEnabledFor(MediaTrack* aTrack, bool aEnable) {
               return DeviceOperationPromise::CreateAndResolve(NS_OK, __func__);
             }
 
+            nsString inputDeviceGroupId;
+            state.mDevice->GetRawGroupId(inputDeviceGroupId);
+
             return MediaManager::PostTask<DeviceOperationPromise>(
-                __func__, [self, device = state.mDevice, aEnable](
-                              MozPromiseHolder<DeviceOperationPromise>& h) {
+                __func__,
+                [self, device = state.mDevice, aEnable, inputDeviceGroupId](
+                    MozPromiseHolder<DeviceOperationPromise>& h) {
+                  // Only take this branch when muting, to avoid muting, in case
+                  // the default audio output device has changed and we need to
+                  // really call `Start` on the source. The AudioInput source
+                  // start/stop are idempotent, so this works.
+                  if (device->mKind == dom::MediaDeviceKind::Audioinput &&
+                      !aEnable) {
+                    // Don't turn off the microphone of a device that is on the
+                    // same physical device as the output.
+                    CubebDeviceEnumerator* enumerator =
+                        CubebDeviceEnumerator::GetInstance();
+                    // Get the current graph's device info. This is always the
+                    // default audio output device for now.
+                    RefPtr<AudioDeviceInfo> outputDevice =
+                        enumerator->DefaultDevice(
+                            CubebDeviceEnumerator::Side::OUTPUT);
+                    if (outputDevice->GroupID().Equals(inputDeviceGroupId)) {
+                      LOG("Device group id match when %s, "
+                          "not turning the input device off (%s)",
+                          aEnable ? "unmuting" : "muting",
+                          NS_ConvertUTF16toUTF8(outputDevice->GroupID()).get());
+                      h.Resolve(NS_OK, __func__);
+                      return;
+                    }
+                  }
+
+                  LOG("Device group id don't match when %s, "
+                      "not turning the audio input device off (%s)",
+                      aEnable ? "unmuting" : "muting",
+                      NS_ConvertUTF16toUTF8(inputDeviceGroupId).get());
                   h.Resolve(aEnable ? device->Start() : device->Stop(),
                             __func__);
                 });
@@ -4563,7 +4660,7 @@ DeviceState& SourceListener::GetDeviceStateFor(MediaTrack* aTrack) const {
 void GetUserMediaWindowListener::StopSharing() {
   MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread");
 
-  for (auto& l : nsTArray<RefPtr<SourceListener>>(mActiveListeners)) {
+  for (auto& l : mActiveListeners.Clone()) {
     l->StopSharing();
   }
 }
@@ -4571,7 +4668,7 @@ void GetUserMediaWindowListener::StopSharing() {
 void GetUserMediaWindowListener::StopRawID(const nsString& removedDeviceID) {
   MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread");
 
-  for (auto& source : nsTArray<RefPtr<SourceListener>>(mActiveListeners)) {
+  for (auto& source : mActiveListeners.Clone()) {
     if (source->GetAudioDevice()) {
       nsString id;
       source->GetAudioDevice()->GetRawId(id);

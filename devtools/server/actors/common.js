@@ -15,7 +15,7 @@ const { method } = require("devtools/shared/protocol");
  */
 function ActorPool(connection, label) {
   this.conn = connection;
-  this._label = label;
+  this.label = label;
   this._actors = {};
 }
 
@@ -39,15 +39,10 @@ ActorPool.prototype = {
   addActor: function APAddActor(actor) {
     actor.conn = this.conn;
     if (!actor.actorID) {
-      // Older style actors use actorPrefix, while protocol.js-based actors use typeName
-      const prefix = actor.actorPrefix || actor.typeName;
-      if (!prefix) {
-        throw new Error(
-          "Actor should precify either `actorPrefix` or `typeName` " +
-            "attribute"
-        );
+      if (!actor.typeName) {
+        throw new Error("Actor should a specify a `typeName` attribute");
       }
-      actor.actorID = this.conn.allocID(prefix || undefined);
+      actor.actorID = this.conn.allocID(actor.typeName);
     }
 
     // If the actor is already in a pool, remove it without destroying it.

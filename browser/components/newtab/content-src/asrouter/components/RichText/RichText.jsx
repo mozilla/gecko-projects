@@ -44,6 +44,8 @@ export function convertLinks(
           data-action={action}
           data-args={links[linkTag].args}
           data-do_not_autoblock={doNotAutoBlock}
+          data-entrypoint_name={links[linkTag].entrypoint_name}
+          data-entrypoint_value={links[linkTag].entrypoint_value}
           onClick={sendClick}
         />
       );
@@ -60,9 +62,7 @@ export function convertLinks(
 export function RichText(props) {
   if (!RICH_TEXT_KEYS.includes(props.localization_id)) {
     throw new Error(
-      `ASRouter: ${
-        props.localization_id
-      } is not a valid rich text property. If you want it to be processed, you need to add it to asrouter/rich-text-strings.js`
+      `ASRouter: ${props.localization_id} is not a valid rich text property. If you want it to be processed, you need to add it to asrouter/rich-text-strings.js`
     );
   }
   return (

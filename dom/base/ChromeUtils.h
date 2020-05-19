@@ -11,6 +11,8 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/ChromeUtilsBinding.h"
 #include "mozilla/ErrorResult.h"
+#include "nsDOMNavigationTiming.h"  // for DOMHighResTimeStamp
+#include "nsIContentChild.h"
 
 namespace mozilla {
 
@@ -24,9 +26,11 @@ class ArrayBufferViewOrArrayBuffer;
 class BrowsingContext;
 class IdleRequestCallback;
 struct IdleRequestOptions;
+struct MediaMetadataInit;
 class MozQueryInterface;
 class PrecompiledScript;
 class Promise;
+struct ProcessActorOptions;
 struct WindowActorOptions;
 
 class ChromeUtils {
@@ -75,6 +79,10 @@ class ChromeUtils {
 
   static void ReleaseAssert(GlobalObject& aGlobal, bool aCondition,
                             const nsAString& aMessage);
+
+  static void AddProfilerMarker(GlobalObject& aGlobal, const nsACString& aName,
+                                const Optional<DOMHighResTimeStamp>& aStartTime,
+                                const Optional<nsACString>& text);
 
   static void OriginAttributesToSuffix(
       GlobalObject& aGlobal, const dom::OriginAttributesDictionary& aAttrs,
@@ -186,12 +194,20 @@ class ChromeUtils {
   static void ResetLastExternalProtocolIframeAllowed(GlobalObject& aGlobal);
 
   static void RegisterWindowActor(const GlobalObject& aGlobal,
-                                  const nsAString& aName,
+                                  const nsACString& aName,
                                   const WindowActorOptions& aOptions,
                                   ErrorResult& aRv);
 
   static void UnregisterWindowActor(const GlobalObject& aGlobal,
-                                    const nsAString& aName);
+                                    const nsACString& aName);
+
+  static void RegisterProcessActor(const GlobalObject& aGlobal,
+                                   const nsACString& aName,
+                                   const ProcessActorOptions& aOptions,
+                                   ErrorResult& aRv);
+
+  static void UnregisterProcessActor(const GlobalObject& aGlobal,
+                                     const nsACString& aName);
 
   static bool IsClassifierBlockingErrorCode(GlobalObject& aGlobal,
                                             uint32_t aError);
@@ -201,6 +217,16 @@ class ChromeUtils {
 
   static void GenerateMediaControlKeysTestEvent(
       const GlobalObject& aGlobal, MediaControlKeysTestEvent aEvent);
+
+  static nsIContentChild* GetContentChild(const GlobalObject&);
+
+  // This function would only be used for testing.
+  static void GetCurrentActiveMediaMetadata(const GlobalObject& aGlobal,
+                                            MediaMetadataInit& aMetadata);
+
+  // This function would only be used for testing.
+  static MediaSessionPlaybackTestState GetCurrentMediaSessionPlaybackState(
+      GlobalObject& aGlobal);
 };
 
 }  // namespace dom

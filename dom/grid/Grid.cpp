@@ -79,7 +79,7 @@ Grid::Grid(nsISupports* aParent, nsGridContainerFrame* aFrame)
   mCols->SetLineInfo(columnTrackInfo, columnLineInfo, mAreas, false);
 }
 
-Grid::~Grid() {}
+Grid::~Grid() = default;
 
 JSObject* Grid::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
   return Grid_Binding::Wrap(aCx, this, aGivenProto);
@@ -90,7 +90,7 @@ GridDimension* Grid::Rows() const { return mRows; }
 GridDimension* Grid::Cols() const { return mCols; }
 
 void Grid::GetAreas(nsTArray<RefPtr<GridArea>>& aAreas) const {
-  aAreas = mAreas;
+  aAreas = mAreas.Clone();
 }
 
 }  // namespace dom

@@ -14,6 +14,7 @@
 #include "prtime.h"
 #include "plstr.h"
 #include "nsURLHelper.h"
+#include "CacheControlParser.h"
 #include <algorithm>
 
 namespace mozilla {
@@ -23,6 +24,8 @@ namespace net {
 // nsHttpResponseHead <public>
 //-----------------------------------------------------------------------------
 
+// Note that the code below MUST be synchronized with the IPC
+// serialization/deserialization in PHttpChannelParams.h.
 nsHttpResponseHead::nsHttpResponseHead(const nsHttpResponseHead& aOther)
     : mRecursiveMutex("nsHttpResponseHead.mRecursiveMutex"),
       mInVisitHeaders(false) {
@@ -41,6 +44,11 @@ nsHttpResponseHead::nsHttpResponseHead(const nsHttpResponseHead& aOther)
   mCacheControlNoStore = other.mCacheControlNoStore;
   mCacheControlNoCache = other.mCacheControlNoCache;
   mCacheControlImmutable = other.mCacheControlImmutable;
+  mCacheControlStaleWhileRevalidateSet =
+      other.mCacheControlStaleWhileRevalidateSet;
+  mCacheControlStaleWhileRevalidate = other.mCacheControlStaleWhileRevalidate;
+  mCacheControlMaxAgeSet = other.mCacheControlMaxAgeSet;
+  mCacheControlMaxAge = other.mCacheControlMaxAge;
   mPragmaNoCache = other.mPragmaNoCache;
 }
 
@@ -62,6 +70,11 @@ nsHttpResponseHead& nsHttpResponseHead::operator=(
   mCacheControlNoStore = other.mCacheControlNoStore;
   mCacheControlNoCache = other.mCacheControlNoCache;
   mCacheControlImmutable = other.mCacheControlImmutable;
+  mCacheControlStaleWhileRevalidateSet =
+      other.mCacheControlStaleWhileRevalidateSet;
+  mCacheControlStaleWhileRevalidate = other.mCacheControlStaleWhileRevalidate;
+  mCacheControlMaxAgeSet = other.mCacheControlMaxAgeSet;
+  mCacheControlMaxAge = other.mCacheControlMaxAge;
   mPragmaNoCache = other.mPragmaNoCache;
 
   return *this;
@@ -87,7 +100,7 @@ int64_t nsHttpResponseHead::ContentLength() {
   return mContentLength;
 }
 
-void nsHttpResponseHead::ContentType(nsACString& aContentType) {
+void nsHttpResponseHead::ContentType(nsACString& aContentType) const {
   RecursiveMutexAutoLock monitor(mRecursiveMutex);
   aContentType = mContentType;
 }
@@ -782,22 +795,16 @@ bool nsHttpResponseHead::MustValidateIfExpired() {
 
 bool nsHttpResponseHead::StaleWhileRevalidate(uint32_t now,
                                               uint32_t expiration) {
-  nsresult rv;
+  RecursiveMutexAutoLock monitor(mRecursiveMutex);
 
-  if (expiration <= 0) {
-    return false;
-  }
-
-  uint32_t revalidateWindow;
-  rv = GetStaleWhileRevalidateValue(&revalidateWindow);
-  if (NS_FAILED(rv)) {
+  if (expiration <= 0 || !mCacheControlStaleWhileRevalidateSet) {
     return false;
   }
 
   // 'expiration' is the expiration time (an absolute unit), the swr window
   // extends the expiration time.
   CheckedInt<uint32_t> stallValidUntil = expiration;
-  stallValidUntil += revalidateWindow;
+  stallValidUntil += mCacheControlStaleWhileRevalidate;
   if (!stallValidUntil.isValid()) {
     // overflow means an indefinite stale window
     return true;
@@ -901,6 +908,10 @@ void nsHttpResponseHead::Reset() {
   mCacheControlNoStore = false;
   mCacheControlNoCache = false;
   mCacheControlImmutable = false;
+  mCacheControlStaleWhileRevalidateSet = false;
+  mCacheControlStaleWhileRevalidate = 0;
+  mCacheControlMaxAgeSet = false;
+  mCacheControlMaxAge = 0;
   mPragmaNoCache = false;
   mStatusText.Truncate();
   mContentType.Truncate();
@@ -941,59 +952,11 @@ nsresult nsHttpResponseHead::GetMaxAgeValue(uint32_t* result) {
 }
 
 nsresult nsHttpResponseHead::GetMaxAgeValue_locked(uint32_t* result) const {
-  const char* val = mHeaders.PeekHeader(nsHttp::Cache_Control);
-  if (!val) return NS_ERROR_NOT_AVAILABLE;
-
-  const char* p = nsHttp::FindToken(val, "max-age", HTTP_HEADER_VALUE_SEPS "=");
-  if (!p) return NS_ERROR_NOT_AVAILABLE;
-  p += 7;
-  while (*p == ' ' || *p == '\t') ++p;
-  if (*p != '=') return NS_ERROR_NOT_AVAILABLE;
-  ++p;
-  while (*p == ' ' || *p == '\t') ++p;
-
-  int maxAgeValue = atoi(p);
-  if (maxAgeValue < 0) maxAgeValue = 0;
-  *result = static_cast<uint32_t>(maxAgeValue);
-  return NS_OK;
-}
-
-// Get the stale-while-revalidate directive value, if present
-nsresult nsHttpResponseHead::GetStaleWhileRevalidateValue(uint32_t* result) {
-  RecursiveMutexAutoLock monitor(mRecursiveMutex);
-  return GetStaleWhileRevalidateValue_locked(result);
-}
-
-nsresult nsHttpResponseHead::GetStaleWhileRevalidateValue_locked(
-    uint32_t* result) const {
-  const char* val = mHeaders.PeekHeader(nsHttp::Cache_Control);
-  if (!val) {
+  if (!mCacheControlMaxAgeSet) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  // Rewrite (best all FindToken users) to mozilla::Tokenizer, bug 1542293.
-  const char* p = nsHttp::FindToken(val, "stale-while-revalidate",
-                                    HTTP_HEADER_VALUE_SEPS "=");
-  if (!p) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-  p += 22;
-  while (*p == ' ' || *p == '\t') {
-    ++p;
-  }
-  if (*p != '=') {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-  ++p;
-  while (*p == ' ' || *p == '\t') {
-    ++p;
-  }
-
-  int revalidateWindow = atoi(p);
-  if (revalidateWindow < 0) {
-    revalidateWindow = 0;
-  }
-  *result = static_cast<uint32_t>(revalidateWindow);
+  *result = mCacheControlMaxAge;
   return NS_OK;
 }
 
@@ -1048,6 +1011,12 @@ bool nsHttpResponseHead::operator==(const nsHttpResponseHead& aOther) const {
          mCacheControlNoCache == aOther.mCacheControlNoCache &&
          mCacheControlNoStore == aOther.mCacheControlNoStore &&
          mCacheControlImmutable == aOther.mCacheControlImmutable &&
+         mCacheControlStaleWhileRevalidateSet ==
+             aOther.mCacheControlStaleWhileRevalidateSet &&
+         mCacheControlStaleWhileRevalidate ==
+             aOther.mCacheControlStaleWhileRevalidate &&
+         mCacheControlMaxAgeSet == aOther.mCacheControlMaxAgeSet &&
+         mCacheControlMaxAge == aOther.mCacheControlMaxAge &&
          mPragmaNoCache == aOther.mPragmaNoCache;
 }
 
@@ -1078,8 +1047,9 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
 
   LOG(("nsHttpResponseHead::ParseVersion [version=%s]\n", str));
 
+  Tokenizer t(str, nullptr, "");
   // make sure we have HTTP at the beginning
-  if (PL_strncasecmp(str, "HTTP", 4) != 0) {
+  if (!t.CheckWord("HTTP")) {
     if (PL_strncasecmp(str, "ICY ", 4) == 0) {
       // ShoutCast ICY is HTTP/1.0-like. Assume it is HTTP/1.0.
       LOG(("Treating ICY as HTTP 1.0\n"));
@@ -1090,9 +1060,8 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
     mVersion = HttpVersion::v0_9;
     return;
   }
-  str += 4;
 
-  if (*str != '/') {
+  if (!t.CheckChar('/')) {
     LOG(("server did not send a version number; assuming HTTP/1.0\n"));
     // NCSA/1.5.2 has a bug in which it fails to send a version number
     // if the request version is HTTP/1.1, so we fall back on HTTP/1.0
@@ -1100,23 +1069,43 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
     return;
   }
 
-  char* p = PL_strchr(str, '.');
-  if (p == nullptr) {
+  uint32_t major;
+  if (!t.ReadInteger(&major)) {
+    LOG(("server did not send a correct version number; assuming HTTP/1.0"));
+    mVersion = HttpVersion::v1_0;
+    return;
+  }
+
+  if (major == 3) {
+    mVersion = HttpVersion::v3_0;
+    return;
+  }
+
+  if (major == 2) {
+    mVersion = HttpVersion::v2_0;
+    return;
+  }
+
+  if (major != 1) {
+    LOG(("server did not send a correct version number; assuming HTTP/1.0"));
+    mVersion = HttpVersion::v1_0;
+    return;
+  }
+
+  if (!t.CheckChar('.')) {
     LOG(("mal-formed server version; assuming HTTP/1.0\n"));
     mVersion = HttpVersion::v1_0;
     return;
   }
 
-  ++p;  // let b point to the minor version
+  uint32_t minor;
+  if (!t.ReadInteger(&minor)) {
+    LOG(("server did not send a correct version number; assuming HTTP/1.0"));
+    mVersion = HttpVersion::v1_0;
+    return;
+  }
 
-  int major = atoi(str + 1);
-  int minor = atoi(p);
-
-  if ((major > 3) || ((major == 3) && (minor >= 0))) {
-    mVersion = HttpVersion::v3_0;
-  } else if ((major > 2) || ((major == 2) && (minor >= 0))) {
-    mVersion = HttpVersion::v2_0;
-  } else if ((major == 1) && (minor >= 1)) {
+  if (minor >= 1) {
     // at least HTTP/1.1
     mVersion = HttpVersion::v1_1;
   } else {
@@ -1133,31 +1122,25 @@ void nsHttpResponseHead::ParseCacheControl(const char* val) {
     mCacheControlNoCache = false;
     mCacheControlNoStore = false;
     mCacheControlImmutable = false;
+    mCacheControlStaleWhileRevalidateSet = false;
+    mCacheControlStaleWhileRevalidate = 0;
+    mCacheControlMaxAgeSet = false;
+    mCacheControlMaxAge = 0;
     return;
   }
 
-  // search header value for occurrence of "public"
-  if (nsHttp::FindToken(val, "public", HTTP_HEADER_VALUE_SEPS)) {
-    mCacheControlPublic = true;
-  }
+  nsDependentCString cacheControlRequestHeader(val);
+  CacheControlParser cacheControlRequest(cacheControlRequestHeader);
 
-  // search header value for occurrence of "private"
-  if (nsHttp::FindToken(val, "private", HTTP_HEADER_VALUE_SEPS))
-    mCacheControlPrivate = true;
-
-  // search header value for occurrence(s) of "no-cache" but ignore
-  // occurrence(s) of "no-cache=blah"
-  if (nsHttp::FindToken(val, "no-cache", HTTP_HEADER_VALUE_SEPS))
-    mCacheControlNoCache = true;
-
-  // search header value for occurrence of "no-store"
-  if (nsHttp::FindToken(val, "no-store", HTTP_HEADER_VALUE_SEPS))
-    mCacheControlNoStore = true;
-
-  // search header value for occurrence of "immutable"
-  if (nsHttp::FindToken(val, "immutable", HTTP_HEADER_VALUE_SEPS)) {
-    mCacheControlImmutable = true;
-  }
+  mCacheControlPublic = cacheControlRequest.Public();
+  mCacheControlPrivate = cacheControlRequest.Private();
+  mCacheControlNoCache = cacheControlRequest.NoCache();
+  mCacheControlNoStore = cacheControlRequest.NoStore();
+  mCacheControlImmutable = cacheControlRequest.Immutable();
+  mCacheControlStaleWhileRevalidateSet =
+      cacheControlRequest.StaleWhileRevalidate(
+          &mCacheControlStaleWhileRevalidate);
+  mCacheControlMaxAgeSet = cacheControlRequest.MaxAge(&mCacheControlMaxAge);
 }
 
 void nsHttpResponseHead::ParsePragma(const char* val) {
@@ -1194,7 +1177,7 @@ nsresult nsHttpResponseHead::GetOriginalHeader(nsHttpAtom aHeader,
   return rv;
 }
 
-bool nsHttpResponseHead::HasContentType() {
+bool nsHttpResponseHead::HasContentType() const {
   RecursiveMutexAutoLock monitor(mRecursiveMutex);
   return !mContentType.IsEmpty();
 }

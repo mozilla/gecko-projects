@@ -5,6 +5,7 @@
 
 #include "AccessibleWrap.h"
 #include "ProxyAccessible.h"
+#include "Platform.h"
 
 #import <Cocoa/Cocoa.h>
 
@@ -23,6 +24,14 @@ namespace mozilla {
 namespace a11y {
 
 inline id<mozAccessible> GetObjectOrRepresentedView(id<mozAccessible> aObject) {
+  if (!ShouldA11yBeEnabled()) {
+    // If platform a11y is not enabled, don't return represented view.
+    // This is mostly for our mochitest environment because the represented
+    // ChildView checks `ShouldA11yBeEnabled` before proxying accessibility
+    // methods to mozAccessibles.
+    return aObject;
+  }
+
   return [aObject hasRepresentedView] ? [aObject representedView] : aObject;
 }
 
@@ -49,19 +58,14 @@ static const uintptr_t IS_PROXY = 1;
   uintptr_t mGeckoAccessible;
 
   /**
-   * Strong ref to array of children
-   */
-  NSMutableArray* mChildren;
-
-  /**
-   * Weak reference to the parent
-   */
-  mozAccessible* mParent;
-
-  /**
    * The role of our gecko accessible.
    */
   mozilla::a11y::role mRole;
+
+  /**
+   * A cache of a subset of our states.
+   */
+  uint64_t mCachedState;
 }
 
 // return the Accessible for this mozAccessible if it exists.
@@ -112,6 +116,9 @@ static const uintptr_t IS_PROXY = 1;
 
 - (BOOL)isEnabled;
 
+// should a child be disabled
+- (BOOL)disableChild:(mozAccessible*)child;
+
 // information about focus.
 - (BOOL)isFocused;
 - (BOOL)canBeFocused;
@@ -119,24 +126,40 @@ static const uintptr_t IS_PROXY = 1;
 // returns NO if for some reason we were unable to focus the element.
 - (BOOL)focus;
 
-// notifications sent out to listening accessible providers.
-- (void)didReceiveFocus;
-- (void)valueDidChange;
-- (void)selectedTextDidChange;
-- (void)documentLoadComplete;
+// Given a gecko accessibility event type, post the relevant
+// system accessibility notification.
+- (void)handleAccessibleEvent:(uint32_t)eventType;
+
+// Post the given accessibility system notification
+- (void)postNotification:(NSString*)notification;
 
 // internal method to retrieve a child at a given index.
 - (id)childAt:(uint32_t)i;
 
+// Get gecko accessible's state.
+- (uint64_t)state;
+
+// Get gecko accessible's state filtered through given mask.
+- (uint64_t)stateWithMask:(uint64_t)mask;
+
+// Notify of a state change, so the cache can be altered.
+- (void)stateChanged:(uint64_t)state isEnabled:(BOOL)enabled;
+
+// Invalidate cached state.
+- (void)invalidateState;
+
+// This is called by isAccessibilityElement. If a subclass wants
+// to alter the isAccessibilityElement return value, it should
+// override this and not isAccessibilityElement directly.
+- (BOOL)ignoreWithParent:(mozAccessible*)parent;
+
+// Should the child be ignored. This allows subclasses to determine
+// what kinds of accessibles are valid children. This causes the child
+// to be skipped, but the unignored descendants will be added to the
+// container in the default children getter.
+- (BOOL)ignoreChild:(mozAccessible*)child;
+
 #pragma mark -
-
-// invalidates and removes all our children from our cached array.
-- (void)invalidateChildren;
-
-/**
- * Append a child if they are already cached.
- */
-- (void)appendChild:(mozilla::a11y::Accessible*)aAccessible;
 
 // makes ourselves "expired". after this point, we might be around if someone
 // has retained us (e.g., a third-party), but we really contain no information.
@@ -153,9 +176,8 @@ static const uintptr_t IS_PROXY = 1;
 
 // ---- NSAccessibility methods ---- //
 
-// whether to skip this element when traversing the accessibility
-// hierarchy.
-- (BOOL)accessibilityIsIgnored;
+// whether to include this element in the platform's tree
+- (BOOL)isAccessibilityElement;
 
 // called by third-parties to determine the deepest child element under the mouse
 - (id)accessibilityHitTest:(NSPoint)point;

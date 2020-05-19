@@ -78,9 +78,7 @@ function logAccessDeniedWarning(window, callerInfo, extensionPolicy) {
     Ci.nsIScriptError
   );
 
-  const msg = `The extension "${name}" is not allowed to access ${
-    reportedURI.spec
-  }`;
+  const msg = `The extension "${name}" is not allowed to access ${reportedURI.spec}`;
 
   const innerWindowId = window.windowUtils.currentInnerWindowID;
 
@@ -140,6 +138,10 @@ CustomizedReload.prototype = {
       .getInterface(Ci.nsIWebNavigation);
   },
 
+  get browsingContext() {
+    return this.docShell.browsingContext;
+  },
+
   start() {
     if (!this.waitForReloadCompleted) {
       this.waitForReloadCompleted = new Promise((resolve, reject) => {
@@ -147,7 +149,7 @@ CustomizedReload.prototype = {
         this.rejectReloadCompleted = reject;
 
         if (this.userAgent) {
-          this.docShell.customUserAgent = this.userAgent;
+          this.browsingContext.customUserAgent = this.userAgent;
         }
 
         let reloadFlags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
@@ -188,7 +190,7 @@ CustomizedReload.prototype = {
     }
 
     const document = subject;
-    const window = document && document.defaultView;
+    const window = document?.defaultView;
 
     // Filter out non interesting documents.
     if (!document || !document.location || !window) {
@@ -265,8 +267,11 @@ CustomizedReload.prototype = {
     }
 
     // Reset the customized user agent.
-    if (this.userAgent && this.docShell.customUserAgent == this.userAgent) {
-      this.docShell.customUserAgent = null;
+    if (
+      this.userAgent &&
+      this.browsingContext.customUserAgent == this.userAgent
+    ) {
+      this.browsingContext.customUserAgent = null;
     }
 
     if (error) {
@@ -624,14 +629,12 @@ var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
             throwErr &&
             typeof throwErr === "object" &&
             throwErr.unsafeDereference();
-          const message =
-            unsafeDereference && unsafeDereference.toString
-              ? unsafeDereference.toString()
-              : String(throwErr);
-          const stack =
-            unsafeDereference && unsafeDereference.stack
-              ? unsafeDereference.stack
-              : null;
+          const message = unsafeDereference?.toString
+            ? unsafeDereference.toString()
+            : String(throwErr);
+          const stack = unsafeDereference?.stack
+            ? unsafeDereference.stack
+            : null;
 
           return {
             exceptionInfo: {

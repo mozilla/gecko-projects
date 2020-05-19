@@ -19,8 +19,10 @@
 #ifndef wasm_op_iter_h
 #define wasm_op_iter_h
 
-#include "mozilla/Pair.h"
+#include "mozilla/CompactPair.h"
 #include "mozilla/Poison.h"
+
+#include <type_traits>
 
 #include "jit/AtomicOp.h"
 #include "js/Printf.h"
@@ -29,316 +31,6 @@
 
 namespace js {
 namespace wasm {
-
-template <typename PointerType>
-class TaggedValue {
- public:
-  enum Kind {
-    ImmediateKind1 = 0,
-    ImmediateKind2 = 1,
-    PointerKind1 = 2,
-    PointerKind2 = 3
-  };
-
- private:
-  uintptr_t bits_;
-
-  static constexpr uintptr_t PayloadShift = 2;
-  static constexpr uintptr_t KindMask = 0x3;
-  static constexpr uintptr_t PointerKindBit = 0x2;
-
-  constexpr static bool IsPointerKind(Kind kind) {
-    return uintptr_t(kind) & PointerKindBit;
-  }
-  constexpr static bool IsImmediateKind(Kind kind) {
-    return !IsPointerKind(kind);
-  }
-
-  static_assert(IsImmediateKind(ImmediateKind1), "immediate kind 1");
-  static_assert(IsImmediateKind(ImmediateKind2), "immediate kind 2");
-  static_assert(IsPointerKind(PointerKind1), "pointer kind 1");
-  static_assert(IsPointerKind(PointerKind2), "pointer kind 2");
-
-  static uintptr_t PackImmediate(Kind kind, uint32_t imm) {
-    MOZ_ASSERT(IsImmediateKind(kind));
-    MOZ_ASSERT((uintptr_t(kind) & KindMask) == kind);
-    MOZ_ASSERT((imm & (uint32_t(KindMask) << (32 - PayloadShift))) == 0);
-    return uintptr_t(kind) | (uintptr_t(imm) << PayloadShift);
-  }
-
-  static uintptr_t PackPointer(Kind kind, PointerType* ptr) {
-    uintptr_t ptrBits = reinterpret_cast<uintptr_t>(ptr);
-    MOZ_ASSERT(IsPointerKind(kind));
-    MOZ_ASSERT((uintptr_t(kind) & KindMask) == kind);
-    MOZ_ASSERT((ptrBits & KindMask) == 0);
-    return uintptr_t(kind) | ptrBits;
-  }
-
- public:
-  TaggedValue(Kind kind, uint32_t imm) : bits_(PackImmediate(kind, imm)) {}
-  TaggedValue(Kind kind, PointerType* ptr) : bits_(PackPointer(kind, ptr)) {}
-
-  uintptr_t bits() const { return bits_; }
-  Kind kind() const { return Kind(bits() & KindMask); }
-  uint32_t immediate() const {
-    MOZ_ASSERT(IsImmediateKind(kind()));
-    return mozilla::AssertedCast<uint32_t>(bits() >> PayloadShift);
-  }
-  PointerType* pointer() const {
-    MOZ_ASSERT(IsPointerKind(kind()));
-    return reinterpret_cast<PointerType*>(bits() & ~KindMask);
-  }
-};
-
-// ResultType represents the WebAssembly spec's `resulttype`. Semantically, a
-// result type is just a vec(valtype).  For effiency, though, the ResultType
-// value is packed into a word, with separate encodings for these 3 cases:
-//  []
-//  [valtype]
-//  pointer to ValTypeVector
-//
-// Additionally there is an encoding indicating uninitialized ResultType
-// values.
-//
-// Generally in the latter case the ValTypeVector is the args() or results() of
-// a FuncType in the compilation unit, so as long as the lifetime of the
-// ResultType value is less than the OpIter, we can just borrow the pointer
-// without ownership or copying.
-class ResultType {
-  typedef TaggedValue<const ValTypeVector> Tagged;
-  Tagged tagged_;
-
-  enum Kind {
-    EmptyKind = Tagged::ImmediateKind1,
-    SingleKind = Tagged::ImmediateKind2,
-#ifdef ENABLE_WASM_MULTI_VALUE
-    VectorKind = Tagged::PointerKind1,
-#endif
-    InvalidKind = Tagged::PointerKind2,
-  };
-
-  ResultType(Kind kind, uint32_t imm) : tagged_(Tagged::Kind(kind), imm) {}
-#ifdef ENABLE_WASM_MULTI_VALUE
-  explicit ResultType(const ValTypeVector* ptr)
-      : tagged_(Tagged::Kind(VectorKind), ptr) {}
-#endif
-
-  Kind kind() const { return Kind(tagged_.kind()); }
-
-  ValType singleValType() const {
-    MOZ_ASSERT(kind() == SingleKind);
-    return ValType(PackedTypeCodeFromBits(tagged_.immediate()));
-  }
-
-#ifdef ENABLE_WASM_MULTI_VALUE
-  const ValTypeVector& values() const {
-    MOZ_ASSERT(kind() == VectorKind);
-    return *tagged_.pointer();
-  }
-#endif
-
- public:
-  ResultType() : tagged_(Tagged::Kind(InvalidKind), nullptr) {}
-
-  static ResultType Empty() { return ResultType(EmptyKind, uint32_t(0)); }
-  static ResultType Single(ValType vt) {
-    return ResultType(SingleKind, vt.bitsUnsafe());
-  }
-  static ResultType Vector(const ValTypeVector& vals) {
-    switch (vals.length()) {
-      case 0:
-        return Empty();
-      case 1:
-        return Single(vals[0]);
-      default:
-#ifdef ENABLE_WASM_MULTI_VALUE
-        return ResultType(&vals);
-#else
-        MOZ_CRASH("multi-value returns not supported");
-#endif
-    }
-  }
-
-  bool empty() const { return kind() == EmptyKind; }
-
-  size_t length() const {
-    switch (kind()) {
-      case EmptyKind:
-        return 0;
-      case SingleKind:
-        return 1;
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case VectorKind:
-        return values().length();
-#endif
-      default:
-        MOZ_CRASH("bad resulttype");
-    }
-  }
-
-  ValType operator[](size_t i) const {
-    switch (kind()) {
-      case SingleKind:
-        MOZ_ASSERT(i == 0);
-        return singleValType();
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case VectorKind:
-        return values()[i];
-#endif
-      default:
-        MOZ_CRASH("bad resulttype");
-    }
-  }
-
-  bool operator==(ResultType rhs) const {
-    switch (kind()) {
-      case EmptyKind:
-      case SingleKind:
-      case InvalidKind:
-        return tagged_.bits() == rhs.tagged_.bits();
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case VectorKind: {
-        if (rhs.kind() != VectorKind) {
-          return false;
-        }
-        return EqualContainers(values(), rhs.values());
-      }
-#endif
-      default:
-        MOZ_CRASH("bad resulttype");
-    }
-  }
-  bool operator!=(ResultType rhs) const { return !(*this == rhs); }
-};
-
-// BlockType represents the WebAssembly spec's `blocktype`. Semantically, a
-// block type is just a (vec(valtype) -> vec(valtype)) with four special
-// encodings which are represented explicitly in BlockType:
-//  [] -> []
-//  [] -> [valtype]
-//  [params] -> [results] via pointer to FuncType
-//  [] -> [results] via pointer to FuncType (ignoring [params])
-
-class BlockType {
-  typedef TaggedValue<const FuncType> Tagged;
-  Tagged tagged_;
-
-  enum Kind {
-    VoidToVoidKind = Tagged::ImmediateKind1,
-    VoidToSingleKind = Tagged::ImmediateKind2,
-#ifdef ENABLE_WASM_MULTI_VALUE
-    FuncKind = Tagged::PointerKind1,
-    FuncResultsKind = Tagged::PointerKind2
-#endif
-  };
-
-  BlockType(Kind kind, uint32_t imm) : tagged_(Tagged::Kind(kind), imm) {}
-#ifdef ENABLE_WASM_MULTI_VALUE
-  BlockType(Kind kind, const FuncType& type)
-      : tagged_(Tagged::Kind(kind), &type) {}
-#endif
-
-  Kind kind() const { return Kind(tagged_.kind()); }
-  ValType singleValType() const {
-    MOZ_ASSERT(kind() == VoidToSingleKind);
-    return ValType(PackedTypeCodeFromBits(tagged_.immediate()));
-  }
-
-#ifdef ENABLE_WASM_MULTI_VALUE
-  const FuncType& funcType() const { return *tagged_.pointer(); }
-#endif
-
- public:
-  BlockType()
-      : tagged_(Tagged::Kind(VoidToVoidKind),
-                uint32_t(InvalidPackedTypeCode())) {}
-
-  static BlockType VoidToVoid() {
-    return BlockType(VoidToVoidKind, uint32_t(0));
-  }
-  static BlockType VoidToSingle(ValType vt) {
-    return BlockType(VoidToSingleKind, vt.bitsUnsafe());
-  }
-  static BlockType Func(const FuncType& type) {
-#ifdef ENABLE_WASM_MULTI_VALUE
-    if (type.args().length() == 0) {
-      return FuncResults(type);
-    }
-    return BlockType(FuncKind, type);
-#else
-    MOZ_ASSERT(type.args().length() == 0);
-    return FuncResults(type);
-#endif
-  }
-  static BlockType FuncResults(const FuncType& type) {
-    switch (type.results().length()) {
-      case 0:
-        return VoidToVoid();
-      case 1:
-        return VoidToSingle(type.results()[0]);
-      default:
-#ifdef ENABLE_WASM_MULTI_VALUE
-        return BlockType(FuncResultsKind, type);
-#else
-        MOZ_CRASH("multi-value returns not supported");
-#endif
-    }
-  }
-
-  ResultType params() const {
-    switch (kind()) {
-      case VoidToVoidKind:
-      case VoidToSingleKind:
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case FuncResultsKind:
-#endif
-        return ResultType::Empty();
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case FuncKind:
-        return ResultType::Vector(funcType().args());
-#endif
-      default:
-        MOZ_CRASH("unexpected kind");
-    }
-  }
-
-  ResultType results() const {
-    switch (kind()) {
-      case VoidToVoidKind:
-        return ResultType::Empty();
-      case VoidToSingleKind:
-        return ResultType::Single(singleValType());
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case FuncKind:
-      case FuncResultsKind:
-        return ResultType::Vector(funcType().results());
-#endif
-      default:
-        MOZ_CRASH("unexpected kind");
-    }
-  }
-
-  bool operator==(BlockType rhs) const {
-    if (kind() != rhs.kind()) {
-      return false;
-    }
-    switch (kind()) {
-      case VoidToVoidKind:
-      case VoidToSingleKind:
-        return tagged_.bits() == rhs.tagged_.bits();
-#ifdef ENABLE_WASM_MULTI_VALUE
-      case FuncKind:
-        return funcType() == rhs.funcType();
-      case FuncResultsKind:
-        return EqualContainers(funcType().results(), rhs.funcType().results());
-#endif
-      default:
-        MOZ_CRASH("unexpected kind");
-    }
-  }
-
-  bool operator!=(BlockType rhs) const { return !(*this == rhs); }
-};
 
 // The kind of a control-flow stack item.
 enum class LabelKind : uint8_t { Body, Block, Loop, Then, Else };
@@ -410,6 +102,7 @@ enum class OpKind {
   I64,
   F32,
   F64,
+  V128,
   Br,
   BrIf,
   BrTable,
@@ -450,11 +143,6 @@ enum class OpKind {
   OldAtomicBinOp,
   OldAtomicCompareExchange,
   OldAtomicExchange,
-  ExtractLane,
-  ReplaceLane,
-  Swizzle,
-  Shuffle,
-  Splat,
   MemOrTableCopy,
   DataOrElemDrop,
   MemFill,
@@ -470,6 +158,13 @@ enum class OpKind {
   StructGet,
   StructSet,
   StructNarrow,
+#  ifdef ENABLE_WASM_SIMD
+  ExtractLane,
+  ReplaceLane,
+  VectorShift,
+  VectorSelect,
+  VectorShuffle,
+#  endif
 };
 
 // Return the OpKind for a given Op. This is used for sanity-checking that
@@ -491,8 +186,8 @@ struct LinearMemoryAddress {
 
 template <typename ControlItem>
 class ControlStackEntry {
-  // Use a Pair to optimize away empty ControlItem.
-  mozilla::Pair<BlockType, ControlItem> typeAndItem_;
+  // Use a pair to optimize away empty ControlItem.
+  mozilla::CompactPair<BlockType, ControlItem> typeAndItem_;
 
   // The "base" of a control stack entry is valueStack_.length() minus
   // type().params().length(), i.e., the size of the value stack "below"
@@ -532,7 +227,7 @@ class ControlStackEntry {
 template <typename Value>
 class TypeAndValueT {
   // Use a Pair to optimize away empty Value.
-  mozilla::Pair<StackType, Value> tv_;
+  mozilla::CompactPair<StackType, Value> tv_;
 
  public:
   TypeAndValueT() : tv_(StackType::bottom(), Value()) {}
@@ -555,12 +250,12 @@ class TypeAndValueT {
 template <typename Policy>
 class MOZ_STACK_CLASS OpIter : private Policy {
  public:
-  typedef typename Policy::Value Value;
-  typedef typename Policy::ValueVector ValueVector;
-  typedef TypeAndValueT<Value> TypeAndValue;
+  using Value = typename Policy::Value;
+  using ValueVector = typename Policy::ValueVector;
+  using TypeAndValue = TypeAndValueT<Value>;
   typedef Vector<TypeAndValue, 8, SystemAllocPolicy> TypeAndValueStack;
-  typedef typename Policy::ControlItem ControlItem;
-  typedef ControlStackEntry<ControlItem> Control;
+  using ControlItem = typename Policy::ControlItem;
+  using Control = ControlStackEntry<ControlItem>;
   typedef Vector<Control, 8, SystemAllocPolicy> ControlStack;
 
  private:
@@ -742,6 +437,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   MOZ_MUST_USE bool readF64Const(double* f64);
   MOZ_MUST_USE bool readRefFunc(uint32_t* funcTypeIndex);
   MOZ_MUST_USE bool readRefNull();
+  MOZ_MUST_USE bool readRefIsNull(Value* input);
   MOZ_MUST_USE bool readCall(uint32_t* calleeIndex, ValueVector* argValues);
   MOZ_MUST_USE bool readCallIndirect(uint32_t* funcTypeIndex,
                                      uint32_t* tableIndex, Value* callee,
@@ -791,7 +487,24 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   MOZ_MUST_USE bool readStructNarrow(ValType* inputType, ValType* outputType,
                                      Value* ptr);
   MOZ_MUST_USE bool readValType(ValType* type);
+  MOZ_MUST_USE bool readRefType(RefType* type);
   MOZ_MUST_USE bool readReferenceType(ValType* type, const char* const context);
+
+#ifdef ENABLE_WASM_SIMD
+  MOZ_MUST_USE bool readLaneIndex(uint32_t inputLanes, uint32_t* laneIndex);
+  MOZ_MUST_USE bool readExtractLane(ValType resultType, uint32_t inputLanes,
+                                    uint32_t* laneIndex, Value* input);
+  MOZ_MUST_USE bool readReplaceLane(ValType operandType, uint32_t inputLanes,
+                                    uint32_t* laneIndex, Value* baseValue,
+                                    Value* operand);
+  MOZ_MUST_USE bool readVectorShift(Value* baseValue, Value* shift);
+  MOZ_MUST_USE bool readVectorSelect(Value* v1, Value* v2, Value* controlMask);
+  MOZ_MUST_USE bool readVectorShuffle(Value* v1, Value* v2, V128* selectMask);
+  MOZ_MUST_USE bool readV128Const(V128* f64);
+  MOZ_MUST_USE bool readLoadSplat(uint32_t byteSize,
+                                  LinearMemoryAddress<Value>* addr);
+  MOZ_MUST_USE bool readLoadExtend(LinearMemoryAddress<Value>* addr);
+#endif
 
   // At a location where readOp is allowed, peek at the next opcode
   // without consuming it or updating any internal state.
@@ -856,9 +569,11 @@ inline bool OpIter<Policy>::checkIsSubtypeOf(ValType actual, ValType expected) {
     return true;
   }
 
+  UniqueChars actualText = ToString(actual);
+  UniqueChars expectedText = ToString(expected);
   UniqueChars error(
       JS_smprintf("type mismatch: expression has type %s but expected %s",
-                  ToCString(actual), ToCString(expected)));
+                  actualText.get(), expectedText.get()));
   if (!error) {
     return false;
   }
@@ -1415,7 +1130,7 @@ inline bool OpIter<Policy>::checkBrTableEntry(uint32_t* relativeDepth,
                                               ResultType* type,
                                               ValueVector* branchValues) {
   if (!readVarU32(relativeDepth)) {
-    return false;
+    return fail("unable to read br_table depth");
   }
 
   Control* block = nullptr;
@@ -1580,12 +1295,12 @@ inline bool OpIter<Policy>::readMemOrTableIndex(bool isMem, uint32_t* index) {
   if (readByte) {
     uint8_t indexTmp;
     if (!readFixedU8(&indexTmp)) {
-      return false;
+      return fail("unable to read memory or table index");
     }
     *index = indexTmp;
   } else {
     if (!readVarU32(index)) {
-      return false;
+      return fail("unable to read memory or table index");
     }
   }
   return true;
@@ -1699,7 +1414,7 @@ inline bool OpIter<Policy>::readMemorySize() {
 
   uint8_t flags;
   if (!readFixedU8(&flags)) {
-    return false;
+    return fail("failed to read memory flags");
   }
 
   if (flags != uint8_t(MemoryTableFlags::Default)) {
@@ -1719,7 +1434,7 @@ inline bool OpIter<Policy>::readMemoryGrow(Value* input) {
 
   uint8_t flags;
   if (!readFixedU8(&flags)) {
-    return false;
+    return fail("failed to read memory flags");
   }
 
   if (flags != uint8_t(MemoryTableFlags::Default)) {
@@ -1805,7 +1520,7 @@ inline bool OpIter<Policy>::readGetLocal(const ValTypeVector& locals,
   MOZ_ASSERT(Classify(op_) == OpKind::GetLocal);
 
   if (!readVarU32(id)) {
-    return false;
+    return fail("unable to read local index");
   }
 
   if (*id >= locals.length()) {
@@ -1821,7 +1536,7 @@ inline bool OpIter<Policy>::readSetLocal(const ValTypeVector& locals,
   MOZ_ASSERT(Classify(op_) == OpKind::SetLocal);
 
   if (!readVarU32(id)) {
-    return false;
+    return fail("unable to read local index");
   }
 
   if (*id >= locals.length()) {
@@ -1837,7 +1552,7 @@ inline bool OpIter<Policy>::readTeeLocal(const ValTypeVector& locals,
   MOZ_ASSERT(Classify(op_) == OpKind::TeeLocal);
 
   if (!readVarU32(id)) {
-    return false;
+    return fail("unable to read local index");
   }
 
   if (*id >= locals.length()) {
@@ -1858,7 +1573,7 @@ inline bool OpIter<Policy>::readGetGlobal(uint32_t* id) {
   MOZ_ASSERT(Classify(op_) == OpKind::GetGlobal);
 
   if (!readVarU32(id)) {
-    return false;
+    return fail("unable to read global index");
   }
 
   if (*id >= env_.globals.length()) {
@@ -1873,7 +1588,7 @@ inline bool OpIter<Policy>::readSetGlobal(uint32_t* id, Value* value) {
   MOZ_ASSERT(Classify(op_) == OpKind::SetGlobal);
 
   if (!readVarU32(id)) {
-    return false;
+    return fail("unable to read global index");
   }
 
   if (*id >= env_.globals.length()) {
@@ -1892,7 +1607,7 @@ inline bool OpIter<Policy>::readTeeGlobal(uint32_t* id, Value* value) {
   MOZ_ASSERT(Classify(op_) == OpKind::TeeGlobal);
 
   if (!readVarU32(id)) {
-    return false;
+    return fail("unable to read global index");
   }
 
   if (*id >= env_.globals.length()) {
@@ -1917,28 +1632,44 @@ template <typename Policy>
 inline bool OpIter<Policy>::readI32Const(int32_t* i32) {
   MOZ_ASSERT(Classify(op_) == OpKind::I32);
 
-  return readVarS32(i32) && push(ValType::I32);
+  if (!readVarS32(i32)) {
+    return fail("failed to read I32 constant");
+  }
+
+  return push(ValType::I32);
 }
 
 template <typename Policy>
 inline bool OpIter<Policy>::readI64Const(int64_t* i64) {
   MOZ_ASSERT(Classify(op_) == OpKind::I64);
 
-  return readVarS64(i64) && push(ValType::I64);
+  if (!readVarS64(i64)) {
+    return fail("failed to read I64 constant");
+  }
+
+  return push(ValType::I64);
 }
 
 template <typename Policy>
 inline bool OpIter<Policy>::readF32Const(float* f32) {
   MOZ_ASSERT(Classify(op_) == OpKind::F32);
 
-  return readFixedF32(f32) && push(ValType::F32);
+  if (!readFixedF32(f32)) {
+    return fail("failed to read F32 constant");
+  }
+
+  return push(ValType::F32);
 }
 
 template <typename Policy>
 inline bool OpIter<Policy>::readF64Const(double* f64) {
   MOZ_ASSERT(Classify(op_) == OpKind::F64);
 
-  return readFixedF64(f64) && push(ValType::F64);
+  if (!readFixedF64(f64)) {
+    return fail("failed to read F64 constant");
+  }
+
+  return push(ValType::F64);
 }
 
 template <typename Policy>
@@ -1952,7 +1683,8 @@ inline bool OpIter<Policy>::readRefFunc(uint32_t* funcTypeIndex) {
     return fail("function index out of range");
   }
   if (!env_.validForRefFunc.getBit(*funcTypeIndex)) {
-    return fail("function index is not in an element segment");
+    return fail(
+        "function index is not declared in a section before the code section");
   }
   return push(RefType::func());
 }
@@ -1961,13 +1693,36 @@ template <typename Policy>
 inline bool OpIter<Policy>::readRefNull() {
   MOZ_ASSERT(Classify(op_) == OpKind::RefNull);
 
-  return push(RefType::null());
+  RefType type;
+  if (!readRefType(&type)) {
+    return false;
+  }
+  return push(type);
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readRefIsNull(Value* input) {
+  MOZ_ASSERT(Classify(op_) == OpKind::Conversion);
+
+  RefType type;
+  if (!readRefType(&type)) {
+    return false;
+  }
+  if (!popWithType(type, input)) {
+    return false;
+  }
+  return push(ValType::I32);
 }
 
 template <typename Policy>
 inline bool OpIter<Policy>::readValType(ValType* type) {
   return d_.readValType(env_.types, env_.refTypesEnabled(),
                         env_.gcTypesEnabled(), type);
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readRefType(RefType* type) {
+  return d_.readRefType(env_.types, env_.gcTypesEnabled(), type);
 }
 
 template <typename Policy>
@@ -2038,7 +1793,7 @@ inline bool OpIter<Policy>::readCallIndirect(uint32_t* funcTypeIndex,
   }
 
   if (!readVarU32(tableIndex)) {
-    return false;
+    return fail("unable to read call_indirect table index");
   }
   if (*tableIndex >= env_.tables.length()) {
     // Special case this for improved user experience.
@@ -2060,12 +1815,6 @@ inline bool OpIter<Policy>::readCallIndirect(uint32_t* funcTypeIndex,
   }
 
   const FuncType& funcType = env_.types[*funcTypeIndex].funcType();
-
-  // FIXME: Remove this check when full multi-value function returns land.
-  // Bug 1585909.
-  if (funcType.results().length() > MaxFuncResults) {
-    return fail("too many returns in signature");
-  }
 
 #ifdef WASM_PRIVATE_REFTYPES
   if (env_.tables[*tableIndex].importedOrExported &&
@@ -2130,12 +1879,6 @@ inline bool OpIter<Policy>::readOldCallIndirect(uint32_t* funcTypeIndex,
   }
 
   const FuncType& funcType = env_.types[*funcTypeIndex].funcType();
-
-  // FIXME: Remove this check when full multi-value function returns land.
-  // Bug 1585909.
-  if (funcType.results().length() > MaxFuncResults) {
-    return fail("too many returns in signature");
-  }
 
   if (!popCallArgs(funcType.args(), argValues)) {
     return false;
@@ -2362,7 +2105,7 @@ inline bool OpIter<Policy>::readDataOrElemDrop(bool isData,
   MOZ_ASSERT(Classify(op_) == OpKind::DataOrElemDrop);
 
   if (!readVarU32(segIndex)) {
-    return false;
+    return fail("unable to read segment index");
   }
 
   if (isData) {
@@ -2391,7 +2134,7 @@ inline bool OpIter<Policy>::readMemFill(Value* start, Value* val, Value* len) {
 
   uint8_t memoryIndex;
   if (!readFixedU8(&memoryIndex)) {
-    return false;
+    return fail("failed to read memory index");
   }
   if (!env_.usesMemory()) {
     return fail("can't touch memory without memory");
@@ -2436,7 +2179,7 @@ inline bool OpIter<Policy>::readMemOrTableInit(bool isMem, uint32_t* segIndex,
   }
 
   if (!readVarU32(segIndex)) {
-    return false;
+    return fail("unable to read segment index");
   }
 
   uint32_t memOrTableIndex = 0;
@@ -2480,7 +2223,7 @@ inline bool OpIter<Policy>::readTableFill(uint32_t* tableIndex, Value* start,
   MOZ_ASSERT(Classify(op_) == OpKind::TableFill);
 
   if (!readVarU32(tableIndex)) {
-    return false;
+    return fail("unable to read table index");
   }
   if (*tableIndex >= env_.tables.length()) {
     return fail("table index out of range for table.fill");
@@ -2504,7 +2247,7 @@ inline bool OpIter<Policy>::readTableGet(uint32_t* tableIndex, Value* index) {
   MOZ_ASSERT(Classify(op_) == OpKind::TableGet);
 
   if (!readVarU32(tableIndex)) {
-    return false;
+    return fail("unable to read table index");
   }
   if (*tableIndex >= env_.tables.length()) {
     return fail("table index out of range for table.get");
@@ -2524,7 +2267,7 @@ inline bool OpIter<Policy>::readTableGrow(uint32_t* tableIndex,
   MOZ_ASSERT(Classify(op_) == OpKind::TableGrow);
 
   if (!readVarU32(tableIndex)) {
-    return false;
+    return fail("unable to read table index");
   }
   if (*tableIndex >= env_.tables.length()) {
     return fail("table index out of range for table.grow");
@@ -2547,7 +2290,7 @@ inline bool OpIter<Policy>::readTableSet(uint32_t* tableIndex, Value* index,
   MOZ_ASSERT(Classify(op_) == OpKind::TableSet);
 
   if (!readVarU32(tableIndex)) {
-    return false;
+    return fail("unable to read table index");
   }
   if (*tableIndex >= env_.tables.length()) {
     return fail("table index out of range for table.set");
@@ -2570,7 +2313,7 @@ inline bool OpIter<Policy>::readTableSize(uint32_t* tableIndex) {
   *tableIndex = 0;
 
   if (!readVarU32(tableIndex)) {
-    return false;
+    return fail("unable to read table index");
   }
   if (*tableIndex >= env_.tables.length()) {
     return fail("table index out of range for table.size");
@@ -2734,6 +2477,175 @@ inline bool OpIter<Policy>::readStructNarrow(ValType* inputType,
   return push(*outputType);
 }
 
+#ifdef ENABLE_WASM_SIMD
+
+template <typename Policy>
+inline bool OpIter<Policy>::readLaneIndex(uint32_t inputLanes,
+                                          uint32_t* laneIndex) {
+  uint8_t tmp;
+  if (!readFixedU8(&tmp)) {
+    return false;  // Caller signals error
+  }
+  if (tmp >= inputLanes) {
+    return false;
+  }
+  *laneIndex = tmp;
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readExtractLane(ValType resultType,
+                                            uint32_t inputLanes,
+                                            uint32_t* laneIndex, Value* input) {
+  MOZ_ASSERT(Classify(op_) == OpKind::ExtractLane);
+
+  if (!readLaneIndex(inputLanes, laneIndex)) {
+    return fail("missing or invalid extract_lane lane index");
+  }
+
+  if (!popWithType(ValType::V128, input)) {
+    return false;
+  }
+
+  infalliblePush(resultType);
+
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readReplaceLane(ValType operandType,
+                                            uint32_t inputLanes,
+                                            uint32_t* laneIndex,
+                                            Value* baseValue, Value* operand) {
+  MOZ_ASSERT(Classify(op_) == OpKind::ReplaceLane);
+
+  if (!readLaneIndex(inputLanes, laneIndex)) {
+    return fail("missing or invalid replace_lane lane index");
+  }
+
+  if (!popWithType(operandType, operand)) {
+    return false;
+  }
+
+  if (!popWithType(ValType::V128, baseValue)) {
+    return false;
+  }
+
+  infalliblePush(ValType::V128);
+
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readVectorShift(Value* baseValue, Value* shift) {
+  MOZ_ASSERT(Classify(op_) == OpKind::VectorShift);
+
+  if (!popWithType(ValType::I32, shift)) {
+    return false;
+  }
+
+  if (!popWithType(ValType::V128, baseValue)) {
+    return false;
+  }
+
+  infalliblePush(ValType::V128);
+
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readVectorSelect(Value* v1, Value* v2,
+                                             Value* controlMask) {
+  MOZ_ASSERT(Classify(op_) == OpKind::VectorSelect);
+
+  if (!popWithType(ValType::V128, controlMask)) {
+    return false;
+  }
+
+  if (!popWithType(ValType::V128, v2)) {
+    return false;
+  }
+
+  if (!popWithType(ValType::V128, v1)) {
+    return false;
+  }
+
+  infalliblePush(ValType::V128);
+
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readVectorShuffle(Value* v1, Value* v2,
+                                              V128* selectMask) {
+  MOZ_ASSERT(Classify(op_) == OpKind::VectorShuffle);
+
+  for (unsigned i = 0; i < 16; i++) {
+    uint8_t tmp;
+    if (!readFixedU8(&tmp)) {
+      return fail("unable to read shuffle index");
+    }
+    if (tmp > 31) {
+      return fail("shuffle index out of range");
+    }
+    selectMask->bytes[i] = tmp;
+  }
+
+  if (!popWithType(ValType::V128, v2)) {
+    return false;
+  }
+
+  if (!popWithType(ValType::V128, v1)) {
+    return false;
+  }
+
+  infalliblePush(ValType::V128);
+
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readV128Const(V128* value) {
+  MOZ_ASSERT(Classify(op_) == OpKind::V128);
+
+  for (unsigned i = 0; i < 16; i++) {
+    if (!readFixedU8(&value->bytes[i])) {
+      return fail("unable to read V128 constant");
+    }
+  }
+
+  return push(ValType::V128);
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readLoadSplat(uint32_t byteSize,
+                                          LinearMemoryAddress<Value>* addr) {
+  MOZ_ASSERT(Classify(op_) == OpKind::Load);
+
+  if (!readLinearMemoryAddress(byteSize, addr)) {
+    return false;
+  }
+
+  infalliblePush(ValType::V128);
+
+  return true;
+}
+
+template <typename Policy>
+inline bool OpIter<Policy>::readLoadExtend(LinearMemoryAddress<Value>* addr) {
+  MOZ_ASSERT(Classify(op_) == OpKind::Load);
+
+  if (!readLinearMemoryAddress(/*byteSize=*/8, addr)) {
+    return false;
+  }
+
+  infalliblePush(ValType::V128);
+
+  return true;
+}
+
+#endif  // ENABLE_WASM_SIMD
+
 }  // namespace wasm
 }  // namespace js
 
@@ -2741,9 +2653,9 @@ namespace mozilla {
 
 // Specialize IsPod for the Nothing specializations.
 template <>
-struct IsPod<js::wasm::TypeAndValueT<Nothing>> : TrueType {};
+struct IsPod<js::wasm::TypeAndValueT<Nothing>> : std::true_type {};
 template <>
-struct IsPod<js::wasm::ControlStackEntry<Nothing>> : TrueType {};
+struct IsPod<js::wasm::ControlStackEntry<Nothing>> : std::true_type {};
 
 }  // namespace mozilla
 

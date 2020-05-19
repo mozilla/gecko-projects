@@ -49,14 +49,14 @@ typedef Vector<MDefinition*, 8, SystemAllocPolicy> DefVector;
 
 struct IonCompilePolicy {
   // We store SSA definitions in the value stack.
-  typedef MDefinition* Value;
-  typedef DefVector ValueVector;
+  using Value = MDefinition*;
+  using ValueVector = DefVector;
 
   // We store loop headers and then/else blocks in the control flow stack.
-  typedef MBasicBlock* ControlItem;
+  using ControlItem = MBasicBlock*;
 };
 
-typedef OpIter<IonCompilePolicy> IonOpIter;
+using IonOpIter = OpIter<IonCompilePolicy>;
 
 class FunctionCompiler;
 
@@ -71,6 +71,10 @@ class CallCompileState {
 
   // Reserved argument for passing Instance* to builtin instance method calls.
   ABIArg instanceArg_;
+
+  // The stack area in which the callee will write stack return values, or
+  // nullptr if no stack results.
+  MWasmStackResultArea* stackResultArea_ = nullptr;
 
   // Only FunctionCompiler should be directly manipulating CallCompileState.
   friend class FunctionCompiler;
@@ -111,6 +115,7 @@ class FunctionCompiler {
 
   // TLS pointer argument to the current function.
   MWasmParameter* tlsPointer_;
+  MWasmParameter* stackResultPointer_;
 
  public:
   FunctionCompiler(const ModuleEnvironment& env, Decoder& decoder,
@@ -129,7 +134,8 @@ class FunctionCompiler {
         maxStackArgBytes_(0),
         loopDepth_(0),
         blockDepth_(0),
-        tlsPointer_(nullptr) {}
+        tlsPointer_(nullptr),
+        stackResultPointer_(nullptr) {}
 
   const ModuleEnvironment& env() const { return env_; }
   IonOpIter& iter() { return iter_; }
@@ -156,12 +162,15 @@ class FunctionCompiler {
     }
 
     for (ABIArgIter i(args); !i.done(); i++) {
-      MOZ_ASSERT(!args.isSyntheticStackResultPointerArg(i.index()),
-                 "multiple results for wasm functions unimplemented");
-      MOZ_ASSERT(i.mirType() != MIRType::Pointer);
       MWasmParameter* ins = MWasmParameter::New(alloc(), *i, i.mirType());
       curBlock_->add(ins);
-      curBlock_->initSlot(info().localSlot(args.naturalIndex(i.index())), ins);
+      if (args.isSyntheticStackResultPointerArg(i.index())) {
+        MOZ_ASSERT(stackResultPointer_ == nullptr);
+        stackResultPointer_ = ins;
+      } else {
+        curBlock_->initSlot(info().localSlot(args.naturalIndex(i.index())),
+                            ins);
+      }
       if (!mirGen_.ensureBallast()) {
         return false;
       }
@@ -175,7 +184,8 @@ class FunctionCompiler {
       return false;
     }
 
-    for (size_t i = args.length(); i < locals_.length(); i++) {
+    for (size_t i = args.lengthWithoutStackResults(); i < locals_.length();
+         i++) {
       MInstruction* ins = nullptr;
       switch (locals_[i].kind()) {
         case ValType::I32:
@@ -184,6 +194,8 @@ class FunctionCompiler {
         case ValType::I64:
           ins = MConstant::NewInt64(alloc(), 0);
           break;
+        case ValType::V128:
+          return iter().fail("Ion has no SIMD support yet");
         case ValType::F32:
           ins = MConstant::New(alloc(), Float32Value(0.f), MIRType::Float32);
           break;
@@ -331,6 +343,24 @@ class FunctionCompiler {
     return ins;
   }
 
+  MDefinition* ursh(MDefinition* lhs, MDefinition* rhs, MIRType type) {
+    if (inDeadCode()) {
+      return nullptr;
+    }
+    auto* ins = MUrsh::NewWasm(alloc(), lhs, rhs, type);
+    curBlock_->add(ins);
+    return ins;
+  }
+
+  MDefinition* add(MDefinition* lhs, MDefinition* rhs, MIRType type) {
+    if (inDeadCode()) {
+      return nullptr;
+    }
+    auto* ins = MAdd::NewWasm(alloc(), lhs, rhs, type);
+    curBlock_->add(ins);
+    return ins;
+  }
+
   bool mustPreserveNaN(MIRType type) {
     return IsFloatingPointType(type) && !env().isAsmJS();
   }
@@ -341,7 +371,7 @@ class FunctionCompiler {
     }
 
     // wasm can't fold x - 0.0 because of NaN with custom payloads.
-    MSub* ins = MSub::New(alloc(), lhs, rhs, type, mustPreserveNaN(type));
+    MSub* ins = MSub::NewWasm(alloc(), lhs, rhs, type, mustPreserveNaN(type));
     curBlock_->add(ins);
     return ins;
   }
@@ -443,7 +473,7 @@ class FunctionCompiler {
     if (inDeadCode()) {
       return nullptr;
     }
-    auto* ins = MBitNot::NewInt32(alloc(), op);
+    auto* ins = MBitNot::New(alloc(), op);
     curBlock_->add(ins);
     return ins;
   }
@@ -1003,6 +1033,43 @@ class FunctionCompiler {
     return passArgWorker(argDef, ToMIRType(type), call);
   }
 
+  // If the call returns results on the stack, prepare a stack area to receive
+  // them, and pass the address of the stack area to the callee as an additional
+  // argument.
+  bool passStackResultAreaCallArg(const ResultType& resultType,
+                                  CallCompileState* call) {
+    if (inDeadCode()) {
+      return true;
+    }
+    ABIResultIter iter(resultType);
+    while (!iter.done() && iter.cur().inRegister()) {
+      iter.next();
+    }
+    if (iter.done()) {
+      // No stack results.
+      return true;
+    }
+
+    auto* stackResultArea = MWasmStackResultArea::New(alloc());
+    if (!stackResultArea) {
+      return false;
+    }
+    if (!stackResultArea->init(alloc(), iter.remaining())) {
+      return false;
+    }
+    for (uint32_t base = iter.index(); !iter.done(); iter.next()) {
+      MWasmStackResultArea::StackResult loc(iter.cur().stackOffset(),
+                                            ToMIRType(iter.cur().type()));
+      stackResultArea->initResult(iter.index() - base, loc);
+    }
+    curBlock_->add(stackResultArea);
+    if (!passArg(stackResultArea, MIRType::Pointer, call)) {
+      return false;
+    }
+    call->stackResultArea_ = stackResultArea;
+    return true;
+  }
+
   bool finishCall(CallCompileState* call) {
     if (inDeadCode()) {
       return true;
@@ -1053,36 +1120,58 @@ class FunctionCompiler {
     return true;
   }
 
-  bool collectCallResults(const ResultType& type, DefVector* results) {
+  bool collectCallResults(const ResultType& type,
+                          MWasmStackResultArea* stackResultArea,
+                          DefVector* results) {
     if (!results->reserve(type.length())) {
       return false;
     }
 
-    for (ABIResultIter i(type); !i.done(); i.next()) {
-      MOZ_ASSERT(i.index() == 0, "multiple values to be implemented");
-      const ABIResult& result = i.cur();
-      MOZ_ASSERT(result.inRegister(), "stack results to be implemented");
-      MInstruction* def;
-      switch (result.type().kind()) {
-        case wasm::ValType::I32:
-          def = MWasmRegisterResult::New(alloc(), MIRType::Int32, result.gpr());
-          break;
-        case wasm::ValType::I64:
-          def = MWasmRegister64Result::New(alloc(), result.gpr64());
-          break;
-        case wasm::ValType::F32:
-          def = MWasmFloatRegisterResult::New(alloc(), MIRType::Float32,
-                                              result.fpr());
-          break;
-        case wasm::ValType::F64:
-          def = MWasmFloatRegisterResult::New(alloc(), MIRType::Double,
-                                              result.fpr());
-          break;
-        case wasm::ValType::Ref:
-          def = MWasmRegisterResult::New(alloc(), MIRType::RefOrNull,
-                                         result.gpr());
-          break;
+    // The result iterator goes in the order in which results would be popped
+    // off; we want the order in which they would be pushed.
+    ABIResultIter iter(type);
+    uint32_t stackResultCount = 0;
+    while (!iter.done()) {
+      if (iter.cur().onStack()) {
+        stackResultCount++;
       }
+      iter.next();
+    }
+
+    for (iter.switchToPrev(); !iter.done(); iter.prev()) {
+      const ABIResult& result = iter.cur();
+      MInstruction* def;
+      if (result.inRegister()) {
+        switch (result.type().kind()) {
+          case wasm::ValType::I32:
+            def =
+                MWasmRegisterResult::New(alloc(), MIRType::Int32, result.gpr());
+            break;
+          case wasm::ValType::I64:
+            def = MWasmRegister64Result::New(alloc(), result.gpr64());
+            break;
+          case wasm::ValType::F32:
+            def = MWasmFloatRegisterResult::New(alloc(), MIRType::Float32,
+                                                result.fpr());
+            break;
+          case wasm::ValType::F64:
+            def = MWasmFloatRegisterResult::New(alloc(), MIRType::Double,
+                                                result.fpr());
+            break;
+          case wasm::ValType::Ref:
+            def = MWasmRegisterResult::New(alloc(), MIRType::RefOrNull,
+                                           result.gpr());
+            break;
+          case wasm::ValType::V128:
+            return this->iter().fail("Ion has no SIMD support yet");
+        }
+      } else {
+        MOZ_ASSERT(stackResultArea);
+        MOZ_ASSERT(stackResultCount);
+        uint32_t idx = --stackResultCount;
+        def = MWasmStackResult::New(alloc(), stackResultArea, idx);
+      }
+
       if (!def) {
         return false;
       }
@@ -1114,7 +1203,7 @@ class FunctionCompiler {
 
     curBlock_->add(ins);
 
-    return collectCallResults(resultType, results);
+    return collectCallResults(resultType, call.stackResultArea_, results);
   }
 
   bool callIndirect(uint32_t funcTypeIndex, uint32_t tableIndex,
@@ -1159,7 +1248,7 @@ class FunctionCompiler {
 
     curBlock_->add(ins);
 
-    return collectCallResults(resultType, results);
+    return collectCallResults(resultType, call.stackResultArea_, results);
   }
 
   bool callImport(unsigned globalDataOffset, uint32_t lineOrBytecode,
@@ -1181,7 +1270,7 @@ class FunctionCompiler {
 
     curBlock_->add(ins);
 
-    return collectCallResults(resultType, results);
+    return collectCallResults(resultType, call.stackResultArea_, results);
   }
 
   bool builtinCall(const SymbolicAddressSignature& builtin,
@@ -1236,19 +1325,50 @@ class FunctionCompiler {
 
   inline bool inDeadCode() const { return curBlock_ == nullptr; }
 
-  void returnValues(const DefVector& values) {
+  bool returnValues(const DefVector& values) {
     if (inDeadCode()) {
-      return;
+      return true;
     }
-
-    MOZ_ASSERT(values.length() <= 1, "until multi-return");
 
     if (values.empty()) {
       curBlock_->end(MWasmReturnVoid::New(alloc()));
     } else {
-      curBlock_->end(MWasmReturn::New(alloc(), values[0]));
+      ResultType resultType = ResultType::Vector(funcType().results());
+      ABIResultIter iter(resultType);
+      // Switch to iterate in FIFO order instead of the default LIFO.
+      while (!iter.done()) {
+        iter.next();
+      }
+      iter.switchToPrev();
+      for (uint32_t i = 0; !iter.done(); iter.prev(), i++) {
+        if (!mirGen().ensureBallast()) {
+          return false;
+        }
+        const ABIResult& result = iter.cur();
+        if (result.onStack()) {
+          MOZ_ASSERT(iter.remaining() > 1);
+          if (result.type().isReference()) {
+            auto* loc = MWasmDerivedPointer::New(alloc(), stackResultPointer_,
+                                                 result.stackOffset());
+            curBlock_->add(loc);
+            auto* store =
+                MWasmStoreRef::New(alloc(), tlsPointer_, loc, values[i],
+                                   AliasSet::WasmStackResult);
+            curBlock_->add(store);
+          } else {
+            auto* store = MWasmStoreStackResult::New(
+                alloc(), stackResultPointer_, result.stackOffset(), values[i]);
+            curBlock_->add(store);
+          }
+        } else {
+          MOZ_ASSERT(iter.remaining() == 1);
+          MOZ_ASSERT(i + 1 == values.length());
+          curBlock_->end(MWasmReturn::New(alloc(), values[i]));
+        }
+      }
     }
     curBlock_ = nullptr;
+    return true;
   }
 
   void unreachableTrap() {
@@ -1949,7 +2069,9 @@ static bool EmitEnd(FunctionCompiler& f) {
       if (!f.finishBlock(&postJoinDefs)) {
         return false;
       }
-      f.returnValues(postJoinDefs);
+      if (!f.returnValues(postJoinDefs)) {
+        return false;
+      }
       return f.iter().readFunctionEnd(f.iter().end());
     case LabelKind::Block:
       if (!f.finishBlock(&postJoinDefs)) {
@@ -2048,8 +2170,7 @@ static bool EmitReturn(FunctionCompiler& f) {
     return false;
   }
 
-  f.returnValues(values);
-  return true;
+  return f.returnValues(values);
 }
 
 static bool EmitUnreachable(FunctionCompiler& f) {
@@ -2070,6 +2191,11 @@ static bool EmitCallArgs(FunctionCompiler& f, const FuncType& funcType,
     if (!f.passArg(args[i], funcType.args()[i], call)) {
       return false;
     }
+  }
+
+  ResultType resultType = ResultType::Vector(funcType.results());
+  if (!f.passStackResultAreaCallArg(resultType, call)) {
+    return false;
   }
 
   return f.finishCall(call);
@@ -2222,11 +2348,12 @@ static bool EmitGetGlobal(FunctionCompiler& f) {
     case ValType::F64:
       result = f.constant(value.f64());
       break;
+    case ValType::V128:
+      return f.iter().fail("Ion has no SIMD support yet");
     case ValType::Ref:
       switch (value.type().refTypeKind()) {
         case RefType::Func:
         case RefType::Any:
-        case RefType::Null:
           MOZ_ASSERT(value.ref().isNull());
           result = f.nullRefConstant();
           break;
@@ -2420,7 +2547,7 @@ static bool EmitAdd(FunctionCompiler& f, ValType type, MIRType mirType) {
     return false;
   }
 
-  f.iter().setResult(f.binary<MAdd>(lhs, rhs, mirType));
+  f.iter().setResult(f.add(lhs, rhs, mirType));
   return true;
 }
 
@@ -2467,6 +2594,18 @@ static bool EmitBitwise(FunctionCompiler& f, ValType operandType,
   }
 
   f.iter().setResult(f.binary<MIRClass>(lhs, rhs, mirType));
+  return true;
+}
+
+static bool EmitUrsh(FunctionCompiler& f, ValType operandType,
+                     MIRType mirType) {
+  MDefinition* lhs;
+  MDefinition* rhs;
+  if (!f.iter().readBinary(operandType, &lhs, &rhs)) {
+    return false;
+  }
+
+  f.iter().setResult(f.ursh(lhs, rhs, mirType));
   return true;
 }
 
@@ -3668,7 +3807,7 @@ static bool EmitRefFunc(FunctionCompiler& f) {
 
   uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
-  const SymbolicAddressSignature& callee = SASigFuncRef;
+  const SymbolicAddressSignature& callee = SASigRefFunc;
   CallCompileState args;
   if (!f.passInstance(callee.argTypes[0], &args)) {
     return false;
@@ -3716,7 +3855,7 @@ static bool EmitRefNull(FunctionCompiler& f) {
 
 static bool EmitRefIsNull(FunctionCompiler& f) {
   MDefinition* input;
-  if (!f.iter().readConversion(RefType::any(), ValType::I32, &input)) {
+  if (!f.iter().readRefIsNull(&input)) {
     return false;
   }
 
@@ -4016,7 +4155,7 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
       case uint16_t(Op::I32ShrS):
         CHECK(EmitBitwise<MRsh>(f, ValType::I32, MIRType::Int32));
       case uint16_t(Op::I32ShrU):
-        CHECK(EmitBitwise<MUrsh>(f, ValType::I32, MIRType::Int32));
+        CHECK(EmitUrsh(f, ValType::I32, MIRType::Int32));
       case uint16_t(Op::I32Rotl):
       case uint16_t(Op::I32Rotr):
         CHECK(EmitRotate(f, ValType::I32, Op(op.b0) == Op::I32Rotl));
@@ -4051,7 +4190,7 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
       case uint16_t(Op::I64ShrS):
         CHECK(EmitBitwise<MRsh>(f, ValType::I64, MIRType::Int64));
       case uint16_t(Op::I64ShrU):
-        CHECK(EmitBitwise<MUrsh>(f, ValType::I64, MIRType::Int64));
+        CHECK(EmitUrsh(f, ValType::I64, MIRType::Int64));
       case uint16_t(Op::I64Rotl):
       case uint16_t(Op::I64Rotr):
         CHECK(EmitRotate(f, ValType::I64, Op(op.b0) == Op::I64Rotl));
@@ -4198,6 +4337,31 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
       case uint16_t(Op::I64Extend32S):
         CHECK(EmitSignExtend(f, 4, 8));
 
+        // Gc operations
+#ifdef ENABLE_WASM_GC
+      case uint16_t(Op::GcPrefix): {
+        switch (op.b1) {
+          case uint32_t(GcOp::StructNew):
+          case uint32_t(GcOp::StructGet):
+          case uint32_t(GcOp::StructSet):
+          case uint32_t(GcOp::StructNarrow):
+            // Not yet supported
+            return f.iter().unrecognizedOpcode(&op);
+          default:
+            return f.iter().unrecognizedOpcode(&op);
+        }
+      }
+#endif
+
+      // SIMD operations
+#ifdef ENABLE_WASM_SIMD
+      case uint16_t(Op::SimdPrefix): {
+        // We should not implement anything in Ion, but focus on implementing it
+        // in Cranelift.
+        return f.iter().unrecognizedOpcode(&op);
+      }
+#endif
+
       // Miscellaneous operations
       case uint16_t(Op::MiscPrefix): {
         switch (op.b1) {
@@ -4238,14 +4402,6 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
             CHECK(EmitTableGrow(f));
           case uint32_t(MiscOp::TableSize):
             CHECK(EmitTableSize(f));
-#endif
-#ifdef ENABLE_WASM_GC
-          case uint32_t(MiscOp::StructNew):
-          case uint32_t(MiscOp::StructGet):
-          case uint32_t(MiscOp::StructSet):
-          case uint32_t(MiscOp::StructNarrow):
-            // Not yet supported
-            return f.iter().unrecognizedOpcode(&op);
 #endif
           default:
             return f.iter().unrecognizedOpcode(&op);
@@ -4642,7 +4798,7 @@ bool wasm::IonCompileFunctions(const ModuleEnvironment& env, LifoAlloc& lifo,
   return code->swap(masm);
 }
 
-bool js::wasm::IonCanCompile() {
+bool js::wasm::IonPlatformSupport() {
 #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86) ||    \
     defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || \
     defined(JS_CODEGEN_MIPS64)

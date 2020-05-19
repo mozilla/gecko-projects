@@ -206,7 +206,8 @@ MediaStreamTrack::MediaStreamTrack(nsPIDOMWindowInner* aWindow,
     // MediaStreamTrackSource soon enough.
     auto graph = mInputTrack->IsDestroyed()
                      ? MediaTrackGraph::GetInstanceIfExists(
-                           mWindow, mInputTrack->mSampleRate)
+                           mWindow, mInputTrack->mSampleRate,
+                           MediaTrackGraph::DEFAULT_OUTPUT_DEVICE)
                      : mInputTrack->Graph();
     MOZ_DIAGNOSTIC_ASSERT(graph,
                           "A destroyed input track is only expected when "
@@ -239,14 +240,11 @@ MediaStreamTrack::~MediaStreamTrack() { Destroy(); }
 void MediaStreamTrack::Destroy() {
   SetReadyState(MediaStreamTrackState::Ended);
   // Remove all listeners -- avoid iterating over the list we're removing from
-  const nsTArray<RefPtr<MediaTrackListener>> trackListeners(mTrackListeners);
-  for (auto listener : trackListeners) {
+  for (const auto& listener : mTrackListeners.Clone()) {
     RemoveListener(listener);
   }
   // Do the same as above for direct listeners
-  const nsTArray<RefPtr<DirectMediaTrackListener>> directTrackListeners(
-      mDirectTrackListeners);
-  for (auto listener : directTrackListeners) {
+  for (const auto& listener : mDirectTrackListeners.Clone()) {
     RemoveDirectListener(listener);
   }
 }
@@ -260,6 +258,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaStreamTrack,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSource)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPrincipal)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingPrincipal)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MediaStreamTrack,
@@ -468,8 +467,7 @@ void MediaStreamTrack::MutedChanged(bool aNewState) {
 void MediaStreamTrack::NotifyEnded() {
   MOZ_ASSERT(mReadyState == MediaStreamTrackState::Ended);
 
-  auto consumers(mConsumers);
-  for (const auto& consumer : consumers) {
+  for (const auto& consumer : mConsumers.Clone()) {
     if (consumer) {
       consumer->NotifyEnded(this);
     } else {
@@ -482,8 +480,7 @@ void MediaStreamTrack::NotifyEnded() {
 void MediaStreamTrack::NotifyEnabledChanged() {
   GetSource().SinkEnabledStateChanged();
 
-  auto consumers(mConsumers);
-  for (const auto& consumer : consumers) {
+  for (const auto& consumer : mConsumers.Clone()) {
     if (consumer) {
       consumer->NotifyEnabledChanged(this, Enabled());
     } else {
@@ -495,7 +492,10 @@ void MediaStreamTrack::NotifyEnabledChanged() {
 
 bool MediaStreamTrack::AddPrincipalChangeObserver(
     PrincipalChangeObserver<MediaStreamTrack>* aObserver) {
-  return mPrincipalChangeObservers.AppendElement(aObserver) != nullptr;
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  mPrincipalChangeObservers.AppendElement(aObserver);
+  return true;
 }
 
 bool MediaStreamTrack::RemovePrincipalChangeObserver(

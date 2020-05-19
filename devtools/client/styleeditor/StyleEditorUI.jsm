@@ -119,6 +119,10 @@ function StyleEditorUI(toolbox, panelDoc, cssProperties) {
 }
 
 StyleEditorUI.prototype = {
+  get cssProperties() {
+    return this._cssProperties;
+  },
+
   get currentTarget() {
     return this._toolbox.targetList.targetFront;
   },
@@ -340,11 +344,17 @@ StyleEditorUI.prototype = {
           return editor;
         }
 
-        const { href, nodeHref, actorID: id, sourceMapURL } = styleSheet;
-        const url = href || nodeHref;
+        const {
+          href,
+          nodeHref,
+          actorID: id,
+          sourceMapURL,
+          sourceMapBaseURL,
+        } = styleSheet;
         const sources = await sourceMapService.getOriginalURLs({
           id,
-          url,
+          url: href || nodeHref,
+          sourceMapBaseURL,
           sourceMapURL,
         });
         // A single generated sheet might map to multiple original
@@ -376,6 +386,36 @@ StyleEditorUI.prototype = {
     return this._seenSheets.get(styleSheet);
   },
 
+  _getInlineStyleSheetsCount() {
+    return this.editors.filter(editor => !editor.styleSheet.href).length;
+  },
+
+  _getNewStyleSheetsCount() {
+    return this.editors.filter(editor => editor.isNew).length;
+  },
+
+  /**
+   * Finds the index to be shown in the Style Editor for inline or
+   * user-created style sheets, returns undefined if not of either type.
+   *
+   * @param {StyleSheet}  styleSheet
+   *        Object representing stylesheet
+   * @param {Boolean} isNew
+   *         Optional if stylesheet is a new sheet created by user
+   * @return {(Number|undefined)}
+   *         Optional Integer representing the index of the current stylesheet
+   *         among all stylesheets of its type (inline or user-created)
+   */
+  _getNextFriendlyIndex: function(styleSheet, isNew) {
+    if (styleSheet.href) {
+      return undefined;
+    }
+
+    return isNew
+      ? this._getNewStyleSheetsCount()
+      : this._getInlineStyleSheetsCount();
+  },
+
   /**
    * Add a new editor to the UI for a source.
    *
@@ -401,7 +441,8 @@ StyleEditorUI.prototype = {
       file,
       isNew,
       this._walker,
-      this._highlighter
+      this._highlighter,
+      this._getNextFriendlyIndex(styleSheet, isNew)
     );
 
     editor.on("property-change", this._summaryChange.bind(this, editor));
@@ -1064,7 +1105,7 @@ StyleEditorUI.prototype = {
   },
 
   /**
-   * Launches the responsive mode with a specific width or height
+   * Launches the responsive mode with a specific width or height.
    *
    * @param  {object} options
    *         Object with width or/and height properties.
@@ -1076,6 +1117,8 @@ StyleEditorUI.prototype = {
     await ResponsiveUIManager.openIfNeeded(win, tab, {
       trigger: "style_editor",
     });
+    this.emit("responsive-mode-opened");
+
     ResponsiveUIManager.getResponsiveUIForTab(tab).setViewportSize(options);
   },
 
@@ -1090,8 +1133,8 @@ StyleEditorUI.prototype = {
     this.selectStyleSheet(source, location.line - 1, location.column - 1);
   },
 
-  async _onTargetAvailable({ targetFront, isTopLevel }) {
-    if (isTopLevel) {
+  async _onTargetAvailable({ targetFront }) {
+    if (targetFront.isTopLevel) {
       await this.initializeHighlighter(targetFront);
 
       const stylesheetsFront = await targetFront.getFront("stylesheets");
@@ -1103,8 +1146,8 @@ StyleEditorUI.prototype = {
     }
   },
 
-  async _onTargetDestroyed({ isTopLevel }) {
-    if (isTopLevel) {
+  async _onTargetDestroyed({ targetFront }) {
+    if (targetFront.isTopLevel) {
       this._clear();
     }
   },

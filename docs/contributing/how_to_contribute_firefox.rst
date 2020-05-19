@@ -1,22 +1,15 @@
 How to contribute to Firefox
 ============================
 
-The goal of this doc is to have a place where all simple commands
-are listed from start to end.
 
-This aims to be a simple tutorial for lazy copy and paste.
-
-Each section in this tutorial links to more detailed documentation on the topic.
-
-The whole process is a bit long, it will take time to get things right.
-If at any point you are stuck, please don't feel shy to ask on Riot/Matrix at `https://chat.mozilla.org <https://chat.mozilla.org>`__
-in `#introduction <https://chat.mozilla.org/#/room/#introduction:mozilla.org>`__ channel.
+The whole process is a bit long, and it will take time to get things right.
+If at any point you are stuck, please don't hesitate to ask at `https://chat.mozilla.org <https://chat.mozilla.org>`__
+in the `#introduction <https://chat.mozilla.org/#/room/#introduction:mozilla.org>`__ channel.
 
 Clone the sources
 -----------------
 
-You can use either mercurial or git. Mercurial is the canonical version control
-system.
+You can use either mercurial or git. `Mercurial <https://www.mercurial-scm.org/downloads>`__ is the canonical version control system.
 
 .. code-block:: shell
 
@@ -27,11 +20,12 @@ For git, see the `git cinnabar documentation <https://github.com/glandium/git-ci
 The clone should be around 30 minutes (depending on your connection) and
 the repository should be less than 5GB (~ 20GB after the build).
 
-`More
-information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Source_Code/Mercurial>`__
+If you have any network connection issues and cannot clone with command, try :ref:`Mercurial bundles <Mercurial bundles>`.
 
-Install dependencies
---------------------
+:ref:`More information <Mercurial Overview>`
+
+Install dependencies (non-Windows)
+----------------------------------
 
 Firefox provides a mechanism to install all dependencies; in the source tree:
 
@@ -40,10 +34,10 @@ Firefox provides a mechanism to install all dependencies; in the source tree:
      $ ./mach bootstrap
 
 The default options are recommended.
-Select "`Artifact Mode <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Artifact_builds>`__" if you are not planning to write C++ or Rust code.
+If you're not planning to write C++ or Rust code, select :ref:`Artifact Mode <Artifact builds>`
+and follow the instructions at the end of the bootstrap for creating a mozconfig file.
 
-`More
-information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Linux_Prerequisites>`__
+:ref:`More information <Linux build preparation>`
 
 Windows dependencies
 --------------------
@@ -52,9 +46,15 @@ Windows dependencies
 #. Download and install `Visual Studio. <https://visualstudio.microsoft.com/downloads/>`__
 #. Finally download the `MozillaBuild Package. <https://ftp.mozilla.org/pub/mozilla.org/mozilla/libraries/win32/MozillaBuildSetup-Latest.exe>`__ Installation directory should be:
 
-.. code-block:: shell
+    .. code-block:: shell
 
-    $ c:\mozilla-build\
+        $ c:\mozilla-build\
+
+#. Before moving on to the next steps, make sure to fulfill the `Windows prerequisites <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Windows_Prerequisites>`__
+
+.. note::
+
+    All the commands of this tutorial must be run in the shell provided with the MozillaBuild Package (start-shell.bat)
 
 `More
 information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Windows_Prerequisites>`__
@@ -72,6 +72,13 @@ Once all the dependencies have been installed, run:
 which will check for dependencies and start the build.
 This will take a while; a few minutes to a few hours depending on your hardware.
 
+.. note::
+
+    The default build is a compiled build with optimizations. Check out the
+    `mozconfig file documentation <https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/Configuring_Build_Options>`__
+    to see other build options. If you don't plan to change C++ or Rust code,
+    an :ref:`artifact build <Artifact builds>` will be faster.
+
 To run it:
 
 .. code-block:: shell
@@ -85,7 +92,7 @@ information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_In
 To write a patch
 ----------------
 
-Make the changes you need in the code base.
+Make the changes you need in the codebase. You can look up UI text in `Searchfox <https://searchfox.org>`__ to find the right file.
 
 Then:
 
@@ -105,10 +112,10 @@ The commit message should look like:
 
     Optionally, a longer description of the change.
 
-To find a reviewer, the easiest way is to do ``hg log <modified-file>`` (or
-``git log <modified-file>``, if you're using git) on the relevant files, and
-look who usually is reviewing the actual changes (ie not reformat, renaming
-of variables, etc).
+To :ref:`find a reviewer or a review group <Getting reviews>`, the easiest way is to do
+``hg log <modified-file>`` (or ``git log <modified-file>``, if
+you're using git) on the relevant files, and look who usually is
+reviewing the actual changes (ie not reformat, renaming of variables, etc).
 
 To visualize your patch in the repository, run:
 
@@ -121,7 +128,7 @@ To visualize your patch in the repository, run:
     $ git show
 
 
-`More information <https://developer.mozilla.org/docs/Mozilla/Mercurial>`__
+:ref:`More information <Mercurial Overview>`
 
 
 To test a change locally
@@ -153,7 +160,7 @@ To select jobs running a fuzzy search:
 
     $ ./mach try fuzzy
 
-From Treeherder, it is also possible to attach new jobs. As every review has
+From `Treeherder <https://treeherder.mozilla.org/>`__ (our continuous integration system), it is also possible to attach new jobs. As every review has
 a try CI run associated, it makes this work easier. See :ref:`attach-job-review` for
 more information.
 
@@ -164,13 +171,18 @@ more information.
     You can ask your reviewer to submit the patch for you if you don't have that
     level of access.
 
-`More information <https://firefox-source-docs.mozilla.org/tools/try/index.html>`__
+:ref:`More information <Try Server>`
 
 
 To submit a patch
 -----------------
 
 To submit a patch for review, we use a tool called `moz-phab <https://pypi.org/project/MozPhab/>`__.
+To install it, run:
+
+.. code-block:: shell
+
+     $ ./mach install-moz-phab
 
 .. code-block:: shell
 
@@ -246,6 +258,11 @@ The landing procedure will automatically close the review and the bug.
 
 `More
 information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/How_to_Submit_a_Patch#Submitting_the_patch>`__
+
+Contributing to GeckoView
+-------------------------
+
+GeckoView information and contribution docs live in `geckoview.dev <https://geckoview.dev>`__.
 
 More documentation about contribution
 -------------------------------------

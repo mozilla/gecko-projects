@@ -5,9 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SHistoryChild.h"
-#include "SHEntryChild.h"
-#include "nsISHistoryListener.h"
 
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/PSHistoryChild.h"
+#include "nsDocShell.h"
+#include "nsISHistoryListener.h"
+#include "SHEntryChild.h"
+
+namespace mozilla {
+namespace dom {
+class SwapEntriesDocshellData;
+}
+}  // namespace mozilla
 #define CONTENT_VIEWER_TIMEOUT_SECONDS \
   "browser.sessionhistory.contentViewerTimeout"
 
@@ -369,18 +378,92 @@ SHistoryChild::CreateEntry(nsISHEntry** aEntry) {
   return NS_OK;
 }
 
-nsresult SHistoryChild::LoadURI(LoadSHEntryData& aLoadData) {
-  nsCOMPtr<nsIDocShell> docShell = aLoadData.browsingContext()->GetDocShell();
-  NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
+nsresult SHistoryChild::LoadURI(nsTArray<LoadSHEntryData>& aLoadData) {
+  for (LoadSHEntryData& l : aLoadData) {
+    if (l.browsingContext().IsNullOrDiscarded()) {
+      continue;
+    }
 
-  RefPtr<SHEntryChild> entry;
-  if (aLoadData.shEntry()) {
-    entry = aLoadData.shEntry()->ToSHEntryChild();
+    nsCOMPtr<nsIDocShell> docShell = l.browsingContext().get()->GetDocShell();
+    if (!docShell) {
+      continue;
+    }
+
+    RefPtr<SHEntryChild> entry;
+    if (l.shEntry()) {
+      entry = l.shEntry()->ToSHEntryChild();
+    }
+
+    // FIXME Should this be sent through IPC?
+    l.loadState()->SetSHEntry(entry);
+    docShell->LoadURI(l.loadState(), false);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+SHistoryChild::AddToRootSessionHistory(bool aCloneChildren, nsISHEntry* aOSHE,
+                                       BrowsingContext* aBC, nsISHEntry* aEntry,
+                                       uint32_t aLoadType, bool aShouldPersist,
+                                       Maybe<int32_t>* aPreviousEntryIndex,
+                                       Maybe<int32_t>* aLoadedEntryIndex) {
+  nsresult rv;
+  int32_t entriesPurged;
+  nsTArray<SwapEntriesDocshellData> entriesToUpdate;
+  if (!SendAddToRootSessionHistory(
+          aCloneChildren, static_cast<SHEntryChild*>(aOSHE), aBC,
+          static_cast<SHEntryChild*>(aEntry), aLoadType, aShouldPersist,
+          aPreviousEntryIndex, aLoadedEntryIndex, &entriesToUpdate,
+          &entriesPurged, &rv)) {
+    return NS_ERROR_FAILURE;
+  }
+  for (auto& data : entriesToUpdate) {
+    MOZ_ASSERT(!data.context().IsNull(), "Browsing context cannot be null");
+    nsDocShell* docshell = static_cast<nsDocShell*>(
+        data.context().GetMaybeDiscarded()->GetDocShell());
+    if (docshell) {
+      docshell->SwapHistoryEntries(data.oldEntry()->ToSHEntryChild(),
+                                   data.newEntry()->ToSHEntryChild());
+    }
+  }
+  if (NS_SUCCEEDED(rv) && mRootDocShell && entriesPurged > 0) {
+    mRootDocShell->HistoryPurged(entriesPurged);
+  }
+  return rv;
+}
+
+NS_IMETHODIMP
+SHistoryChild::AddChildSHEntryHelper(nsISHEntry* aCloneRef,
+                                     nsISHEntry* aNewEntry,
+                                     BrowsingContext* aBC,
+                                     bool aCloneChildren) {
+  nsresult rv;
+  RefPtr<CrossProcessSHEntry> child;
+  int32_t entriesPurged;
+  nsTArray<SwapEntriesDocshellData> entriesToUpdate;
+  if (!SendAddChildSHEntryHelper(static_cast<SHEntryChild*>(aCloneRef),
+                                 static_cast<SHEntryChild*>(aNewEntry), aBC,
+                                 aCloneChildren, &entriesToUpdate,
+                                 &entriesPurged, &child, &rv)) {
+    return NS_ERROR_FAILURE;
+  }
+  for (auto& data : entriesToUpdate) {
+    MOZ_ASSERT(!data.context().IsNull(), "Browsing context cannot be null");
+    nsDocShell* docshell = static_cast<nsDocShell*>(
+        data.context().GetMaybeDiscarded()->GetDocShell());
+    if (docshell) {
+      docshell->SwapHistoryEntries(data.oldEntry()->ToSHEntryChild(),
+                                   data.newEntry()->ToSHEntryChild());
+    }
+  }
+  if (!child) {
+    return rv;
+  }
+  if (NS_SUCCEEDED(rv) && mRootDocShell && entriesPurged > 0) {
+    mRootDocShell->HistoryPurged(entriesPurged);
   }
 
-  // FIXME Should this be sent through IPC?
-  aLoadData.loadState()->SetSHEntry(entry);
-  return docShell->LoadURI(aLoadData.loadState(), false);
+  return rv;
 }
 
 }  // namespace dom

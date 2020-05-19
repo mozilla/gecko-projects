@@ -8,11 +8,13 @@
 #ifndef mozilla_net_ParentChannelListener_h
 #define mozilla_net_ParentChannelListener_h
 
+#include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "nsIAuthPromptProvider.h"
 #include "nsIInterfaceRequestor.h"
+#include "nsIMultiPartChannel.h"
 #include "nsINetworkInterceptController.h"
 #include "nsIStreamListener.h"
-#include "nsIMultiPartChannel.h"
-#include "mozilla/dom/BrowserParent.h"
+#include "nsIThreadRetargetableStreamListener.h"
 
 namespace mozilla {
 namespace net {
@@ -31,7 +33,9 @@ namespace net {
 class ParentChannelListener final : public nsIInterfaceRequestor,
                                     public nsIStreamListener,
                                     public nsIMultiPartChannelListener,
-                                    public nsINetworkInterceptController {
+                                    public nsINetworkInterceptController,
+                                    public nsIThreadRetargetableStreamListener,
+                                    private nsIAuthPromptProvider {
  public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -39,15 +43,19 @@ class ParentChannelListener final : public nsIInterfaceRequestor,
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSIMULTIPARTCHANNELLISTENER
   NS_DECL_NSINETWORKINTERCEPTCONTROLLER
+  NS_DECL_NSIAUTHPROMPTPROVIDER
+  NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
   NS_DECLARE_STATIC_IID_ACCESSOR(PARENT_CHANNEL_LISTENER)
 
-  explicit ParentChannelListener(nsIStreamListener* aListener,
-                                 dom::BrowserParent* aBrowserParent);
+  explicit ParentChannelListener(
+      nsIStreamListener* aListener,
+      dom::CanonicalBrowsingContext* aBrowsingContext,
+      bool aUsePrivateBrowsing);
 
   // For channel diversion from child to parent.
   void DivertTo(nsIStreamListener* aListener);
-  MOZ_MUST_USE nsresult SuspendForDiversion();
+  [[nodiscard]] nsresult SuspendForDiversion();
 
   void SetupInterception(const nsHttpResponseHead& aResponseHead);
   void SetupInterceptionAfterRedirect(bool aShouldIntercept);
@@ -55,6 +63,10 @@ class ParentChannelListener final : public nsIInterfaceRequestor,
 
   // Called to set a new listener which replaces the old one after a redirect.
   void SetListenerAfterRedirect(nsIStreamListener* aListener);
+
+  dom::CanonicalBrowsingContext* GetBrowsingContext() {
+    return mBrowsingContext;
+  }
 
  private:
   virtual ~ParentChannelListener();
@@ -89,7 +101,7 @@ class ParentChannelListener final : public nsIInterfaceRequestor,
   // interception is enabled.
   nsCOMPtr<nsINetworkInterceptController> mInterceptController;
 
-  RefPtr<mozilla::dom::BrowserParent> mBrowserParent;
+  RefPtr<dom::CanonicalBrowsingContext> mBrowsingContext;
 
   // True if we received OnStartRequest for a nsIMultiPartChannel, and are
   // expected AllPartsStopped to be called when complete.

@@ -62,12 +62,12 @@ class imgRequest final : public nsIStreamListener,
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
 
-  MOZ_MUST_USE nsresult Init(nsIURI* aURI, nsIURI* aFinalURI,
-                             bool aHadInsecureRedirect, nsIRequest* aRequest,
-                             nsIChannel* aChannel, imgCacheEntry* aCacheEntry,
-                             nsISupports* aCX,
-                             nsIPrincipal* aTriggeringPrincipal,
-                             int32_t aCORSMode, nsIReferrerInfo* aReferrerInfo);
+      [[nodiscard]] nsresult
+      Init(nsIURI* aURI, nsIURI* aFinalURI, bool aHadInsecureRedirect,
+           nsIRequest* aRequest, nsIChannel* aChannel,
+           imgCacheEntry* aCacheEntry, mozilla::dom::Document* aLoadingDocument,
+           nsIPrincipal* aTriggeringPrincipal, int32_t aCORSMode,
+           nsIReferrerInfo* aReferrerInfo);
 
   void ClearLoader();
 
@@ -201,6 +201,14 @@ class imgRequest final : public nsIStreamListener,
 
   bool ImageAvailable() const;
 
+  void PrioritizeAsPreload();
+
+  bool IsDeniedCrossSiteCORSRequest() const {
+    return mIsDeniedCrossSiteCORSRequest;
+  }
+
+  bool IsCrossSiteNoCORSRequest() const { return mIsCrossSiteNoCORSRequest; }
+
  private:
   friend class FinishPreparingForNewPartRunnable;
 
@@ -289,6 +297,8 @@ class imgRequest final : public nsIStreamListener,
   bool mDecodeRequested : 1;
   bool mNewPartPending : 1;
   bool mHadInsecureRedirect : 1;
+  bool mIsDeniedCrossSiteCORSRequest : 1;
+  bool mIsCrossSiteNoCORSRequest : 1;
 };
 
 #endif  // mozilla_image_imgRequest_h

@@ -42,13 +42,13 @@ add_task(async function test_sitespecific_iframe_global_zoom() {
   is(loadedURL, TEST_IFRAME_URL, "got the load event for the iframe");
 
   let frameZoom = await SpecialPowers.spawn(
-    gBrowser.selectedBrowser.browsingContext.getChildren()[0],
+    gBrowser.selectedBrowser.browsingContext.children[0],
     [],
     async () => {
       await ContentTaskUtils.waitForCondition(() => {
-        return content.docShell.contentViewer.fullZoom.toFixed(2) == 0.67;
+        return content.docShell.browsingContext.fullZoom.toFixed(2) == 0.67;
       });
-      return content.docShell.contentViewer.fullZoom.toFixed(2);
+      return content.docShell.browsingContext.fullZoom.toFixed(2);
     }
   );
 
@@ -94,13 +94,13 @@ add_task(async function test_sitespecific_global_zoom_enlarge() {
   is(ZoomManager.getZoomForBrowser(tabBrowser), 0.8, "Local zoom is increased");
 
   let frameZoom = await SpecialPowers.spawn(
-    gBrowser.selectedBrowser.browsingContext.getChildren()[0],
+    gBrowser.selectedBrowser.browsingContext.children[0],
     [],
     async () => {
       await ContentTaskUtils.waitForCondition(() => {
-        return content.docShell.contentViewer.fullZoom.toFixed(2) == 0.8;
+        return content.docShell.browsingContext.fullZoom.toFixed(2) == 0.8;
       });
-      return content.docShell.contentViewer.fullZoom.toFixed(2);
+      return content.docShell.browsingContext.fullZoom.toFixed(2);
     }
   );
 

@@ -75,6 +75,7 @@ var snapshotFormatters = {
     }
     $("version-box").textContent = version;
     $("buildid-box").textContent = data.buildID;
+    $("distributionid-box").textContent = data.distributionID;
     if (data.updateChannel) {
       $("updatechannel-box").textContent = data.updateChannel;
     }
@@ -368,7 +369,14 @@ var snapshotFormatters = {
     let apzInfo = [];
     let formatApzInfo = function(info) {
       let out = [];
-      for (let type of ["Wheel", "Touch", "Drag", "Keyboard", "Autoscroll"]) {
+      for (let type of [
+        "Wheel",
+        "Touch",
+        "Drag",
+        "Keyboard",
+        "Autoscroll",
+        "Zooming",
+      ]) {
         let key = "Apz" + type + "Input";
 
         if (!(key in info)) {
@@ -568,11 +576,13 @@ var snapshotFormatters = {
       apzInfo.length
         ? [
             new Text(
-              (await document.l10n.formatValues(
-                apzInfo.map(id => {
-                  return { id };
-                })
-              )).join("; ")
+              (
+                await document.l10n.formatValues(
+                  apzInfo.map(id => {
+                    return { id };
+                  })
+                )
+              ).join("; ")
             ),
           ]
         : "apz-none"
@@ -669,25 +679,15 @@ var snapshotFormatters = {
     let featureLog = data.featureLog;
     delete data.featureLog;
 
-    let features = [];
-    for (let feature of featureLog.features) {
-      // Only add interesting decisions - ones that were not automatic based on
-      // all.js/StaticPrefs defaults.
-      if (feature.log.length > 1 || feature.log[0].status != "available") {
-        features.push(feature);
-      }
-    }
-
-    if (features.length) {
-      for (let feature of features) {
+    if (featureLog.features.length) {
+      for (let feature of featureLog.features) {
         let trs = [];
         for (let entry of feature.log) {
-          if (entry.type == "default" && entry.status == "available") {
-            continue;
-          }
-
           let contents;
-          if (entry.message.length && entry.message[0] == "#") {
+          if (!entry.hasOwnProperty("message")) {
+            // This is a default entry.
+            contents = entry.status + " by " + entry.type;
+          } else if (entry.message.length && entry.message[0] == "#") {
             // This is a failure ID. See nsIGfxInfo.idl.
             let m = /#BLOCKLIST_FEATURE_FAILURE_BUG_(\d+)/.exec(entry.message);
             if (m) {
@@ -930,10 +930,6 @@ var snapshotFormatters = {
     insertEnumerateDatabase();
   },
 
-  javaScript(data) {
-    $("javascript-incremental-gc").textContent = data.incrementalGCEnabled;
-  },
-
   remoteAgent(data) {
     if (!AppConstants.ENABLE_REMOTE_AGENT) {
       return;
@@ -955,6 +951,14 @@ var snapshotFormatters = {
     if (a11yInstantiator) {
       a11yInstantiator.textContent = data.instantiator;
     }
+  },
+
+  startupCache(data) {
+    $("startup-cache-disk-cache-path").textContent = data.DiskCachePath;
+    $("startup-cache-ignore-disk-cache").textContent = data.IgnoreDiskCache;
+    $("startup-cache-found-disk-cache-on-init").textContent =
+      data.FoundDiskCacheOnInit;
+    $("startup-cache-wrote-to-disk-cache").textContent = data.WroteToDiskCache;
   },
 
   libraryVersions(data) {

@@ -17,8 +17,10 @@ with Files('KeyPressEventModelCheckerChild.jsm'):
     BUG_COMPONENT = ('Core', 'DOM: Events')
 
 TESTING_JS_MODULES += [
-    'TestChild.jsm',
-    'TestParent.jsm',
+    'TestProcessActorChild.jsm',
+    'TestProcessActorParent.jsm',
+    'TestWindowChild.jsm',
+    'TestWindowParent.jsm',
 ]
 
 FINAL_TARGET_FILES.actors += [
@@ -33,6 +35,7 @@ FINAL_TARGET_FILES.actors += [
     'BrowserElementChild.jsm',
     'BrowserElementParent.jsm',
     'ControllersChild.jsm',
+    'ControllersParent.jsm',
     'DateTimePickerChild.jsm',
     'DateTimePickerParent.jsm',
     'ExtFindChild.jsm',
@@ -47,17 +50,18 @@ FINAL_TARGET_FILES.actors += [
     'PopupBlockingParent.jsm',
     'PrintingChild.jsm',
     'PurgeSessionHistoryChild.jsm',
+    'RemotePageChild.jsm',
     'SelectChild.jsm',
     'SelectParent.jsm',
+    'SidebarSearchParent.jsm',
     'ThumbnailsChild.jsm',
     'UAWidgetsChild.jsm',
     'UnselectedTabHoverChild.jsm',
+    'UnselectedTabHoverParent.jsm',
     'ViewSourceChild.jsm',
     'ViewSourcePageChild.jsm',
     'ViewSourcePageParent.jsm',
     'WebChannelChild.jsm',
     'WebChannelParent.jsm',
     'WebNavigationChild.jsm',
-    'ZoomChild.jsm',
-    'ZoomParent.jsm',
 ]

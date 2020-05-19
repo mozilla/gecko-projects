@@ -9,6 +9,7 @@ devtools.jar:
     content/shared/widgets/widgets.css (shared/widgets/widgets.css)
     content/webconsole/index.html (webconsole/index.html)
     content/shared/splitview.css (shared/splitview.css)
+    content/shared/toolbarbutton.css (shared/toolbarbutton.css)
     content/shared/theme-switching.js (shared/theme-switching.js)
     content/styleeditor/index.xhtml (styleeditor/index.xhtml)
     content/storage/index.xhtml (storage/index.xhtml)
@@ -25,8 +26,6 @@ devtools.jar:
     content/performance/index.xhtml (performance/index.xhtml)
     content/performance-new/index.xhtml (performance-new/index.xhtml)
     content/performance-new/frame-script.js (performance-new/frame-script.js)
-    content/performance-new/popup/initializer.js (performance-new/popup/initializer.js)
-    content/performance-new/popup/popup.xhtml (performance-new/popup/popup.xhtml)
     content/memory/index.xhtml (memory/index.xhtml)
     content/framework/toolbox-window.xhtml (framework/toolbox-window.xhtml)
     content/framework/toolbox-options.html (framework/toolbox-options.html)
@@ -53,7 +52,6 @@ devtools.jar:
     skin/devtools-browser.css (themes/devtools-browser.css)
     skin/dark-theme.css (themes/dark-theme.css)
     skin/light-theme.css (themes/light-theme.css)
-    skin/toolbars.css (themes/toolbars.css)
     skin/toolbox.css (themes/toolbox.css)
     skin/tooltips.css (themes/tooltips.css)
     skin/images/accessibility.svg (themes/images/accessibility.svg)
@@ -190,8 +188,7 @@ devtools.jar:
     skin/images/open-3-pane.svg (themes/images/open-3-pane.svg)
     skin/images/vview-delete.svg (themes/images/vview-delete.svg)
     skin/images/vview-edit.svg (themes/images/vview-edit.svg)
-    skin/images/vview-lock.png (themes/images/vview-lock.png)
-    skin/images/vview-lock@2x.png (themes/images/vview-lock@2x.png)
+    skin/images/vview-lock.svg (themes/images/vview-lock.svg)
     skin/images/sort-ascending-arrow.svg (themes/images/sort-ascending-arrow.svg)
     skin/images/sort-descending-arrow.svg (themes/images/sort-descending-arrow.svg)
     skin/images/cubic-bezier-swatch.svg (themes/images/cubic-bezier-swatch.svg)
@@ -211,6 +208,7 @@ devtools.jar:
     skin/images/pane-collapse.svg (themes/images/pane-collapse.svg)
     skin/images/pane-expand.svg (themes/images/pane-expand.svg)
     skin/images/help.svg (themes/images/help.svg)
+    skin/images/report.svg (themes/images/report.svg)
     skin/images/reveal.svg (themes/images/reveal.svg)
     skin/images/select-arrow.svg (themes/images/select-arrow.svg)
     skin/images/settings.svg (themes/images/settings.svg)
@@ -228,7 +226,7 @@ devtools.jar:
     content/netmonitor/src/assets/styles/netmonitor.css (netmonitor/src/assets/styles/netmonitor.css)
     content/netmonitor/src/assets/styles/NetworkActionBar.css (netmonitor/src/assets/styles/NetworkActionBar.css)
     content/netmonitor/src/assets/styles/RequestBlockingPanel.css (netmonitor/src/assets/styles/RequestBlockingPanel.css)
-    content/netmonitor/src/assets/styles/NetworkDetailsPanel.css (netmonitor/src/assets/styles/NetworkDetailsPanel.css)
+    content/netmonitor/src/assets/styles/NetworkDetailsBar.css (netmonitor/src/assets/styles/NetworkDetailsBar.css)
     content/netmonitor/src/assets/styles/CustomRequestPanel.css (netmonitor/src/assets/styles/CustomRequestPanel.css)
     content/netmonitor/src/assets/styles/RequestList.css (netmonitor/src/assets/styles/RequestList.css)
     content/netmonitor/src/assets/styles/StatisticsPanel.css (netmonitor/src/assets/styles/StatisticsPanel.css)
@@ -250,13 +248,7 @@ devtools.jar:
     # WhatsNew panel
     content/whats-new/index.html (whats-new/index.html)
 
-#if !defined(ANDROID) && defined(NIGHTLY_BUILD)
     # about:profiling
-
-    # This page is still Nightly only while under active development.
-    # The about:profiling page is also has an ifdef in:
-    # browser/components/about/AboutRedirector.cpp
     skin/aboutprofiling.css (themes/aboutprofiling.css)
     content/performance-new/aboutprofiling/initializer.js (performance-new/aboutprofiling/initializer.js)
     content/performance-new/aboutprofiling/index.xhtml (performance-new/aboutprofiling/index.xhtml)
-#endif

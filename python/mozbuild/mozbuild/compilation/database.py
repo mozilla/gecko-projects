@@ -7,7 +7,6 @@
 from __future__ import absolute_import, print_function
 
 import os
-import types
 
 from mozbuild.backend.common import CommonBackend
 from mozbuild.frontend.data import (
@@ -85,7 +84,7 @@ class CompileDBBackend(CommonBackend):
 
         db = []
 
-        for (directory, filename, unified), cmd in self._db.iteritems():
+        for (directory, filename, unified), cmd in self._db.items():
             env = self._envs[directory]
             cmd = list(cmd)
             if unified is None:
@@ -125,7 +124,7 @@ class CompileDBBackend(CommonBackend):
             # Tell clangd to keep parsing to the end of a file, regardless of
             # how many errors are encountered. (Unified builds mean that we
             # encounter a lot of errors parsing some files.)
-            c.append("-ferror-limit=0")
+            c.insert(-1, "-ferror-limit=0")
 
             per_source_flags = self._per_source_flags.get(filename)
             if per_source_flags is not None:
@@ -201,7 +200,7 @@ class CompileDBBackend(CommonBackend):
             value = cenv.substs.get(name)
             if not value:
                 return
-            if isinstance(value, types.StringTypes):
+            if isinstance(value, str):
                 value = value.split()
             db.extend(value)
 

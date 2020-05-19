@@ -40,7 +40,8 @@ RefPtr<IDBFileRequest> GenerateFileRequest(IDBFileHandle* aFileHandle) {
 }  // namespace
 
 IDBFileHandle::IDBFileHandle(IDBMutableFile* aMutableFile, FileMode aMode)
-    : mMutableFile(aMutableFile),
+    : DOMEventTargetHelper(aMutableFile),
+      mMutableFile(aMutableFile),
       mBackgroundActor(nullptr),
       mLocation(0),
       mPendingRequestCount(0),
@@ -82,8 +83,6 @@ RefPtr<IDBFileHandle> IDBFileHandle::Create(IDBMutableFile* aMutableFile,
   MOZ_ASSERT(aMode == FileMode::Readonly || aMode == FileMode::Readwrite);
 
   RefPtr<IDBFileHandle> fileHandle = new IDBFileHandle(aMutableFile, aMode);
-
-  fileHandle->BindToOwner(aMutableFile);
 
   // XXX Fix!
   MOZ_ASSERT(NS_IsMainThread(), "This won't work on non-main threads!");
@@ -262,7 +261,7 @@ RefPtr<IDBFileRequest> IDBFileHandle::GetMetadata(
 
   // Argument checking for get metadata.
   if (!aParameters.mSize && !aParameters.mLastModified) {
-    aRv.ThrowTypeError(u"Either size or lastModified should be true.");
+    aRv.ThrowTypeError("Either size or lastModified should be true.");
     return nullptr;
   }
 
@@ -301,7 +300,7 @@ RefPtr<IDBFileRequest> IDBFileHandle::Truncate(const Optional<uint64_t>& aSize,
     // XXX: Remove this check when removing the use of UINT64_MAX as a special
     // value for the location to mark append mode?
     if (aSize.Value() == UINT64_MAX) {
-      aRv.ThrowTypeError(u"UINT64_MAX is not a valid size");
+      aRv.ThrowTypeError("UINT64_MAX is not a valid size");
       return nullptr;
     }
     location = aSize.Value();
@@ -395,12 +394,12 @@ bool IDBFileHandle::CheckStateAndArgumentsForRead(uint64_t aSize,
 
   // Argument checking for read
   if (!aSize) {
-    aRv.ThrowTypeError(u"0 (Zero) is not a valid read size.");
+    aRv.ThrowTypeError("0 (Zero) is not a valid read size.");
     return false;
   }
 
   if (aSize > UINT32_MAX) {
-    aRv.ThrowTypeError(u"Data size for read is too large.");
+    aRv.ThrowTypeError("Data size for read is too large.");
     return false;
   }
 
@@ -711,6 +710,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBFileHandle,
                                                 DOMEventTargetHelper)
   // Don't unlink mMutableFile!
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMETHODIMP

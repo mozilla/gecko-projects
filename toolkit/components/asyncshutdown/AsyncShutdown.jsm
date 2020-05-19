@@ -288,7 +288,10 @@ function looseTimer(delay) {
   );
   // Ensure that the timer is both canceled once we are done with it
   // and not garbage-collected until then.
-  deferred.promise.then(() => timer.cancel(), () => timer.cancel());
+  deferred.promise.then(
+    () => timer.cancel(),
+    () => timer.cancel()
+  );
   return deferred;
 }
 
@@ -692,9 +695,7 @@ function Barrier(name) {
       }
       if (!this._waitForMe) {
         throw new Error(
-          `Phase "${
-            this._name
-          }" is finished, it is too late to register completion condition "${name}"`
+          `Phase "${this._name}" is finished, it is too late to register completion condition "${name}"`
         );
       }
       debug(`Adding blocker ${name} for phase ${this._name}`);

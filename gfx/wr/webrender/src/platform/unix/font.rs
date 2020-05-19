@@ -12,7 +12,7 @@ use freetype::freetype::{FT_F26Dot6, FT_Face, FT_Glyph_Format, FT_Long, FT_UInt}
 use freetype::freetype::{FT_GlyphSlot, FT_LcdFilter, FT_New_Face, FT_New_Memory_Face};
 use freetype::freetype::{FT_Init_FreeType, FT_Load_Glyph, FT_Render_Glyph};
 use freetype::freetype::{FT_Library, FT_Outline_Get_CBox, FT_Set_Char_Size, FT_Select_Size};
-use freetype::freetype::{FT_Fixed, FT_Matrix, FT_Set_Transform, FT_String, FT_ULong};
+use freetype::freetype::{FT_Fixed, FT_Matrix, FT_Set_Transform, FT_String, FT_ULong, FT_Vector};
 use freetype::freetype::{FT_Err_Unimplemented_Feature, FT_MulFix, FT_Outline_Embolden};
 use freetype::freetype::{FT_LOAD_COLOR, FT_LOAD_DEFAULT, FT_LOAD_FORCE_AUTOHINT};
 use freetype::freetype::{FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH, FT_LOAD_NO_AUTOHINT};
@@ -224,7 +224,7 @@ pub struct FontContext {
 // a given FontContext so it is safe to move the latter between threads.
 unsafe impl Send for FontContext {}
 
-fn get_skew_bounds(bottom: i32, top: i32, skew_factor: f32) -> (f32, f32) {
+fn get_skew_bounds(bottom: i32, top: i32, skew_factor: f32, _vertical: bool) -> (f32, f32) {
     let skew_min = ((bottom as f32 + 0.5) * skew_factor).floor();
     let skew_max = ((top as f32 - 0.5) * skew_factor).ceil();
     (skew_min, skew_max)
@@ -237,10 +237,11 @@ fn skew_bitmap(
     left: i32,
     top: i32,
     skew_factor: f32,
+    vertical: bool, // TODO: vertical skew not yet implemented!
 ) -> (Vec<u8>, usize, i32) {
     let stride = width * 4;
     // Calculate the skewed horizontal offsets of the bottom and top of the glyph.
-    let (skew_min, skew_max) = get_skew_bounds(top - height as i32, top, skew_factor);
+    let (skew_min, skew_max) = get_skew_bounds(top - height as i32, top, skew_factor, vertical);
     // Allocate enough extra width for the min/max skew offsets.
     let skew_width = width + (skew_max - skew_min) as usize;
     let mut skew_buffer = vec![0u8; skew_width * height * 4];
@@ -478,8 +479,12 @@ impl FontContext {
             if font.flags.contains(FontInstanceFlags::TRANSPOSE) {
                 shape = shape.swap_xy();
             }
+            let (mut tx, mut ty) = (0.0, 0.0);
             if font.synthetic_italics.is_enabled() {
-                shape = shape.synthesize_italics(font.synthetic_italics);
+                let (shape_, (tx_, ty_)) = font.synthesize_italics(shape, y_scale * req_size);
+                shape = shape_;
+                tx = tx_;
+                ty = ty_;
             };
             let mut ft_shape = FT_Matrix {
                 xx: (shape.scale_x * 65536.0) as FT_Fixed,
@@ -487,8 +492,13 @@ impl FontContext {
                 yx: (shape.skew_y * -65536.0) as FT_Fixed,
                 yy: (shape.scale_y * 65536.0) as FT_Fixed,
             };
+            // The delta vector for FT_Set_Transform is in units of 1/64 pixel.
+            let mut ft_delta = FT_Vector {
+                x: (tx * 64.0) as FT_F26Dot6,
+                y: (ty * -64.0) as FT_F26Dot6,
+            };
             unsafe {
-                FT_Set_Transform(face, &mut ft_shape, ptr::null_mut());
+                FT_Set_Transform(face, &mut ft_shape, &mut ft_delta);
                 FT_Set_Char_Size(
                     face,
                     (req_size * x_scale * 64.0 + 0.5) as FT_F26Dot6,
@@ -660,6 +670,7 @@ impl FontContext {
                         top - height as i32,
                         top,
                         font.synthetic_italics.to_skew(),
+                        font.flags.contains(FontInstanceFlags::VERTICAL),
                     );
                     left += skew_min as i32;
                     width += (skew_max - skew_min) as i32;
@@ -857,14 +868,23 @@ impl FontContext {
             }
             _ => panic!("Unsupported mode"),
         };
-        let mut final_buffer = vec![0u8; actual_width * actual_height * 4];
+
+        // If we need padding, we will need to expand the buffer size.
+        let (buffer_width, buffer_height, padding) = if font.texture_padding {
+            (actual_width + 2, actual_height + 2, 1)
+        } else {
+            (actual_width, actual_height, 0)
+        };
+
+        let mut final_buffer = vec![0u8; buffer_width * buffer_height * 4];
 
         // Extract the final glyph from FT format into BGRA8 format, which is
         // what WR expects.
         let subpixel_bgr = font.flags.contains(FontInstanceFlags::SUBPIXEL_BGR);
         let mut src_row = bitmap.buffer;
-        let mut dest: usize = 0;
-        while dest < final_buffer.len() {
+        let mut dest = 4 * padding * (padding + buffer_width);
+        let actual_end = final_buffer.len() - 4 * padding * (buffer_width + 1);
+        while dest < actual_end {
             let mut src = src_row;
             let row_end = dest + actual_width * 4;
             match pixel_mode {
@@ -936,7 +956,14 @@ impl FontContext {
                 _ => panic!("Unsupported mode"),
             }
             src_row = unsafe { src_row.offset(bitmap.pitch as isize) };
-            dest = row_end;
+            dest = row_end + 8 * padding;
+        }
+
+        if font.texture_padding {
+            left -= padding as i32;
+            top += padding as i32;
+            actual_width = buffer_width;
+            actual_height = buffer_height;
         }
 
         match format {
@@ -949,6 +976,7 @@ impl FontContext {
                         left,
                         top,
                         font.synthetic_italics.to_skew(),
+                        font.flags.contains(FontInstanceFlags::VERTICAL),
                     );
                     final_buffer = skew_buffer;
                     actual_width = skew_width;

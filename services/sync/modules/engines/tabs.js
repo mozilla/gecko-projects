@@ -4,7 +4,7 @@
 
 var EXPORTED_SYMBOLS = ["TabEngine", "TabSetRecord"];
 
-const TABS_TTL = 1814400; // 21 days.
+const TABS_TTL = 31622400; // 366 days (1 leap year).
 const TAB_ENTRIES_LIMIT = 5; // How many URLs to include in tab history.
 
 const { XPCOMUtils } = ChromeUtils.import(
@@ -194,7 +194,7 @@ TabStore.prototype = {
           let iconData = await PlacesUtils.promiseFaviconData(urls[0]);
           icon = iconData.uri.spec;
         } catch (ex) {
-          this._log.warn(`Failed to fetch favicon for ${urls[0]}`, ex);
+          this._log.trace(`Failed to fetch favicon for ${urls[0]}`, ex);
         }
         allTabs.push({
           title: current.title || "",
@@ -221,9 +221,7 @@ TabStore.prototype = {
 
     if (records.length != tabs.length) {
       this._log.warn(
-        `Can't fit all tabs in sync payload: have ${
-          tabs.length
-        }, but can only fit ${records.length}.`
+        `Can't fit all tabs in sync payload: have ${tabs.length}, but can only fit ${records.length}.`
       );
     }
 
@@ -269,7 +267,7 @@ TabStore.prototype = {
   },
 
   async create(record) {
-    this._log.debug("Adding remote tabs from " + record.clientName);
+    this._log.debug("Adding remote tabs from " + record.id);
     this._remoteClients[record.id] = Object.assign({}, record.cleartext, {
       lastModified: record.modified,
     });
@@ -277,6 +275,10 @@ TabStore.prototype = {
 
   async update(record) {
     this._log.trace("Ignoring tab updates as local ones win");
+  },
+
+  async trackRemainingChanges() {
+    this._tracker.modified = true;
   },
 };
 

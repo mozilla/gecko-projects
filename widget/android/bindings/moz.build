@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Firefox for Android", "General")
+    BUG_COMPONENT = ("GeckoView", "General")
 
 # List of stems to generate .cpp and .h files for.  To add a stem, add it to
 # this list and ensure that $(stem)-classes.txt exists in this directory.
@@ -40,7 +40,6 @@ t = tuple(['sdk_bindings'] +
 GENERATED_FILES += [t]
 GENERATED_FILES[t].script = '/mobile/android/gradle.py:generate_sdk_bindings'
 GENERATED_FILES[t].inputs += ['%s-classes.txt' % stem for stem in generated]
-GENERATED_FILES[t].py2 = True
 
 FINAL_LIBRARY = 'xul'
 

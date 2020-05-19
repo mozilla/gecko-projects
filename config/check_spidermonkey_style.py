@@ -61,10 +61,12 @@ included_inclnames_to_ignore = set([
     'double-conversion/double-conversion.h',  # strange MFBT case
     'javascript-trace.h',       # generated in $OBJDIR if HAVE_DTRACE is defined
     'frontend/ReservedWordsGenerated.h',  # generated in $OBJDIR
+    'frontend/smoosh_generated.h',        # generated in $OBJDIR
     'gc/StatsPhasesGenerated.h',         # generated in $OBJDIR
     'gc/StatsPhasesGenerated.inc',       # generated in $OBJDIR
-    'jit/LOpcodes.h',           # generated in $OBJDIR
-    'jit/MOpcodes.h',           # generated in $OBJDIR
+    'jit/CacheIROpsGenerated.h',         # generated in $OBJDIR
+    'jit/LOpcodesGenerated.h',           # generated in $OBJDIR
+    'jit/MOpcodesGenerated.h',           # generated in $OBJDIR
     'jscustomallocator.h',      # provided by embedders;  allowed to be missing
     'js-config.h',              # generated in $OBJDIR
     'fdlibm.h',                 # fdlibm
@@ -102,6 +104,7 @@ included_inclnames_to_ignore = set([
     'unicode/uformattedvalue.h',  # ICU
     'unicode/ulistformatter.h',  # ICU
     'unicode/uloc.h',           # ICU
+    'unicode/uniset.h',         # ICU
     'unicode/unistr.h',         # ICU
     'unicode/unorm2.h',         # ICU
     'unicode/unum.h',           # ICU
@@ -319,7 +322,7 @@ def check_style(enable_fixup):
            file_kind == FileKind.H or file_kind == FileKind.INL_H:
             included_h_inclnames = set()    # type: set(inclname)
 
-            with open(filename) as f:
+            with open(filename, encoding='utf-8') as f:
                 code = read_file(f)
 
             if enable_fixup:

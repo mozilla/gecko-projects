@@ -36,12 +36,14 @@
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/NativeObject.h"  // js::PlainObject
 #include "vm/Shape.h"
 #include "vm/TypedArrayObject.h"
 
 #include "vm/Compartment-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
+#include "vm/PlainObject-inl.h"  // js::PlainObject::createWithTemplate
 #include "vm/ReceiverGuard-inl.h"
 #include "vm/Stack-inl.h"
 #include "vm/StringType-inl.h"
@@ -53,7 +55,7 @@ using mozilla::DebugOnly;
 using mozilla::Maybe;
 using mozilla::PodCopy;
 
-typedef Rooted<PropertyIteratorObject*> RootedPropertyIteratorObject;
+using RootedPropertyIteratorObject = Rooted<PropertyIteratorObject*>;
 
 static const gc::AllocKind ITERATOR_FINALIZE_KIND =
     gc::AllocKind::OBJECT2_BACKGROUND;
@@ -951,20 +953,20 @@ PropertyIteratorObject* js::LookupInIteratorCache(JSContext* cx,
 }
 
 // ES 2017 draft 7.4.7.
-JSObject* js::CreateIterResultObject(JSContext* cx, HandleValue value,
-                                     bool done) {
+PlainObject* js::CreateIterResultObject(JSContext* cx, HandleValue value,
+                                        bool done) {
   // Step 1 (implicit).
 
   // Step 2.
-  RootedObject templateObject(
+  Rooted<PlainObject*> templateObject(
       cx, cx->realm()->getOrCreateIterResultTemplateObject(cx));
   if (!templateObject) {
     return nullptr;
   }
 
-  NativeObject* resultObj;
+  PlainObject* resultObj;
   JS_TRY_VAR_OR_RETURN_NULL(
-      cx, resultObj, NativeObject::createWithTemplate(cx, templateObject));
+      cx, resultObj, PlainObject::createWithTemplate(cx, templateObject));
 
   // Step 3.
   resultObj->setSlot(Realm::IterResultObjectValueSlot, value);
@@ -977,20 +979,20 @@ JSObject* js::CreateIterResultObject(JSContext* cx, HandleValue value,
   return resultObj;
 }
 
-NativeObject* Realm::getOrCreateIterResultTemplateObject(JSContext* cx) {
+PlainObject* Realm::getOrCreateIterResultTemplateObject(JSContext* cx) {
   MOZ_ASSERT(cx->realm() == this);
 
   if (iterResultTemplate_) {
     return iterResultTemplate_;
   }
 
-  NativeObject* templateObj =
+  PlainObject* templateObj =
       createIterResultTemplateObject(cx, WithObjectPrototype::Yes);
   iterResultTemplate_.set(templateObj);
   return iterResultTemplate_;
 }
 
-NativeObject* Realm::getOrCreateIterResultWithoutPrototypeTemplateObject(
+PlainObject* Realm::getOrCreateIterResultWithoutPrototypeTemplateObject(
     JSContext* cx) {
   MOZ_ASSERT(cx->realm() == this);
 
@@ -998,19 +1000,19 @@ NativeObject* Realm::getOrCreateIterResultWithoutPrototypeTemplateObject(
     return iterResultWithoutPrototypeTemplate_;
   }
 
-  NativeObject* templateObj =
+  PlainObject* templateObj =
       createIterResultTemplateObject(cx, WithObjectPrototype::No);
   iterResultWithoutPrototypeTemplate_.set(templateObj);
   return iterResultWithoutPrototypeTemplate_;
 }
 
-NativeObject* Realm::createIterResultTemplateObject(
+PlainObject* Realm::createIterResultTemplateObject(
     JSContext* cx, WithObjectPrototype withProto) {
   // Create template plain object
-  RootedNativeObject templateObject(
+  Rooted<PlainObject*> templateObject(
       cx, withProto == WithObjectPrototype::Yes
-              ? NewBuiltinClassInstance<PlainObject>(cx, TenuredObject)
-              : NewObjectWithNullTaggedProto<PlainObject>(cx));
+              ? NewTenuredBuiltinClassInstance<PlainObject>(cx)
+              : NewObjectWithGivenProto<PlainObject>(cx, nullptr));
   if (!templateObject) {
     return nullptr;
   }
@@ -1110,15 +1112,24 @@ enum {
 const JSClass ArrayIteratorObject::class_ = {
     "Array Iterator", JSCLASS_HAS_RESERVED_SLOTS(ArrayIteratorSlotCount)};
 
-ArrayIteratorObject* js::NewArrayIteratorObject(JSContext* cx,
-                                                NewObjectKind newKind) {
+ArrayIteratorObject* js::NewArrayIteratorTemplate(JSContext* cx) {
   RootedObject proto(
       cx, GlobalObject::getOrCreateArrayIteratorPrototype(cx, cx->global()));
   if (!proto) {
     return nullptr;
   }
 
-  return NewObjectWithGivenProto<ArrayIteratorObject>(cx, proto, newKind);
+  return NewTenuredObjectWithGivenProto<ArrayIteratorObject>(cx, proto);
+}
+
+ArrayIteratorObject* js::NewArrayIterator(JSContext* cx) {
+  RootedObject proto(
+      cx, GlobalObject::getOrCreateArrayIteratorPrototype(cx, cx->global()));
+  if (!proto) {
+    return nullptr;
+  }
+
+  return NewObjectWithGivenProto<ArrayIteratorObject>(cx, proto);
 }
 
 static const JSFunctionSpec array_iterator_methods[] = {
@@ -1138,15 +1149,24 @@ const JSClass StringIteratorObject::class_ = {
 static const JSFunctionSpec string_iterator_methods[] = {
     JS_SELF_HOSTED_FN("next", "StringIteratorNext", 0, 0), JS_FS_END};
 
-StringIteratorObject* js::NewStringIteratorObject(JSContext* cx,
-                                                  NewObjectKind newKind) {
+StringIteratorObject* js::NewStringIteratorTemplate(JSContext* cx) {
   RootedObject proto(
       cx, GlobalObject::getOrCreateStringIteratorPrototype(cx, cx->global()));
   if (!proto) {
     return nullptr;
   }
 
-  return NewObjectWithGivenProto<StringIteratorObject>(cx, proto, newKind);
+  return NewTenuredObjectWithGivenProto<StringIteratorObject>(cx, proto);
+}
+
+StringIteratorObject* js::NewStringIterator(JSContext* cx) {
+  RootedObject proto(
+      cx, GlobalObject::getOrCreateStringIteratorPrototype(cx, cx->global()));
+  if (!proto) {
+    return nullptr;
+  }
+
+  return NewObjectWithGivenProto<StringIteratorObject>(cx, proto);
 }
 
 static const JSClass RegExpStringIteratorPrototypeClass = {
@@ -1207,16 +1227,24 @@ static const JSFunctionSpec regexp_string_iterator_methods[] = {
 
     JS_FS_END};
 
-RegExpStringIteratorObject* js::NewRegExpStringIteratorObject(
-    JSContext* cx, NewObjectKind newKind) {
+RegExpStringIteratorObject* js::NewRegExpStringIteratorTemplate(JSContext* cx) {
   RootedObject proto(cx, GlobalObject::getOrCreateRegExpStringIteratorPrototype(
                              cx, cx->global()));
   if (!proto) {
     return nullptr;
   }
 
-  return NewObjectWithGivenProto<RegExpStringIteratorObject>(cx, proto,
-                                                             newKind);
+  return NewTenuredObjectWithGivenProto<RegExpStringIteratorObject>(cx, proto);
+}
+
+RegExpStringIteratorObject* js::NewRegExpStringIterator(JSContext* cx) {
+  RootedObject proto(cx, GlobalObject::getOrCreateRegExpStringIteratorPrototype(
+                             cx, cx->global()));
+  if (!proto) {
+    return nullptr;
+  }
+
+  return NewObjectWithGivenProto<RegExpStringIteratorObject>(cx, proto);
 }
 
 JSObject* js::ValueToIterator(JSContext* cx, HandleValue vp) {

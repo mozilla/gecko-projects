@@ -4,7 +4,10 @@
 
 "use strict";
 
-const { prepareMessage } = require("devtools/client/webconsole/utils/messages");
+const {
+  prepareMessage,
+  getNaturalOrder,
+} = require("devtools/client/webconsole/utils/messages");
 const {
   IdGenerator,
 } = require("devtools/client/webconsole/utils/id-generator");
@@ -21,8 +24,8 @@ const {
   MESSAGE_OPEN,
   MESSAGE_CLOSE,
   MESSAGE_TYPE,
+  MESSAGE_REMOVE,
   MESSAGE_UPDATE_PAYLOAD,
-  PAUSED_EXECUTION_POINT,
   PRIVATE_MESSAGES_CLEAR,
 } = require("devtools/client/webconsole/constants");
 
@@ -33,6 +36,8 @@ function messagesAdd(packets, idGenerator = null) {
     idGenerator = defaultIdGenerator;
   }
   const messages = packets.map(packet => prepareMessage(packet, idGenerator));
+  // Sort the messages by their timestamps.
+  messages.sort(getNaturalOrder);
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].type === MESSAGE_TYPE.CLEAR) {
       return batchActions([
@@ -63,13 +68,6 @@ function messagesClearLogpoint(logpointId) {
   return {
     type: MESSAGES_CLEAR_LOGPOINT,
     logpointId,
-  };
-}
-
-function setPauseExecutionPoint(executionPoint) {
-  return {
-    type: PAUSED_EXECUTION_POINT,
-    executionPoint,
   };
 }
 
@@ -132,6 +130,13 @@ function messageUpdatePayload(id, data) {
   };
 }
 
+function messageRemove(id) {
+  return {
+    type: MESSAGE_REMOVE,
+    id,
+  };
+}
+
 function networkMessageUpdate(packet, idGenerator = null, response) {
   if (idGenerator == null) {
     idGenerator = defaultIdGenerator;
@@ -154,24 +159,16 @@ function networkUpdateRequest(id, data) {
   };
 }
 
-function jumpToExecutionPoint(executionPoint) {
-  return ({ client }) => {
-    client.timeWarp(executionPoint);
-  };
-}
-
 module.exports = {
   messagesAdd,
   messagesClear,
   messagesClearLogpoint,
   messageOpen,
   messageClose,
+  messageRemove,
   messageGetMatchingElements,
   messageUpdatePayload,
   networkMessageUpdate,
   networkUpdateRequest,
   privateMessagesClear,
-  // for test purpose only.
-  setPauseExecutionPoint,
-  jumpToExecutionPoint,
 };

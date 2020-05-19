@@ -45,7 +45,7 @@ uniform HIGHP_SAMPLER_FLOAT sampler2D sPrimitiveHeadersF;
 uniform HIGHP_SAMPLER_FLOAT isampler2D sPrimitiveHeadersI;
 
 // Instanced attributes
-in ivec4 aData;
+PER_INSTANCE in ivec4 aData;
 
 #define VECS_PER_PRIM_HEADER_F 2U
 #define VECS_PER_PRIM_HEADER_I 2U
@@ -240,6 +240,14 @@ vec2 get_image_quad_uv(int address, vec2 f) {
 #endif //WR_VERTEX_SHADER
 
 #ifdef WR_FRAGMENT_SHADER
+
+struct Fragment {
+    vec4 color;
+#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+    vec4 blend;
+#endif
+};
+
 
 float do_clip() {
     // check for the dummy bounds, which are given to the opaque objects

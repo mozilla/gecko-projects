@@ -206,8 +206,17 @@ function requestTabs() {
         DEBUG_TARGET_PANE.TAB
       );
       const tabs = isSupported
-        ? await clientWrapper.listTabs({ favicons: true })
+        ? await clientWrapper.listTabs({
+            // Backward compatibility: this is only used for FF75 or older.
+            // The argument can be dropped when FF76 hits the release channel.
+            favicons: true,
+          })
         : [];
+
+      // Fetch the missing information for all tabs.
+      await Promise.all(
+        tabs.map(descriptorFront => descriptorFront.retrieveAsyncFormData())
+      );
 
       dispatch({ type: REQUEST_TABS_SUCCESS, tabs });
     } catch (e) {
@@ -271,8 +280,8 @@ function requestProcesses() {
     const clientWrapper = getCurrentClient(getState().runtimes);
 
     try {
-      const mainProcessFront = await clientWrapper.getMainProcess();
-
+      const mainProcessDescriptorFront = await clientWrapper.getMainProcess();
+      const mainProcessFront = await mainProcessDescriptorFront.getTarget();
       dispatch({
         type: REQUEST_PROCESSES_SUCCESS,
         mainProcess: {

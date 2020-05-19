@@ -1,0 +1,62 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+.registration {
+  line-height: 1.5;
+  font-size: var(--body-10-font-size);
+}
+
+/*
+ * The current layout of a registration header is
+ *
+ *  +----------------------------+----------------+
+ *  | Registration scope         | Unregister_btn |
+ *  +---+----------+-------------+----------------|
+ */
+.registration__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  /* make the row min height the same size of the Unregister button,
+     so we avoid a shifting movement when the button is not displayed */
+  grid-template-rows: minmax(calc(var(--base-unit) * 6), auto);
+  grid-column-gap: calc(4 * var(--base-unit));
+  align-items: center;
+}
+
+.registration__scope {
+  font-size: var(--title-10-font-size);
+  font-weight: var(--title-10-font-weight);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: text;
+
+  /* display flex to handle showing the icon with ::before */
+  display: flex;
+  flex-direction: row;
+  column-gap: calc(var(--base-unit) * 2);
+  align-items: center;
+}
+
+.registration__scope::before {
+  display: inline-block;
+  width: calc(var(--base-unit) * 4);
+  height: calc(var(--base-unit) * 4);
+  content: "";
+  background-image: url(chrome://devtools/skin/images/debugging-workers.svg);
+}
+
+.registration__updated-time {
+  color: var(--theme-text-color-alt);
+}
+
+.registration__workers {
+  list-style-type: none;
+  padding: 0;
+  margin: calc(2 * var(--base-unit)) 0 0 0;
+}
+
+.registration__workers-item:not(:first-child) {
+  margin-block-start: calc(var(--base-unit) * 2);
+}

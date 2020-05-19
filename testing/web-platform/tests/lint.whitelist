@@ -10,7 +10,7 @@
 INDENT TABS: conformance-checkers/*
 INDENT TABS: encoding/legacy*/*
 
-TRAILING WHITESPACE: 2dcontext/tools/current-work-canvas.xhtml
+TRAILING WHITESPACE: html/canvas/tools/current-work-canvas.xhtml
 TRAILING WHITESPACE: conformance-checkers/*
 TRAILING WHITESPACE: content-security-policy/*
 TRAILING WHITESPACE: WebIDL/valid/*
@@ -176,7 +176,7 @@ SET TIMEOUT: media-source/mediasource-util.js
 SET TIMEOUT: media-source/URL-createObjectURL-revoke.html
 SET TIMEOUT: mixed-content/generic/sanity-checker.js
 SET TIMEOUT: navigation-timing/*
-SET TIMEOUT: offscreen-canvas/the-offscreen-canvas/*
+SET TIMEOUT: html/canvas/offscreen/the-offscreen-canvas/*
 SET TIMEOUT: old-tests/submission/Microsoft/history/history_000.htm
 SET TIMEOUT: paint-timing/resources/subframe-painting.html
 SET TIMEOUT: payment-request/allowpaymentrequest/setting-allowpaymentrequest-timing.https.sub.html
@@ -201,8 +201,8 @@ SET TIMEOUT: service-workers/service-worker/resources/resource-timing-worker.js
 SET TIMEOUT: shadow-dom/Document-prototype-currentScript.html
 SET TIMEOUT: shadow-dom/scroll-to-the-fragment-in-shadow-tree.html
 SET TIMEOUT: shadow-dom/slotchange-event.html
-SET TIMEOUT: trusted-types/block-string-assignment-to-DOMWindowTimers-setTimeout-setInterval.tentative.html
-SET TIMEOUT: trusted-types/DOMWindowTimers-setTimeout-setInterval.tentative.html
+SET TIMEOUT: trusted-types/block-string-assignment-to-DOMWindowTimers-setTimeout-setInterval.tentative.https.html
+SET TIMEOUT: trusted-types/DOMWindowTimers-setTimeout-setInterval.tentative.https.html
 SET TIMEOUT: user-timing/*
 SET TIMEOUT: web-animations/timing-model/animations/*
 SET TIMEOUT: webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/mediaElementAudioSourceToScriptProcessorTest.html
@@ -220,7 +220,7 @@ GENERATE_TESTS: resources/test/tests/functional/generate-callback.html
 GENERATE_TESTS: resources/testharness.js
 
 # generate_tests usage (should be got rid of)
-GENERATE_TESTS: 2dcontext/drawing-images-to-the-canvas/*
+GENERATE_TESTS: html/canvas/element/drawing-images-to-the-canvas/*
 GENERATE_TESTS: css/css-shapes/shape-outside/values/*
 GENERATE_TESTS: css/css-tables/bounding-box-computation-1.html
 GENERATE_TESTS: css/css-tables/bounding-box-computation-2.html
@@ -275,7 +275,7 @@ GENERATE_TESTS: html/webappapis/atob/base64.html
 GENERATE_TESTS: mediacapture-fromelement/capture.html
 GENERATE_TESTS: mediacapture-fromelement/creation.html
 GENERATE_TESTS: mediacapture-fromelement/ended.html
-GENERATE_TESTS: offscreen-canvas/filter/offscreencanvas.filter.html
+GENERATE_TESTS: html/canvas/offscreen/filter/offscreencanvas.filter.html
 GENERATE_TESTS: pointerevents/pointerevent_constructor.html
 GENERATE_TESTS: pointerevents/extension/pointerevent_constructor.html
 GENERATE_TESTS: selection/collapse.js
@@ -297,8 +297,10 @@ SET TIMEOUT: document-policy/font-display/font-display-document-policy-01.tentat
 SET TIMEOUT: html/browsers/windows/auxiliary-browsing-contexts/resources/close-opener.html
 SET TIMEOUT: html/cross-origin-embedder-policy/resources/navigate-none.sub.html
 SET TIMEOUT: html/cross-origin-embedder-policy/resources/navigate-require-corp.sub.html
+SET TIMEOUT: html/cross-origin-embedder-policy/resources/navigate-require-corp-same-site.sub.html
 SET TIMEOUT: html/dom/documents/dom-tree-accessors/Document.currentScript.html
 SET TIMEOUT: html/webappapis/timers/*
+SET TIMEOUT: orientation-event/resources/orientation-event-helpers.js
 SET TIMEOUT: portals/history/resources/portal-harness.js
 SET TIMEOUT: resources/chromium/*
 SET TIMEOUT: resources/test/tests/functional/add_cleanup.html
@@ -321,6 +323,7 @@ SET TIMEOUT: acid/acid3/test.html
 *: css/tools/w3ctestlib/*
 *: resources/webidl2/*
 *: tools/*
+*: */third_party/*
 
 # Build system virtualenv
 *: css/tools/_virtualenv/*
@@ -604,6 +607,13 @@ CSS-COLLIDING-SUPPORT-NAME: css/css-display/support/util.js
 CSS-COLLIDING-SUPPORT-NAME: css/CSS2/normal-flow/support/replaced-min-max-1.png
 CSS-COLLIDING-SUPPORT-NAME: css/vendor-imports/mozilla/mozilla-central-reftests/ui3/support/replaced-min-max-1.png
 
+CSS-COLLIDING-TEST-NAME: css/css-sizing/contain-intrinsic-size/parsing/contain-intrinsic-size-invalid.html
+CSS-COLLIDING-TEST-NAME: css/css-sizing/aspect-ratio/parsing/contain-intrinsic-size-invalid.html
+CSS-COLLIDING-TEST-NAME: css/css-sizing/contain-intrinsic-size/parsing/contain-intrinsic-size-computed.html
+CSS-COLLIDING-TEST-NAME: css/css-sizing/aspect-ratio/parsing/contain-intrinsic-size-computed.html
+CSS-COLLIDING-TEST-NAME: css/css-sizing/contain-intrinsic-size/parsing/contain-intrinsic-size-valid.html
+CSS-COLLIDING-TEST-NAME: css/css-sizing/aspect-ratio/parsing/contain-intrinsic-size-valid.html
+
 # CSS tests that used to be at the top level and weren't subject to lints
 MISSING-LINK: css/css-fonts/matching/fixed-stretch-style-over-weight.html
 SUPPORT-WRONG-DIR: css/css-fonts/matching/font-matching.css
@@ -666,7 +676,6 @@ MISSING-LINK: css/geometry/*.worker.js
 MISSING-LINK: css/filter-effects/*.any.js
 
 # Tests that use WebKit/Blink testing APIs
-LAYOUTTESTS APIS: import-maps/resources/jest-test-helper.js
 LAYOUTTESTS APIS: import-maps/common/resources/common-test-helper.js
 LAYOUTTESTS APIS: resources/chromium/enable-hyperlink-auditing.js
 LAYOUTTESTS APIS: resources/chromium/generic_sensor_mocks.js
@@ -675,6 +684,7 @@ LAYOUTTESTS APIS: resources/chromium/webxr-test.js
 LAYOUTTESTS APIS: web-nfc/NDEFReader-document-hidden-manual.https.html
 LAYOUTTESTS APIS: web-nfc/NDEFReader_scan.https.html
 LAYOUTTESTS APIS: web-nfc/NDEFWriter_write.https.html
+LAYOUTTESTS APIS: webxr/resources/webxr_util.js
 
 # Signed Exchange files have hard-coded URLs in the certUrl field
 WEB-PLATFORM.TEST:signed-exchange/resources/*.sxg
@@ -689,12 +699,13 @@ WEB-PLATFORM.TEST:web-bundle/resources/wbn/*.wbn
 # https://github.com/web-platform-tests/wpt/issues/16455
 # Please consult with ecosystem-infra@chromium.org before adding more.
 MISSING DEPENDENCY: idle-detection/interceptor.https.html
-MISSING DEPENDENCY: sms/resources/helper.js
+MISSING DEPENDENCY: credential-management/support/otpcredential-helper.js
 MISSING DEPENDENCY: web-nfc/resources/nfc-helpers.js
 MISSING DEPENDENCY: shape-detection/resources/shapedetection-helpers.js
 MISSING DEPENDENCY: webxr/resources/webxr_util.js
 MISSING DEPENDENCY: contacts/resources/helpers.js
 MISSING DEPENDENCY: generic-sensor/resources/generic-sensor-helpers.js
+MISSING DEPENDENCY: orientation-event/resources/orientation-event-helpers.js
 
 # Tests that are false positives for using Ahem as a system font
 AHEM SYSTEM FONT: acid/acid3/test.html
@@ -707,7 +718,7 @@ AHEM SYSTEM FONT: infrastructure/assumptions/ahem-ref.html
 AHEM SYSTEM FONT: infrastructure/assumptions/ahem.html
 
 # Existing crashtests using testharness
-TESTHARNESS-IN-OTHER-TYPE: 2dcontext/wide-gamut-canvas/imagedata-no-color-settings-crash.html
+TESTHARNESS-IN-OTHER-TYPE: html/canvas/element/wide-gamut-canvas/imagedata-no-color-settings-crash.html
 TESTHARNESS-IN-OTHER-TYPE: css/CSS2/floats-clear/adjoining-float-new-fc-crash.html
 TESTHARNESS-IN-OTHER-TYPE: css/CSS2/floats/floats-saturated-position-crash.html
 TESTHARNESS-IN-OTHER-TYPE: css/CSS2/linebox/video-needs-layout-crash.html
@@ -745,3 +756,10 @@ TESTHARNESS-IN-OTHER-TYPE: svg/extensibility/foreignObject/foreign-object-circul
 TESTHARNESS-IN-OTHER-TYPE: svg/extensibility/foreignObject/foreign-object-under-clip-path-crash.html
 TESTHARNESS-IN-OTHER-TYPE: svg/extensibility/foreignObject/foreign-object-under-defs-crash.html
 TESTHARNESS-IN-OTHER-TYPE: svg/svg-in-svg/svg-in-svg-circular-filter-reference-crash.html
+
+# TODO: Temporary inclusions while we deprecate assert_precondition
+# https://github.com/web-platform-tests/wpt/issues/21971
+ASSERT-PRECONDITION: infrastructure/expected-fail/precondition.html
+ASSERT-PRECONDITION: infrastructure/expected-fail/precondition-in-setup.html
+ASSERT-PRECONDITION: infrastructure/expected-fail/precondition-in-promise.html
+ASSERT-PRECONDITION: resources/testharness.js

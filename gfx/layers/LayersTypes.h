@@ -53,7 +53,7 @@ class TextureHost;
 #undef OPAQUE
 
 struct LayersId {
-  uint64_t mId;
+  uint64_t mId = 0;
 
   bool IsValid() const { return mId != 0; }
 
@@ -84,11 +84,11 @@ struct BaseTransactionId {
 
   bool IsValid() const { return mId != 0; }
 
-  MOZ_MUST_USE BaseTransactionId<T> Next() const {
+  [[nodiscard]] BaseTransactionId<T> Next() const {
     return BaseTransactionId<T>{mId + 1};
   }
 
-  MOZ_MUST_USE BaseTransactionId<T> Prev() const {
+  [[nodiscard]] BaseTransactionId<T> Prev() const {
     return BaseTransactionId<T>{mId - 1};
   }
 
@@ -126,7 +126,7 @@ typedef BaseTransactionId<TransactionIdType> TransactionId;
 struct LayersObserverEpoch {
   uint64_t mId;
 
-  MOZ_MUST_USE LayersObserverEpoch Next() const {
+  [[nodiscard]] LayersObserverEpoch Next() const {
     return LayersObserverEpoch{mId + 1};
   }
 
@@ -366,7 +366,7 @@ typedef gfx::Matrix4x4Typed<ParentLayerPixel, ParentLayerPixel>
 typedef gfx::Matrix4x4Typed<CSSTransformedLayerPixel, ParentLayerPixel>
     AsyncTransformMatrix;
 
-typedef Array<gfx::Color, 4> BorderColors;
+typedef Array<gfx::DeviceColor, 4> BorderColors;
 typedef Array<LayerSize, 4> BorderCorners;
 typedef Array<LayerCoord, 4> BorderWidths;
 typedef Array<StyleBorderStyle, 4> BorderStyles;
@@ -381,7 +381,7 @@ class LayerHandle final {
 
  public:
   LayerHandle() : mHandle(0) {}
-  LayerHandle(const LayerHandle& aOther) : mHandle(aOther.mHandle) {}
+  LayerHandle(const LayerHandle& aOther) = default;
   explicit LayerHandle(uint64_t aHandle) : mHandle(aHandle) {}
   bool IsValid() const { return mHandle != 0; }
   explicit operator bool() const { return IsValid(); }
@@ -403,8 +403,7 @@ class CompositableHandle final {
 
  public:
   CompositableHandle() : mHandle(0) {}
-  CompositableHandle(const CompositableHandle& aOther)
-      : mHandle(aOther.mHandle) {}
+  CompositableHandle(const CompositableHandle& aOther) = default;
   explicit CompositableHandle(uint64_t aHandle) : mHandle(aHandle) {}
   bool IsValid() const { return mHandle != 0; }
   explicit operator bool() const { return IsValid(); }

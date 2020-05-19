@@ -93,8 +93,10 @@ class MediaEngineWebRTCMicrophoneSource : public MediaEngineSource {
    * Sent the AudioProcessingModule parameter for a given processing algorithm.
    */
   void UpdateAECSettings(bool aEnable, bool aUseAecMobile,
-                         webrtc::EchoCancellation::SuppressionLevel aLevel);
+                         webrtc::EchoCancellation::SuppressionLevel aLevel,
+                         webrtc::EchoControlMobile::RoutingMode aRoutingMode);
   void UpdateAGCSettings(bool aEnable, webrtc::GainControl::Mode aMode);
+  void UpdateHPFSettings(bool aEnable);
   void UpdateNSSettings(bool aEnable, webrtc::NoiseSuppression::Level aLevel);
   void UpdateAPMExtraOptions(bool aExtendedFilter, bool aDelayAgnostic);
 
@@ -189,8 +191,10 @@ class AudioInputProcessing : public AudioDataListener {
   // This allow changing the APM options, enabling or disabling processing
   // steps.
   void UpdateAECSettings(bool aEnable, bool aUseAecMobile,
-                         webrtc::EchoCancellation::SuppressionLevel aLevel);
+                         webrtc::EchoCancellation::SuppressionLevel aLevel,
+                         webrtc::EchoControlMobile::RoutingMode aRoutingMode);
   void UpdateAGCSettings(bool aEnable, webrtc::GainControl::Mode aMode);
+  void UpdateHPFSettings(bool aEnable);
   void UpdateNSSettings(bool aEnable, webrtc::NoiseSuppression::Level aLevel);
   void UpdateAPMExtraOptions(bool aExtendedFilter, bool aDelayAgnostic);
 
@@ -207,10 +211,10 @@ class AudioInputProcessing : public AudioDataListener {
   const UniquePtr<webrtc::AudioProcessing> mAudioProcessing;
   // Packetizer to be able to feed 10ms packets to the input side of
   // mAudioProcessing. Not used if the processing is bypassed.
-  nsAutoPtr<AudioPacketizer<AudioDataValue, float>> mPacketizerInput;
+  UniquePtr<AudioPacketizer<AudioDataValue, float>> mPacketizerInput;
   // Packetizer to be able to feed 10ms packets to the output side of
   // mAudioProcessing. Not used if the processing is bypassed.
-  nsAutoPtr<AudioPacketizer<AudioDataValue, float>> mPacketizerOutput;
+  UniquePtr<AudioPacketizer<AudioDataValue, float>> mPacketizerOutput;
   // The number of channels asked for by content, after clamping to the range of
   // legal channel count for this particular device. This is the number of
   // channels of the input buffer passed as parameter in NotifyInputData.

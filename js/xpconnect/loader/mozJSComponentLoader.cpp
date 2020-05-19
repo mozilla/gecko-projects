@@ -240,7 +240,7 @@ class MOZ_STACK_CLASS ComponentLoaderInfo {
                          nsContentUtils::GetSystemPrincipal(),
                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                          nsIContentPolicy::TYPE_SCRIPT,
-                         nullptr,  // nsICookieSettings
+                         nullptr,  // nsICookieJarSettings
                          nullptr,  // aPerformanceStorage
                          nullptr,  // aLoadGroup
                          nullptr,  // aCallbacks
@@ -294,10 +294,11 @@ static nsresult ReportOnCallerUTF8(JSCLContextHelper& helper,
 #undef ENSURE_DEP
 
 mozJSComponentLoader::~mozJSComponentLoader() {
+  MOZ_ASSERT(!mInitialized,
+             "UnloadModules() was not explicitly called before cleaning up "
+             "mozJSComponentLoader");
+
   if (mInitialized) {
-    NS_ERROR(
-        "UnloadModules() was not explicitly called before cleaning up "
-        "mozJSComponentLoader");
     UnloadModules();
   }
 
@@ -565,10 +566,7 @@ size_t mozJSComponentLoader::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) {
 void mozJSComponentLoader::CreateLoaderGlobal(JSContext* aCx,
                                               const nsACString& aLocation,
                                               MutableHandleObject aGlobal) {
-  RefPtr<BackstagePass> backstagePass;
-  nsresult rv = NS_NewBackstagePass(getter_AddRefs(backstagePass));
-  NS_ENSURE_SUCCESS_VOID(rv);
-
+  auto backstagePass = MakeRefPtr<BackstagePass>();
   RealmOptions options;
 
   options.creationOptions().setNewCompartmentInSystemZone();
@@ -578,7 +576,7 @@ void mozJSComponentLoader::CreateLoaderGlobal(JSContext* aCx,
   // been defined so the JS debugger can tell what module the global is
   // for
   RootedObject global(aCx);
-  rv = xpc::InitClassesWithNewWrappedGlobal(
+  nsresult rv = xpc::InitClassesWithNewWrappedGlobal(
       aCx, static_cast<nsIGlobalObject*>(backstagePass),
       nsContentUtils::GetSystemPrincipal(), xpc::DONT_FIRE_ONNEWGLOBALHOOK,
       options, &global);
@@ -617,13 +615,6 @@ bool mozJSComponentLoader::ReuseGlobal(nsIURI* aURI) {
   // Various tests call addDebuggerToGlobal on the result of
   // importing this JSM, which would be annoying to fix.
   if (spec.EqualsASCII("resource://gre/modules/jsdebugger.jsm")) {
-    return false;
-  }
-
-  // BrowserTestUtils.jsm calls Cu.permitCPOWsInScope(this) which sets a
-  // per-compartment flag to permit CPOWs. We don't want to set this flag for
-  // all other JSMs.
-  if (spec.EqualsASCII("resource://testing-common/BrowserTestUtils.jsm")) {
     return false;
   }
 
@@ -836,13 +827,6 @@ nsresult mozJSComponentLoader::ObjectForLocation(
     // The script wasn't in the cache , so compile it now.
     LOG(("Slow loading %s\n", nativePath.get()));
 
-    // If we are debugging a replaying process and have diverged from the
-    // recording, trying to load and compile new code will cause the
-    // debugger operation to fail, so just abort now.
-    if (recordreplay::HasDivergedFromRecording()) {
-      return NS_ERROR_FAILURE;
-    }
-
     // Use lazy source if we're using the startup cache. Non-lazy source +
     // startup cache regresses installer size (due to source code stored in
     // XDR encoded modules in omni.ja). Also, XDR decoding is relatively
@@ -866,9 +850,8 @@ nsresult mozJSComponentLoader::ObjectForLocation(
       JS::SourceText<mozilla::Utf8Unit> srcBuf;
       if (srcBuf.init(cx, buf.get(), map.size(),
                       JS::SourceOwnership::Borrowed)) {
-        script = reuseGlobal ? CompileForNonSyntacticScopeDontInflate(
-                                   cx, options, srcBuf)
-                             : CompileDontInflate(cx, options, srcBuf);
+        script = reuseGlobal ? CompileForNonSyntacticScope(cx, options, srcBuf)
+                             : Compile(cx, options, srcBuf);
       } else {
         MOZ_ASSERT(!script);
       }
@@ -879,9 +862,8 @@ nsresult mozJSComponentLoader::ObjectForLocation(
       JS::SourceText<mozilla::Utf8Unit> srcBuf;
       if (srcBuf.init(cx, str.get(), str.Length(),
                       JS::SourceOwnership::Borrowed)) {
-        script = reuseGlobal ? CompileForNonSyntacticScopeDontInflate(
-                                   cx, options, srcBuf)
-                             : CompileDontInflate(cx, options, srcBuf);
+        script = reuseGlobal ? CompileForNonSyntacticScope(cx, options, srcBuf)
+                             : Compile(cx, options, srcBuf);
       } else {
         MOZ_ASSERT(!script);
       }
@@ -949,7 +931,7 @@ nsresult mozJSComponentLoader::ObjectForLocation(
   }
 
   /* Freed when we remove from the table. */
-  *aLocation = ToNewCString(nativePath);
+  *aLocation = ToNewCString(nativePath, mozilla::fallible);
   if (!*aLocation) {
     aObject.set(nullptr);
     aTableScript.set(nullptr);

@@ -62,6 +62,9 @@ TEST(Moz2D, PremultiplyRow)
   const uint8_t check_rgba[5 * 4] = {
       0, 255, 255, 255, 255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 128,
   };
+  const uint8_t check_argb[5 * 4] = {
+      255, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 128,
+  };
 
   SwizzleRowFn func =
       PremultiplyRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8);
@@ -71,6 +74,10 @@ TEST(Moz2D, PremultiplyRow)
   func = PremultiplyRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8);
   func(in_bgra, out, 5);
   EXPECT_TRUE(ArrayEqual(out, check_rgba));
+
+  func = PremultiplyRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::A8R8G8B8);
+  func(in_bgra, out, 5);
+  EXPECT_TRUE(ArrayEqual(out, check_argb));
 }
 
 TEST(Moz2D, UnpremultiplyData)
@@ -104,6 +111,41 @@ TEST(Moz2D, UnpremultiplyData)
 
   UnpremultiplyData(in_bgra, sizeof(in_bgra), SurfaceFormat::B8G8R8A8, out,
                     sizeof(in_bgra), SurfaceFormat::A8R8G8B8, IntSize(5, 1));
+  EXPECT_TRUE(ArrayEqual(out, check_argb));
+}
+
+TEST(Moz2D, UnpremultiplyRow)
+{
+  const uint8_t in_bgra[5 * 4] = {
+      255, 255, 0,   255,              // verify 255 alpha leaves RGB unchanged
+      0,   0,   255, 255, 0, 0, 0, 0,  // verify 0 alpha leaves RGB at 0
+      0,   0,   0,   64,   // verify 0 RGB stays 0 with non-zero alpha
+      128, 0,   0,   128,  // verify that RGB == alpha maps to 255
+
+  };
+  uint8_t out[5 * 4];
+  const uint8_t check_bgra[5 * 4] = {
+      255, 255, 0, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 64, 255, 0, 0, 128,
+  };
+  // check swizzled output
+  const uint8_t check_rgba[5 * 4] = {
+      0, 255, 255, 255, 255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 255, 128,
+  };
+  const uint8_t check_argb[5 * 4] = {
+      255, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 128, 0, 0, 255,
+  };
+
+  SwizzleRowFn func =
+      UnpremultiplyRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8);
+  func(in_bgra, out, 5);
+  EXPECT_TRUE(ArrayEqual(out, check_bgra));
+
+  func = UnpremultiplyRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8);
+  func(in_bgra, out, 5);
+  EXPECT_TRUE(ArrayEqual(out, check_rgba));
+
+  func = UnpremultiplyRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::A8R8G8B8);
+  func(in_bgra, out, 5);
   EXPECT_TRUE(ArrayEqual(out, check_argb));
 }
 
@@ -200,6 +242,13 @@ TEST(Moz2D, SwizzleRow)
       0, 254, 253, 255, 255, 0,   0, 255, 0,   0,
       0, 255, 3,   2,   1,   255, 9, 0,   127, 255,
   };
+  // check packing
+  uint8_t out24[5 * 3];
+  const uint8_t check_bgr[5 * 3] = {253, 254, 0, 0, 0,   255, 0, 0,
+                                    0,   1,   2, 3, 127, 0,   9};
+  const uint8_t check_rgb[5 * 3] = {
+      0, 254, 253, 255, 0, 0, 0, 0, 0, 3, 2, 1, 9, 0, 127,
+  };
   // check unpacking
   uint8_t out_unpack[16 * 4];
   const uint8_t in_rgb[16 * 3] = {
@@ -219,6 +268,12 @@ TEST(Moz2D, SwizzleRow)
       15,  14,  13, 255, 18, 17, 16,  255, 21, 20, 19, 255, 24, 23, 22, 255,
       27,  26,  25, 255, 30, 29, 28,  255, 33, 32, 31, 255, 36, 35, 34, 255,
   };
+  const uint8_t check_unpack_xrgb[16 * 4] = {
+      255, 0,  254, 253, 255, 255, 0,  0,  255, 0,  0,  0,  255, 3,  2,  1,
+      255, 9,  0,   127, 255, 4,   5,  6,  255, 9,  8,  7,  255, 10, 11, 12,
+      255, 13, 14,  15,  255, 16,  17, 18, 255, 19, 20, 21, 255, 22, 23, 24,
+      255, 25, 26,  27,  255, 28,  29, 30, 255, 31, 32, 33, 255, 34, 35, 36,
+  };
 
   SwizzleRowFn func =
       SwizzleRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8);
@@ -228,6 +283,18 @@ TEST(Moz2D, SwizzleRow)
   func = SwizzleRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8);
   func(in_bgra, out, 5);
   EXPECT_TRUE(ArrayEqual(out, check_rgbx));
+
+  func = SwizzleRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8);
+  func(in_bgra, out, 5);
+  EXPECT_TRUE(ArrayEqual(out, in_bgra));
+
+  func = SwizzleRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8);
+  func(in_bgra, out24, 5);
+  EXPECT_TRUE(ArrayEqual(out24, check_bgr));
+
+  func = SwizzleRow(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8);
+  func(in_bgra, out24, 5);
+  EXPECT_TRUE(ArrayEqual(out24, check_rgb));
 
   func = SwizzleRow(SurfaceFormat::R8G8B8, SurfaceFormat::B8G8R8X8);
   func(in_rgb, out_unpack, 16);
@@ -246,4 +313,13 @@ TEST(Moz2D, SwizzleRow)
   memcpy(out_unpack, in_rgb, sizeof(in_rgb));
   func(out_unpack, out_unpack, 16);
   EXPECT_TRUE(ArrayEqual(out_unpack, check_unpack_rgbx));
+
+  func = SwizzleRow(SurfaceFormat::R8G8B8, SurfaceFormat::X8R8G8B8);
+  func(in_rgb, out_unpack, 16);
+  EXPECT_TRUE(ArrayEqual(out_unpack, check_unpack_xrgb));
+
+  memset(out_unpack, 0xE5, sizeof(out_unpack));
+  memcpy(out_unpack, in_rgb, sizeof(in_rgb));
+  func(out_unpack, out_unpack, 16);
+  EXPECT_TRUE(ArrayEqual(out_unpack, check_unpack_xrgb));
 }

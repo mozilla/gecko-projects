@@ -180,6 +180,15 @@ bool nsImageFrame::ShouldShowBrokenImageIcon() const {
     return false;
   }
 
+  // <img alt=""> is special, and it shouldn't draw the broken image icon,
+  // unlike the no-alt attribute or non-empty-alt-attribute case.
+  if (auto* image = HTMLImageElement::FromNode(mContent)) {
+    const nsAttrValue* alt = image->GetParsedAttr(nsGkAtoms::alt);
+    if (alt && alt->IsEmptyString()) {
+      return false;
+    }
+  }
+
   // check for broken images. valid null images (eg. img src="") are
   // not considered broken because they have no image requests
   if (nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest()) {
@@ -215,7 +224,7 @@ nsImageFrame::nsImageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
   EnableVisibilityTracking();
 }
 
-nsImageFrame::~nsImageFrame() {}
+nsImageFrame::~nsImageFrame() = default;
 
 NS_QUERYFRAME_HEAD(nsImageFrame)
   NS_QUERYFRAME_ENTRY(nsImageFrame)
@@ -272,6 +281,7 @@ void nsImageFrame::DestroyFrom(nsIFrame* aDestructRoot,
     imageLoader->FrameDestroyed(this);
     imageLoader->RemoveNativeObserver(mListener);
   } else if (mContentURLRequest) {
+    PresContext()->Document()->ImageTracker()->Remove(mContentURLRequest);
     nsLayoutUtils::DeregisterImageRequest(PresContext(), mContentURLRequest,
                                           &mContentURLRequestRegistered);
     mContentURLRequest->Cancel(NS_BINDING_ABORTED);
@@ -393,6 +403,10 @@ void nsImageFrame::SetupForContentURLRequest() {
     return;
   }
 
+  // We're not using AssociateRequestToFrame for the content property, so we
+  // need to add it to the image tracker manually.
+  PresContext()->Document()->ImageTracker()->Add(mContentURLRequest);
+
   uint32_t status = 0;
   nsresult rv = mContentURLRequest->GetImageStatus(&status);
   if (NS_FAILED(rv)) {
@@ -442,7 +456,7 @@ static void ScaleIntrinsicSizeForDensity(nsIContent& aContent,
 }
 
 static IntrinsicSize ComputeIntrinsicSize(imgIContainer* aImage,
-                                          bool aHasRequest,
+                                          bool aUseMappedRatio,
                                           nsImageFrame::Kind aKind,
                                           const nsImageFrame& aFrame) {
   const ComputedStyle& style = *aFrame.Style();
@@ -467,21 +481,41 @@ static IntrinsicSize ComputeIntrinsicSize(imgIContainer* aImage,
     return IntrinsicSize(edgeLengthToUse, edgeLengthToUse);
   }
 
-  if (aHasRequest && style.StylePosition()->mAspectRatio != 0.0f) {
+  if (aUseMappedRatio && style.StylePosition()->mAspectRatio != 0.0f) {
     return IntrinsicSize();
   }
 
   return IntrinsicSize(0, 0);
 }
 
+// For compat reasons, see bug 1602047, we don't use the intrinsic ratio from
+// width="" and height="" for images with no src attribute (no request).
+//
+// But we shouldn't get fooled by <img loading=lazy>. We do want to apply the
+// ratio then...
+bool nsImageFrame::ShouldUseMappedAspectRatio() const {
+  if (mKind != Kind::ImageElement) {
+    return true;
+  }
+  nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
+  if (currentRequest) {
+    return true;
+  }
+  // TODO(emilio): Investigate the compat situation of the above check, maybe we
+  // can just check for empty src attribute or something...
+  auto* image = HTMLImageElement::FromNode(mContent);
+  return image && image->IsAwaitingLoadOrLazyLoading();
+}
+
 bool nsImageFrame::UpdateIntrinsicSize() {
   IntrinsicSize oldIntrinsicSize = mIntrinsicSize;
-  nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
-  mIntrinsicSize = ComputeIntrinsicSize(mImage, !!currentRequest, mKind, *this);
+  mIntrinsicSize =
+      ComputeIntrinsicSize(mImage, ShouldUseMappedAspectRatio(), mKind, *this);
   return mIntrinsicSize != oldIntrinsicSize;
 }
 
-static AspectRatio ComputeAspectRatio(imgIContainer* aImage, bool aHasRequest,
+static AspectRatio ComputeAspectRatio(imgIContainer* aImage,
+                                      bool aUseMappedRatio,
                                       const nsImageFrame& aFrame) {
   const ComputedStyle& style = *aFrame.Style();
   if (style.StyleDisplay()->IsContainSize()) {
@@ -492,7 +526,7 @@ static AspectRatio ComputeAspectRatio(imgIContainer* aImage, bool aHasRequest,
       return *fromImage;
     }
   }
-  if (aHasRequest && style.StylePosition()->mAspectRatio != 0.0f) {
+  if (aUseMappedRatio && style.StylePosition()->mAspectRatio != 0.0f) {
     return AspectRatio(style.StylePosition()->mAspectRatio);
   }
   if (aFrame.ShouldShowBrokenImageIcon()) {
@@ -503,8 +537,8 @@ static AspectRatio ComputeAspectRatio(imgIContainer* aImage, bool aHasRequest,
 
 bool nsImageFrame::UpdateIntrinsicRatio() {
   AspectRatio oldIntrinsicRatio = mIntrinsicRatio;
-  nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
-  mIntrinsicRatio = ComputeAspectRatio(mImage, !!currentRequest, *this);
+  mIntrinsicRatio =
+      ComputeAspectRatio(mImage, ShouldUseMappedAspectRatio(), *this);
   return mIntrinsicRatio != oldIntrinsicRatio;
 }
 
@@ -623,7 +657,7 @@ bool nsImageFrame::ShouldCreateImageFrameFor(const Element& aElement,
     return true;
   }
 
-  if (aStyle.StyleUIReset()->mForceBrokenImageIcon) {
+  if (aStyle.StyleUIReset()->mMozForceBrokenImageIcon) {
     return true;
   }
 
@@ -644,8 +678,8 @@ bool nsImageFrame::ShouldCreateImageFrameFor(const Element& aElement,
   return false;
 }
 
-nsresult nsImageFrame::Notify(imgIRequest* aRequest, int32_t aType,
-                              const nsIntRect* aRect) {
+void nsImageFrame::Notify(imgIRequest* aRequest, int32_t aType,
+                          const nsIntRect* aRect) {
   if (aType == imgINotificationObserver::SIZE_AVAILABLE) {
     nsCOMPtr<imgIContainer> image;
     aRequest->GetImage(getter_AddRefs(image));
@@ -673,14 +707,12 @@ nsresult nsImageFrame::Notify(imgIRequest* aRequest, int32_t aType,
         imgStatus & imgIRequest::STATUS_ERROR ? NS_ERROR_FAILURE : NS_OK;
     return OnLoadComplete(aRequest, status);
   }
-
-  return NS_OK;
 }
 
-nsresult nsImageFrame::OnSizeAvailable(imgIRequest* aRequest,
-                                       imgIContainer* aImage) {
+void nsImageFrame::OnSizeAvailable(imgIRequest* aRequest,
+                                   imgIContainer* aImage) {
   if (!aImage) {
-    return NS_ERROR_INVALID_ARG;
+    return;
   }
 
   /* Get requested animation policy from the pres context:
@@ -692,11 +724,10 @@ nsresult nsImageFrame::OnSizeAvailable(imgIRequest* aRequest,
 
   if (IsPendingLoad(aRequest)) {
     // We don't care
-    return NS_OK;
+    return;
   }
 
   UpdateImage(aRequest, aImage);
-  return NS_OK;
 }
 
 void nsImageFrame::UpdateImage(imgIRequest* aRequest, imgIContainer* aImage) {
@@ -740,22 +771,24 @@ void nsImageFrame::UpdateImage(imgIRequest* aRequest, imgIContainer* aImage) {
   }
 }
 
-nsresult nsImageFrame::OnFrameUpdate(imgIRequest* aRequest,
-                                     const nsIntRect* aRect) {
-  NS_ENSURE_ARG_POINTER(aRect);
+void nsImageFrame::OnFrameUpdate(imgIRequest* aRequest,
+                                 const nsIntRect* aRect) {
+  if (NS_WARN_IF(!aRect)) {
+    return;
+  }
 
   if (!GotInitialReflow()) {
     // Don't bother to do anything; we have a reflow coming up!
-    return NS_OK;
+    return;
   }
 
   if (mFirstFrameComplete && !StyleVisibility()->IsVisible()) {
-    return NS_OK;
+    return;
   }
 
   if (IsPendingLoad(aRequest)) {
     // We don't care
-    return NS_OK;
+    return;
   }
 
   nsIntRect layerInvalidRect =
@@ -764,12 +797,11 @@ nsresult nsImageFrame::OnFrameUpdate(imgIRequest* aRequest,
   if (layerInvalidRect.IsEqualInterior(GetMaxSizedIntRect())) {
     // Invalidate our entire area.
     InvalidateSelf(nullptr, nullptr);
-    return NS_OK;
+    return;
   }
 
   nsRect frameInvalidRect = SourceRectToDest(layerInvalidRect);
   InvalidateSelf(&layerInvalidRect, &frameInvalidRect);
-  return NS_OK;
 }
 
 void nsImageFrame::InvalidateSelf(const nsIntRect* aLayerInvalidRect,
@@ -791,9 +823,8 @@ void nsImageFrame::InvalidateSelf(const nsIntRect* aLayerInvalidRect,
   }
 }
 
-nsresult nsImageFrame::OnLoadComplete(imgIRequest* aRequest, nsresult aStatus) {
+void nsImageFrame::OnLoadComplete(imgIRequest* aRequest, nsresult aStatus) {
   NotifyNewCurrentRequest(aRequest, aStatus);
-  return NS_OK;
 }
 
 void nsImageFrame::ResponsiveContentDensityChanged() {
@@ -1021,7 +1052,8 @@ void nsImageFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
   }
 
   aMetrics.SetOverflowAreasToDesiredBounds();
-  bool imageOK = ImageOk(mContent->AsElement()->State());
+  bool imageOK =
+      mKind != Kind::ImageElement || ImageOk(mContent->AsElement()->State());
 
   // Determine if the size is available
   bool haveSize = false;
@@ -1147,7 +1179,8 @@ void nsImageFrame::DisplayAltText(nsPresContext* aPresContext,
                                   const nsString& aAltText,
                                   const nsRect& aRect) {
   // Set font and color
-  aRenderingContext.SetColor(Color::FromABGR(StyleText()->mColor.ToColor()));
+  aRenderingContext.SetColor(
+      sRGBColor::FromABGR(StyleText()->mColor.ToColor()));
   RefPtr<nsFontMetrics> fm =
       nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
 
@@ -1329,7 +1362,8 @@ ImgDrawResult nsImageFrame::DisplayAltFeedback(gfxContext& aRenderingContext,
   MOZ_ASSERT(gIconLoad, "How did we succeed in Init then?");
 
   // Whether we draw the broken or loading icon.
-  bool isLoading = ImageOk(mContent->AsElement()->State());
+  bool isLoading =
+      mKind != Kind::ImageElement || ImageOk(mContent->AsElement()->State());
 
   // Calculate the inner area
   nsRect inner = GetInnerArea() + aPt;
@@ -1424,7 +1458,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedback(gfxContext& aRenderingContext,
 
     // If we could not draw the icon, just draw some graffiti in the mean time.
     if (result == ImgDrawResult::NOT_READY) {
-      ColorPattern color(ToDeviceColor(Color(1.f, 0.f, 0.f, 1.f)));
+      ColorPattern color(ToDeviceColor(sRGBColor(1.f, 0.f, 0.f, 1.f)));
 
       nscoord iconXPos = flushRight ? inner.XMost() - size : inner.x;
 
@@ -1484,7 +1518,8 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
   MOZ_ASSERT(gIconLoad, "How did we succeed in Init then?");
 
   // Whether we draw the broken or loading icon.
-  bool isLoading = ImageOk(mContent->AsElement()->State());
+  bool isLoading =
+      mKind != Kind::ImageElement || ImageOk(mContent->AsElement()->State());
 
   // Calculate the inner area
   nsRect inner = GetInnerArea() + aPt;
@@ -1694,9 +1729,8 @@ static void PaintDebugImageMap(nsIFrame* aFrame, DrawTarget* aDrawTarget,
   AutoRestoreTransform autoRestoreTransform(aDrawTarget);
   aDrawTarget->SetTransform(
       aDrawTarget->GetTransform().PreTranslate(ToPoint(devPixelOffset)));
-  f->GetImageMap()->Draw(
-      aFrame, *aDrawTarget,
-      ColorPattern(ToDeviceColor(Color(0.f, 0.f, 0.f, 1.f))));
+  f->GetImageMap()->Draw(aFrame, *aDrawTarget,
+                         ColorPattern(ToDeviceColor(sRGBColor::OpaqueBlack())));
 }
 #endif
 
@@ -2019,11 +2053,11 @@ ImgDrawResult nsImageFrame::PaintImage(gfxContext& aRenderingContext,
         drawTarget->GetTransform().PreTranslate(ToPoint(devPixelOffset)));
 
     // solid white stroke:
-    ColorPattern white(ToDeviceColor(Color(1.f, 1.f, 1.f, 1.f)));
+    ColorPattern white(ToDeviceColor(sRGBColor::OpaqueWhite()));
     map->Draw(this, *drawTarget, white);
 
     // then dashed black stroke over the top:
-    ColorPattern black(ToDeviceColor(Color(0.f, 0.f, 0.f, 1.f)));
+    ColorPattern black(ToDeviceColor(sRGBColor::OpaqueBlack()));
     StrokeOptions strokeOptions;
     nsLayoutUtils::InitDashPattern(strokeOptions, StyleBorderStyle::Dotted);
     map->Draw(this, *drawTarget, black, strokeOptions);
@@ -2068,7 +2102,8 @@ void nsImageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       aBuilder, this, clipFlags);
 
   if (mComputedSize.width != 0 && mComputedSize.height != 0) {
-    bool imageOK = ImageOk(mContent->AsElement()->State());
+    bool imageOK =
+        mKind != Kind::ImageElement || ImageOk(mContent->AsElement()->State());
 
     nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
 
@@ -2226,7 +2261,8 @@ nsresult nsImageFrame::GetContentForEvent(WidgetEvent* aEvent,
   if (nsImageMap* map = GetImageMap()) {
     nsIntPoint p;
     TranslateEventCoords(
-        nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this), p);
+        nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, RelativeTo{this}),
+        p);
     nsCOMPtr<nsIContent> area = map->GetArea(p.x, p.y);
     if (area) {
       area.forget(aContent);
@@ -2252,8 +2288,9 @@ nsresult nsImageFrame::HandleEvent(nsPresContext* aPresContext,
     bool isServerMap = IsServerImageMap();
     if (map || isServerMap) {
       nsIntPoint p;
-      TranslateEventCoords(
-          nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this), p);
+      TranslateEventCoords(nsLayoutUtils::GetEventCoordinatesRelativeTo(
+                               aEvent, RelativeTo{this}),
+                           p);
       bool inside = false;
       // Even though client-side image map triggering happens
       // through content, we need to make sure we're not inside
@@ -2323,7 +2360,7 @@ Maybe<nsIFrame::Cursor> nsImageFrame::GetCursor(const nsPoint& aPoint) {
   // get styles out of the blue and expect to trigger image loads for those.
   areaStyle->StartImageLoads(*PresContext()->Document());
 
-  StyleCursorKind kind = areaStyle->StyleUI()->mCursor;
+  StyleCursorKind kind = areaStyle->StyleUI()->mCursor.keyword;
   if (kind == StyleCursorKind::Auto) {
     kind = StyleCursorKind::Default;
   }
@@ -2365,7 +2402,8 @@ nsresult nsImageFrame::GetFrameName(nsAString& aResult) const {
   return MakeFrameName(NS_LITERAL_STRING("ImageFrame"), aResult);
 }
 
-void nsImageFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const {
+void nsImageFrame::List(FILE* out, const char* aPrefix,
+                        ListFlags aFlags) const {
   nsCString str;
   ListGeneric(str, aPrefix, aFlags);
 
@@ -2383,11 +2421,11 @@ void nsImageFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const {
 
 nsIFrame::LogicalSides nsImageFrame::GetLogicalSkipSides(
     const ReflowInput* aReflowInput) const {
+  LogicalSides skip(mWritingMode);
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
                    StyleBoxDecorationBreak::Clone)) {
-    return LogicalSides();
+    return skip;
   }
-  LogicalSides skip;
   if (nullptr != GetPrevInFlow()) {
     skip |= eLogicalSideBitsBStart;
   }
@@ -2435,6 +2473,7 @@ nsresult nsImageFrame::LoadIcon(const nsAString& aSpec,
       nullptr, /* Not associated with any particular document */
       loadFlags, nullptr, contentPolicyType, EmptyString(),
       false, /* aUseUrgentStartForChannel */
+      false, /* aLinkPreload */
       aRequest);
 }
 
@@ -2580,21 +2619,20 @@ nsresult nsImageFrame::StopAnimation() {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsImageFrame::IconLoad::Notify(imgIRequest* aRequest, int32_t aType,
-                               const nsIntRect* aData) {
+void nsImageFrame::IconLoad::Notify(imgIRequest* aRequest, int32_t aType,
+                                    const nsIntRect* aData) {
   MOZ_ASSERT(aRequest);
 
   if (aType != imgINotificationObserver::LOAD_COMPLETE &&
       aType != imgINotificationObserver::FRAME_UPDATE) {
-    return NS_OK;
+    return;
   }
 
   if (aType == imgINotificationObserver::LOAD_COMPLETE) {
     nsCOMPtr<imgIContainer> image;
     aRequest->GetImage(getter_AddRefs(image));
     if (!image) {
-      return NS_ERROR_FAILURE;
+      return;
     }
 
     // Retrieve the image's intrinsic size.
@@ -2615,8 +2653,6 @@ nsImageFrame::IconLoad::Notify(imgIRequest* aRequest, int32_t aType,
     frame = iter.GetNext();
     frame->InvalidateFrame();
   }
-
-  return NS_OK;
 }
 
 NS_IMPL_ISUPPORTS(nsImageListener, imgINotificationObserver)
@@ -2625,10 +2661,11 @@ nsImageListener::nsImageListener(nsImageFrame* aFrame) : mFrame(aFrame) {}
 
 nsImageListener::~nsImageListener() = default;
 
-NS_IMETHODIMP
-nsImageListener::Notify(imgIRequest* aRequest, int32_t aType,
-                        const nsIntRect* aData) {
-  if (!mFrame) return NS_ERROR_FAILURE;
+void nsImageListener::Notify(imgIRequest* aRequest, int32_t aType,
+                             const nsIntRect* aData) {
+  if (!mFrame) {
+    return;
+  }
 
   return mFrame->Notify(aRequest, aType, aData);
 }

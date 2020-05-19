@@ -25,11 +25,6 @@ ChromeUtils.defineModuleGetter(
   "resource://gre/modules/Services.jsm"
 );
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
-ChromeUtils.defineModuleGetter(
-  this,
-  "perfService",
-  "resource://activity-stream/common/PerfService.jsm"
-);
 const { actionTypes: at, actionCreators: ac } = ChromeUtils.import(
   "resource://activity-stream/common/Actions.jsm"
 );
@@ -58,13 +53,14 @@ const PREF_IMPRESSION_ID = "browser.newtabpage.activity-stream.impressionId";
 const PREF_ENABLED = "discoverystream.enabled";
 const PREF_HARDCODED_BASIC_LAYOUT = "discoverystream.hardcoded-basic-layout";
 const PREF_SPOCS_ENDPOINT = "discoverystream.spocs-endpoint";
-const PREF_LANG_LAYOUT_CONFIG = "discoverystream.lang-layout-config";
+const PREF_REGION_BASIC_LAYOUT = "discoverystream.region-basic-layout";
 const PREF_TOPSTORIES = "feeds.section.topstories";
 const PREF_SPOCS_CLEAR_ENDPOINT = "discoverystream.endpointSpocsClear";
 const PREF_SHOW_SPONSORED = "showSponsored";
 const PREF_SPOC_IMPRESSIONS = "discoverystream.spoc.impressions";
 const PREF_FLIGHT_BLOCKS = "discoverystream.flight.blocks";
 const PREF_REC_IMPRESSIONS = "discoverystream.rec.impressions";
+const PREF_COLLECTION_DISMISSIBLE = "discoverystream.isCollectionDismissible";
 
 let getHardcodedLayout;
 
@@ -200,6 +196,16 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         data: this.config,
       })
     );
+    this.store.dispatch(
+      ac.BroadcastToContent({
+        type: at.DISCOVERY_STREAM_COLLECTION_DISMISSIBLE_TOGGLE,
+        data: {
+          value: this.store.getState().Prefs.values[
+            PREF_COLLECTION_DISMISSIBLE
+          ],
+        },
+      })
+    );
   }
 
   uninitPrefs() {
@@ -325,12 +331,12 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     const cachedData = (await this.cache.get()) || {};
     let { layout } = cachedData;
     if (this.isExpired({ cachedData, key: "layout", isStartup })) {
-      const start = perfService.absNow();
+      const start = Cu.now();
       const layoutResponse = await this.fetchFromEndpoint(
         this.config.layout_endpoint
       );
       if (layoutResponse && layoutResponse.layout) {
-        this.layoutRequestTime = Math.round(perfService.absNow() - start);
+        this.layoutRequestTime = Math.round(Cu.now() - start);
         layout = {
           lastUpdated: Date.now(),
           spocs: layoutResponse.spocs,
@@ -376,15 +382,10 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     }
 
     if (!layoutResp || !layoutResp.layout) {
-      const langLayoutConfig =
-        this.store.getState().Prefs.values[PREF_LANG_LAYOUT_CONFIG] || "";
-
       const isBasic =
         this.config.hardcoded_basic_layout ||
         this.store.getState().Prefs.values[PREF_HARDCODED_BASIC_LAYOUT] ||
-        !langLayoutConfig
-          .split(",")
-          .find(lang => this.locale.startsWith(lang.trim()));
+        this.store.getState().Prefs.values[PREF_REGION_BASIC_LAYOUT];
 
       // Set a hardcoded layout if one is needed.
       // Changing values in this layout in memory object is unnecessary.
@@ -540,7 +541,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     // Reset the flag that indicates whether or not at least one API request
     // was issued to fetch the component feed in `getComponentFeed()`.
     this.componentFeedFetched = false;
-    const start = perfService.absNow();
+    const start = Cu.now();
     const { newFeedsPromises, newFeeds } = this.buildFeedPromises(
       DiscoveryStream.layout,
       isStartup,
@@ -552,7 +553,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 
     if (this.componentFeedFetched) {
       this.cleanUpTopRecImpressionPref(newFeeds);
-      this.componentFeedRequestTime = Math.round(perfService.absNow() - start);
+      this.componentFeedRequestTime = Math.round(Cu.now() - start);
     }
     await this.cache.set("feeds", newFeeds);
     sendUpdate({
@@ -560,16 +561,19 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     });
   }
 
-  // I wonder, can this be better as a reducer?
-  // See Bug https://bugzilla.mozilla.org/show_bug.cgi?id=1606717
-  placementsForEach(callback) {
+  getPlacements() {
     const { placements } = this.store.getState().DiscoveryStream.spocs;
     // Backwards comp for before we had placements, assume just a single spocs placement.
     if (!placements || !placements.length) {
-      [{ name: "spocs" }].forEach(callback);
-    } else {
-      placements.forEach(callback);
+      return [{ name: "spocs" }];
     }
+    return placements;
+  }
+
+  // I wonder, can this be better as a reducer?
+  // See Bug https://bugzilla.mozilla.org/show_bug.cgi?id=1606717
+  placementsForEach(callback) {
+    this.getPlacements().forEach(callback);
   }
 
   // Bug 1567271 introduced meta data on a list of spocs.
@@ -582,7 +586,15 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     const items = spocs.items || spocs;
     const title = spocs.title || "";
     const context = spocs.context || "";
-    return { items, title, context };
+    // Undefined is fine here. It's optional and only used by collections.
+    // If we leave it out, you get a collection that cannot be dismissed.
+    const { flight_id } = spocs;
+    return {
+      items,
+      title,
+      context,
+      ...(flight_id ? { flight_id } : {}),
+    };
   }
 
   async loadSpocs(sendUpdate, isStartup) {
@@ -596,7 +608,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       if (this.isExpired({ cachedData, key: "spocs", isStartup })) {
         const endpoint = this.store.getState().DiscoveryStream.spocs
           .spocs_endpoint;
-        const start = perfService.absNow();
+        const start = Cu.now();
 
         const headers = new Headers();
         headers.append("content-type", "application/json");
@@ -609,14 +621,14 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
           headers,
           body: JSON.stringify({
             pocket_id: this._impressionId,
-            version: 1,
+            version: 2,
             consumer_key: apiKey,
             ...(placements.length ? { placements } : {}),
           }),
         });
 
         if (spocsResponse) {
-          this.spocsRequestTime = Math.round(perfService.absNow() - start);
+          this.spocsRequestTime = Math.round(Cu.now() - start);
           spocsState = {
             lastUpdated: Date.now(),
             spocs: {
@@ -648,7 +660,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     let blockedItems = [];
     let belowMinScore = [];
     let flightDupes = [];
-    this.placementsForEach(placement => {
+    const spocsResultPromises = this.getPlacements().map(async placement => {
       const freshSpocs = spocsState.spocs[placement.name];
 
       if (!freshSpocs) {
@@ -663,6 +675,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         items: normalizedSpocsItems,
         title,
         context,
+        flight_id,
       } = this.normalizeSpocsItems(freshSpocs);
 
       if (!normalizedSpocsItems || !normalizedSpocsItems.length) {
@@ -695,9 +708,10 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       );
       blockedItems = [...blockedItems, ...blocks];
 
-      let { data: transformResult, filtered: transformFilter } = this.transform(
-        blockedResults
-      );
+      let {
+        data: transformResult,
+        filtered: transformFilter,
+      } = await this.transform(blockedResults);
       let {
         below_min_score: minScoreFilter,
         flight_duplicate: dupes,
@@ -710,10 +724,12 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         [placement.name]: {
           title,
           context,
+          ...(flight_id ? { flight_id } : {}),
           items: transformResult,
         },
       };
     });
+    await Promise.all(spocsResultPromises);
 
     sendUpdate({
       type: at.DISCOVERY_STREAM_SPOCS_UPDATE,
@@ -837,11 +853,11 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     }
   }
 
-  scoreItems(items) {
+  async scoreItems(items) {
     const filtered = [];
-    const scoreStart = perfService.absNow();
-    const data = items
-      .map(item => this.scoreItem(item))
+    const scoreStart = Cu.now();
+
+    const data = (await Promise.all(items.map(item => this.scoreItem(item))))
       // Remove spocs that are scored too low.
       .filter(s => {
         if (s.score >= s.min_score) {
@@ -859,14 +875,14 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     return { data, filtered };
   }
 
-  scoreItem(item) {
+  async scoreItem(item) {
     item.score = item.item_score;
     item.min_score = item.min_score || 0;
     if (item.score !== 0 && !item.score) {
       item.score = 1;
     }
     if (this.personalized) {
-      this.providerSwitcher.calculateItemRelevanceScore(item);
+      await this.providerSwitcher.calculateItemRelevanceScore(item);
     }
     return item;
   }
@@ -892,7 +908,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     return { data, filtered };
   }
 
-  transform(spocs) {
+  async transform(spocs) {
     if (spocs && spocs.length) {
       const spocsPerDomain =
         this.store.getState().DiscoveryStream.spocs.spocs_per_domain || 1;
@@ -900,10 +916,10 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       const flightDuplicates = [];
 
       // This order of operations is intended.
-      // scoreItems must be first because it creates this.score.
-      const { data: items, filtered: belowMinScoreItems } = this.scoreItems(
-        spocs
-      );
+      const {
+        data: items,
+        filtered: belowMinScoreItems,
+      } = await this.scoreItems(spocs);
       // This removes flight dupes.
       // We do this only after scoring and sorting because that way
       // we can keep the first item we see, and end up keeping the highest scored.
@@ -1059,7 +1075,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     if (this.isExpired({ cachedData, key: "feed", url: feedUrl, isStartup })) {
       const feedResponse = await this.fetchFromEndpoint(feedUrl);
       if (feedResponse) {
-        const { data: scoredItems } = this.scoreItems(
+        const { data: scoredItems } = await this.scoreItems(
           feedResponse.recommendations
         );
         const { recsExpireTime } = feedResponse.settings;
@@ -1152,42 +1168,43 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 
   async scoreFeeds(feedsState) {
     if (feedsState.data) {
-      const feedsResult = Object.keys(feedsState.data).reduce((feeds, url) => {
+      const feeds = {};
+      const feedsPromises = Object.keys(feedsState.data).map(url => {
         let feed = feedsState.data[url];
-        const { data: scoredItems } = this.scoreItems(
-          feed.data.recommendations
-        );
-        const { recsExpireTime } = feed.data.settings;
-        const recommendations = this.rotate(scoredItems, recsExpireTime);
-
-        feed = {
-          ...feed,
-          data: {
-            ...feed.data,
-            recommendations,
-          },
-        };
-
-        feeds[url] = feed;
-
-        this.store.dispatch(
-          ac.AlsoToPreloaded({
-            type: at.DISCOVERY_STREAM_FEED_UPDATE,
+        const feedPromise = this.scoreItems(feed.data.recommendations);
+        feedPromise.then(({ data: scoredItems }) => {
+          const { recsExpireTime } = feed.data.settings;
+          const recommendations = this.rotate(scoredItems, recsExpireTime);
+          feed = {
+            ...feed,
             data: {
-              feed,
-              url,
+              ...feed.data,
+              recommendations,
             },
-          })
-        );
-        return feeds;
-      }, {});
-      await this.cache.set("feeds", feedsResult);
+          };
+
+          feeds[url] = feed;
+
+          this.store.dispatch(
+            ac.AlsoToPreloaded({
+              type: at.DISCOVERY_STREAM_FEED_UPDATE,
+              data: {
+                feed,
+                url,
+              },
+            })
+          );
+        });
+        return feedPromise;
+      });
+      await Promise.all(feedsPromises);
+      await this.cache.set("feeds", feeds);
     }
   }
 
   async scoreSpocs(spocsState) {
     let belowMinScore = [];
-    this.placementsForEach(placement => {
+    const spocsResultPromises = this.getPlacements().map(async placement => {
       const nextSpocs = spocsState.data[placement.name] || {};
       const { items } = nextSpocs;
 
@@ -1195,9 +1212,10 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         return;
       }
 
-      const { data: scoreResult, filtered: minScoreFilter } = this.scoreItems(
-        items
-      );
+      const {
+        data: scoreResult,
+        filtered: minScoreFilter,
+      } = await this.scoreItems(items);
 
       belowMinScore = [...belowMinScore, ...minScoreFilter];
 
@@ -1209,6 +1227,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         },
       };
     });
+    await Promise.all(spocsResultPromises);
 
     // Update cache here so we don't need to re calculate scores on loads from cache.
     // Related Bug 1606276
@@ -1377,11 +1396,11 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
   async enable() {
     // Note that cache age needs to be reported prior to refreshAll.
     await this.reportCacheAge();
-    const start = perfService.absNow();
+    const start = Cu.now();
     await this.refreshAll({ updateOpenTabs: true, isStartup: true });
     Services.obs.addObserver(this, "idle-daily");
     this.loaded = true;
-    this.totalRequestTime = Math.round(perfService.absNow() - start);
+    this.totalRequestTime = Math.round(Cu.now() - start);
     this.reportRequestTime();
   }
 
@@ -1420,6 +1439,16 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     this.store.dispatch(
       ac.BroadcastToContent({ type: at.DISCOVERY_STREAM_LAYOUT_RESET })
     );
+    this.store.dispatch(
+      ac.BroadcastToContent({
+        type: at.DISCOVERY_STREAM_COLLECTION_DISMISSIBLE_TOGGLE,
+        data: {
+          value: this.store.getState().Prefs.values[
+            PREF_COLLECTION_DISMISSIBLE
+          ],
+        },
+      })
+    );
     this.domainAffinitiesLastUpdated = null;
     this.loaded = false;
     this.layoutRequestTime = undefined;
@@ -1438,7 +1467,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
   }
 
   // This is a request to change the config from somewhere.
-  // Can be from a spefici pref related to Discovery Stream,
+  // Can be from a spefic pref related to Discovery Stream,
   // or can be a generic request from an external feed that
   // something changed.
   configReset() {
@@ -1551,7 +1580,6 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       case PREF_ENABLED:
       case PREF_HARDCODED_BASIC_LAYOUT:
       case PREF_SPOCS_ENDPOINT:
-      case PREF_LANG_LAYOUT_CONFIG:
         // This is a config reset directly related to Discovery Stream pref.
         this.configReset();
         break;
@@ -1739,10 +1767,12 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         // If we block a story that also has a flight_id
         // we want to record that as blocked too.
         // This is because a single flight might have slightly different urls.
-        const { flight_id } = action.data;
-        if (flight_id) {
-          this.recordBlockFlightId(flight_id);
-        }
+        action.data.forEach(site => {
+          const { flight_id } = site;
+          if (flight_id) {
+            this.recordBlockFlightId(flight_id);
+          }
+        });
         break;
       }
       case at.PREF_CHANGED:
@@ -1755,238 +1785,156 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 // This function generates a hardcoded layout each call.
 // This is because modifying the original object would
 // persist across pref changes and system_tick updates.
-getHardcodedLayout = basic => {
-  if (basic) {
-    // Hardcoded version of layout_variant `basic`
-    return {
-      lastUpdate: Date.now(),
-      spocs: {
-        url: "https://spocs.getpocket.com/spocs",
-        spocs_per_domain: 1,
-      },
-      layout: [
+//
+// NOTE: There is some branching logic in the template based on `isBasicLayout`
+//
+getHardcodedLayout = isBasicLayout => ({
+  lastUpdate: Date.now(),
+  spocs: {
+    url: "https://spocs.getpocket.com/spocs",
+    spocs_per_domain: 3,
+  },
+  layout: [
+    {
+      width: 12,
+      components: [
         {
-          width: 12,
-          components: [
-            {
-              type: "TopSites",
-              header: {
-                title: {
-                  id: "newtab-section-header-topsites",
-                },
-              },
-              properties: {},
+          type: "TopSites",
+          header: {
+            title: {
+              id: "newtab-section-header-topsites",
             },
-            {
-              type: "Message",
-              header: {
-                title: {
-                  id: "newtab-section-header-pocket",
-                  values: { provider: "Pocket" },
-                },
-                subtitle: "",
-                link_text: {
-                  id: "newtab-pocket-learn-more",
-                },
-                link_url: "https://getpocket.com/firefox/new_tab_learn_more",
-                icon:
-                  "resource://activity-stream/data/content/assets/glyph-pocket-16.svg",
+          },
+          properties: {},
+        },
+        {
+          type: "CollectionCardGrid",
+          properties: {
+            items: 3,
+          },
+          header: {
+            title: "",
+          },
+          placement: {
+            name: "sponsored-collection",
+            ad_types: [3617],
+            zone_ids: [217759, 218031],
+          },
+          spocs: {
+            probability: 1,
+            positions: [
+              {
+                index: 0,
               },
-              properties: {},
-              styles: {
-                ".ds-message": "margin-bottom: -20px",
+              {
+                index: 1,
               },
+              {
+                index: 2,
+              },
+            ],
+          },
+        },
+        {
+          type: "Message",
+          header: {
+            title: {
+              id: "newtab-section-header-pocket",
+              values: { provider: "Pocket" },
             },
-            {
-              type: "CardGrid",
-              properties: {
-                items: 3,
+            subtitle: "",
+            link_text: {
+              id: "newtab-pocket-learn-more",
+            },
+            link_url: "https://getpocket.com/firefox/new_tab_learn_more",
+            icon:
+              "resource://activity-stream/data/content/assets/glyph-pocket-16.svg",
+          },
+          properties: {},
+          styles: {
+            ".ds-message": "margin-bottom: -20px",
+          },
+        },
+        {
+          type: "CardGrid",
+          properties: {
+            items: isBasicLayout ? 3 : 21,
+          },
+          header: {
+            title: "",
+          },
+          placement: {
+            name: "spocs",
+            ad_types: [3617],
+            zone_ids: [217758, 217995],
+          },
+          feed: {
+            embed_reference: null,
+            url:
+              "https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=$locale&count=30",
+          },
+          spocs: {
+            probability: 1,
+            positions: [
+              {
+                index: 2,
               },
-              header: {
-                title: "",
+              {
+                index: 4,
               },
-              feed: {
-                embed_reference: null,
+              {
+                index: 11,
+              },
+              {
+                index: 20,
+              },
+            ],
+          },
+        },
+        {
+          type: "Navigation",
+          properties: {
+            alignment: "left-align",
+            links: [
+              {
+                name: "Must Reads",
+                url: "https://getpocket.com/explore/must-reads?src=fx_new_tab",
+              },
+              {
+                name: "Productivity",
                 url:
-                  "https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=$locale",
+                  "https://getpocket.com/explore/productivity?src=fx_new_tab",
               },
-              spocs: {
-                probability: 1,
-                positions: [
-                  {
-                    index: 2,
-                  },
-                ],
+              {
+                name: "Health",
+                url: "https://getpocket.com/explore/health?src=fx_new_tab",
               },
+              {
+                name: "Finance",
+                url: "https://getpocket.com/explore/finance?src=fx_new_tab",
+              },
+              {
+                name: "Technology",
+                url: "https://getpocket.com/explore/technology?src=fx_new_tab",
+              },
+              {
+                name: "More Recommendations ›",
+                url: "https://getpocket.com/explore?src=fx_new_tab&cdn=0",
+              },
+            ],
+          },
+          header: {
+            title: {
+              id: "newtab-pocket-read-more",
             },
-            {
-              type: "Navigation",
-              properties: {
-                alignment: "left-align",
-                links: [
-                  {
-                    name: "Must Reads",
-                    url:
-                      "https://getpocket.com/explore/must-reads?src=fx_new_tab",
-                  },
-                  {
-                    name: "Productivity",
-                    url:
-                      "https://getpocket.com/explore/productivity?src=fx_new_tab",
-                  },
-                  {
-                    name: "Health",
-                    url: "https://getpocket.com/explore/health?src=fx_new_tab",
-                  },
-                  {
-                    name: "Finance",
-                    url: "https://getpocket.com/explore/finance?src=fx_new_tab",
-                  },
-                  {
-                    name: "Technology",
-                    url:
-                      "https://getpocket.com/explore/technology?src=fx_new_tab",
-                  },
-                  {
-                    name: "More Recommendations ›",
-                    url:
-                      "https://getpocket.com/explore/trending?src=fx_new_tab",
-                  },
-                ],
-              },
-            },
-          ],
+          },
+          styles: {
+            ".ds-navigation": "margin-top: -10px;",
+          },
         },
       ],
-    };
-  }
-  // Hardcoded version of layout_variant `3-col-7-row-octr`
-  return {
-    lastUpdate: Date.now(),
-    spocs: {
-      url: "https://spocs.getpocket.com/spocs",
-      spocs_per_domain: 1,
     },
-    layout: [
-      {
-        width: 12,
-        components: [
-          {
-            type: "TopSites",
-            header: {
-              title: {
-                id: "newtab-section-header-topsites",
-              },
-            },
-          },
-        ],
-      },
-      {
-        width: 12,
-        components: [
-          {
-            type: "Message",
-            header: {
-              title: {
-                id: "newtab-section-header-pocket",
-                values: { provider: "Pocket" },
-              },
-              subtitle: "",
-              link_text: {
-                id: "newtab-pocket-learn-more",
-              },
-              link_url: "https://getpocket.com/firefox/new_tab_learn_more",
-              icon:
-                "resource://activity-stream/data/content/assets/glyph-pocket-16.svg",
-            },
-            properties: {},
-            styles: {
-              ".ds-message": "margin-bottom: -20px",
-            },
-          },
-        ],
-      },
-      {
-        width: 12,
-        components: [
-          {
-            type: "CardGrid",
-            properties: {
-              items: 21,
-            },
-            header: {
-              title: "",
-            },
-            feed: {
-              embed_reference: null,
-              url:
-                "https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=$locale&count=30",
-            },
-            spocs: {
-              probability: 1,
-              positions: [
-                {
-                  index: 2,
-                },
-                {
-                  index: 4,
-                },
-                {
-                  index: 11,
-                },
-                {
-                  index: 20,
-                },
-              ],
-            },
-          },
-          {
-            type: "Navigation",
-            properties: {
-              alignment: "left-align",
-              links: [
-                {
-                  name: "Must Reads",
-                  url:
-                    "https://getpocket.com/explore/must-reads?src=fx_new_tab",
-                },
-                {
-                  name: "Productivity",
-                  url:
-                    "https://getpocket.com/explore/productivity?src=fx_new_tab",
-                },
-                {
-                  name: "Health",
-                  url: "https://getpocket.com/explore/health?src=fx_new_tab",
-                },
-                {
-                  name: "Finance",
-                  url: "https://getpocket.com/explore/finance?src=fx_new_tab",
-                },
-                {
-                  name: "Technology",
-                  url:
-                    "https://getpocket.com/explore/technology?src=fx_new_tab",
-                },
-                {
-                  name: "More Recommendations ›",
-                  url: "https://getpocket.com/explore/trending?src=fx_new_tab",
-                },
-              ],
-            },
-            header: {
-              title: {
-                id: "newtab-pocket-read-more",
-              },
-            },
-            styles: {
-              ".ds-navigation": "margin-top: -10px;",
-            },
-          },
-        ],
-      },
-    ],
-  };
-};
+  ],
+});
 
 const EXPORTED_SYMBOLS = ["DiscoveryStreamFeed"];

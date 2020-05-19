@@ -11,6 +11,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/PerformanceNavigation.h"
 #include "mozilla/ipc/IPDLParamTraits.h"
+#include "mozilla/ipc/URIUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
@@ -39,7 +40,7 @@ nsDOMNavigationTiming::nsDOMNavigationTiming(nsDocShell* aDocShell) {
   mDocShell = aDocShell;
 }
 
-nsDOMNavigationTiming::~nsDOMNavigationTiming() {}
+nsDOMNavigationTiming::~nsDOMNavigationTiming() = default;
 
 void nsDOMNavigationTiming::Clear() {
   mNavigationType = TYPE_RESERVED;

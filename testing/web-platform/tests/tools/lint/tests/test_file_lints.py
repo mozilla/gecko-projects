@@ -633,6 +633,8 @@ def test_late_timeout():
             ]
 
 
+# Note: This test checks the print *statement* (which doesn't exist in python 3).
+#       The print *function* is checked in test_print_function below.
 @pytest.mark.skipif(six.PY3, reason="Cannot parse print statements from python 3")
 def test_print_statement():
     error_map = check_with_files(b"def foo():\n  print 'statement'\n  print\n")
@@ -842,17 +844,17 @@ def test_script_metadata(filename, input, error):
 
 @pytest.mark.parametrize("globals,error", [
     (b"", None),
-    (b"default", None),
-    (b"!default", None),
+    (b"default", "UNKNOWN-GLOBAL-METADATA"),
+    (b"!default", "UNKNOWN-GLOBAL-METADATA"),
     (b"window", None),
-    (b"!window", None),
-    (b"!dedicatedworker", None),
-    (b"window, !window", "BROKEN-GLOBAL-METADATA"),
-    (b"!serviceworker", "BROKEN-GLOBAL-METADATA"),
-    (b"serviceworker, !serviceworker", "BROKEN-GLOBAL-METADATA"),
-    (b"worker, !dedicatedworker", None),
-    (b"worker, !serviceworker", None),
-    (b"!worker", None),
+    (b"!window", "UNKNOWN-GLOBAL-METADATA"),
+    (b"!dedicatedworker", "UNKNOWN-GLOBAL-METADATA"),
+    (b"window, !window", "UNKNOWN-GLOBAL-METADATA"),
+    (b"!serviceworker", "UNKNOWN-GLOBAL-METADATA"),
+    (b"serviceworker, !serviceworker", "UNKNOWN-GLOBAL-METADATA"),
+    (b"worker, !dedicatedworker", "UNKNOWN-GLOBAL-METADATA"),
+    (b"worker, !serviceworker", "UNKNOWN-GLOBAL-METADATA"),
+    (b"!worker", "UNKNOWN-GLOBAL-METADATA"),
     (b"foo", "UNKNOWN-GLOBAL-METADATA"),
     (b"!foo", "UNKNOWN-GLOBAL-METADATA"),
 ])

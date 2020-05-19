@@ -59,8 +59,14 @@ class PerformanceNavigationTiming final : public PerformanceResourceTiming {
   void UpdatePropertiesFromHttpChannel(nsIHttpChannel* aHttpChannel,
                                        nsITimedChannel* aChannel);
 
+  /*
+   * For use with the WebIDL Func attribute to determine whether
+   * window.PerformanceNavigationTiming is exposed.
+   */
+  static bool Enabled(JSContext* aCx, JSObject* aGlobal);
+
  private:
-  ~PerformanceNavigationTiming() {}
+  ~PerformanceNavigationTiming() = default;
 };
 
 }  // namespace dom

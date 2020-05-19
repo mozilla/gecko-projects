@@ -1219,7 +1219,7 @@ mozTXTToHTMLConv::AsyncConvertData(const char* aFromType, const char* aToType,
 
 NS_IMETHODIMP
 mozTXTToHTMLConv::GetConvertedType(const nsACString& aFromType,
-                                   nsACString& aToType) {
+                                   nsIChannel* aChannel, nsACString& aToType) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1251,10 +1251,8 @@ nsresult MOZ_NewTXTToHTMLConv(mozTXTToHTMLConv** aConv) {
   MOZ_ASSERT(aConv != nullptr, "null ptr");
   if (!aConv) return NS_ERROR_NULL_POINTER;
 
-  *aConv = new mozTXTToHTMLConv();
-  if (!*aConv) return NS_ERROR_OUT_OF_MEMORY;
-
-  NS_ADDREF(*aConv);
+  RefPtr<mozTXTToHTMLConv> conv = new mozTXTToHTMLConv();
+  conv.forget(aConv);
   //    return (*aConv)->Init();
   return NS_OK;
 }

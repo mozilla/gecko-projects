@@ -74,7 +74,6 @@ class Table : public ShareableBase<Table> {
   TableRepr repr() const {
     switch (kind()) {
       case TableKind::AnyRef:
-      case TableKind::NullRef:
         return TableRepr::Ref;
       case TableKind::FuncRef:
       case TableKind::AsmJS:
@@ -124,7 +123,7 @@ class Table : public ShareableBase<Table> {
   size_t gcMallocBytes() const;
 };
 
-typedef RefPtr<Table> SharedTable;
+using SharedTable = RefPtr<Table>;
 typedef Vector<SharedTable, 0, SystemAllocPolicy> SharedTableVector;
 
 }  // namespace wasm

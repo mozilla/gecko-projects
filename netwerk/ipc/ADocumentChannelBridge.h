@@ -8,6 +8,7 @@
 #define mozilla_net_ADocumentChannelBridge_h
 
 #include "mozilla/net/PDocumentChannelParent.h"
+#include "mozilla/dom/nsCSPContext.h"
 
 namespace mozilla {
 namespace net {
@@ -37,23 +38,17 @@ class ADocumentChannelBridge {
   // Delete the bridge, and drop any refs to the DocumentLoadListener
   virtual void Delete() = 0;
 
-  // Checks if we should allow a redirect to aNewURI.
-  // We need this because we currently can only do CSP checks in the content
-  // process in order to get the right events fired.
-  virtual RefPtr<PDocumentChannelParent::ConfirmRedirectPromise>
-  ConfirmRedirect(const LoadInfoArgs& aLoadInfo, nsIURI* aNewURI) = 0;
-
   // Initate a switch from the DocumentChannel to the protocol-specific
   // real channel.
   virtual RefPtr<PDocumentChannelParent::RedirectToRealChannelPromise>
-  RedirectToRealChannel(uint32_t aRedirectFlags, uint32_t aLoadFlags) = 0;
+  RedirectToRealChannel(
+      nsTArray<ipc::Endpoint<extensions::PStreamFilterParent>>&&
+          aStreamFilterEndpoints,
+      uint32_t aRedirectFlags, uint32_t aLoadFlags) = 0;
 
   // Returns the process id that this bridge is connected to.
+  // If 0 indicates that the load is started from the parent process.
   virtual base::ProcessId OtherPid() const = 0;
-
-  // Attach a StreamFilterParent to the remote-side nsIChannel of this bridge.
-  virtual bool AttachStreamFilter(
-      ipc::Endpoint<mozilla::extensions::PStreamFilterParent>&& aEndpoint) = 0;
 
  protected:
   virtual ~ADocumentChannelBridge() = default;

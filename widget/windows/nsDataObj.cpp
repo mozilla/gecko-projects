@@ -78,7 +78,7 @@ nsresult nsDataObj::CStream::Init(nsIURI* pSourceURI,
   rv = NS_NewChannel(getter_AddRefs(mChannel), pSourceURI, aRequestingPrincipal,
                      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
                      aContentPolicyType,
-                     nullptr,  // nsICookieSettings
+                     nullptr,  // nsICookieJarSettings
                      nullptr,  // PerformanceStorage
                      nullptr,  // loadGroup
                      nullptr,  // aCallbacks
@@ -1368,7 +1368,7 @@ nsDataObj ::GetFileContentsInternetShortcut(FORMATETC& aFE, STGMEDIUM& aSTG) {
     if (event && event->IsInited()) {
       event->Signal();  // We can't block reading the global memory
     }
-    aSTG.hGlobal = globalMem.get();
+    aSTG.hGlobal = globalMem.disown();
     aSTG.tymed = TYMED_HGLOBAL;
   }
 
@@ -2015,7 +2015,7 @@ nsresult nsDataObj ::BuildPlatformHTML(const char* inOurHTML,
   clipboardString.Append(inHTMLString);
   clipboardString.Append(trailingString);
 
-  *outPlatformHTML = ToNewCString(clipboardString);
+  *outPlatformHTML = ToNewCString(clipboardString, mozilla::fallible);
   if (!*outPlatformHTML) return NS_ERROR_OUT_OF_MEMORY;
 
   return NS_OK;

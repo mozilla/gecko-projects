@@ -285,6 +285,11 @@ translate-exceptions =
     .label = Exceptions…
     .accesskey = x
 
+# Variables:
+#    $localeName (string) - Localized name of the locale to be used.
+use-system-locale =
+   .label = Use your operating system settings for “{ $localeName }” to format dates, times, numbers, and measurements.
+
 check-user-spelling =
     .label = Check your spelling as you type
     .accesskey = t
@@ -346,6 +351,14 @@ applications-use-app =
 applications-use-app-default =
     .label = Use { $app-name } (default)
 
+applications-use-os-default =
+    .label =
+        { PLATFORM() ->
+            [macos] Use macOS default application
+            [windows] Use Windows default application
+           *[other] Use system default application
+        }
+
 applications-use-other =
     .label = Use other…
 applications-select-helper = Select Helper Application
@@ -374,8 +387,8 @@ applications-file-ending-with-type = { applications-file-ending } ({ $type })
 #   $plugin-name (String) - Name of a plugin (e.g Adobe Flash)
 applications-use-plugin-in =
     .label = Use { $plugin-name } (in { -brand-short-name })
-applications-preview-inapp =
-    .label = Preview in { -brand-short-name }
+applications-open-inapp =
+    .label = Open in { -brand-short-name }
 
 ## The strings in this group are used to populate
 ## selected label element based on the string from
@@ -390,8 +403,8 @@ applications-action-save-label =
 applications-use-app-label =
     .value = { applications-use-app.label }
 
-applications-preview-inapp-label =
-    .value = { applications-preview-inapp.label }
+applications-open-inapp-label =
+    .value = { applications-open-inapp.label }
 
 applications-always-ask-label =
     .value = { applications-always-ask.label }
@@ -401,6 +414,9 @@ applications-use-app-default-label =
 
 applications-use-other-label =
     .value = { applications-use-other.label }
+
+applications-use-os-default-label =
+    .value = { applications-use-os-default.label }
 
 ##
 
@@ -883,7 +899,9 @@ privacy-header = Browser Privacy
 
 ## Privacy Section - Logins and Passwords
 
-logins-header = Logins and Passwords
+# The search keyword isn't shown to users but is used to find relevant settings in about:preferences.
+pane-privacy-logins-and-passwords-header = Logins and Passwords
+    .searchkeywords = { -lockwise-brand-short-name }
 
 # Checkbox to control whether UI is shown to users to save or fill logins/passwords.
 forms-ask-to-save-logins =
@@ -916,6 +934,18 @@ forms-master-pw-change =
 
 forms-master-pw-fips-title = You are currently in FIPS mode. FIPS requires a non-empty Master Password.
 forms-master-pw-fips-desc = Password Change Failed
+
+## OS Authentication dialog
+
+# This message can be seen by trying to add a Master Password.
+master-password-os-auth-dialog-message-win = To create a Master Password, enter your Windows login credentials. This helps protect the security of your accounts.
+
+# This message can be seen by trying to add a Master Password.
+# The macOS strings are preceded by the operating system with "Firefox is trying to "
+# and includes subtitle of "Enter password for the user "xxx" to allow this." These
+# notes are only valid for English. Please test in your locale.
+master-password-os-auth-dialog-message-macosx = create a Master Password
+master-password-os-auth-dialog-caption = { -brand-full-name }
 
 ## Privacy Section - History
 
@@ -1003,6 +1033,8 @@ sitedata-option-block-cross-site-trackers =
     .label = Cross-site trackers
 sitedata-option-block-cross-site-and-social-media-trackers =
     .label = Cross-site and social media trackers
+sitedata-option-block-cross-site-and-social-media-trackers-plus-isolate =
+    .label = Cross-site and social media trackers, and isolate remaining cookies
 sitedata-option-block-unvisited =
     .label = Cookies from unvisited websites
 sitedata-option-block-all-third-party =
@@ -1069,6 +1101,7 @@ content-blocking-etp-custom-desc = Choose which trackers and scripts to block.
 
 content-blocking-private-windows = Tracking content in Private Windows
 content-blocking-cross-site-tracking-cookies = Cross-site tracking cookies
+content-blocking-cross-site-tracking-cookies-plus-isolate = Cross-site tracking cookies, and isolate remaining cookies
 content-blocking-social-media-trackers = Social media trackers
 content-blocking-all-cookies = All cookies
 content-blocking-unvisited-cookies = Cookies from unvisited sites
@@ -1078,7 +1111,7 @@ content-blocking-cryptominers = Cryptominers
 content-blocking-fingerprinters = Fingerprinters
 
 content-blocking-warning-title = Heads up!
-content-blocking-etp-warning-description = Blocking trackers could impact the functionality of some sites. Reload a page with trackers to load all content.
+content-blocking-and-isolating-etp-warning-description = Blocking trackers and isolating cookies could impact the functionality of some sites. Reload a page with trackers to load all content.
 content-blocking-warning-learn-how = Learn how
 
 content-blocking-reload-description = You will need to reload your tabs to apply these changes.

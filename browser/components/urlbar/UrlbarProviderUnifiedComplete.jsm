@@ -58,7 +58,7 @@ class ProviderUnifiedComplete extends UrlbarProvider {
    * @returns {integer} one of the types from UrlbarUtils.PROVIDER_TYPE.*
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.IMMEDIATE;
+    return UrlbarUtils.PROVIDER_TYPE.HEURISTIC;
   }
 
   /**
@@ -208,11 +208,14 @@ function makeUrlbarResult(tokens, info) {
               action.params.searchSuggestion,
               UrlbarUtils.HIGHLIGHT.SUGGESTED,
             ],
+            // For test interoperabilty with UrlbarProviderSearchSuggestions.
+            tail: undefined,
             keyword: [action.params.alias, UrlbarUtils.HIGHLIGHT.TYPED],
             query: [
               action.params.searchQuery.trim(),
-              UrlbarUtils.HIGHLIGHT.TYPED,
+              UrlbarUtils.HIGHLIGHT.NONE,
             ],
+            isSearchHistory: !!action.params.isSearchHistory,
             icon: [info.icon],
             keywordOffer,
           })
@@ -223,10 +226,7 @@ function makeUrlbarResult(tokens, info) {
         if (!title) {
           // If the url doesn't have an host (e.g. javascript urls), comment
           // will be empty, and we can't build the usual title. Thus use the url.
-          title = Services.textToSubURI.unEscapeURIForUI(
-            "UTF-8",
-            action.params.url
-          );
+          title = Services.textToSubURI.unEscapeURIForUI(action.params.url);
         } else if (tokens && tokens.length > 1) {
           title = UrlbarUtils.strings.formatStringFromName(
             "bookmarkKeywordSearch",
@@ -281,7 +281,6 @@ function makeUrlbarResult(tokens, info) {
           ...UrlbarResult.payloadAndSimpleHighlights(tokens, {
             url: [action.params.url, UrlbarUtils.HIGHLIGHT.TYPED],
             title: [info.comment, UrlbarUtils.HIGHLIGHT.TYPED],
-            device: [action.params.deviceName, UrlbarUtils.HIGHLIGHT.TYPED],
             icon: [info.icon],
           })
         );

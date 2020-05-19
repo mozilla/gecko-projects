@@ -85,7 +85,7 @@ static const nsGlyphCode kNullGlyph = {{{0, 0}}, 0};
 
 class nsGlyphTable {
  public:
-  virtual ~nsGlyphTable() {}
+  virtual ~nsGlyphTable() = default;
 
   virtual const FontFamilyName& FontNameFor(
       const nsGlyphCode& aGlyphCode) const = 0;
@@ -560,7 +560,7 @@ class nsGlyphTableList final : public nsIObserver {
   nsGlyphTable* GetGlyphTableFor(const nsACString& aFamily);
 
  private:
-  ~nsGlyphTableList() {}
+  ~nsGlyphTableList() = default;
 
   nsPropertiesTable* PropertiesTableAt(int32_t aIndex) {
     return &mPropertiesTableList.ElementAt(aIndex);
@@ -885,6 +885,7 @@ bool nsMathMLChar::SetFontFamily(nsPresContext* aPresContext,
     params.explicitLanguage = styleFont->mExplicitLanguage;
     params.userFontSet = aPresContext->GetUserFontSet();
     params.textPerf = aPresContext->GetTextPerfMetrics();
+    params.fontStats = aPresContext->GetFontMatchingStats();
     params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
     RefPtr<nsFontMetrics> fm =
         aPresContext->DeviceContext()->GetMetricsFor(font, params);
@@ -1398,6 +1399,7 @@ nsresult nsMathMLChar::StretchInternal(
   params.explicitLanguage = styleFont->mExplicitLanguage;
   params.userFontSet = presContext->GetUserFontSet();
   params.textPerf = presContext->GetTextPerfMetrics();
+  params.fontStats = presContext->GetFontMatchingStats();
   RefPtr<nsFontMetrics> fm =
       presContext->DeviceContext()->GetMetricsFor(font, params);
   uint32_t len = uint32_t(mData.Length());
@@ -1713,10 +1715,9 @@ class nsDisplayMathMLCharForeground final : public nsPaintedDisplayItem {
  public:
   nsDisplayMathMLCharForeground(nsDisplayListBuilder* aBuilder,
                                 nsIFrame* aFrame, nsMathMLChar* aChar,
-                                uint16_t aIndex, bool aIsSelected)
+                                const bool aIsSelected)
       : nsPaintedDisplayItem(aBuilder, aFrame),
         mChar(aChar),
-        mIndex(aIndex),
         mIsSelected(aIsSelected) {
     MOZ_COUNT_CTOR(nsDisplayMathMLCharForeground);
   }
@@ -1750,11 +1751,8 @@ class nsDisplayMathMLCharForeground final : public nsPaintedDisplayItem {
     return GetBounds(aBuilder, &snap);
   }
 
-  virtual uint16_t CalculatePerFrameKey() const override { return mIndex; }
-
  private:
   nsMathMLChar* mChar;
-  uint16_t mIndex;
   bool mIsSelected;
 };
 
@@ -1811,13 +1809,17 @@ void nsMathMLChar::Display(nsDisplayListBuilder* aBuilder, nsIFrame* aForFrame,
     computedStyle = aForFrame->Style();
   }
 
-  if (!computedStyle->StyleVisibility()->IsVisible()) return;
+  if (!computedStyle->StyleVisibility()->IsVisible()) {
+    return;
+  }
+
+  const bool isSelected = aSelectedRect && !aSelectedRect->IsEmpty();
 
   // if the leaf computed style that we use for stretchy chars has a background
   // color we use it -- this feature is mostly used for testing and debugging
   // purposes. Normally, users will set the background on the container frame.
   // paint the selection background -- beware MathML frames overlap a lot
-  if (aSelectedRect && !aSelectedRect->IsEmpty()) {
+  if (isSelected) {
     aLists.BorderBackground()->AppendNewToTop<nsDisplayMathMLSelectionRect>(
         aBuilder, aForFrame, *aSelectedRect);
   } else if (mRect.width && mRect.height) {
@@ -1838,9 +1840,8 @@ void nsMathMLChar::Display(nsDisplayListBuilder* aBuilder, nsIFrame* aForFrame,
         aBuilder, aForFrame, mRect);
 #endif
   }
-  aLists.Content()->AppendNewToTop<nsDisplayMathMLCharForeground>(
-      aBuilder, aForFrame, this, aIndex,
-      aSelectedRect && !aSelectedRect->IsEmpty());
+  aLists.Content()->AppendNewToTopWithIndex<nsDisplayMathMLCharForeground>(
+      aBuilder, aForFrame, aIndex, this, isSelected);
 }
 
 void nsMathMLChar::ApplyTransforms(gfxContext* aThebesContext,
@@ -1888,7 +1889,7 @@ void nsMathMLChar::PaintForeground(nsIFrame* aForFrame,
     fgColor = LookAndFeel::GetColor(LookAndFeel::ColorID::TextSelectForeground,
                                     fgColor);
   }
-  aRenderingContext.SetColor(Color::FromABGR(fgColor));
+  aRenderingContext.SetColor(sRGBColor::FromABGR(fgColor));
   aRenderingContext.Save();
   nsRect r = mRect + aPt;
   ApplyTransforms(&aRenderingContext,

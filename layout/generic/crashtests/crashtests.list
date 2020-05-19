@@ -573,7 +573,7 @@ load chrome://reftest/content/crashtests/layout/generic/crashtests/1003441.xhtml
 load 1015562.html
 asserts(1-2) asserts-if(Android,1-3) load 1015563-1.html
 asserts(1-2) load 1015563-2.html
-asserts-if(Android,21) load 1015844.html
+asserts-if(Android,48) load 1015844.html
 asserts-if(Android,0-358) pref(font.size.inflation.minTwips,200) load 1032450.html # Bug 1607658
 load 1032613-1.svg
 load 1032613-2.html
@@ -725,9 +725,9 @@ load chrome://reftest/content/crashtests/layout/generic/crashtests/1520798-1.xht
 load 1520798-2.html
 load 1528771.html
 load 1539656.html
+load 1542441.html
 load 1544060-1.html
 load 1544060-2.html
-load 1542441.html
 pref(layout.css.grid-template-subgrid-value.enabled,true) load 1553824.html
 load 1554824.html
 load 1555142.html
@@ -749,4 +749,20 @@ load 1574552.html
 load 1574993.html
 load 1582019.html
 load 1586470.html
+load 1588955-very-large-frameset.html
+load 1590569.html
 load 1596310.html
+load 1608851.html
+load 1613210.html
+load 1614101.html
+load 1618312.html
+load 1618564.html
+load 1625051-1.html
+load 1625051-2.html
+load 1626970.html
+load 1628804.html
+load 1629575-1.html
+load 1629575-2.html
+load 1630385.html
+load 1633434.html
+load 1633828.html

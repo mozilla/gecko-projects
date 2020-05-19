@@ -21,10 +21,12 @@ MOZHARNESS_SCRIPTS = {
         ],
         'xfail': [
             'cppunittest',
+            'crashtest-qr',
             'gtest',
             'geckoview-junit',
             'jittest',
             'jsreftest',
+            'reftest-qr',
         ],
     },
     'desktop_unittest': {
@@ -42,11 +44,9 @@ MOZHARNESS_SCRIPTS = {
             'jittest1',
             'jittest2',
             'jsreftest',
-            'mochitest-devtools-chrome-webreplay',
             'mochitest-valgrind-plain',
             'reftest-gpu',
             'reftest-no-accel',
-            'reftest-qr',
         ],
     },
 }

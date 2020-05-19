@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 // @ts-check
 "use strict";
-const { presets } = require("devtools/shared/performance-new/recording-utils");
 
 /**
  * @typedef {import("../@types/perf").RecordingState} RecordingState
@@ -16,6 +15,7 @@ const { presets } = require("devtools/shared/performance-new/recording-utils");
  * @typedef {import("../@types/perf").RestartBrowserWithEnvironmentVariable} RestartBrowserWithEnvironmentVariable
  * @typedef {import("../@types/perf").GetEnvironmentVariable} GetEnvironmentVariable
  * @typedef {import("../@types/perf").PageContext} PageContext
+ * @typedef {import("../@types/perf").Presets} Presets
  */
 /**
  * @template S
@@ -50,8 +50,33 @@ const getThreadsString = state => getThreads(state).join(",");
 /** @type {Selector<string[]>} */
 const getObjdirs = state => state.objdirs;
 
+/** @type {Selector<Presets>} */
+const getPresets = state => getInitializedValues(state).presets;
+
 /** @type {Selector<string>} */
 const getPresetName = state => state.presetName;
+
+/**
+ * When remote profiling, there will be a back button to the settings.
+ *
+ * @type {Selector<(() => void) | undefined>}
+ */
+const getOpenRemoteDevTools = state =>
+  getInitializedValues(state).openRemoteDevTools;
+
+/**
+ * Get the functon to open about:profiling. This assumes that the function exists,
+ * otherwise it will throw an error.
+ *
+ * @type {Selector<() => void>}
+ */
+const getOpenAboutProfiling = state => {
+  const { openAboutProfiling } = getInitializedValues(state);
+  if (!openAboutProfiling) {
+    throw new Error("Expected to get an openAboutProfiling function.");
+  }
+  return openAboutProfiling;
+};
 
 /**
  * Warning! This function returns a new object on every run, and so should not
@@ -60,6 +85,7 @@ const getPresetName = state => state.presetName;
  * @type {Selector<RecordingStateFromPreferences>}
  */
 const getRecordingSettings = state => {
+  const presets = getPresets(state);
   const presetName = getPresetName(state);
   const preset = presets[presetName];
   if (preset) {
@@ -111,7 +137,7 @@ const getSetRecordingPreferencesFn = state =>
 /** @type {Selector<PageContext>} */
 const getPageContext = state => getInitializedValues(state).pageContext;
 
-/** @type {Selector<(profile: Object) => GetSymbolTableCallback>} */
+/** @type {Selector<(profile: MinimallyTypedGeckoProfile) => GetSymbolTableCallback>} */
 const getSymbolTableGetter = state =>
   getInitializedValues(state).getSymbolTableGetter;
 
@@ -132,7 +158,10 @@ module.exports = {
   getThreads,
   getThreadsString,
   getObjdirs,
+  getPresets,
   getPresetName,
+  getOpenRemoteDevTools,
+  getOpenAboutProfiling,
   getRecordingSettings,
   getInitializedValues,
   getPerfFront,

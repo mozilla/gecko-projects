@@ -39,7 +39,6 @@ import {
   getThreadContext,
   getSkipPausing,
   getInlinePreview,
-  getSelectedFrame,
   getHighlightedCalls,
 } from "../../selectors";
 
@@ -80,6 +79,18 @@ import {
 } from "../../utils/editor";
 
 import { resizeToggleButton, resizeBreakpointGutter } from "../../utils/ui";
+import Services from "devtools-services";
+const { appinfo } = Services;
+
+const isMacOS = appinfo.OS === "Darwin";
+
+function isSecondary(ev) {
+  return isMacOS && ev.ctrlKey && ev.button === 0;
+}
+
+function isCmd(ev) {
+  return isMacOS ? ev.metaKey : ev.ctrlKey;
+}
 
 import "./Editor.css";
 import "./Breakpoints.css";
@@ -91,7 +102,6 @@ import type {
   SourceLocation,
   SourceWithContent,
   ThreadContext,
-  Frame,
   HighlightedCalls as highlightedCallsType,
 } from "../../types";
 
@@ -115,7 +125,6 @@ export type Props = {
   isPaused: boolean,
   skipPausing: boolean,
   inlinePreviewEnabled: boolean,
-  selectedFrame: ?Frame,
   highlightedCalls: ?highlightedCallsType,
 
   // Actions
@@ -154,9 +163,9 @@ class Editor extends PureComponent<Props, State> {
   }
 
   componentWillReceiveProps(nextProps: Props) {
-    let editor = this.state.editor;
+    let { editor } = this.state;
 
-    if (!this.state.editor && nextProps.selectedSource) {
+    if (!editor && nextProps.selectedSource) {
       editor = this.setupEditor();
     }
 
@@ -258,13 +267,14 @@ class Editor extends PureComponent<Props, State> {
   };
 
   componentWillUnmount() {
-    if (this.state.editor) {
-      this.state.editor.destroy();
-      this.state.editor.codeMirror.off("scroll", this.onEditorScroll);
+    const { editor } = this.state;
+    if (editor) {
+      editor.destroy();
+      editor.codeMirror.off("scroll", this.onEditorScroll);
       this.setState({ editor: (null: any) });
     }
 
-    const shortcuts = this.context.shortcuts;
+    const { shortcuts } = this.context;
     shortcuts.off(L10N.getStr("sourceTabs.closeTab.key"));
     shortcuts.off(L10N.getStr("toggleBreakpoint.key"));
     shortcuts.off(L10N.getStr("toggleCondPanel.breakpoint.key"));
@@ -338,8 +348,8 @@ class Editor extends PureComponent<Props, State> {
   commandKeyDown = (e: KeyboardEvent) => {
     const { key } = e;
     if (this.props.isPaused && key === "Meta") {
-      const { cx, selectedFrame, highlightCalls } = this.props;
-      highlightCalls(cx, selectedFrame);
+      const { cx, highlightCalls } = this.props;
+      highlightCalls(cx);
     }
   };
 
@@ -461,12 +471,12 @@ class Editor extends PureComponent<Props, State> {
     } = this.props;
 
     // ignore right clicks in the gutter
-    if ((ev.ctrlKey && ev.button === 0) || ev.button === 2 || !selectedSource) {
+    if (isSecondary(ev) || ev.button === 2 || !selectedSource) {
       return;
     }
 
     // if user clicks gutter to set breakpoint on blackboxed source, un-blackbox the source.
-    if (selectedSource && selectedSource.isBlackBoxed) {
+    if (selectedSource?.isBlackBoxed) {
       toggleBlackBox(cx, selectedSource);
     }
 
@@ -483,8 +493,12 @@ class Editor extends PureComponent<Props, State> {
       return;
     }
 
-    if (ev.metaKey) {
-      return continueToHere(cx, sourceLine);
+    if (isCmd(ev)) {
+      return continueToHere(cx, {
+        line: sourceLine,
+        column: undefined,
+        sourceId: selectedSource.id,
+      });
     }
 
     return addBreakpointAtLine(cx, sourceLine, ev.altKey, ev.shiftKey);
@@ -689,7 +703,7 @@ class Editor extends PureComponent<Props, State> {
     return (
       <div
         className={classnames("editor-wrapper", {
-          blackboxed: selectedSource && selectedSource.isBlackBoxed,
+          blackboxed: selectedSource?.isBlackBoxed,
           "skip-pausing": skipPausing,
         })}
         ref={c => (this.$editorWrapper = c)}
@@ -722,7 +736,6 @@ const mapStateToProps = state => {
     isPaused: getIsPaused(state, getCurrentThread(state)),
     skipPausing: getSkipPausing(state),
     inlinePreviewEnabled: getInlinePreview(state),
-    selectedFrame: getSelectedFrame(state, getCurrentThread(state)),
     highlightedCalls: getHighlightedCalls(state, getCurrentThread(state)),
   };
 };

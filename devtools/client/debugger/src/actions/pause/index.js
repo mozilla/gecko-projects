@@ -9,14 +9,7 @@
  * @module actions/pause
  */
 
-export {
-  selectThread,
-  stepIn,
-  stepOver,
-  stepOut,
-  resume,
-  seekToPosition,
-} from "./commands";
+export { selectThread, stepIn, stepOver, stepOut, resume } from "./commands";
 export { fetchFrames } from "./fetchFrames";
 export { fetchScopes } from "./fetchScopes";
 export { paused } from "./paused";
@@ -24,6 +17,7 @@ export { resumed } from "./resumed";
 export { continueToHere } from "./continueToHere";
 export { breakOnNext } from "./breakOnNext";
 export { mapFrames } from "./mapFrames";
+export { mapDisplayNames } from "./mapDisplayNames";
 export { pauseOnExceptions } from "./pauseOnExceptions";
 export { selectFrame } from "./selectFrame";
 export { toggleSkipPausing, setSkipPausing } from "./skipPausing";
@@ -35,4 +29,3 @@ export {
   previewPausedLocation,
   clearPreviewPausedLocation,
 } from "./previewPausedLocation";
-export { setFramePositions } from "./setFramePositions";

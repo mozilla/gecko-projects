@@ -21,8 +21,7 @@ var gStrings = Services.strings.createBundle(
   "chrome://global/locale/narrate.properties"
 );
 
-function NarrateControls(mm, win, languagePromise) {
-  this._mm = mm;
+function NarrateControls(win, languagePromise) {
   this._winRef = Cu.getWeakReference(win);
   this._languagePromise = languagePromise;
 
@@ -35,7 +34,7 @@ function NarrateControls(mm, win, languagePromise) {
   win.document.head.appendChild(style);
 
   let elemL10nMap = {
-    ".narrate-toggle": "narrate",
+    ".narrate-toggle": "listen",
     ".narrate-skip-previous": "back",
     ".narrate-start-stop": "start",
     ".narrate-skip-next": "forward",
@@ -48,6 +47,7 @@ function NarrateControls(mm, win, languagePromise) {
   let toggle = win.document.createElement("li");
   let toggleButton = win.document.createElement("button");
   toggleButton.className = "dropdown-toggle button narrate-toggle";
+  toggleButton.textContent = gStrings.GetStringFromName("listen");
   toggleButton.hidden = true;
   dropdown.appendChild(toggle);
   toggle.appendChild(toggleButton);
@@ -123,7 +123,7 @@ function NarrateControls(mm, win, languagePromise) {
 
   this._setupVoices();
 
-  let tb = win.document.querySelector(".reader-toolbar");
+  let tb = win.document.querySelector(".reader-controls");
   tb.appendChild(dropdown);
 }
 

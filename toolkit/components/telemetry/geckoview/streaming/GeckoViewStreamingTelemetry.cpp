@@ -10,7 +10,6 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs_toolkit.h"
-#include "mozilla/SystemGroup.h"
 #include "mozilla/TimeStamp.h"
 #include "nsDataHashtable.h"
 #include "nsIObserverService.h"
@@ -19,10 +18,9 @@
 #include "nsThreadUtils.h"
 
 using mozilla::Runnable;
+using mozilla::StaticMutex;
 using mozilla::StaticMutexAutoLock;
-using mozilla::StaticMutexNotRecorded;
 using mozilla::StaticRefPtr;
-using mozilla::SystemGroup;
 using mozilla::TaskCategory;
 using mozilla::TimeStamp;
 
@@ -37,7 +35,7 @@ void SendBatch(const StaticMutexAutoLock& aLock);
 // Topic on which we flush the batch.
 static const char* const kApplicationBackgroundTopic = "application-background";
 
-static StaticMutexNotRecorded gMutex;
+static StaticMutex gMutex;
 
 // -- The following state is accessed across threads.
 // -- Do not touch these if you do not hold gMutex.
@@ -213,9 +211,7 @@ void BatchCheck(const StaticMutexAutoLock& aLock) {
     NS_DispatchToMainThread(NS_NewRunnableFunction(
         "GeckoviewStreamingTelemetry::ArmTimer", []() -> void {
           if (!gJICTimer) {
-            gJICTimer =
-                NS_NewTimer(SystemGroup::EventTargetFor(TaskCategory::Other))
-                    .take();
+            gJICTimer = NS_NewTimer().take();
           }
           if (gJICTimer) {
             gJICTimer->InitWithNamedFuncCallback(

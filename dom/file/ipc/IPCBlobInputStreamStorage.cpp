@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "IPCBlobInputStreamStorage.h"
-
+#include "mozilla/SlicedInputStream.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
@@ -31,9 +31,9 @@ NS_INTERFACE_MAP_END
 NS_IMPL_ADDREF(IPCBlobInputStreamStorage)
 NS_IMPL_RELEASE(IPCBlobInputStreamStorage)
 
-IPCBlobInputStreamStorage::IPCBlobInputStreamStorage() {}
+IPCBlobInputStreamStorage::IPCBlobInputStreamStorage() = default;
 
-IPCBlobInputStreamStorage::~IPCBlobInputStreamStorage() {}
+IPCBlobInputStreamStorage::~IPCBlobInputStreamStorage() = default;
 
 /* static */
 IPCBlobInputStreamStorage* IPCBlobInputStreamStorage::Get() { return gStorage; }
@@ -106,6 +106,12 @@ void IPCBlobInputStreamStorage::AddStream(nsIInputStream* aInputStream,
 void IPCBlobInputStreamStorage::ForgetStream(const nsID& aID) {
   mozilla::StaticMutexAutoLock lock(gMutex);
   mStorage.Remove(aID);
+}
+
+bool IPCBlobInputStreamStorage::HasStream(const nsID& aID) {
+  mozilla::StaticMutexAutoLock lock(gMutex);
+  StreamData* data = mStorage.Get(aID);
+  return !!data;
 }
 
 void IPCBlobInputStreamStorage::GetStream(const nsID& aID, uint64_t aStart,

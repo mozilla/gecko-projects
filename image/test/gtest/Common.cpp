@@ -36,12 +36,12 @@ AutoInitializeImageLib::AutoInitializeImageLib() {
   EXPECT_TRUE(NS_IsMainThread());
   sImageLibInitialized = true;
 
-  // Force sRGB to be consistent with reftests.
-  nsresult rv = Preferences::SetBool("gfx.color_management.force_srgb", true);
+  // Ensure WebP is enabled to run decoder tests.
+  nsresult rv = Preferences::SetBool("image.webp.enabled", true);
   EXPECT_TRUE(rv == NS_OK);
 
-  // Ensure WebP is enabled to run decoder tests.
-  rv = Preferences::SetBool("image.webp.enabled", true);
+  // Ensure AVIF is enabled to run decoder tests.
+  rv = Preferences::SetBool("image.avif.enabled", true);
   EXPECT_TRUE(rv == NS_OK);
 
   // Ensure that ImageLib services are initialized.
@@ -137,7 +137,6 @@ already_AddRefed<nsIInputStream> LoadFile(const char* aRelativePath) {
   rv = dirService->Get(NS_OS_CURRENT_WORKING_DIR, NS_GET_IID(nsIFile),
                        getter_AddRefs(file));
   ASSERT_TRUE_OR_RETURN(NS_SUCCEEDED(rv), nullptr);
-
   // Construct the final path by appending the working path to the current
   // working directory.
   file->AppendNative(nsDependentCString(aRelativePath));
@@ -394,7 +393,8 @@ void CheckTransformedWritePixels(
 ///////////////////////////////////////////////////////////////////////////////
 
 ImageTestCase GreenPNGTestCase() {
-  return ImageTestCase("green.png", "image/png", IntSize(100, 100));
+  return ImageTestCase("green.png", "image/png", IntSize(100, 100),
+                       TEST_CASE_ASSUME_SRGB_OUTPUT);
 }
 
 ImageTestCase GreenGIFTestCase() {
@@ -403,7 +403,7 @@ ImageTestCase GreenGIFTestCase() {
 
 ImageTestCase GreenJPGTestCase() {
   return ImageTestCase("green.jpg", "image/jpeg", IntSize(100, 100),
-                       TEST_CASE_IS_FUZZY);
+                       TEST_CASE_IS_FUZZY | TEST_CASE_ASSUME_SRGB_OUTPUT);
 }
 
 ImageTestCase GreenBMPTestCase() {
@@ -423,11 +423,24 @@ ImageTestCase GreenIconTestCase() {
 }
 
 ImageTestCase GreenWebPTestCase() {
-  return ImageTestCase("green.webp", "image/webp", IntSize(100, 100));
+  return ImageTestCase("green.webp", "image/webp", IntSize(100, 100),
+                       TEST_CASE_ASSUME_SRGB_OUTPUT);
+}
+
+// Forcing sRGB is required until nsAVIFDecoder supports ICC profiles
+// See bug 1634741
+ImageTestCase GreenAVIFTestCase() {
+  return ImageTestCase("green.avif", "image/avif", IntSize(100, 100))
+      .WithSurfaceFlags(SurfaceFlags::TO_SRGB_COLORSPACE);
 }
 
 ImageTestCase LargeWebPTestCase() {
   return ImageTestCase("large.webp", "image/webp", IntSize(1200, 660),
+                       TEST_CASE_IGNORE_OUTPUT);
+}
+
+ImageTestCase LargeAVIFTestCase() {
+  return ImageTestCase("large.avif", "image/avif", IntSize(1200, 660),
                        TEST_CASE_IGNORE_OUTPUT);
 }
 
@@ -442,12 +455,14 @@ ImageTestCase GreenFirstFrameAnimatedGIFTestCase() {
 
 ImageTestCase GreenFirstFrameAnimatedPNGTestCase() {
   return ImageTestCase("first-frame-green.png", "image/png", IntSize(100, 100),
-                       TEST_CASE_IS_TRANSPARENT | TEST_CASE_IS_ANIMATED);
+                       TEST_CASE_IS_TRANSPARENT | TEST_CASE_IS_ANIMATED |
+                           TEST_CASE_ASSUME_SRGB_OUTPUT);
 }
 
 ImageTestCase GreenFirstFrameAnimatedWebPTestCase() {
   return ImageTestCase("first-frame-green.webp", "image/webp",
-                       IntSize(100, 100), TEST_CASE_IS_ANIMATED);
+                       IntSize(100, 100),
+                       TEST_CASE_IS_ANIMATED | TEST_CASE_ASSUME_SRGB_OUTPUT);
 }
 
 ImageTestCase BlendAnimatedGIFTestCase() {
@@ -457,12 +472,14 @@ ImageTestCase BlendAnimatedGIFTestCase() {
 
 ImageTestCase BlendAnimatedPNGTestCase() {
   return ImageTestCase("blend.png", "image/png", IntSize(100, 100),
-                       TEST_CASE_IS_TRANSPARENT | TEST_CASE_IS_ANIMATED);
+                       TEST_CASE_IS_TRANSPARENT | TEST_CASE_IS_ANIMATED |
+                           TEST_CASE_ASSUME_SRGB_OUTPUT);
 }
 
 ImageTestCase BlendAnimatedWebPTestCase() {
   return ImageTestCase("blend.webp", "image/webp", IntSize(100, 100),
-                       TEST_CASE_IS_TRANSPARENT | TEST_CASE_IS_ANIMATED);
+                       TEST_CASE_IS_TRANSPARENT | TEST_CASE_IS_ANIMATED |
+                           TEST_CASE_ASSUME_SRGB_OUTPUT);
 }
 
 ImageTestCase CorruptTestCase() {
@@ -601,6 +618,11 @@ ImageTestCase DownscaledWebPTestCase() {
                        IntSize(20, 20));
 }
 
+ImageTestCase DownscaledAVIFTestCase() {
+  return ImageTestCase("downscaled.avif", "image/avif", IntSize(100, 100),
+                       IntSize(20, 20));
+}
+
 ImageTestCase DownscaledTransparentICOWithANDMaskTestCase() {
   // This test case is an ICO with AND mask transparency. We want to ensure that
   // we can downscale it without crashing or triggering ASAN failures, but its
@@ -626,7 +648,8 @@ ImageTestCase LargeICOWithPNGTestCase() {
 
 ImageTestCase GreenMultipleSizesICOTestCase() {
   return ImageTestCase("green-multiple-sizes.ico", "image/x-icon",
-                       IntSize(256, 256));
+                       IntSize(256, 256))
+      .WithSurfaceFlags(SurfaceFlags::TO_SRGB_COLORSPACE);
 }
 
 ImageTestCase PerfGrayJPGTestCase() {

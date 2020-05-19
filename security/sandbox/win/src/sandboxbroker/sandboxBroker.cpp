@@ -32,6 +32,10 @@
 #include "sandbox/win/src/security_level.h"
 #include "WinUtils.h"
 
+#if defined(MOZ_LAUNCHER_PROCESS)
+#  include "mozilla/LauncherRegistryInfo.h"
+#endif  // defined(MOZ_LAUNCHER_PROCESS)
+
 namespace mozilla {
 
 sandbox::BrokerServices* SandboxBroker::sBrokerService = nullptr;
@@ -218,6 +222,7 @@ bool SandboxBroker::LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
                               base::EnvironmentMap& aEnvironment,
                               GeckoProcessType aProcessType,
                               const bool aEnableLogging,
+                              const IMAGE_THUNK_DATA* aCachedNtdllThunk,
                               void** aProcessHandle) {
   if (!sBrokerService || !mPolicy) {
     return false;
@@ -288,56 +293,11 @@ bool SandboxBroker::LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
           last_error, last_warning);
   }
 
-  // moduleHandle holds a strong reference to the module, whereas realBase
-  // is weak and might reference a module from another process (and thus must
-  // not be considered valid to pass in to any Win32 APIs from within this
-  // process).
-  nsModuleHandle moduleHandle;
-  HMODULE realBase = nullptr;
-  if (XRE_GetChildProcBinPathType(aProcessType) == BinPathType::Self) {
-    // We use GetModuleHandleEx here so that we increment the module's refcount
-    HMODULE ourExe;
-    if (::GetModuleHandleExW(0, nullptr, &ourExe)) {
-      moduleHandle.own(ourExe);
-      // We can assign ourExe to realBase because the child process's binary is
-      // the same as ours; ASLR will map it to the same address.
-      realBase = ourExe;
-    }
-  } else {
-    // Load the child executable as a datafile so that we can examine its
-    // headers without doing a full load with dependencies and such.
-    moduleHandle.own(
-        ::LoadLibraryExW(aPath, nullptr, LOAD_LIBRARY_AS_DATAFILE));
-    LauncherResult<HMODULE> procExeModule =
-        nt::GetProcessExeModule(targetInfo.hProcess);
-    if (procExeModule.isOk()) {
-      realBase = procExeModule.unwrap();
-    } else {
-      LOG_E("nt::GetProcessExeModule failed with HRESULT 0x%08lX",
-            procExeModule.unwrapErr().AsHResult());
-    }
-  }
-
-  if (moduleHandle && realBase) {
-    nt::PEHeaders exeImage(moduleHandle.get());
-    if (!!exeImage) {
-      LauncherVoidResult importsRestored = RestoreImportDirectory(
-          aPath, exeImage, targetInfo.hProcess, realBase);
-      if (importsRestored.isErr()) {
-        LOG_E("Failed to restore import directory with HRESULT 0x%08lX",
-              importsRestored.unwrapErr().AsHResult());
-        TerminateProcess(targetInfo.hProcess, 1);
-        CloseHandle(targetInfo.hThread);
-        CloseHandle(targetInfo.hProcess);
-        return false;
-      }
-    }
-  }
-
   if (XRE_GetChildProcBinPathType(aProcessType) == BinPathType::Self) {
     RefPtr<DllServices> dllSvc(DllServices::Get());
     LauncherVoidResultWithLineInfo blocklistInitOk =
-        dllSvc->InitDllBlocklistOOP(aPath, targetInfo.hProcess);
+        dllSvc->InitDllBlocklistOOP(aPath, targetInfo.hProcess,
+                                    aCachedNtdllThunk);
     if (blocklistInitOk.isErr()) {
       LOG_E("InitDllBlocklistOOP failed at %s:%d with HRESULT 0x%08lX",
             blocklistInitOk.unwrapErr().mFile,
@@ -346,7 +306,54 @@ bool SandboxBroker::LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
       TerminateProcess(targetInfo.hProcess, 1);
       CloseHandle(targetInfo.hThread);
       CloseHandle(targetInfo.hProcess);
+
+#if defined(MOZ_LAUNCHER_PROCESS)
+      // The launcher process had started the browser process successfully, but
+      // the browser process failed start to a content process.  We're entering
+      // into a situation where the browser is opened without content processes.
+      // To stop it next time, we disable the launcher process.
+      LauncherRegistryInfo regInfo;
+      Unused << regInfo.DisableDueToFailure();
+#endif  // defined(MOZ_LAUNCHER_PROCESS)
+
       return false;
+    }
+  } else {
+    // moduleHandle holds a strong reference to the module, whereas realBase
+    // is weak and might reference a module from another process (and thus must
+    // not be considered valid to pass in to any Win32 APIs from within this
+    // process).
+
+    // Load the child executable as a datafile so that we can examine its
+    // headers without doing a full load with dependencies and such.
+    nsModuleHandle moduleHandle(
+        ::LoadLibraryExW(aPath, nullptr, LOAD_LIBRARY_AS_DATAFILE));
+
+    LauncherResult<HMODULE> procExeModule =
+        nt::GetProcessExeModule(targetInfo.hProcess);
+
+    HMODULE realBase = nullptr;
+    if (procExeModule.isOk()) {
+      realBase = procExeModule.unwrap();
+    } else {
+      LOG_E("nt::GetProcessExeModule failed with HRESULT 0x%08lX",
+            procExeModule.unwrapErr().AsHResult());
+    }
+
+    if (moduleHandle && realBase) {
+      nt::PEHeaders exeImage(moduleHandle.get());
+      if (!!exeImage) {
+        LauncherVoidResult importsRestored = RestoreImportDirectory(
+            aPath, exeImage, targetInfo.hProcess, realBase);
+        if (importsRestored.isErr()) {
+          LOG_E("Failed to restore import directory with HRESULT 0x%08lX",
+                importsRestored.unwrapErr().AsHResult());
+          TerminateProcess(targetInfo.hProcess, 1);
+          CloseHandle(targetInfo.hThread);
+          CloseHandle(targetInfo.hProcess);
+          return false;
+        }
+      }
     }
   }
 
@@ -532,11 +539,9 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
       sandbox::SBOX_ALL_OK == result,
       "SetDelayedIntegrityLevel should never fail, what happened?");
 
-  // SetLockdownDefaultDacl causes audio to fail for Windows 8.1 and earlier.
-  // Bug 1564842 tracks removing the Win10 or later restriction, once we can
-  // work around that problem.
-  if (aSandboxLevel > 5 && IsWin10OrLater()) {
+  if (aSandboxLevel > 5) {
     mPolicy->SetLockdownDefaultDacl();
+    mPolicy->AddRestrictingRandomSid();
   }
 
   if (aSandboxLevel > 4) {
@@ -657,9 +662,14 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
       "With these static arguments AddRule should never fail, what happened?");
 
   // The content process needs to be able to duplicate named pipes back to the
-  // broker process, which are File type handles.
+  // broker and other child processes, which are File type handles.
   result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
                             sandbox::TargetPolicy::HANDLES_DUP_BROKER, L"File");
+  MOZ_RELEASE_ASSERT(
+      sandbox::SBOX_ALL_OK == result,
+      "With these static arguments AddRule should never fail, what happened?");
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            sandbox::TargetPolicy::HANDLES_DUP_ANY, L"File");
   MOZ_RELEASE_ASSERT(
       sandbox::SBOX_ALL_OK == result,
       "With these static arguments AddRule should never fail, what happened?");
@@ -694,7 +704,8 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
       "With these static arguments AddRule should never fail, what happened?");
 }
 
-void SandboxBroker::SetSecurityLevelForGPUProcess(int32_t aSandboxLevel) {
+void SandboxBroker::SetSecurityLevelForGPUProcess(
+    int32_t aSandboxLevel, const nsCOMPtr<nsIFile>& aProfileDir) {
   MOZ_RELEASE_ASSERT(mPolicy, "mPolicy must be set before this call.");
 
   sandbox::JobLevel jobLevel;
@@ -746,6 +757,9 @@ void SandboxBroker::SetSecurityLevelForGPUProcess(int32_t aSandboxLevel) {
       sandbox::SBOX_ALL_OK == result,
       "SetDelayedIntegrityLevel should never fail, what happened?");
 
+  mPolicy->SetLockdownDefaultDacl();
+  mPolicy->AddRestrictingRandomSid();
+
   sandbox::MitigationFlags mitigations =
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_DEP_NO_ATL_THUNK |
@@ -779,6 +793,54 @@ void SandboxBroker::SetSecurityLevelForGPUProcess(int32_t aSandboxLevel) {
   MOZ_RELEASE_ASSERT(
       sandbox::SBOX_ALL_OK == result,
       "With these static arguments AddRule should never fail, what happened?");
+
+  // The GPU process needs to write to a shader cache for performance reasons
+  // Note that we can't use the sProfileDir variable stored above because
+  // the GPU process is created very early in Gecko initialization before
+  // SandboxBroker::GeckoDependentInitialize() is called
+  if (aProfileDir) {
+    if (![&aProfileDir, this] {
+          nsString shaderCacheRulePath;
+          nsresult rv = aProfileDir->GetPath(shaderCacheRulePath);
+          if (NS_FAILED(rv)) {
+            return false;
+          }
+          if (shaderCacheRulePath.IsEmpty()) {
+            return false;
+          }
+
+          if (Substring(shaderCacheRulePath, 0, 2).Equals(u"\\\\")) {
+            shaderCacheRulePath.InsertLiteral(u"??\\UNC", 1);
+          }
+
+          shaderCacheRulePath.Append(u"\\shader-cache");
+
+          sandbox::ResultCode result =
+              mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                               sandbox::TargetPolicy::FILES_ALLOW_DIR_ANY,
+                               shaderCacheRulePath.get());
+
+          if (result != sandbox::SBOX_ALL_OK) {
+            return false;
+          }
+
+          shaderCacheRulePath.Append(u"\\*");
+
+          result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                                    sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                                    shaderCacheRulePath.get());
+
+          if (result != sandbox::SBOX_ALL_OK) {
+            return false;
+          }
+
+          return true;
+        }()) {
+      NS_WARNING(
+          "Failed to add rule enabling GPU shader cache. Performance will be "
+          "negatively affected");
+    }
+  }
 
   // The process needs to be able to duplicate shared memory handles,
   // which are Section handles, to the broker process and other child processes.
@@ -834,6 +896,9 @@ bool SandboxBroker::SetSecurityLevelForRDDProcess() {
   SANDBOX_ENSURE_SUCCESS(result,
                          "SetDelayedIntegrityLevel should never fail with "
                          "these arguments, what happened?");
+
+  mPolicy->SetLockdownDefaultDacl();
+  mPolicy->AddRestrictingRandomSid();
 
   sandbox::MitigationFlags mitigations =
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
@@ -902,6 +967,103 @@ bool SandboxBroker::SetSecurityLevelForRDDProcess() {
   return true;
 }
 
+bool SandboxBroker::SetSecurityLevelForSocketProcess() {
+  if (!mPolicy) {
+    return false;
+  }
+
+  auto result =
+      SetJobLevel(mPolicy, sandbox::JOB_LOCKDOWN, 0 /* ui_exceptions */);
+  SANDBOX_ENSURE_SUCCESS(
+      result,
+      "SetJobLevel should never fail with these arguments, what happened?");
+
+  result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                                  sandbox::USER_LIMITED);
+  SANDBOX_ENSURE_SUCCESS(
+      result,
+      "SetTokenLevel should never fail with these arguments, what happened?");
+
+  result = mPolicy->SetAlternateDesktop(true);
+  if (NS_WARN_IF(result != sandbox::SBOX_ALL_OK)) {
+    LOG_W("SetAlternateDesktop failed, result: %i, last error: %x", result,
+          ::GetLastError());
+  }
+
+  result = mPolicy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "SetIntegrityLevel should never fail with these "
+                         "arguments, what happened?");
+
+  result =
+      mPolicy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_UNTRUSTED);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "SetDelayedIntegrityLevel should never fail with "
+                         "these arguments, what happened?");
+
+  mPolicy->SetLockdownDefaultDacl();
+  mPolicy->AddRestrictingRandomSid();
+
+  sandbox::MitigationFlags mitigations =
+      sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
+      sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
+      sandbox::MITIGATION_DEP_NO_ATL_THUNK | sandbox::MITIGATION_DEP |
+      sandbox::MITIGATION_IMAGE_LOAD_PREFER_SYS32;
+
+  // On Windows 7, where Win32k lockdown is not supported, the Chromium
+  // sandbox does something weird that breaks COM instantiation.
+  if (StaticPrefs::security_sandbox_socket_win32k_disable() &&
+      IsWin8OrLater()) {
+    mitigations |= sandbox::MITIGATION_WIN32K_DISABLE;
+    result =
+        mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_WIN32K_LOCKDOWN,
+                         sandbox::TargetPolicy::FAKE_USER_GDI_INIT, nullptr);
+    SANDBOX_ENSURE_SUCCESS(result, "Failed to set FAKE_USER_GDI_INIT policy.");
+  }
+
+  result = mPolicy->SetProcessMitigations(mitigations);
+  SANDBOX_ENSURE_SUCCESS(result, "Invalid flags for SetProcessMitigations.");
+
+  mitigations = sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
+                sandbox::MITIGATION_DYNAMIC_CODE_DISABLE |
+                sandbox::MITIGATION_DLL_SEARCH_ORDER |
+                sandbox::MITIGATION_FORCE_MS_SIGNED_BINS;
+
+  result = mPolicy->SetDelayedProcessMitigations(mitigations);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "Invalid flags for SetDelayedProcessMitigations.");
+
+  // Add the policy for the client side of a pipe. It is just a file
+  // in the \pipe\ namespace. We restrict it to pipes that start with
+  // "chrome." so the sandboxed process cannot connect to system services.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                            L"\\??\\pipe\\chrome.*");
+  SANDBOX_ENSURE_SUCCESS(
+      result,
+      "With these static arguments AddRule should never fail, what happened?");
+
+  // Add the policy for the client side of the crash server pipe.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                            L"\\??\\pipe\\gecko-crash-server-pipe.*");
+  SANDBOX_ENSURE_SUCCESS(
+      result,
+      "With these static arguments AddRule should never fail, what happened?");
+
+  // This section is needed to avoid an assert during crash reporting code
+  // when running mochitests.  The assertion is here:
+  // toolkit/crashreporter/nsExceptionHandler.cpp:2041
+  result =
+      mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                       sandbox::TargetPolicy::HANDLES_DUP_BROKER, L"Section");
+  SANDBOX_ENSURE_SUCCESS(
+      result,
+      "With these static arguments AddRule should never fail, what happened?");
+
+  return true;
+}
+
 bool SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel) {
   if (!mPolicy) {
     return false;
@@ -949,6 +1111,9 @@ bool SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel) {
   result = mPolicy->SetDelayedIntegrityLevel(delayedIntegrityLevel);
   SANDBOX_ENSURE_SUCCESS(
       result, "SetDelayedIntegrityLevel should never fail, what happened?");
+
+  mPolicy->SetLockdownDefaultDacl();
+  mPolicy->AddRestrictingRandomSid();
 
   sandbox::MitigationFlags mitigations =
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
@@ -1103,6 +1268,9 @@ bool SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel,
   SANDBOX_ENSURE_SUCCESS(result,
                          "SetIntegrityLevel should never fail with these "
                          "arguments, what happened?");
+
+  mPolicy->SetLockdownDefaultDacl();
+  mPolicy->AddRestrictingRandomSid();
 
   sandbox::MitigationFlags mitigations =
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |

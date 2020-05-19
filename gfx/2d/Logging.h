@@ -216,11 +216,11 @@ class LogForwarder {
 
 class NoLog {
  public:
-  NoLog() {}
-  ~NoLog() {}
+  NoLog() = default;
+  ~NoLog() = default;
 
   // No-op
-  MOZ_IMPLICIT NoLog(const NoLog&) {}
+  MOZ_IMPLICIT NoLog(const NoLog&) = default;
 
   template <typename T>
   NoLog& operator<<(const T& aLogText) {
@@ -361,10 +361,17 @@ class Log final {
     }
     return *this;
   }
-  Log& operator<<(const Color& aColor) {
+  Log& operator<<(const sRGBColor& aColor) {
     if (MOZ_UNLIKELY(LogIt())) {
-      mMessage << "Color(" << aColor.r << ", " << aColor.g << ", " << aColor.b
-               << ", " << aColor.a << ")";
+      mMessage << "sRGBColor(" << aColor.r << ", " << aColor.g << ", "
+               << aColor.b << ", " << aColor.a << ")";
+    }
+    return *this;
+  }
+  Log& operator<<(const DeviceColor& aColor) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "DeviceColor(" << aColor.r << ", " << aColor.g << ", "
+               << aColor.b << ", " << aColor.a << ")";
     }
     return *this;
   }

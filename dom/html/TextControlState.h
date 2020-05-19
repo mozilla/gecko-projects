@@ -275,15 +275,6 @@ class TextControlState final : public SupportsWeakPtr<TextControlState> {
   void GetPreviewText(nsAString& aValue);
   bool GetPreviewVisibility() { return mPreviewVisibility; }
 
-  /**
-   * Get the maxlength attribute
-   * @param aMaxLength the value of the max length attr
-   * @returns false if attr not defined
-   */
-  int32_t GetMaxLength();
-
-  void HideSelectionIfBlurred();
-
   struct SelectionProperties {
    public:
     SelectionProperties()
@@ -323,7 +314,6 @@ class TextControlState final : public SupportsWeakPtr<TextControlState> {
   bool IsSelectionCached() const { return mSelectionCached; }
   SelectionProperties& GetSelectionProperties() { return mSelectionProperties; }
   MOZ_CAN_RUN_SCRIPT void SetSelectionProperties(SelectionProperties& aProps);
-  void WillInitEagerly() { mSelectionRestoreEagerInit = true; }
   bool HasNeverInitializedBefore() const { return !mEverInited; }
   // Sync up our selection properties with our editor prior to being destroyed.
   // This will invoke UnbindFromFrame() to ensure that we grab whatever
@@ -407,7 +397,7 @@ class TextControlState final : public SupportsWeakPtr<TextControlState> {
 
   MOZ_CAN_RUN_SCRIPT void UnlinkInternal();
 
-  void ValueWasChanged(bool aNotify);
+  void ValueWasChanged();
 
   MOZ_CAN_RUN_SCRIPT void DestroyEditor();
   MOZ_CAN_RUN_SCRIPT void Clear();
@@ -464,8 +454,6 @@ class TextControlState final : public SupportsWeakPtr<TextControlState> {
   bool mValueTransferInProgress;  // Whether a value is being transferred to the
                                   // frame
   bool mSelectionCached;          // Whether mSelectionProperties is valid
-  mutable bool mSelectionRestoreEagerInit;  // Whether we're eager initing
-                                            // because of selection restore
   bool mPlaceholderVisibility;
   bool mPreviewVisibility;
 

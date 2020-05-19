@@ -22,6 +22,7 @@
 #include "vm/ErrorObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSObject.h"
+#include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/RegExpObject.h"
 #include "vm/Shape.h"
 #include "vm/TaggedProto.h"
@@ -40,7 +41,10 @@ using namespace js;
 
 ObjectGroup::ObjectGroup(const JSClass* clasp, TaggedProto proto,
                          JS::Realm* realm, ObjectGroupFlags initialFlags)
-    : clasp_(clasp), proto_(proto), realm_(realm), flags_(initialFlags) {
+    : headerAndClasp_(clasp),
+      proto_(proto),
+      realm_(realm),
+      flags_(initialFlags) {
   /* Windows may not appear on prototype chains. */
   MOZ_ASSERT_IF(proto.isObject(), !IsWindow(proto.toObject()));
   MOZ_ASSERT(JS::StringIsASCII(clasp->name));
@@ -246,9 +250,9 @@ bool ObjectGroup::useSingletonForAllocationSite(JSScript* script,
 
   uint32_t offset = script->pcToOffset(pc);
 
-  for (const JSTryNote& tn : script->trynotes()) {
-    if (tn.kind != JSTRY_FOR_IN && tn.kind != JSTRY_FOR_OF &&
-        tn.kind != JSTRY_LOOP) {
+  for (const TryNote& tn : script->trynotes()) {
+    if (tn.kind() != TryNoteKind::ForIn && tn.kind() != TryNoteKind::ForOf &&
+        tn.kind() != TryNoteKind::Loop) {
       continue;
     }
 
@@ -354,7 +358,7 @@ ObjectGroup* JSObject::makeLazyGroup(JSContext* cx, HandleObject obj) {
     group->setInterpretedFunction(&obj->as<JSFunction>());
   }
 
-  obj->group_ = group;
+  obj->setGroupRaw(group);
 
   return group;
 }
@@ -396,16 +400,17 @@ struct ObjectGroupRealm::NewEntry {
 
     Lookup(const JSClass* clasp, TaggedProto proto, JSObject* associated)
         : clasp(clasp), proto(proto), associated(associated) {
-      MOZ_ASSERT((associated && associated->is<JSFunction>()) == !clasp);
+      MOZ_ASSERT(clasp);
+      MOZ_ASSERT_IF(associated && associated->is<JSFunction>(),
+                    clasp == &PlainObject::class_);
     }
 
     explicit Lookup(const NewEntry& entry)
         : clasp(entry.group.unbarrieredGet()->clasp()),
           proto(entry.group.unbarrieredGet()->proto()),
           associated(entry.associated) {
-      if (associated && associated->is<JSFunction>()) {
-        clasp = nullptr;
-      }
+      MOZ_ASSERT_IF(associated && associated->is<JSFunction>(),
+                    clasp == &PlainObject::class_);
     }
   };
 
@@ -444,7 +449,7 @@ struct MovableCellHasher<ObjectGroupRealm::NewEntry> {
 
   static inline bool match(const ObjectGroupRealm::NewEntry& key,
                            const Lookup& lookup) {
-    if (lookup.clasp && key.group.unbarrieredGet()->clasp() != lookup.clasp) {
+    if (key.group.unbarrieredGet()->clasp() != lookup.clasp) {
       return false;
     }
 
@@ -481,7 +486,7 @@ class ObjectGroupRealm::NewTable
 MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
     const JSClass* clasp, TaggedProto proto, JSObject* associated) {
   if (group_ && associated_ == associated && group_->proto() == proto &&
-      (!clasp || group_->clasp() == clasp)) {
+      group_->clasp() == clasp) {
     return group_;
   }
   return nullptr;
@@ -491,22 +496,16 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
 ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
                                           TaggedProto proto,
                                           JSObject* associated) {
+  MOZ_ASSERT(clasp);
   MOZ_ASSERT_IF(associated, proto.isObject());
   MOZ_ASSERT_IF(proto.isObject(),
                 cx->isInsideCurrentCompartment(proto.toObject()));
 
-  // A null lookup clasp is used for 'new' groups with an associated
-  // function. The group starts out as a plain object but might mutate into an
-  // unboxed plain object.
-  MOZ_ASSERT_IF(!clasp, !!associated);
-
   if (associated && !associated->is<TypeDescr>() && !IsTypeInferenceEnabled()) {
-    clasp = &PlainObject::class_;
     associated = nullptr;
   }
 
   if (associated) {
-    MOZ_ASSERT_IF(!associated->is<TypeDescr>(), !clasp);
     if (associated->is<JSFunction>()) {
       // Canonicalize new functions to use the original one associated with its
       // script.
@@ -520,18 +519,14 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
         associated = nullptr;
       }
     } else if (associated->is<TypeDescr>()) {
-      if (!clasp) {
+      if (!IsTypedObjectClass(clasp)) {
         // This can happen when we call Reflect.construct with a TypeDescr as
-        // newTarget argument. We're creating a plain object in this case, so
+        // newTarget argument. We're not creating a TypedObject in this case, so
         // don't set the TypeDescr on the group.
         associated = nullptr;
       }
     } else {
       associated = nullptr;
-    }
-
-    if (!associated) {
-      clasp = &PlainObject::class_;
     }
   }
 
@@ -583,8 +578,7 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
       ObjectGroupRealm::NewEntry::Lookup(clasp, proto, associated));
   if (p) {
     ObjectGroup* group = p->group;
-    MOZ_ASSERT_IF(clasp, group->clasp() == clasp);
-    MOZ_ASSERT_IF(!clasp, group->clasp() == &PlainObject::class_);
+    MOZ_ASSERT(group->clasp() == clasp);
     MOZ_ASSERT(group->proto() == proto);
     groups.defaultNewGroupCache.put(group, associated);
     return group;
@@ -597,9 +591,8 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
   }
 
   Rooted<TaggedProto> protoRoot(cx, proto);
-  ObjectGroup* group = ObjectGroupRealm::makeGroup(
-      cx, cx->realm(), clasp ? clasp : &PlainObject::class_, protoRoot,
-      initialFlags);
+  ObjectGroup* group = ObjectGroupRealm::makeGroup(cx, cx->realm(), clasp,
+                                                   protoRoot, initialFlags);
   if (!group) {
     return nullptr;
   }
@@ -649,12 +642,10 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
 
 /* static */
 ObjectGroup* ObjectGroup::lazySingletonGroup(JSContext* cx,
-                                             ObjectGroup* oldGroup,
+                                             ObjectGroupRealm& realm,
+                                             JS::Realm* objectRealm,
                                              const JSClass* clasp,
                                              TaggedProto proto) {
-  ObjectGroupRealm& realm = oldGroup ? ObjectGroupRealm::get(oldGroup)
-                                     : ObjectGroupRealm::getForNewObject(cx);
-
   MOZ_ASSERT_IF(proto.isObject(),
                 cx->compartment() == proto.toObject()->compartment());
 
@@ -680,7 +671,7 @@ ObjectGroup* ObjectGroup::lazySingletonGroup(JSContext* cx,
 
   Rooted<TaggedProto> protoRoot(cx, proto);
   ObjectGroup* group = ObjectGroupRealm::makeGroup(
-      cx, oldGroup ? oldGroup->realm() : cx->realm(), clasp, protoRoot,
+      cx, objectRealm, clasp, protoRoot,
       OBJECT_FLAG_SINGLETON | OBJECT_FLAG_LAZY_SINGLETON);
   if (!group) {
     return nullptr;
@@ -1334,11 +1325,7 @@ struct ObjectGroupRealm::AllocationSiteKey {
     MOZ_ASSERT(offset_ < OFFSET_LIMIT);
   }
 
-  AllocationSiteKey(const AllocationSiteKey& key)
-      : script(key.script),
-        offset(key.offset),
-        kind(key.kind),
-        proto(key.proto) {}
+  AllocationSiteKey(const AllocationSiteKey& key) = default;
 
   AllocationSiteKey(AllocationSiteKey&& key)
       : script(std::move(key.script)),
@@ -1538,6 +1525,8 @@ bool ObjectGroup::setAllocationSiteObjectGroup(JSContext* cx,
 ArrayObject* ObjectGroup::getOrFixupCopyOnWriteObject(JSContext* cx,
                                                       HandleScript script,
                                                       jsbytecode* pc) {
+  MOZ_ASSERT(IsTypeInferenceEnabled());
+
   // Make sure that the template object for script/pc has a type indicating
   // that the object and its copies have copy on write elements.
   RootedArrayObject obj(

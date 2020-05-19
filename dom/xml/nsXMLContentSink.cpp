@@ -94,7 +94,7 @@ nsXMLContentSink::nsXMLContentSink()
   PodArrayZero(mText);
 }
 
-nsXMLContentSink::~nsXMLContentSink() {}
+nsXMLContentSink::~nsXMLContentSink() = default;
 
 nsresult nsXMLContentSink::Init(Document* aDoc, nsIURI* aURI,
                                 nsISupports* aContainer, nsIChannel* aChannel) {
@@ -637,8 +637,8 @@ nsresult nsXMLContentSink::LoadXSLStyleSheet(nsIURI* aUrl) {
 
 nsresult nsXMLContentSink::ProcessStyleLinkFromHeader(
     const nsAString& aHref, bool aAlternate, const nsAString& aTitle,
-    const nsAString& aType, const nsAString& aMedia,
-    const nsAString& aReferrerPolicy) {
+    const nsAString& aIntegrity, const nsAString& aType,
+    const nsAString& aMedia, const nsAString& aReferrerPolicy) {
   mPrettyPrintXML = false;
 
   nsAutoCString cmd;
@@ -657,7 +657,7 @@ nsresult nsXMLContentSink::ProcessStyleLinkFromHeader(
 
   // Otherwise fall through to nsContentSink to handle CSS Link headers.
   return nsContentSink::ProcessStyleLinkFromHeader(
-      aHref, aAlternate, aTitle, aType, aMedia, aReferrerPolicy);
+      aHref, aAlternate, aTitle, aIntegrity, aType, aMedia, aReferrerPolicy);
 }
 
 nsresult nsXMLContentSink::MaybeProcessXSLTLink(
@@ -749,7 +749,8 @@ nsresult nsXMLContentSink::FlushText(bool aReleaseTextNode) {
 
       mTextLength = 0;
     } else {
-      RefPtr<nsTextNode> textContent = new nsTextNode(mNodeInfoManager);
+      RefPtr<nsTextNode> textContent =
+          new (mNodeInfoManager) nsTextNode(mNodeInfoManager);
 
       mLastTextNode = textContent;
 
@@ -1059,7 +1060,7 @@ nsresult nsXMLContentSink::HandleEndElement(const char16_t* aName,
     // probably need to deal here.... (and stop appending them on open).
     mState = eXMLContentSinkState_InEpilog;
 
-    mDocument->TriggerInitialDocumentTranslation();
+    mDocument->OnParsingCompleted();
 
     // We might have had no occasion to start layout yet.  Do so now.
     MaybeStartLayout(false);
@@ -1084,7 +1085,7 @@ NS_IMETHODIMP
 nsXMLContentSink::HandleComment(const char16_t* aName) {
   FlushText();
 
-  RefPtr<Comment> comment = new Comment(mNodeInfoManager);
+  RefPtr<Comment> comment = new (mNodeInfoManager) Comment(mNodeInfoManager);
   comment->SetText(nsDependentString(aName), false);
   nsresult rv = AddContentAsLeaf(comment);
   DidAddContent();
@@ -1102,7 +1103,8 @@ nsXMLContentSink::HandleCDataSection(const char16_t* aData, uint32_t aLength) {
 
   FlushText();
 
-  RefPtr<CDATASection> cdata = new CDATASection(mNodeInfoManager);
+  RefPtr<CDATASection> cdata =
+      new (mNodeInfoManager) CDATASection(mNodeInfoManager);
   cdata->SetText(aData, aLength, false);
   nsresult rv = AddContentAsLeaf(cdata);
   DidAddContent();
@@ -1395,9 +1397,7 @@ nsresult nsXMLContentSink::AddText(const char16_t* aText, int32_t aLength) {
   return NS_OK;
 }
 
-void nsXMLContentSink::InitialDocumentTranslationCompleted() {
-  StartLayout(false);
-}
+void nsXMLContentSink::InitialTranslationCompleted() { StartLayout(false); }
 
 void nsXMLContentSink::FlushPendingNotifications(FlushType aType) {
   // Only flush tags if we're not doing the notification ourselves

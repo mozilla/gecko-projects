@@ -15,6 +15,7 @@
 #include "nsCOMPtr.h"
 #include "nsIURI.h"
 #include "nsIProcess.h"
+#include "mozilla/dom/BrowsingContext.h"
 
 /**
  * UTF8 moz-icon URI string for the default handler application's icon, if
@@ -57,8 +58,8 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
       nsIMutableArray** aPossibleAppHandlers) override;
   NS_IMETHOD GetDefaultDescription(nsAString& aDefaultDescription) override;
   NS_IMETHOD LaunchWithFile(nsIFile* aFile) override;
-  NS_IMETHOD LaunchWithURI(nsIURI* aURI,
-                           nsIInterfaceRequestor* aWindowContext) override;
+  NS_IMETHOD LaunchWithURI(
+      nsIURI* aURI, mozilla::dom::BrowsingContext* aBrowsingContext) override;
   NS_IMETHOD GetPreferredAction(nsHandlerInfoAction* aPreferredAction) override;
   NS_IMETHOD SetPreferredAction(nsHandlerInfoAction aPreferredAction) override;
   NS_IMETHOD GetAlwaysAskBeforeHandling(
@@ -137,6 +138,11 @@ class nsMIMEInfoBase : public nsIMIMEInfo {
    */
   static nsresult GetLocalFileFromURI(nsIURI* aURI, nsIFile** aFile);
 
+  /**
+   * Internal helper to avoid adding duplicates.
+   */
+  void AddUniqueExtension(const nsACString& aExtension);
+
   // member variables
   nsTArray<nsCString>
       mExtensions;  ///< array of file extensions associated w/ this MIME obj
@@ -173,6 +179,7 @@ class nsMIMEInfoImpl : public nsMIMEInfoBase {
   // nsIMIMEInfo methods
   NS_IMETHOD GetHasDefaultHandler(bool* _retval) override;
   NS_IMETHOD GetDefaultDescription(nsAString& aDefaultDescription) override;
+  NS_IMETHOD IsCurrentAppOSDefault(bool* _retval) override;
 
   // additional methods
   /**

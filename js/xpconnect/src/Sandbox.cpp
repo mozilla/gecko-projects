@@ -31,6 +31,7 @@
 #include "xpc_make_class.h"
 #include "XPCWrapper.h"
 #include "Crypto.h"
+#include "mozilla/dom/BindingCallContext.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/cache/CacheStorage.h"
@@ -38,6 +39,7 @@
 #include "mozilla/dom/CSSRuleBinding.h"
 #include "mozilla/dom/DirectoryBinding.h"
 #include "mozilla/dom/DocumentBinding.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMParserBinding.h"
 #include "mozilla/dom/DOMTokenListBinding.h"
 #include "mozilla/dom/ElementBinding.h"
@@ -90,11 +92,12 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(SandboxPrivate)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SandboxPrivate)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-  tmp->UnlinkHostObjectURIs();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
+  tmp->UnlinkObjectsInGlobal();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(SandboxPrivate)
-  tmp->TraverseHostObjectURIs(cb);
+  tmp->TraverseObjectsInGlobal(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(SandboxPrivate)
@@ -303,8 +306,9 @@ static bool SandboxFetch(JSContext* cx, JS::HandleObject scope,
     return false;
   }
   RootedDictionary<dom::RequestInit> options(cx);
+  BindingCallContext callCx(cx, "fetch");
   if (!options.Init(cx, args.hasDefined(1) ? args[1] : JS::NullHandleValue,
-                    "Argument 2 of fetch", false)) {
+                    "Argument 2", false)) {
     return false;
   }
   nsCOMPtr<nsIGlobalObject> global = xpc::NativeGlobal(scope);
@@ -487,9 +491,9 @@ bool xpc::IsSandbox(JSObject* obj) {
 }
 
 /***************************************************************************/
-nsXPCComponents_utils_Sandbox::nsXPCComponents_utils_Sandbox() {}
+nsXPCComponents_utils_Sandbox::nsXPCComponents_utils_Sandbox() = default;
 
-nsXPCComponents_utils_Sandbox::~nsXPCComponents_utils_Sandbox() {}
+nsXPCComponents_utils_Sandbox::~nsXPCComponents_utils_Sandbox() = default;
 
 NS_IMPL_QUERY_INTERFACE(nsXPCComponents_utils_Sandbox,
                         nsIXPCComponents_utils_Sandbox, nsIXPCScriptable)
@@ -843,6 +847,8 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
       Document = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "Directory")) {
       Directory = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "DOMException")) {
+      DOMException = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "DOMParser")) {
       DOMParser = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "DOMTokenList")) {
@@ -947,8 +953,13 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
     return false;
   }
 
-  if (DOMParser && !dom::DOMParser_Binding::GetConstructorObject(cx))
+  if (DOMException && !dom::DOMException_Binding::GetConstructorObject(cx)) {
     return false;
+  }
+
+  if (DOMParser && !dom::DOMParser_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
 
   if (DOMTokenList && !dom::DOMTokenList_Binding::GetConstructorObject(cx)) {
     return false;

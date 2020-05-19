@@ -112,7 +112,7 @@ MOZDEPTH ?= $(DEPTH)
 
 repackage-zip: UNPACKAGE='$(ZIP_IN)'
 repackage-zip:
-	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/l10n-repack.py '$(STAGEDIST)' $(DIST)/xpi-stage/locale-$(AB_CD) \
+	$(PYTHON3) $(MOZILLA_DIR)/toolkit/mozapps/installer/l10n-repack.py '$(STAGEDIST)' $(DIST)/xpi-stage/locale-$(AB_CD) \
 		$(MOZ_PKG_EXTRAL10N) \
 		$(if $(filter omni,$(MOZ_PACKAGER_FORMAT)),$(if $(NON_OMNIJAR_FILES),--non-resource $(NON_OMNIJAR_FILES)))
 
@@ -203,12 +203,12 @@ ifdef NIGHTLY_BUILD
 	fi
 endif
 	$(RM) -rf $(REAL_LOCALE_MERGEDIR)
-	-$(MOZILLA_DIR)/mach compare-locales $(COMPARE_LOCALES_DEFINES) --merge $(BASE_MERGE) $(srcdir)/l10n.toml $(L10NBASEDIR) $*
+	-$(MOZILLA_DIR)/mach compare-locales --merge $(BASE_MERGE) $(srcdir)/l10n.toml $(L10NBASEDIR) $*
 
 langpack-%: IS_LANGUAGE_REPACK=1
 langpack-%: IS_LANGPACK=1
 langpack-%: AB_CD=$*
-langpack-%:
+langpack-%: clobber-%
 	@echo 'Making langpack $(LANGPACK_FILE)'
 	@$(MAKE) libs-$(AB_CD)
 	@$(MAKE) package-langpack-$(AB_CD)

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "RefMessageBodyService.h"
+#include "nsContentUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -53,7 +54,7 @@ const nsID RefMessageBodyService::Register(
   }
 
   StaticMutexAutoLock lock(sRefMessageBodyServiceMutex);
-  GetOrCreateInternal(lock)->mMessages.Put(uuid, body);
+  GetOrCreateInternal(lock)->mMessages.Put(uuid, std::move(body));
   return uuid;
 }
 

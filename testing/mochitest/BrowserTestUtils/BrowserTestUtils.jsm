@@ -68,10 +68,6 @@ let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
 let selectorFactory = XPCOMUtils._getFactory(NewProcessSelector);
 registrar.registerFactory(OUR_PROCESSSELECTOR_CID, "", null, selectorFactory);
 
-// For now, we'll allow tests to use CPOWs in this module for
-// some cases.
-Cu.permitCPOWsInScope(this);
-
 const kAboutPageRegistrationContentScript =
   "chrome://mochikit/content/tests/BrowserTestUtils/content-about-page-utils.js";
 
@@ -380,9 +376,13 @@ var BrowserTestUtils = {
    *
    * This can be used in conjunction with any synchronous method for starting a
    * load, like the "addTab" method on "tabbrowser", and must be called before
-   * yielding control to the event loop. This is guaranteed to work because the
-   * way we're listening for the load is in the content-utils.js frame script,
-   * and then sending an async message up, so we can't miss the message.
+   * yielding control to the event loop. Note that calling this after multiple
+   * successive load operations can be racy, so a |wantLoad| should be specified
+   * in these cases.
+   *
+   * This function works by listening for custom load events on |browser|. These
+   * are sent by a BrowserTestUtils window actor in response to "load" and
+   * "DOMContentLoaded" content events.
    *
    * @param {xul:browser} browser
    *        A xul:browser.
@@ -895,6 +895,24 @@ var BrowserTestUtils = {
 
   /**
    * @param win (optional)
+   *        The window we should wait to have "domwindowopened" sent through
+   *        the observer service for. If this is not supplied, we'll just
+   *        resolve when the first "domwindowopened" notification is seen.
+   *        The promise will be resolved once the new window's document has been
+   *        loaded.
+   * @return {Promise}
+   *         A Promise which resolves when a "domwindowopened" notification
+   *         has been fired by the window watcher.
+   */
+  domWindowOpenedAndLoaded(win) {
+    return this.domWindowOpened(win, async win => {
+      await this.waitForEvent(win, "load");
+      return true;
+    });
+  },
+
+  /**
+   * @param win (optional)
    *        The window we should wait to have "domwindowclosed" sent through
    *        the observer service for. If this is not supplied, we'll just
    *        resolve when the first "domwindowclosed" notification is seen.
@@ -1175,7 +1193,7 @@ var BrowserTestUtils = {
         eventName,
         () => {
           removeEventListener();
-          resolve();
+          resolve(eventName);
         },
         { capture, wantUntrusted },
         checkFn
@@ -1390,7 +1408,7 @@ var BrowserTestUtils = {
               null
             ),
 
-            applyFilter(service, channel, defaultProxyInfo, callback) {
+            applyFilter(channel, defaultProxyInfo, callback) {
               callback.onProxyFilterResult(
                 isHttp(channel.URI.spec) ? defaultProxyInfo : this.proxyInfo
               );
@@ -1628,6 +1646,12 @@ var BrowserTestUtils = {
    * @param (BrowsingContext) browsingContext
    *        The context where the frame leaves. Default to
    *        top level context if not supplied.
+   * @param (object?) options
+   *        An object with any of the following fields:
+   *          crashType: "CRASH_INVALID_POINTER_DEREF" | "CRASH_OOM"
+   *            The type of crash. If unspecified, default to "CRASH_INVALID_POINTER_DEREF"
+   *          asyncCrash: bool
+   *            If specified and `true`, cause the crash asynchronously.
    *
    * @returns (Promise)
    * @resolves An Object with key-value pairs representing the data from the
@@ -1637,7 +1661,8 @@ var BrowserTestUtils = {
     browser,
     shouldShowTabCrashPage = true,
     shouldClearMinidumps = true,
-    browsingContext
+    browsingContext,
+    options = {}
   ) {
     let extra = {};
 
@@ -1772,7 +1797,10 @@ var BrowserTestUtils = {
     this.sendAsyncMessage(
       browsingContext || browser.browsingContext,
       "BrowserTestUtils:CrashFrame",
-      {}
+      {
+        crashType: options.crashType || "",
+        asyncCrash: options.asyncCrash || false,
+      }
     );
 
     await Promise.all(expectedPromises);
@@ -1786,6 +1814,56 @@ var BrowserTestUtils = {
     }
 
     return extra;
+  },
+
+  /**
+   * Attempts to simulate a launch fail by crashing a browser, but
+   * stripping the browser of its childID so that the TabCrashHandler
+   * thinks it was a launch fail.
+   *
+   * @param browser (<xul:browser>)
+   *   The browser to simulate a content process launch failure on.
+   * @return Promise
+   * @resolves undefined
+   *   Resolves when the TabCrashHandler should be done handling the
+   *   simulated crash.
+   */
+  simulateProcessLaunchFail(browser, dueToBuildIDMismatch = false) {
+    const NORMAL_CRASH_TOPIC = "ipc:content-shutdown";
+
+    Object.defineProperty(browser.frameLoader, "childID", {
+      get: () => 0,
+    });
+
+    let sawNormalCrash = false;
+    let observer = (subject, topic, data) => {
+      sawNormalCrash = true;
+    };
+
+    Services.obs.addObserver(observer, NORMAL_CRASH_TOPIC);
+
+    Services.obs.notifyObservers(
+      browser.frameLoader,
+      "oop-frameloader-crashed"
+    );
+
+    let eventType = dueToBuildIDMismatch
+      ? "oop-browser-buildid-mismatch"
+      : "oop-browser-crashed";
+
+    let event = new browser.ownerGlobal.CustomEvent(eventType, {
+      bubbles: true,
+    });
+    event.isTopFrame = true;
+    browser.dispatchEvent(event);
+
+    Services.obs.removeObserver(observer, NORMAL_CRASH_TOPIC);
+
+    if (sawNormalCrash) {
+      throw new Error(`Unexpectedly saw ${NORMAL_CRASH_TOPIC}`);
+    }
+
+    return new Promise(resolve => TestUtils.executeSoon(resolve));
   },
 
   /**

@@ -11,7 +11,6 @@
 #include "mozilla/EventQueue.h"
 #include "mozilla/IdlePeriodState.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
 
@@ -102,6 +101,11 @@ class PrioritizedEventQueue final : public AbstractEventQueue {
  private:
   EventQueuePriority SelectQueue(bool aUpdateState,
                                  const MutexAutoLock& aProofOfLock);
+
+  void IndirectlyQueueRunnable(already_AddRefed<nsIRunnable>&& aEvent,
+                               EventQueuePriority aPriority,
+                               const MutexAutoLock& aProofOfLock,
+                               mozilla::TimeDuration* aDelay);
 
   UniquePtr<EventQueue> mHighQueue;
   UniquePtr<EventQueueSized<32>> mInputQueue;

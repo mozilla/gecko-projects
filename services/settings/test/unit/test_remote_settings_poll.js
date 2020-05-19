@@ -9,8 +9,8 @@ const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm");
 const { UptakeTelemetry } = ChromeUtils.import(
   "resource://services-common/uptake-telemetry.js"
 );
-const { Kinto } = ChromeUtils.import(
-  "resource://services-common/kinto-offline-client.js"
+const { RemoteSettingsClient } = ChromeUtils.import(
+  "resource://services-settings/RemoteSettingsClient.jsm"
 );
 const { pushBroadcastService } = ChromeUtils.import(
   "resource://gre/modules/PushBroadcastService.jsm"
@@ -33,7 +33,6 @@ const PREF_LAST_UPDATE = "services.settings.last_update_seconds";
 const PREF_LAST_ETAG = "services.settings.last_etag";
 const PREF_CLOCK_SKEW_SECONDS = "services.settings.clock_skew_seconds";
 
-const DB_NAME = "remote-settings";
 // Telemetry report result.
 const TELEMETRY_HISTOGRAM_POLL_KEY = "settings-changes-monitoring";
 const TELEMETRY_HISTOGRAM_SYNC_KEY = "settings-sync";
@@ -538,6 +537,34 @@ add_task(async function test_success_with_partial_list() {
 });
 add_task(clear_state);
 
+add_task(async function test_full_polling() {
+  server.registerPathHandler(
+    CHANGES_PATH,
+    serveChangesEntries(10000, [
+      {
+        id: "b6ba7fab-a40a-4d03-a4af-6b627f3c5b36",
+        last_modified: 42,
+        host: "localhost",
+        bucket: "main",
+        collection: "poll-test-collection",
+      },
+    ])
+  );
+
+  const c = RemoteSettings("poll-test-collection");
+  let maybeSyncCount = 0;
+  c.maybeSync = () => {
+    maybeSyncCount++;
+  };
+
+  await RemoteSettings.pollChanges();
+  await RemoteSettings.pollChanges({ full: true });
+
+  // Since the second call is full, clients are called
+  Assert.equal(maybeSyncCount, 2, "maybeSync should be called twice");
+});
+add_task(clear_state);
+
 add_task(async function test_server_bad_json() {
   const startHistogram = getUptakeTelemetrySnapshot(
     TELEMETRY_HISTOGRAM_POLL_KEY
@@ -888,12 +915,12 @@ add_task(async function test_syncs_clients_with_local_database() {
   // This simulates what remote-settings would do when initializing a local database.
   // We don't want to instantiate a client using the RemoteSettings() API
   // since we want to test «unknown» clients that have a local database.
-  await new Kinto.adapters.IDB("blocklists/addons", {
-    dbName: DB_NAME,
-  }).saveLastModified(42);
-  await new Kinto.adapters.IDB("main/recipes", {
-    dbName: DB_NAME,
-  }).saveLastModified(43);
+  new RemoteSettingsClient("addons", {
+    bucketNamePref: "services.blocklist.bucket", // bucketName = "blocklists"
+  }).db.saveLastModified(42);
+  new RemoteSettingsClient("recipes", {
+    bucketNamePref: "services.settings.default_bucket", // bucketName = "main"
+  }).db.saveLastModified(43);
 
   let error;
   try {

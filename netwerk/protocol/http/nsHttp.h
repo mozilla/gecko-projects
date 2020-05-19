@@ -35,26 +35,10 @@ enum class HttpVersion {
   v3_0 = 30
 };
 
-enum class SpdyVersion {
-  NONE = 0,
-  // SPDY_VERSION_2 = 2, REMOVED
-  // SPDY_VERSION_3 = 3, REMOVED
-  // SPDY_VERSION_31 = 4, REMOVED
-  HTTP_2 = 5
-
-  // leave room for official versions. telem goes to 48
-  // 24 was a internal spdy/3.1
-  // 25 was spdy/4a2
-  // 26 was http/2-draft08 and http/2-draft07 (they were the same)
-  // 27 was http/2-draft09, h2-10, and h2-11
-  // 28 was http/2-draft12
-  // 29 was http/2-draft13
-  // 30 was h2-14 and h2-15
-  // 31 was h2-16
-};
+enum class SpdyVersion { NONE = 0, HTTP_2 = 5 };
 
 extern const nsCString kHttp3Version;
-const char kHttp3VersionHEX[] = "ff00000019";  // this is draft 25.
+const char kHttp3VersionHEX[] = "ff0000001b";  // this is draft 27.
 
 //-----------------------------------------------------------------------------
 // http connection capabilities
@@ -132,6 +116,10 @@ const char kHttp3VersionHEX[] = "ff00000019";  // this is draft 25.
 // The connection could bring the peeked data for sniffing
 #define NS_HTTP_CALL_CONTENT_SNIFFER (1 << 21)
 
+// Disallow the use of the HTTP3 protocol. This is meant for the contexts
+// such as HTTP upgrade which are not supported by HTTP3.
+#define NS_HTTP_DISALLOW_HTTP3 (1 << 22)
+
 #define NS_HTTP_TRR_FLAGS_FROM_MODE(x) ((static_cast<uint32_t>(x) & 3) << 19)
 
 #define NS_HTTP_TRR_MODE_FROM_FLAGS(x) \
@@ -166,7 +154,7 @@ struct nsHttpAtom {
 };
 
 namespace nsHttp {
-MOZ_MUST_USE nsresult CreateAtomTable();
+[[nodiscard]] nsresult CreateAtomTable();
 void DestroyAtomTable();
 
 // The mutex is valid any time the Atom Table is valid
@@ -212,12 +200,12 @@ const char* FindToken(const char* input, const char* token,
 //
 // TODO(darin): Replace this with something generic.
 //
-MOZ_MUST_USE bool ParseInt64(const char* input, const char** next,
-                             int64_t* result);
+[[nodiscard]] bool ParseInt64(const char* input, const char** next,
+                              int64_t* result);
 
 // Variant on ParseInt64 that expects the input string to contain nothing
 // more than the value being parsed.
-inline MOZ_MUST_USE bool ParseInt64(const char* input, int64_t* result) {
+[[nodiscard]] inline bool ParseInt64(const char* input, int64_t* result) {
   const char* next;
   return ParseInt64(input, &next, result) && *next == '\0';
 }
@@ -256,8 +244,6 @@ void NotifyActiveTabLoadOptimization();
 TimeStamp const GetLastActiveTabLoadOptimizationHit();
 void SetLastActiveTabLoadOptimizationHit(TimeStamp const& when);
 bool IsBeforeLastActiveTabLoadOptimization(TimeStamp const& when);
-
-HttpVersion GetHttpVersionFromSpdy(SpdyVersion sv);
 
 // Declare all atoms
 //

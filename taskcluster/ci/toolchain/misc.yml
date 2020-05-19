@@ -100,24 +100,6 @@ linux64-mar-tools:
             - toolkit/mozapps/update/updater/bspatch/
             - tools/update-packaging/
 
-linux64-tup:
-    description: "tup toolchain build"
-    treeherder:
-        symbol: TL(tup)
-    worker:
-        max-run-time: 3600
-    run:
-        script: build-tup-linux.sh
-        toolchain-artifact: public/build/tup.tar.xz
-    run-on-projects:
-        - trunk
-        - try
-    fetches:
-        fetch:
-            - tup
-        toolchain:
-            - linux64-gcc-7
-
 linux64-upx:
     description: "UPX build"
     treeherder:
@@ -168,7 +150,7 @@ wasi-sysroot:
         toolchain-artifact: public/build/wasi-sysroot.tar.xz
     fetches:
         fetch:
-            - clang-9
+            - clang-10
             - wasi-sdk
         toolchain:
             - linux64-binutils
@@ -190,7 +172,7 @@ wrench-deps:
         fetch:
             - android-rs-glue
         toolchain:
-            - linux64-rust-1.39  # whatever m-c is built with
+            - linux64-rust-1.41  # whatever m-c is built with
 
 wgpu-deps:
     description: "Downloads all the crates needed for testing wgpu"
@@ -201,8 +183,6 @@ wgpu-deps:
     run:
         script: wgpu-deps-vendoring.sh
         sparse-profile: null
-        resources:
-            - 'gfx/wgpu/Cargo.lock'
         toolchain-artifact: public/build/wgpu-deps.tar.bz2
     fetches:
         fetch:
@@ -225,3 +205,95 @@ linux64-lucetc:
             - linux64-binutils
             - linux64-clang
             - linux64-rust
+
+linux64-liblowercase:
+    description: "liblowercase"
+    treeherder:
+        symbol: TL(lc)
+    run:
+        script: build-liblowercase.sh
+        sparse-profile: liblowercase
+        toolchain-artifact: public/build/liblowercase.tar.xz
+        resources:
+            - build/liblowercase/
+    fetches:
+        toolchain:
+            - linux64-rust-1.41
+
+linux64-wine:
+    description: "Wine build for Windows Cross Compile"
+    treeherder:
+        symbol: TL(wine)
+        tier: 1
+    worker:
+        docker-image: {in-tree: deb9-toolchain-build}
+        max-run-time: 10800
+    run:
+        script: build-wine.sh
+        toolchain-artifact: public/build/wine.tar.xz
+    fetches:
+        fetch:
+            - wine-5.0
+
+win32-pdbstr:
+    description: "pdbstr for 32-bits Windows"
+    treeherder:
+        symbol: TW32(pdbstr)
+    worker-type: b-win2012
+    worker:
+        artifacts:
+            - name: project/gecko/pdbstr/pdbstr.tar.bz2
+              path: pdbstr.tar.bz2
+              type: file
+    run:
+        script: exfiltrate-pdbstr.sh
+        arguments: ['x86']
+        toolchain-artifact: project/gecko/pdbstr/pdbstr.tar.bz2
+
+win64-pdbstr:
+    description: "pdbstr for 64-bits Windows"
+    treeherder:
+        symbol: TW64(pdbstr)
+    worker-type: b-win2012
+    worker:
+        artifacts:
+            - name: project/gecko/pdbstr/pdbstr.tar.bz2
+              path: pdbstr.tar.bz2
+              type: file
+    run:
+        script: exfiltrate-pdbstr.sh
+        arguments: ['x64']
+        toolchain-artifact: project/gecko/pdbstr/pdbstr.tar.bz2
+
+linux64-winchecksec:
+    description: "winchecksec"
+    treeherder:
+        symbol: TL(winchecksec)
+    worker:
+        docker-image: {in-tree: deb10-toolchain-build}
+    run:
+        script: build-winchecksec.sh
+        toolchain-artifact: public/build/winchecksec.tar.bz2
+        tooltool-downloads: internal
+    fetches:
+        fetch:
+            - winchecksec
+
+win64-winchecksec:
+    description: "winchecksec"
+    treeherder:
+        symbol: TW64(winchecksec)
+    worker:
+        docker-image: {in-tree: deb10-toolchain-build}
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/vs2017.manifest"
+    run:
+        script: build-winchecksec.sh
+        toolchain-artifact: public/build/winchecksec.tar.bz2
+        tooltool-downloads: internal
+    fetches:
+        fetch:
+            - winchecksec
+        toolchain:
+            - linux64-clang-win-cross
+            - linux64-liblowercase

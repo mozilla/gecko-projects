@@ -141,6 +141,8 @@ const REGION_STORIES_CONFIG =
   "browser.newtabpage.activity-stream.discoverystream.region-stories-config";
 const REGION_SPOCS_CONFIG =
   "browser.newtabpage.activity-stream.discoverystream.region-spocs-config";
+const REGION_LAYOUT_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.region-layout-config";
 
 // Determine if spocs should be shown for a geo/locale
 function showSpocs({ geo }) {
@@ -182,9 +184,7 @@ const PREFS_CONFIG = new Map([
             showSpocs(args) ? "default_spocs_on" : "default_spocs_off"
           }`,
           stories_referrer: "https://getpocket.com/recommendations",
-          topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${
-            args.locale
-          }`,
+          topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
           model_keys: [
             "nmf_model_animals",
             "nmf_model_business",
@@ -515,6 +515,28 @@ const PREFS_CONFIG = new Map([
     },
   ],
   [
+    "discoverystream.isCollectionDismissible",
+    {
+      title: "Allows Pocket story collections to be dismissed",
+      value: false,
+    },
+  ],
+  [
+    "discoverystream.region-basic-layout",
+    {
+      title: "Decision to use basic layout based on region.",
+      getValue: ({ geo }) => {
+        const preffedRegionsString =
+          Services.prefs.getStringPref(REGION_LAYOUT_CONFIG) || "";
+        const preffedRegions = preffedRegionsString
+          .split(",")
+          .map(s => s.trim());
+
+        return !preffedRegions.includes(geo);
+      },
+    },
+  ],
+  [
     "discoverystream.spoc.impressions",
     {
       title: "Track spoc impressions",
@@ -590,11 +612,22 @@ const FEEDS_DATA = [
         Services.prefs.getStringPref(REGION_STORIES_CONFIG) || "";
       const preffedRegions = preffedRegionsString.split(",").map(s => s.trim());
       const locales = {
-        US: ["en-CA", "en-GB", "en-US", "en-ZA"],
-        CA: ["en-CA", "en-GB", "en-US", "en-ZA"],
-        GB: ["en-CA", "en-GB", "en-US", "en-ZA"],
-        DE: ["de", "de-DE", "de-AT", "de-CH"],
-        JP: ["ja", "ja-JP"],
+        US: ["en-CA", "en-GB", "en-US"],
+        CA: ["en-CA", "en-GB", "en-US"],
+        GB: ["en-CA", "en-GB", "en-US"],
+        AU: ["en-CA", "en-GB", "en-US"],
+        NZ: ["en-CA", "en-GB", "en-US"],
+        IN: ["en-CA", "en-GB", "en-US"],
+        ZA: ["en-CA", "en-GB", "en-US"],
+        CH: ["de", "fr", "it"],
+        BE: ["fr", "de"],
+        DE: ["de"],
+        AT: ["de"],
+        IT: ["it"],
+        FR: ["fr"],
+        ES: ["es"],
+        PL: ["pl"],
+        JP: ["ja", "ja-JP-mac"],
       }[geo];
       return (
         preffedRegions.includes(geo) && !!locales && locales.includes(locale)
@@ -692,7 +725,9 @@ this.ActivityStream = class ActivityStream {
         this.feeds,
         ac.BroadcastToContent({
           type: at.INIT,
-          data: {},
+          data: {
+            locale: this.locale,
+          },
         }),
         { type: at.UNINIT }
       );

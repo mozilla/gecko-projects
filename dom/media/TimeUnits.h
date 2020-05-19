@@ -7,6 +7,8 @@
 #ifndef TIME_UNITS_H
 #define TIME_UNITS_H
 
+#include <type_traits>
+
 #include "Intervals.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/FloatingPoint.h"
@@ -20,8 +22,9 @@ class TimeIntervals;
 }  // namespace mozilla
 // CopyChooser specialization for nsTArray
 template <>
-struct nsTArray_CopyChooser<mozilla::media::TimeIntervals> {
-  typedef nsTArray_CopyWithConstructors<mozilla::media::TimeIntervals> Type;
+struct nsTArray_RelocationStrategy<mozilla::media::TimeIntervals> {
+  typedef nsTArray_RelocateUsingMoveConstructor<mozilla::media::TimeIntervals>
+      Type;
 };
 
 namespace mozilla {
@@ -171,7 +174,7 @@ class TimeUnit final {
   TimeUnit operator*(T aVal) const {
     // See bug 853398 for the reason to block double multiplier.
     // If required, use MultDouble below and with caution.
-    static_assert(mozilla::IsIntegral<T>::value, "Must be an integral type");
+    static_assert(std::is_integral_v<T>, "Must be an integral type");
     return TimeUnit(mValue * aVal);
   }
   TimeUnit MultDouble(double aVal) const {
@@ -188,7 +191,7 @@ class TimeUnit final {
 
   bool IsValid() const { return mValue.isValid(); }
 
-  constexpr TimeUnit() : mValue(CheckedInt64(0)) {}
+  constexpr TimeUnit() = default;
 
   TimeUnit(const TimeUnit&) = default;
 
@@ -206,7 +209,7 @@ class TimeUnit final {
       : mValue(aMicroseconds) {}
 
   // Our internal representation is in microseconds.
-  CheckedInt64 mValue;
+  CheckedInt64 mValue{0};
 };
 
 typedef Maybe<TimeUnit> NullableTimeUnit;

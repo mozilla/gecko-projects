@@ -44,6 +44,7 @@
 #include "gfxContext.h"
 #include "gfxQuartzSurface.h"
 #include "gfxQuartzNativeDrawing.h"
+#include "gfxUtils.h"  // for ToDeviceColor
 #include <algorithm>
 
 using namespace mozilla;
@@ -1162,18 +1163,19 @@ nsNativeThemeCocoa::MenuItemParams nsNativeThemeCocoa::ComputeMenuItemParams(
   return params;
 }
 
-static void SetCGContextFillColor(CGContextRef cgContext, const Color& aColor) {
-  CGContextSetRGBFillColor(cgContext, aColor.r, aColor.g, aColor.b, aColor.a);
+static void SetCGContextFillColor(CGContextRef cgContext, const sRGBColor& aColor) {
+  DeviceColor color = ToDeviceColor(aColor);
+  CGContextSetRGBFillColor(cgContext, color.r, color.g, color.b, color.a);
 }
 
 static void SetCGContextFillColor(CGContextRef cgContext, nscolor aColor) {
-  CGContextSetRGBFillColor(cgContext, NS_GET_R(aColor) / 255.0f, NS_GET_G(aColor) / 255.0f,
-                           NS_GET_B(aColor) / 255.0f, NS_GET_A(aColor) / 255.0f);
+  DeviceColor color = ToDeviceColor(aColor);
+  CGContextSetRGBFillColor(cgContext, color.r, color.g, color.b, color.a);
 }
 
 static void SetCGContextStrokeColor(CGContextRef cgContext, nscolor aColor) {
-  CGContextSetRGBStrokeColor(cgContext, NS_GET_R(aColor) / 255.0f, NS_GET_G(aColor) / 255.0f,
-                             NS_GET_B(aColor) / 255.0f, NS_GET_A(aColor) / 255.0f);
+  DeviceColor color = ToDeviceColor(aColor);
+  CGContextSetRGBStrokeColor(cgContext, color.r, color.g, color.b, color.a);
 }
 
 void nsNativeThemeCocoa::DrawMenuItem(CGContextRef cgContext, const CGRect& inBoxRect,
@@ -1746,7 +1748,7 @@ void nsNativeThemeCocoa::DrawTextBox(CGContextRef cgContext, const HIRect& inBox
                                      TextBoxParams aParams) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  CGContextSetRGBFillColor(cgContext, 1.0, 1.0, 1.0, 1.0);
+  SetCGContextFillColor(cgContext, sRGBColor(1.0, 1.0, 1.0, 1.0));
   CGContextFillRect(cgContext, inBoxRect);
 
 #if DRAW_IN_FRAME_DEBUG
@@ -2601,15 +2603,15 @@ void nsNativeThemeCocoa::DrawScrollCorner(CGContextRef cgContext, const CGRect& 
   CGContextStrokeLineSegments(cgContext, outerPoints, 4);
 }
 
-static const Color kTooltipBackgroundColor(0.996, 1.000, 0.792, 0.950);
-static const Color kMultilineTextFieldTopBorderColor(0.4510, 0.4510, 0.4510, 1.0);
-static const Color kMultilineTextFieldSidesAndBottomBorderColor(0.6, 0.6, 0.6, 1.0);
-static const Color kListboxTopBorderColor(0.557, 0.557, 0.557, 1.0);
-static const Color kListBoxSidesAndBottomBorderColor(0.745, 0.745, 0.745, 1.0);
+static const sRGBColor kTooltipBackgroundColor(0.996, 1.000, 0.792, 0.950);
+static const sRGBColor kMultilineTextFieldTopBorderColor(0.4510, 0.4510, 0.4510, 1.0);
+static const sRGBColor kMultilineTextFieldSidesAndBottomBorderColor(0.6, 0.6, 0.6, 1.0);
+static const sRGBColor kListboxTopBorderColor(0.557, 0.557, 0.557, 1.0);
+static const sRGBColor kListBoxSidesAndBottomBorderColor(0.745, 0.745, 0.745, 1.0);
 
 void nsNativeThemeCocoa::DrawMultilineTextField(CGContextRef cgContext, const CGRect& inBoxRect,
                                                 bool aIsFocused) {
-  CGContextSetRGBFillColor(cgContext, 1.0, 1.0, 1.0, 1.0);
+  SetCGContextFillColor(cgContext, sRGBColor(1.0, 1.0, 1.0, 1.0));
 
   CGContextFillRect(cgContext, inBoxRect);
 
@@ -2908,7 +2910,7 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
       return Some(WidgetInfo::Dropdown(params));
     }
 
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
       return Some(WidgetInfo::Button(
           ButtonParams{ComputeControlParams(aFrame, eventState), ButtonType::eArrowButton}));
 
@@ -2971,7 +2973,7 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
 
     case StyleAppearance::Treeitem:
     case StyleAppearance::Treeview:
-      return Some(WidgetInfo::ColorFill(Color(1.0, 1.0, 1.0, 1.0)));
+      return Some(WidgetInfo::ColorFill(sRGBColor(1.0, 1.0, 1.0, 1.0)));
 
     case StyleAppearance::Treeheader:
       // do nothing, taken care of by individual header cells
@@ -3129,7 +3131,7 @@ void nsNativeThemeCocoa::RenderWidget(const WidgetInfo& aWidgetInfo, DrawTarget&
 
   switch (aWidgetInfo.Widget()) {
     case Widget::eColorFill: {
-      Color params = aWidgetInfo.Params<Color>();
+      sRGBColor params = aWidgetInfo.Params<sRGBColor>();
       SetCGContextFillColor(cgContext, params);
       CGContextFillRect(cgContext, macRect);
       break;
@@ -3296,7 +3298,7 @@ void nsNativeThemeCocoa::RenderWidget(const WidgetInfo& aWidgetInfo, DrawTarget&
     case Widget::eListBox: {
       // We have to draw this by hand because kHIThemeFrameListBox drawing
       // is buggy on 10.5, see bug 579259.
-      CGContextSetRGBFillColor(cgContext, 1.0, 1.0, 1.0, 1.0);
+      SetCGContextFillColor(cgContext, sRGBColor(1.0, 1.0, 1.0, 1.0));
       CGContextFillRect(cgContext, macRect);
 
       float x = macRect.origin.x, y = macRect.origin.y;
@@ -3392,7 +3394,8 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
 
     case StyleAppearance::Tooltip:
       if (!VibrancyManager::SystemSupportsVibrancy()) {
-        aBuilder.PushRect(bounds, bounds, true, wr::ToColorF(kTooltipBackgroundColor));
+        aBuilder.PushRect(bounds, bounds, true,
+                          wr::ToColorF(ToDeviceColor(kTooltipBackgroundColor)));
       }
       return true;
 
@@ -3415,7 +3418,7 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistTextfield:
     case StyleAppearance::MenulistButton:
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
     case StyleAppearance::Groupbox:
     case StyleAppearance::Textfield:
     case StyleAppearance::NumberInput:
@@ -3455,13 +3458,18 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
       }
 
       // White background
-      aBuilder.PushRect(bounds, bounds, true, wr::ToColorF(Color(1.0, 1.0, 1.0, 1.0)));
+      aBuilder.PushRect(bounds, bounds, true,
+                        wr::ToColorF(ToDeviceColor(sRGBColor::OpaqueWhite())));
 
       wr::BorderSide side[4] = {
-          wr::ToBorderSide(kMultilineTextFieldTopBorderColor, StyleBorderStyle::Solid),
-          wr::ToBorderSide(kMultilineTextFieldSidesAndBottomBorderColor, StyleBorderStyle::Solid),
-          wr::ToBorderSide(kMultilineTextFieldSidesAndBottomBorderColor, StyleBorderStyle::Solid),
-          wr::ToBorderSide(kMultilineTextFieldSidesAndBottomBorderColor, StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kMultilineTextFieldTopBorderColor),
+                           StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kMultilineTextFieldSidesAndBottomBorderColor),
+                           StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kMultilineTextFieldSidesAndBottomBorderColor),
+                           StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kMultilineTextFieldSidesAndBottomBorderColor),
+                           StyleBorderStyle::Solid),
       };
 
       wr::BorderRadius borderRadius = wr::EmptyBorderRadius();
@@ -3477,13 +3485,17 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
 
     case StyleAppearance::Listbox: {
       // White background
-      aBuilder.PushRect(bounds, bounds, true, wr::ToColorF(Color(1.0, 1.0, 1.0, 1.0)));
+      aBuilder.PushRect(bounds, bounds, true,
+                        wr::ToColorF(ToDeviceColor(sRGBColor::OpaqueWhite())));
 
       wr::BorderSide side[4] = {
-          wr::ToBorderSide(kListboxTopBorderColor, StyleBorderStyle::Solid),
-          wr::ToBorderSide(kListBoxSidesAndBottomBorderColor, StyleBorderStyle::Solid),
-          wr::ToBorderSide(kListBoxSidesAndBottomBorderColor, StyleBorderStyle::Solid),
-          wr::ToBorderSide(kListBoxSidesAndBottomBorderColor, StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kListboxTopBorderColor), StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kListBoxSidesAndBottomBorderColor),
+                           StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kListBoxSidesAndBottomBorderColor),
+                           StyleBorderStyle::Solid),
+          wr::ToBorderSide(ToDeviceColor(kListBoxSidesAndBottomBorderColor),
+                           StyleBorderStyle::Solid),
       };
 
       wr::BorderRadius borderRadius = wr::EmptyBorderRadius();
@@ -3559,7 +3571,7 @@ LayoutDeviceIntMargin nsNativeThemeCocoa::GetWidgetBorder(nsDeviceContext* aCont
 
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
       result = DirectionAwareMargin(kAquaDropdownBorder, aFrame);
       break;
 
@@ -3676,7 +3688,7 @@ bool nsNativeThemeCocoa::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* 
     case StyleAppearance::Listbox:
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
     case StyleAppearance::MenulistTextfield:
     case StyleAppearance::Checkbox:
     case StyleAppearance::Radio:
@@ -3790,7 +3802,7 @@ nsNativeThemeCocoa::GetMinimumWidgetSize(nsPresContext* aPresContext, nsIFrame* 
 
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
-    case StyleAppearance::MozMenulistButton: {
+    case StyleAppearance::MozMenulistArrowButton: {
       SInt32 popupHeight = 0;
       ::GetThemeMetric(kThemeMetricPopupButtonHeight, &popupHeight);
       aResult->SizeTo(0, popupHeight);
@@ -3927,17 +3939,6 @@ nsNativeThemeCocoa::GetMinimumWidgetSize(nsPresContext* aPresContext, nsIFrame* 
 
     case StyleAppearance::ScrollbarNonDisappearing: {
       int32_t themeMetric = kThemeMetricScrollBarWidth;
-
-      if (aFrame) {
-        if (IsSmallScrollbar(aFrame)) {
-          // XXX We're interested in the width of non-disappearing scrollbars
-          // to leave enough space for a dropmarker in non-native styled
-          // comboboxes (bug 869314). It isn't clear to me if comboboxes can
-          // ever have small scrollbars.
-          themeMetric = kThemeMetricSmallScrollBarWidth;
-        }
-      }
-
       SInt32 scrollbarWidth = 0;
       ::GetThemeMetric(themeMetric, &scrollbarWidth);
       aResult->SizeTo(scrollbarWidth, scrollbarWidth);
@@ -4054,7 +4055,7 @@ nsNativeThemeCocoa::ThemeChanged() {
 bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* aFrame,
                                              StyleAppearance aAppearance) {
   // if this is a dropdown button in a combobox the answer is always no
-  if (aAppearance == StyleAppearance::MozMenulistButton) {
+  if (aAppearance == StyleAppearance::MozMenulistArrowButton) {
     nsIFrame* parentFrame = aFrame->GetParent();
     if (parentFrame && parentFrame->IsComboboxControlFrame()) return false;
   }
@@ -4063,7 +4064,7 @@ bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFra
     // Combobox dropdowns don't support native theming in vertical mode.
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
     case StyleAppearance::MenulistText:
       if (aFrame && aFrame->GetWritingMode().IsVertical()) {
         return false;
@@ -4186,7 +4187,7 @@ bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFra
 bool nsNativeThemeCocoa::WidgetIsContainer(StyleAppearance aAppearance) {
   // flesh this out at some point
   switch (aAppearance) {
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
     case StyleAppearance::Radio:
     case StyleAppearance::Checkbox:
     case StyleAppearance::ProgressBar:
@@ -4203,17 +4204,24 @@ bool nsNativeThemeCocoa::WidgetIsContainer(StyleAppearance aAppearance) {
 }
 
 bool nsNativeThemeCocoa::ThemeDrawsFocusForWidget(StyleAppearance aAppearance) {
-
-  if (aAppearance == StyleAppearance::MenulistButton ||
-      aAppearance == StyleAppearance::Button ||
-      aAppearance == StyleAppearance::MozMacHelpButton ||
-      aAppearance == StyleAppearance::MozMacDisclosureButtonOpen ||
-      aAppearance == StyleAppearance::MozMacDisclosureButtonClosed ||
-      aAppearance == StyleAppearance::Radio || aAppearance == StyleAppearance::Range ||
-      aAppearance == StyleAppearance::Checkbox)
-    return true;
-
-  return false;
+  switch (aAppearance) {
+    case StyleAppearance::Textarea:
+    case StyleAppearance::Textfield:
+    case StyleAppearance::Searchfield:
+    case StyleAppearance::NumberInput:
+    case StyleAppearance::Menulist:
+    case StyleAppearance::MenulistButton:
+    case StyleAppearance::Button:
+    case StyleAppearance::MozMacHelpButton:
+    case StyleAppearance::MozMacDisclosureButtonOpen:
+    case StyleAppearance::MozMacDisclosureButtonClosed:
+    case StyleAppearance::Radio:
+    case StyleAppearance::Range:
+    case StyleAppearance::Checkbox:
+      return true;
+    default:
+      return false;
+  }
 }
 
 bool nsNativeThemeCocoa::ThemeNeedsComboboxDropmarker() { return false; }
@@ -4372,15 +4380,11 @@ nsITheme::Transparency nsNativeThemeCocoa::GetWidgetTransparency(nsIFrame* aFram
   }
 }
 
-already_AddRefed<nsITheme> do_GetNativeTheme() {
+already_AddRefed<nsITheme> do_GetNativeThemeDoNotUseDirectly() {
   static nsCOMPtr<nsITheme> inst;
 
   if (!inst) {
-    if (XRE_IsContentProcess() && StaticPrefs::widget_disable_native_theme_for_content()) {
-      inst = new nsNativeBasicTheme();
-    } else {
-      inst = new nsNativeThemeCocoa();
-    }
+    inst = new nsNativeThemeCocoa();
     ClearOnShutdown(&inst);
   }
 

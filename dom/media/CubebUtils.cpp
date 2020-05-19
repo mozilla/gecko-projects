@@ -30,7 +30,7 @@
 #include <algorithm>
 #include <stdint.h>
 #ifdef MOZ_WIDGET_ANDROID
-#  include "GeneratedJNIWrappers.h"
+#  include "mozilla/java/GeckoAppShellWrappers.h"
 #endif
 #ifdef XP_WIN
 #  include "mozilla/mscom/EnsureMTA.h"
@@ -52,6 +52,7 @@
 #define PREF_CUBEB_LOGGING_LEVEL "media.cubeb.logging_level"
 // Hidden pref used by tests to force failure to obtain cubeb context
 #define PREF_CUBEB_FORCE_NULL_CONTEXT "media.cubeb.force_null_context"
+#define PREF_CUBEB_OUTPUT_VOICE_ROUTING "media.cubeb.output_voice_routing"
 // Hidden pref to disable BMO 1427011 experiment; can be removed once proven.
 #define PREF_CUBEB_DISABLE_DEVICE_SWITCHING \
   "media.cubeb.disable_device_switching"
@@ -71,7 +72,7 @@ namespace {
 LazyLogModule gCubebLog("cubeb");
 
 void CubebLogCallback(const char* aFmt, ...) {
-  char buffer[256];
+  char buffer[1024];
 
   va_list arglist;
   va_start(arglist, aFmt);
@@ -100,6 +101,7 @@ bool sCubebMTGLatencyPrefSet = false;
 bool sAudioStreamInitEverSucceeded = false;
 bool sCubebForceNullContext = false;
 bool sCubebDisableDeviceSwitching = true;
+bool sRouteOutputAsVoice = false;
 #ifdef MOZ_CUBEB_REMOTING
 bool sCubebSandbox = false;
 size_t sAudioIPCPoolSize;
@@ -267,6 +269,13 @@ void PrefChanged(const char* aPref, void* aClosure) {
                                               AUDIOIPC_STACK_SIZE_DEFAULT);
   }
 #endif
+  else if (strcmp(aPref, PREF_CUBEB_OUTPUT_VOICE_ROUTING) == 0) {
+    StaticMutexAutoLock lock(sMutex);
+    sRouteOutputAsVoice = Preferences::GetBool(aPref);
+    MOZ_LOG(gCubebLog, LogLevel::Verbose,
+            ("%s: %s", PREF_CUBEB_OUTPUT_VOICE_ROUTING,
+             sRouteOutputAsVoice ? "true" : "false"));
+  }
 }
 
 bool GetFirstStream() {
@@ -431,10 +440,6 @@ cubeb* GetCubebContextUnlocked() {
     MOZ_LOG(gCubebLog, LogLevel::Debug,
             ("%s: returning null context due to %s!", __func__,
              PREF_CUBEB_FORCE_NULL_CONTEXT));
-    return nullptr;
-  }
-  if (recordreplay::IsRecordingOrReplaying()) {
-    // Media is not supported when recording or replaying. See bug 1304146.
     return nullptr;
   }
   if (sCubebState != CubebState::Uninitialized) {
@@ -605,11 +610,11 @@ void InitLibrary() {
   }
 
 #ifndef MOZ_WIDGET_ANDROID
-  AbstractThread::MainThread()->Dispatch(
+  NS_DispatchToMainThread(
       NS_NewRunnableFunction("CubebUtils::InitLibrary", &InitBrandName));
 #endif
 #ifdef MOZ_CUBEB_REMOTING
-  if (sCubebSandbox && XRE_IsContentProcess() && !recordreplay::IsMiddleman()) {
+  if (sCubebSandbox && XRE_IsContentProcess()) {
     InitAudioIPCConnection();
   }
 #endif
@@ -679,6 +684,8 @@ cubeb_stream_prefs GetDefaultStreamPrefs() {
 #endif
   return CUBEB_STREAM_PREF_NONE;
 }
+
+bool RouteOutputAsVoice() { return sRouteOutputAsVoice; }
 
 #ifdef MOZ_WIDGET_ANDROID
 uint32_t AndroidGetAudioOutputSampleRate() {

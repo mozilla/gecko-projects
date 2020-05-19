@@ -73,8 +73,8 @@ class SeleniumBaseProtocolPart(BaseProtocolPart):
             except (socket.timeout, exceptions.NoSuchWindowException,
                     exceptions.ErrorInResponseException, IOError):
                 break
-            except Exception as e:
-                self.logger.error(traceback.format_exc(e))
+            except Exception:
+                self.logger.error(traceback.format_exc())
                 break
 
 
@@ -262,7 +262,7 @@ class SeleniumRun(TimedRunner):
             message = str(getattr(e, "message", ""))
             if message:
                 message += "\n"
-            message += traceback.format_exc(e)
+            message += traceback.format_exc()
             self.result = False, ("INTERNAL-ERROR", message)
         finally:
             self.result_flag.set()
@@ -372,8 +372,8 @@ class SeleniumRefTestExecutor(RefTestExecutor):
         self.close_after_done = close_after_done
         self.has_window = False
 
-        with open(os.path.join(here, "test-wait.js" % {"classname": "reftest-wait"})) as f:
-            self.wait_script = f.read()
+        with open(os.path.join(here, "test-wait.js")) as f:
+            self.wait_script = f.read() % {"classname": "reftest-wait"}
 
     def reset(self):
         self.implementation.reset()

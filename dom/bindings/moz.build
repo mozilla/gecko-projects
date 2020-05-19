@@ -27,6 +27,7 @@ EXPORTS.mozilla += [
 
 EXPORTS.mozilla.dom += [
     'AtomList.h',
+    'BindingCallContext.h',
     'BindingDeclarations.h',
     'BindingIPCUtils.h',
     'BindingUtils.h',
@@ -92,6 +93,8 @@ LOCAL_INCLUDES += [
     '/media/webrtc/signaling/src/common/time_profiling',
     '/media/webrtc/signaling/src/peerconnection',
     '/media/webrtc/trunk/',
+    '/media/webrtc/trunk/webrtc/',
+    '/netwerk/base/'
 ]
 
 LOCAL_INCLUDES += ['/third_party/msgpack/include']
@@ -176,7 +179,6 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
 if CONFIG['COMPILE_ENVIRONMENT']:
     GeneratedFile('CSS2Properties.webidl',
                   script='GenerateCSS2PropertiesWebIDL.py',
-                  py2=True,
                   entry_point='generate',
                   inputs=[
                       '/dom/webidl/CSS2Properties.webidl.in',

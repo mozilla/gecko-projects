@@ -11,6 +11,7 @@ include "mozilla/layers/LayersMessageUtils.h";
 
 include IPCBlob;
 include IPCStream;
+include protocol PIPCBlobInputStream;
 include ProtocolTypes;
 include protocol PSHEntry;
 
@@ -28,12 +29,12 @@ using CSSRect from "Units.h";
 using CSSSize from "Units.h";
 using ScreenIntSize from "Units.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
-using nsSizeMode from "nsIWidgetListener.h";
+using nsSizeMode from "mozilla/dom/TabMessageUtils.h";
 using ScrollbarPreference from "mozilla/ScrollbarPreferences.h";
 using hal::ScreenOrientation from "mozilla/HalScreenConfiguration.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using refcounted class nsIPrincipal from "mozilla/dom/PermissionMessageUtils.h";
-using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
+using mozilla::dom::MaybeDiscardedBrowsingContext from "mozilla/dom/BrowsingContext.h";
 using refcounted class nsIURI from "mozilla/ipc/URIUtils.h";
 using refcounted class nsIContentSecurityPolicy from "mozilla/dom/CSPMessageUtils.h";
 using refcounted class nsIInputStream from "mozilla/ipc/IPCStreamUtils.h";
@@ -41,7 +42,9 @@ using refcounted class nsIReferrerInfo from "mozilla/dom/ReferrerInfoUtils.h";
 using refcounted class nsIVariant from "mozilla/dom/PropertyBagUtils.h";
 using class mozilla::TimeStamp from "mozilla/TimeStamp.h";
 using refcounted class nsISHEntry from "nsISHEntry.h";
+using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
 using refcounted class mozilla::dom::CrossProcessSHEntry from "mozilla/dom/MaybeNewPSHEntry.h";
+using mozilla::dom::WindowContextInitializer from "mozilla/dom/WindowContext.h";
 
 namespace mozilla {
 namespace dom {
@@ -221,14 +224,15 @@ struct PerformanceInfo
   CategoryDispatch[] items;
 };
 
-
 struct WindowGlobalInit
 {
+  // Fields which are synchronized to other processes are found here.
+  WindowContextInitializer context;
+
+  // Private fields only shared with the parent process.
   nsIPrincipal principal;
+  nsIPrincipal contentBlockingAllowListPrincipal;
   nsIURI documentURI;
-  BrowsingContext browsingContext;
-  uint64_t innerWindowId;
-  uint64_t outerWindowId;
 };
 
 struct DocShellLoadStateInit
@@ -253,6 +257,7 @@ struct DocShellLoadStateInit
   nsIURI BaseURI;
   uint32_t LoadFlags;
   bool FirstParty;
+  bool HasValidUserGestureActivation;
   nsCString TypeHint;
   nsString FileName;
   bool IsFromProcessingFrameAttributes;
@@ -263,6 +268,8 @@ struct DocShellLoadStateInit
   // also the CSP that will be applied to the load in case the load
   // encounters a server side redirect.
   nsIContentSecurityPolicy Csp;
+
+  MaybeDiscardedBrowsingContext SourceBrowsingContext;
 
   nsCString? OriginalURIString;
   int32_t? CancelContentJSEpoch;
@@ -280,6 +287,8 @@ struct DocShellLoadStateInit
   // nsCOMPtr<nsIDocShell> mSourceDocShell;
   // bool mIsSrcDocLoad; // useless without sourcedocshell
   // nsIChannel pendingRedirectedChannel; // sent through other mechanism
+
+  uint32_t LoadIdentifier;
 };
 
 struct TimedChannelInfo
@@ -307,14 +316,13 @@ struct TimedChannelInfo
 
 struct ReplacementChannelConfigInit
 {
-  uint32_t loadFlags;
   uint32_t redirectFlags;
   uint32_t classOfService;
   bool? privateBrowsing;
   nsCString? method;
   nsIReferrerInfo referrerInfo;
   TimedChannelInfo? timedChannel;
-  nsIInputStream uploadStream;
+  nullable PIPCBlobInputStream uploadStream;
   bool uploadStreamHasHeaders;
   nsCString? contentType;
   nsCString? contentLength;
@@ -334,6 +342,7 @@ union IPDLVariantValue
   nsString;
   nsCString;
   nsIURI;
+  nsIPrincipal;
 };
 
 struct IDPLVariant
@@ -354,7 +363,6 @@ struct ParentShowInfo
 {
   nsString name;
   bool fullscreenAllowed;
-  bool isPrivate;
   bool fakeShowInfo;
   bool isTransparent;
   float dpi;
@@ -376,6 +384,12 @@ struct OwnerShowInfo {
   // parent process too instead.
   bool parentWindowIsActive;
   nsSizeMode sizeMode;
+};
+
+struct SwapEntriesDocshellData {
+  CrossProcessSHEntry oldEntry;
+  CrossProcessSHEntry newEntry;
+  MaybeDiscardedBrowsingContext context;
 };
 
 } // namespace dom

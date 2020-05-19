@@ -11,7 +11,7 @@ from six.moves.urllib.parse import parse_qs, urlsplit, urlunsplit, urlencode, un
 
 from logger.logger import RaptorLogger
 from manifestparser import TestManifest
-from utils import transform_platform, transform_subtest
+from utils import bool_from_str, transform_platform, transform_subtest
 from constants.raptor_tests_constants import YOUTUBE_PLAYBACK_MEASURE
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -39,7 +39,21 @@ playback_settings = [
 ]
 
 whitelist_live_site_tests = [
+    "booking-sf",
+    "discord",
+    "expedia",
+    "fashionbeans",
+    "google-accounts",
+    "imdb-firefox",
+    "medium-article",
+    "nytimes",
+    "people-article",
     "raptor-youtube-playback",
+    "reddit-thread",
+    "rumble-fox",
+    "stackoverflow-question",
+    "urbandictionary-define",
+    "wikia-marvel",
 ]
 
 
@@ -327,6 +341,14 @@ def get_raptor_test_list(args, oskey):
                 # subtest comes from matching test ini file name, so add it
                 tests_to_run.append(next_test)
 
+    # enable live sites if requested with --live-sites
+    if args.live_sites:
+        for next_test in tests_to_run:
+            # set use_live_sites to `true` and disable mitmproxy playback
+            # immediately so we don't follow playback paths below
+            next_test['use_live_sites'] = "true"
+            next_test['playback'] = None
+
     # go through each test and set the page-cycles and page-timeout, and some config flags
     # the page-cycles value in the INI can be overriden when debug-mode enabled, when
     # gecko-profiling enabled, or when --page-cycles cmd line arg was used (that overrides all)
@@ -335,7 +357,9 @@ def get_raptor_test_list(args, oskey):
         max_page_cycles = next_test.get('page_cycles', 1)
         max_browser_cycles = next_test.get('browser_cycles', 1)
 
-        # if using playback, the playback recording info may need to be transformed
+        # If using playback, the playback recording info may need to be transformed.
+        # This transformation needs to happen before the test name is changed
+        # below (for cold tests for instance)
         if next_test.get('playback') is not None:
             next_test['playback_pageset_manifest'] = \
                 transform_subtest(next_test['playback_pageset_manifest'],
@@ -446,8 +470,10 @@ def get_raptor_test_list(args, oskey):
             # when using live sites we want to turn off playback
             LOG.info("using live sites so turning playback off!")
             next_test['playback'] = None
-            LOG.info("using live sites so appending '-live' to the test name")
-            next_test['name'] = next_test['name'] + "-live"
+            # Only for raptor-youtube-playback tests until they are removed
+            # in favor of the browsertime variant
+            if "raptor-youtube-playback" in next_test['name']:
+                next_test['name'] = next_test['name'] + "-live"
             # allow a slightly higher page timeout due to remote page loads
             next_test['page_timeout'] = int(
                 next_test['page_timeout']) * LIVE_SITE_TIMEOUT_MULTIPLIER
@@ -492,17 +518,5 @@ def get_raptor_test_list(args, oskey):
                 # test doesn't have valid settings, remove it from available list
                 LOG.info("test %s is not valid due to missing settings" % test['name'])
                 tests_to_run.remove(test)
-    else:
-        LOG.critical("abort: specified test name doesn't exist")
 
     return tests_to_run
-
-
-def bool_from_str(boolean_string):
-    lower_boolean_str = boolean_string.lower()
-    if lower_boolean_str == 'true':
-        return True
-    elif lower_boolean_str == 'false':
-        return False
-    else:
-        raise ValueError("Expected either 'true' or 'false'")

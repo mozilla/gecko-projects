@@ -16,7 +16,11 @@
 #include <algorithm>
 
 #include "Http2Push.h"
+#include "nsHttpHandler.h"
+#include "nsHttpTransaction.h"
 #include "nsIHttpPushListener.h"
+#include "nsISocketTransport.h"
+#include "nsSocketTransportService2.h"
 #include "nsString.h"
 
 namespace mozilla {
@@ -194,10 +198,7 @@ bool Http2PushedStream::TryOnPush() {
   mDeferCleanupOnPush = true;
   mResourceUrl = Origin() + Path();
   RefPtr<Http2PushedStreamWrapper> stream = new Http2PushedStreamWrapper(this);
-  RefPtr<nsHttpTransaction> transaction = trans;
-  NS_DispatchToMainThread(NS_NewRunnableFunction(
-      "net::nsHttpTransaction::OnPush",
-      [transaction, stream]() { transaction->OnPush(stream); }));
+  trans->OnPush(stream);
   return true;
 }
 

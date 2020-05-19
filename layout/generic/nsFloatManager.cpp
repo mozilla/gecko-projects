@@ -503,7 +503,7 @@ bool nsFloatManager::ClearContinues(StyleClear aBreakType) const {
 //
 class nsFloatManager::ShapeInfo {
  public:
-  virtual ~ShapeInfo() {}
+  virtual ~ShapeInfo() = default;
 
   virtual nscoord LineLeft(const nscoord aBStart,
                            const nscoord aBEnd) const = 0;
@@ -1263,14 +1263,14 @@ class nsFloatManager::PolygonShapeInfo final
 
 nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
     nsTArray<nsPoint>&& aVertices)
-    : mVertices(aVertices) {
+    : mVertices(std::move(aVertices)) {
   ComputeExtent();
 }
 
 nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
     nsTArray<nsPoint>&& aVertices, nscoord aShapeMargin,
     int32_t aAppUnitsPerDevPixel, const nsRect& aMarginRect)
-    : mVertices(aVertices) {
+    : mVertices(std::move(aVertices)) {
   MOZ_ASSERT(aShapeMargin > 0,
              "This constructor should only be used for a "
              "polygon with a positive shape-margin.");

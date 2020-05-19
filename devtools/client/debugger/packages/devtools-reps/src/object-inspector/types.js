@@ -13,7 +13,7 @@ export type Grip = {
   userDisplayName?: string,
   name: string,
   extensible: boolean,
-  location: {
+  location?: {
     url: string,
     line: number,
     column: number,
@@ -144,7 +144,6 @@ export type Props = {
       setExpanded: (Node, boolean) => any,
     }
   ) => any,
-  actors: Set<string>,
   expandedPaths: Set<Path>,
   focusedItem: ?Node,
   activeItem: ?Node,
@@ -159,7 +158,6 @@ export type ReduxAction = {
 };
 
 export type State = {
-  actors: Set<string>,
   expandedPaths: Set<Path>,
   focusedItem: ?Node,
   activeItem: ?Node,

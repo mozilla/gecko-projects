@@ -36,6 +36,7 @@ const DEFAULT_PORTS = new Map([
 ]);
 
 ExtensionPreferencesManager.addSetting("proxy.settings", {
+  permission: "proxy",
   prefNames: [
     "network.proxy.type",
     "network.proxy.http",
@@ -291,9 +292,7 @@ this.proxy = class extends ExtensionAPI {
                   new URL(value.autoConfigUrl);
                 } catch (e) {
                   throw new ExtensionError(
-                    `${
-                      value.autoConfigUrl
-                    } is not a valid value for autoConfigUrl.`
+                    `${value.autoConfigUrl} is not a valid value for autoConfigUrl.`
                   );
                 }
               }
@@ -305,9 +304,7 @@ this.proxy = class extends ExtensionAPI {
                   value.socksVersion > 5
                 ) {
                   throw new ExtensionError(
-                    `${
-                      value.socksVersion
-                    } is not a valid value for socksVersion.`
+                    `${value.socksVersion} is not a valid value for socksVersion.`
                   );
                 }
               }

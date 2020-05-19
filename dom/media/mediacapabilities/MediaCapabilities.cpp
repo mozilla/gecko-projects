@@ -20,6 +20,7 @@
 #include "PDMFactory.h"
 #include "VPXDecoder.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/SchedulerGroup.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/dom/DOMMozPromiseRequestHolder.h"
@@ -112,8 +113,8 @@ already_AddRefed<Promise> MediaCapabilities::DecodingInfo(
   if (!aConfiguration.mVideo.WasPassed() &&
       !aConfiguration.mAudio.WasPassed()) {
     aRv.ThrowTypeError<MSG_MISSING_REQUIRED_DICTIONARY_MEMBER>(
-        u"'audio' or 'video' member of argument of "
-        u"MediaCapabilities.decodingInfo");
+        "'audio' or 'video' member of argument of "
+        "MediaCapabilities.decodingInfo");
     return nullptr;
   }
 
@@ -172,7 +173,7 @@ already_AddRefed<Promise> MediaCapabilities::DecodingInfo(
     // parameters.
     if (videoTracks.Length() != 1) {
       promise->MaybeRejectWithTypeError<MSG_NO_CODECS_PARAMETER>(
-          NS_ConvertUTF8toUTF16(videoContainer->OriginalString()));
+          videoContainer->OriginalString());
       return promise.forget();
     }
     MOZ_DIAGNOSTIC_ASSERT(videoTracks.ElementAt(0),
@@ -188,7 +189,7 @@ already_AddRefed<Promise> MediaCapabilities::DecodingInfo(
     // parameters.
     if (audioTracks.Length() != 1) {
       promise->MaybeRejectWithTypeError<MSG_NO_CODECS_PARAMETER>(
-          NS_ConvertUTF8toUTF16(audioContainer->OriginalString()));
+          audioContainer->OriginalString());
       return promise.forget();
     }
     MOZ_DIAGNOSTIC_ASSERT(audioTracks.ElementAt(0),
@@ -255,7 +256,7 @@ already_AddRefed<Promise> MediaCapabilities::DecodingInfo(
           // once at a time as it can quickly exhaust the system resources
           // otherwise.
           static RefPtr<AllocPolicy> sVideoAllocPolicy = [&taskQueue]() {
-            SystemGroup::Dispatch(
+            SchedulerGroup::Dispatch(
                 TaskCategory::Other,
                 NS_NewRunnableFunction(
                     "MediaCapabilities::AllocPolicy:Video", []() {
@@ -459,8 +460,8 @@ already_AddRefed<Promise> MediaCapabilities::EncodingInfo(
   if (!aConfiguration.mVideo.WasPassed() &&
       !aConfiguration.mAudio.WasPassed()) {
     aRv.ThrowTypeError<MSG_MISSING_REQUIRED_DICTIONARY_MEMBER>(
-        u"'audio' or 'video' member of argument of "
-        u"MediaCapabilities.encodingInfo");
+        "'audio' or 'video' member of argument of "
+        "MediaCapabilities.encodingInfo");
     return nullptr;
   }
 

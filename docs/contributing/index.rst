@@ -8,4 +8,23 @@ source code documentation.
    :maxdepth: 1
    :glob:
 
-   *
+   how_to_contribute_firefox
+   editor
+   reviews
+   directory_structure
+
+
+.. toctree::
+   :caption: Version control system
+   :maxdepth: 1
+   :glob:
+
+   vcs/*
+
+
+.. toctree::
+   :caption: How to build Firefox
+   :maxdepth: 1
+   :glob:
+
+   build/*

@@ -219,6 +219,13 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
+  MOZ_UPDATE_AGENT:
+#ifdef MOZ_UPDATE_AGENT
+  true,
+#else
+  false,
+#endif
+
   MOZ_BITS_DOWNLOAD:
 #ifdef MOZ_BITS_DOWNLOAD
   true,
@@ -242,6 +249,13 @@ this.AppConstants = Object.freeze({
 
   ASAN_REPORTER:
 #ifdef MOZ_ASAN_REPORTER
+  true,
+#else
+  false,
+#endif
+
+  TSAN:
+#ifdef MOZ_TSAN
   true,
 #else
   false,

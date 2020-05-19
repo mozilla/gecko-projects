@@ -168,12 +168,16 @@ class MessageLogger(object):
         self.logger = logger
         self.structured = structured
         self.gecko_id = 'GECKO'
+        self.is_test_running = False
 
         # Even if buffering is enabled, we only want to buffer messages between
         # TEST-START/TEST-END. So it is off to begin, but will be enabled after
         # a TEST-START comes in.
-        self.buffering = False
+        self._buffering = False
         self.restore_buffering = buffering
+
+        # Guard to ensure we never buffer if this value was initially `False`
+        self._buffering_initially_enabled = buffering
 
         # Message buffering
         self.buffered_messages = []
@@ -245,11 +249,22 @@ class MessageLogger(object):
 
         return messages
 
+    @property
+    def buffering(self):
+        if not self._buffering_initially_enabled:
+            return False
+        return self._buffering
+
+    @buffering.setter
+    def buffering(self, val):
+        self._buffering = val
+
     def process_message(self, message):
         """Processes a structured message. Takes into account buffering, errors, ..."""
         # Activation/deactivating message buffering from the JS side
         if message['action'] == 'buffering_on':
-            self.buffering = True
+            if self.is_test_running:
+                self.buffering = True
             return
         if message['action'] == 'buffering_off':
             self.buffering = False
@@ -283,11 +298,14 @@ class MessageLogger(object):
 
         # If a test ended, we clean the buffer
         if message['action'] == 'test_end':
+            self.is_test_running = False
             self.buffered_messages = []
             self.restore_buffering = self.restore_buffering or self.buffering
             self.buffering = False
 
         if message['action'] == 'test_start':
+            self.is_test_running = True
+
             if self.restore_buffering:
                 self.restore_buffering = False
                 self.buffering = True
@@ -805,28 +823,31 @@ def findTestMediaDevices(log):
                            'v4l2sink', 'device=%s' % device])
     info['video'] = name
 
-    if platform.linux_distribution()[0] == 'debian':
-        # Debian 10 doesn't seem to appreciate starting pactl here.
-        # Still WIP (bug 1565332)
-        pass
-    else:
-        # Use pactl to see if the PulseAudio module-null-sink module is loaded.
-        pactl = spawn.find_executable("pactl")
+    # check if PulseAudio module-null-sink is loaded
+    pactl = spawn.find_executable("pactl")
 
-        def null_sink_loaded():
-            o = subprocess.check_output(
-                [pactl, 'list', 'short', 'modules'])
-            return filter(lambda x: 'module-null-sink' in x, o.splitlines())
+    if not pactl:
+        log.error('Could not find pactl on system')
+        return None
 
-        if not null_sink_loaded():
+    try:
+        o = subprocess.check_output(
+            [pactl, 'list', 'short', 'modules'])
+    except subprocess.CalledProcessError:
+        log.error('Could not list currently loaded modules')
+        return None
+
+    null_sink = filter(lambda x: 'module-null-sink' in x, o.splitlines())
+
+    if not null_sink:
+        try:
             subprocess.check_call([
                 pactl,
                 'load-module',
                 'module-null-sink'
             ])
-
-        if not null_sink_loaded():
-            log.error('Couldn\'t load module-null-sink')
+        except subprocess.CalledProcessError:
+            log.error('Could not load module-null-sink')
             return None
 
     # Hardcode the name since it's always the same.
@@ -1521,8 +1542,6 @@ toolbar#nav-bar {
                 testob['disabled'] = test['disabled']
             if 'expected' in test:
                 testob['expected'] = test['expected']
-            if 'uses-unsafe-cpows' in test:
-                testob['uses-unsafe-cpows'] = test['uses-unsafe-cpows'] == 'true'
             if 'scheme' in test:
                 testob['scheme'] = test['scheme']
             if options.failure_pattern_file:
@@ -1681,7 +1700,11 @@ toolbar#nav-bar {
             self.log.error(str(e))
             return None
 
-        browserEnv["XPCOM_MEM_BLOAT_LOG"] = self.leak_report_file
+        if ("MOZ_PROFILER_STARTUP_FEATURES" not in browserEnv or
+            "nativeallocations" not in browserEnv["MOZ_PROFILER_STARTUP_FEATURES"].split(",")):
+            # Only turn on the bloat log if the profiler's native allocation feature is
+            # not enabled. The two are not compatible.
+            browserEnv["XPCOM_MEM_BLOAT_LOG"] = self.leak_report_file
 
         try:
             gmp_path = self.getGMPPluginPath(options)
@@ -1699,11 +1722,6 @@ toolbar#nav-bar {
         self.mozLogs = MOZ_LOG and "MOZ_UPLOAD_DIR" in os.environ
         if self.mozLogs:
             browserEnv["MOZ_LOG"] = MOZ_LOG
-
-        # For e10s, our tests default to suppressing the "unsafe CPOW usage"
-        # warnings that can plague test logs.
-        if not options.enableCPOWWarnings:
-            browserEnv["DISABLE_UNSAFE_CPOW_WARNINGS"] = "1"
 
         if options.enable_webrender:
             browserEnv["MOZ_WEBRENDER"] = "1"
@@ -1851,13 +1869,20 @@ toolbar#nav-bar {
 
     def merge_base_profiles(self, options, category):
         """Merge extra profile data from testing/profiles."""
-        profile_data_dir = os.path.join(SCRIPT_DIR, 'profile_data')
 
+        # In test packages used in CI, the profile_data directory is installed
+        # in the SCRIPT_DIR.
+        profile_data_dir = os.path.join(SCRIPT_DIR, 'profile_data')
         # If possible, read profile data from topsrcdir. This prevents us from
         # requiring a re-build to pick up newly added extensions in the
         # <profile>/extensions directory.
         if build_obj:
             path = os.path.join(build_obj.topsrcdir, 'testing', 'profiles')
+            if os.path.isdir(path):
+                profile_data_dir = path
+        # Still not found? Look for testing/profiles relative to testing/mochitest.
+        if not os.path.isdir(profile_data_dir):
+            path = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'profiles'))
             if os.path.isdir(path):
                 profile_data_dir = path
 
@@ -1957,10 +1982,6 @@ toolbar#nav-bar {
             prefs['media.video_loopback_dev'] = self.mediaDevices['video']
             prefs['media.cubeb.output_device'] = "Null Output"
             prefs['media.volume_scale'] = "1.0"
-
-        # Disable web replay rewinding by default if recordings are being saved.
-        if options.recordingPath:
-            prefs["devtools.recordreplay.enableRewinding"] = False
 
         self.profile.set_preferences(prefs)
 
@@ -2761,10 +2782,12 @@ toolbar#nav-bar {
                 options.browserArgs.extend(['--jsconsole'])
 
             if options.jsdebugger:
-                options.browserArgs.extend(['-jsdebugger', '-wait-for-jsdebugger'])
+                options.browserArgs.extend(['-wait-for-jsdebugger', '-jsdebugger'])
 
-            if options.recordingPath:
-                options.browserArgs.extend(['--save-recordings', options.recordingPath])
+            # -jsdebugger takes a binary path as an optional argument.
+            # Append jsdebuggerPath right after `-jsdebugger`.
+            if options.jsdebuggerPath:
+                options.browserArgs.extend([options.jsdebuggerPath])
 
             # Remove the leak detection file so it can't "leak" to the tests run.
             # The file is not there if leak logging was not enabled in the
@@ -3060,10 +3083,12 @@ toolbar#nav-bar {
             return message
 
         def countline(self, message):
-            if message['action'] != 'log':
+            if message['action'] == 'log':
+                line = message['message']
+            elif message['action'] == 'process_output':
+                line = message['data']
+            else:
                 return message
-
-            line = message['message']
             val = 0
             try:
                 val = int(line.split(':')[-1].strip())

@@ -106,9 +106,6 @@ class App extends PureComponent {
     this.onToggleUserAgentInput = this.onToggleUserAgentInput.bind(this);
     this.onUpdateDeviceDisplayed = this.onUpdateDeviceDisplayed.bind(this);
     this.onUpdateDeviceModal = this.onUpdateDeviceModal.bind(this);
-    this.onUpdateDeviceSelectorMenu = this.onUpdateDeviceSelectorMenu.bind(
-      this
-    );
   }
 
   componentWillUnmount() {
@@ -348,6 +345,17 @@ class App extends PureComponent {
 
     this.onChangeViewportOrientation(id, type, angle, true);
     this.props.dispatch(rotateViewport(id));
+
+    if (Services.prefs.getBoolPref("devtools.responsive.browserUI.enabled")) {
+      window.postMessage(
+        {
+          type: "viewport-resize",
+          height: viewport.width,
+          width: viewport.height,
+        },
+        "*"
+      );
+    }
   }
 
   onScreenshot() {
@@ -392,12 +400,6 @@ class App extends PureComponent {
     }
   }
 
-  onUpdateDeviceSelectorMenu(isOpen) {
-    if (Services.prefs.getBoolPref("devtools.responsive.browserUI.enabled")) {
-      window.postMessage({ type: "update-device-selector-menu", isOpen }, "*");
-    }
-  }
-
   render() {
     const { devices, networkThrottling, screenshot, viewports } = this.props;
 
@@ -425,7 +427,6 @@ class App extends PureComponent {
       onToggleUserAgentInput,
       onUpdateDeviceDisplayed,
       onUpdateDeviceModal,
-      onUpdateDeviceSelectorMenu,
     } = this;
 
     if (!viewports.length) {
@@ -464,7 +465,6 @@ class App extends PureComponent {
         onToggleReloadOnUserAgent,
         onToggleUserAgentInput,
         onUpdateDeviceModal,
-        onUpdateDeviceSelectorMenu,
       }),
       !Services.prefs.getBoolPref("devtools.responsive.browserUI.enabled")
         ? Viewports({

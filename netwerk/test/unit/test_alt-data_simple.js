@@ -9,6 +9,8 @@
  * - this time the alt data must arive
  */
 
+"use strict";
+
 const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
@@ -58,13 +60,18 @@ function contentHandler(metadata, response) {
   }
 }
 
-function check_has_alt_data_in_index(aHasAltData) {
+function check_has_alt_data_in_index(aHasAltData, callback) {
   if (inChildProcess()) {
+    callback();
     return;
   }
-  var hasAltData = {};
-  cache_storage.getCacheIndexEntryAttrs(createURI(URL), "", hasAltData, {});
-  Assert.equal(hasAltData.value, aHasAltData);
+
+  syncWithCacheIOThread(() => {
+    var hasAltData = {};
+    cache_storage.getCacheIndexEntryAttrs(createURI(URL), "", hasAltData, {});
+    Assert.equal(hasAltData.value, aHasAltData);
+    callback();
+  }, true);
 }
 
 function run_test() {
@@ -96,14 +103,17 @@ function readServerContent(request, buffer) {
 
   Assert.equal(buffer, responseContent);
   Assert.equal(cc.alternativeDataType, "");
-  check_has_alt_data_in_index(false);
+  check_has_alt_data_in_index(false, () => {
+    executeSoon(() => {
+      var os = cc.openAlternativeOutputStream(
+        altContentType,
+        altContent.length
+      );
+      os.write(altContent, altContent.length);
+      os.close();
 
-  executeSoon(() => {
-    var os = cc.openAlternativeOutputStream(altContentType, altContent.length);
-    os.write(altContent, altContent.length);
-    os.close();
-
-    executeSoon(flushAndOpenAltChannel);
+      executeSoon(flushAndOpenAltChannel);
+    });
   });
 }
 
@@ -146,12 +156,12 @@ function readAltContent(request, buffer) {
   Assert.equal(servedNotModified, true);
   Assert.equal(cc.alternativeDataType, altContentType);
   Assert.equal(buffer, altContent);
-  check_has_alt_data_in_index(true);
-
-  cc.getOriginalInputStream({
-    onInputStreamReady(aInputStream) {
-      executeSoon(() => readOriginalInputStream(aInputStream));
-    },
+  check_has_alt_data_in_index(true, () => {
+    cc.getOriginalInputStream({
+      onInputStreamReady(aInputStream) {
+        executeSoon(() => readOriginalInputStream(aInputStream));
+      },
+    });
   });
 }
 
@@ -182,7 +192,5 @@ function readEmptyAltContent(request, buffer) {
   // the cache is overwrite and the alt-data is reset
   Assert.equal(cc.alternativeDataType, "");
   Assert.equal(buffer, responseContent2);
-  check_has_alt_data_in_index(false);
-
-  httpServer.stop(do_test_finished);
+  check_has_alt_data_in_index(false, () => httpServer.stop(do_test_finished));
 }

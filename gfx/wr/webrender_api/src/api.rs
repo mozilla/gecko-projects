@@ -6,7 +6,6 @@
 
 extern crate serde_bytes;
 
-use crate::channel::{self, MsgSender, Payload, PayloadSender};
 use peek_poke::PeekPoke;
 use std::cell::Cell;
 use std::fmt;
@@ -15,11 +14,14 @@ use std::os::raw::c_void;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::u32;
+use std::sync::mpsc::{Sender, Receiver, channel};
+use time::precise_time_ns;
 // local imports
 use crate::{display_item as di, font};
 use crate::color::{ColorU, ColorF};
-use crate::display_list::{BuiltDisplayList, BuiltDisplayListDescriptor};
+use crate::display_list::BuiltDisplayList;
 use crate::image::{BlobImageData, BlobImageKey, ImageData, ImageDescriptor, ImageKey};
+use crate::image::DEFAULT_TILE_SIZE;
 use crate::units::*;
 
 /// Width and height in device pixels of image tiles.
@@ -32,18 +34,19 @@ pub type DocumentLayer = i8;
 /// between rendering quality and performance / power usage.
 #[derive(Copy, Clone, Deserialize, Serialize)]
 pub struct QualitySettings {
-    /// If true, allow picture cache slices to be created that may prevent
-    /// subpixel AA on text being used due to lack of opaque background. This
-    /// often allows a significant performance win on pages that interleave
-    /// scroll regions with fixed position elements.
-    pub allow_sacrificing_subpixel_aa: bool,
+    /// If true, disable creating separate picture cache slices when the
+    /// scroll root changes. This gives maximum opportunity to find an
+    /// opaque background, which enables subpixel AA. However, it is
+    /// usually significantly more expensive to render when scrolling.
+    pub force_subpixel_aa_where_possible: bool,
 }
 
 impl Default for QualitySettings {
     fn default() -> Self {
         QualitySettings {
-            // Preferring performance in this case retains the current behavior.
-            allow_sacrificing_subpixel_aa: true,
+            // Prefer performance over maximum subpixel AA quality, since WR
+            // already enables subpixel AA in more situations than other browsers.
+            force_subpixel_aa_where_possible: false,
         }
     }
 }
@@ -99,7 +102,7 @@ impl fmt::Debug for ResourceUpdate {
                 &i.descriptor.size
             )),
             ResourceUpdate::AddBlobImage(ref i) => f.write_fmt(format_args!(
-                "ResourceUpdate::AddBlobImage size({:?})",
+                "ResourceUFpdate::AddBlobImage size({:?})",
                 &i.descriptor.size
             )),
             ResourceUpdate::UpdateBlobImage(i) => f.write_fmt(format_args!(
@@ -128,9 +131,6 @@ pub struct Transaction {
     /// Operations affecting the generation of frames (applied after scene building).
     frame_ops: Vec<FrameMsg>,
 
-    /// Additional display list data.
-    payloads: Vec<Payload>,
-
     notifications: Vec<NotificationRequest>,
 
     /// Persistent resource updates to apply as part of this transaction.
@@ -156,7 +156,6 @@ impl Transaction {
             scene_ops: Vec::new(),
             frame_ops: Vec::new(),
             resource_updates: Vec::new(),
-            payloads: Vec::new(),
             notifications: Vec::new(),
             use_scene_builder_thread: true,
             generate_frame: false,
@@ -251,22 +250,21 @@ impl Transaction {
         epoch: Epoch,
         background: Option<ColorF>,
         viewport_size: LayoutSize,
-        (pipeline_id, content_size, display_list): (PipelineId, LayoutSize, BuiltDisplayList),
+        (pipeline_id, content_size, mut display_list): (PipelineId, LayoutSize, BuiltDisplayList),
         preserve_frame_state: bool,
     ) {
-        let (display_list_data, list_descriptor) = display_list.into_data();
+        display_list.set_send_time_ns(precise_time_ns());
         self.scene_ops.push(
             SceneMsg::SetDisplayList {
+                display_list,
                 epoch,
                 pipeline_id,
                 background,
                 viewport_size,
                 content_size,
-                list_descriptor,
                 preserve_frame_state,
             }
         );
-        self.payloads.push(Payload { epoch, pipeline_id, display_list_data });
     }
 
     /// Add a set of persistent resource updates to apply as part of this transaction.
@@ -392,20 +390,17 @@ impl Transaction {
         self.frame_ops
     }
 
-    fn finalize(self) -> (TransactionMsg, Vec<Payload>) {
-        (
-            TransactionMsg {
-                scene_ops: self.scene_ops,
-                frame_ops: self.frame_ops,
-                resource_updates: self.resource_updates,
-                notifications: self.notifications,
-                use_scene_builder_thread: self.use_scene_builder_thread,
-                generate_frame: self.generate_frame,
-                invalidate_rendered_frame: self.invalidate_rendered_frame,
-                low_priority: self.low_priority,
-            },
-            self.payloads,
-        )
+    fn finalize(self) -> TransactionMsg {
+        TransactionMsg {
+            scene_ops: self.scene_ops,
+            frame_ops: self.frame_ops,
+            resource_updates: self.resource_updates,
+            notifications: self.notifications,
+            use_scene_builder_thread: self.use_scene_builder_thread,
+            generate_frame: self.generate_frame,
+            invalidate_rendered_frame: self.invalidate_rendered_frame,
+            low_priority: self.low_priority,
+        }
     }
 
     /// See `ResourceUpdate::AddImage`.
@@ -452,7 +447,7 @@ impl Transaction {
         descriptor: ImageDescriptor,
         data: Arc<BlobImageData>,
         visible_rect: DeviceIntRect,
-        tiling: Option<TileSize>,
+        tile_size: Option<TileSize>,
     ) {
         self.resource_updates.push(
             ResourceUpdate::AddBlobImage(AddBlobImage {
@@ -460,7 +455,7 @@ impl Transaction {
                 descriptor,
                 data,
                 visible_rect,
-                tiling,
+                tile_size: tile_size.unwrap_or(DEFAULT_TILE_SIZE),
             })
         );
     }
@@ -561,7 +556,6 @@ pub struct DocumentTransaction {
 }
 
 /// Represents a transaction in the format sent through the channel.
-#[derive(Clone, Deserialize, Serialize)]
 pub struct TransactionMsg {
     /// Changes that require re-building the scene.
     pub scene_ops: Vec<SceneMsg>,
@@ -580,7 +574,6 @@ pub struct TransactionMsg {
     pub low_priority: bool,
 
     /// Handlers to notify at certain points of the pipeline.
-    #[serde(skip)]
     pub notifications: Vec<NotificationRequest>,
 }
 
@@ -702,13 +695,12 @@ pub struct AddBlobImage {
     /// This means that blob images can be updated to insert/remove content
     /// in any direction to support panning and zooming.
     pub visible_rect: DeviceIntRect,
-    /// An optional tiling scheme to apply when rasterizing the blob-image
+    /// The blob image's tile size to apply when rasterizing the blob-image
     /// and when storing its rasterized data on the GPU.
     /// Applies to both width and heights of the tiles.
     ///
-    /// Note that WebRender may internally chose to tile large blob-images
-    /// even if this member is set to `None`.
-    pub tiling: Option<TileSize>,
+    /// All blob images are tiled.
+    pub tile_size: TileSize,
 }
 
 /// Updates an already existing blob-image resource.
@@ -734,11 +726,7 @@ pub struct UpdateBlobImage {
 #[derive(Clone, Deserialize, Serialize)]
 pub enum AddFont {
     ///
-    Raw(
-        font::FontKey,
-        #[serde(with = "serde_bytes")] Vec<u8>,
-        u32
-    ),
+    Raw(font::FontKey, Vec<u8>, u32),
     ///
     Native(font::FontKey, font::NativeFontHandle),
 }
@@ -801,7 +789,6 @@ pub struct AddFontInstance {
 }
 
 /// Frame messages affect building the scene.
-#[derive(Clone, Deserialize, Serialize)]
 pub enum SceneMsg {
     ///
     UpdateEpoch(PipelineId, Epoch),
@@ -816,7 +803,7 @@ pub enum SceneMsg {
     ///
     SetDisplayList {
         ///
-        list_descriptor: BuiltDisplayListDescriptor,
+        display_list: BuiltDisplayList,
         ///
         epoch: Epoch,
         ///
@@ -845,12 +832,13 @@ pub enum SceneMsg {
 }
 
 /// Frame messages affect frame generation (applied after building the scene).
-#[derive(Clone, Deserialize, Serialize)]
 pub enum FrameMsg {
     ///
     UpdateEpoch(PipelineId, Epoch),
     ///
-    HitTest(Option<PipelineId>, WorldPoint, HitTestFlags, MsgSender<HitTestResult>),
+    HitTest(Option<PipelineId>, WorldPoint, HitTestFlags, Sender<HitTestResult>),
+    ///
+    RequestHitTester(Sender<Arc<dyn ApiHitTester>>),
     ///
     SetPan(DeviceIntPoint),
     ///
@@ -858,7 +846,7 @@ pub enum FrameMsg {
     ///
     ScrollNodeWithId(LayoutPoint, di::ExternalScrollId, ScrollClamping),
     ///
-    GetScrollNodeState(MsgSender<Vec<ScrollNodeState>>),
+    GetScrollNodeState(Sender<Vec<ScrollNodeState>>),
     ///
     UpdateDynamicProperties(DynamicProperties),
     ///
@@ -889,6 +877,7 @@ impl fmt::Debug for FrameMsg {
         f.write_str(match *self {
             FrameMsg::UpdateEpoch(..) => "FrameMsg::UpdateEpoch",
             FrameMsg::HitTest(..) => "FrameMsg::HitTest",
+            FrameMsg::RequestHitTester(..) => "FrameMsg::RequestHitTester",
             FrameMsg::SetPan(..) => "FrameMsg::SetPan",
             FrameMsg::Scroll(..) => "FrameMsg::Scroll",
             FrameMsg::ScrollNodeWithId(..) => "FrameMsg::ScrollNodeWithId",
@@ -904,7 +893,6 @@ impl fmt::Debug for FrameMsg {
 bitflags!{
     /// Bit flags for WR stages to store in a capture.
     // Note: capturing `FRAME` without `SCENE` is not currently supported.
-    #[derive(Deserialize, Serialize)]
     pub struct CaptureBits: u8 {
         ///
         const SCENE = 0x1;
@@ -912,12 +900,13 @@ bitflags!{
         const FRAME = 0x2;
         ///
         const TILE_CACHE = 0x4;
+        ///
+        const EXTERNAL_RESOURCES = 0x8;
     }
 }
 
 bitflags!{
     /// Mask for clearing caches in debug commands.
-    #[derive(Deserialize, Serialize)]
     pub struct ClearCache: u8 {
         ///
         const IMAGES = 0b1;
@@ -929,14 +918,12 @@ bitflags!{
         const RENDER_TASKS = 0b0001;
         ///
         const TEXTURE_CACHE = 0b00001;
-        ///
-        const RASTERIZED_BLOBS = 0b000001;
     }
 }
 
 /// Information about a loaded capture of each document
 /// that is returned by `RenderBackend`.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct CapturedDocument {
     ///
     pub document_id: DocumentId,
@@ -945,7 +932,7 @@ pub struct CapturedDocument {
 }
 
 /// Update of the state of built-in debugging facilities.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub enum DebugCommand {
     /// Sets the provided debug flags.
     SetFlags(DebugFlags),
@@ -967,7 +954,11 @@ pub enum DebugCommand {
     /// Save a capture of all the documents state.
     SaveCapture(PathBuf, CaptureBits),
     /// Load a capture of all the documents state.
-    LoadCapture(PathBuf, MsgSender<CapturedDocument>),
+    LoadCapture(PathBuf, Option<(u32, u32)>, Sender<CapturedDocument>),
+    /// Start capturing a sequence of scene/frame changes.
+    StartCaptureSequence(PathBuf, CaptureBits),
+    /// Stop capturing a sequence of scene/frame changes.
+    StopCaptureSequence,
     /// Clear cached resources, forcing them to be re-uploaded from templates.
     ClearCaches(ClearCache),
     /// Enable/disable native compositor usage
@@ -991,20 +982,13 @@ pub enum DebugCommand {
 }
 
 /// Message sent by the `RenderApi` to the render backend thread.
-#[derive(Clone, Deserialize, Serialize)]
 pub enum ApiMsg {
-    /// Add/remove/update images and fonts.
-    UpdateResources(Vec<ResourceUpdate>),
     /// Gets the glyph dimensions
-    GetGlyphDimensions(
-        font::FontInstanceKey,
-        Vec<font::GlyphIndex>,
-        MsgSender<Vec<Option<font::GlyphDimensions>>>,
-    ),
+    GetGlyphDimensions(font::GlyphDimensionRequest),
     /// Gets the glyph indices from a string
-    GetGlyphIndices(font::FontKey, String, MsgSender<Vec<Option<u32>>>),
+    GetGlyphIndices(font::GlyphIndexRequest),
     /// Adds a new document namespace.
-    CloneApi(MsgSender<IdNamespace>),
+    CloneApi(Sender<IdNamespace>),
     /// Adds a new document namespace.
     CloneApiByClient(IdNamespace),
     /// Adds a new document with given initial size.
@@ -1022,7 +1006,7 @@ pub enum ApiMsg {
     /// Flush from the caches anything that isn't necessary, to free some memory.
     MemoryPressure,
     /// Collects a memory report.
-    ReportMemory(MsgSender<Box<MemoryReport>>),
+    ReportMemory(Sender<Box<MemoryReport>>),
     /// Change debugging options.
     DebugCommand(DebugCommand),
     /// Wakes the render backend's event loop up. Needed when an event is communicated
@@ -1033,15 +1017,14 @@ pub enum ApiMsg {
     /// Block until a round-trip to the scene builder thread has completed. This
     /// ensures that any transactions (including ones deferred to the scene
     /// builder thread) have been processed.
-    FlushSceneBuilder(MsgSender<()>),
+    FlushSceneBuilder(Sender<()>),
     /// Shut the WebRender instance down.
-    ShutDown(Option<MsgSender<()>>),
+    ShutDown(Option<Sender<()>>),
 }
 
 impl fmt::Debug for ApiMsg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match *self {
-            ApiMsg::UpdateResources(..) => "ApiMsg::UpdateResources",
             ApiMsg::GetGlyphDimensions(..) => "ApiMsg::GetGlyphDimensions",
             ApiMsg::GetGlyphIndices(..) => "ApiMsg::GetGlyphIndices",
             ApiMsg::CloneApi(..) => "ApiMsg::CloneApi",
@@ -1154,7 +1137,7 @@ pub enum PrimitiveKeyKind {
     ///
     Rectangle {
         ///
-        color: ColorU,
+        color: PropertyBinding<ColorU>,
     },
 }
 
@@ -1190,7 +1173,7 @@ macro_rules! declare_interning_memory_report {
     ( $( $name:ident: $ty:ident, )+ ) => {
         ///
         #[repr(C)]
-        #[derive(AddAssign, Clone, Debug, Default, Deserialize, Serialize)]
+        #[derive(AddAssign, Clone, Debug, Default)]
         pub struct InternerSubReport {
             $(
                 ///
@@ -1205,7 +1188,7 @@ enumerate_interners!(declare_interning_memory_report);
 /// Memory report for interning-related data structures.
 /// cbindgen:derive-eq=false
 #[repr(C)]
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct InterningMemoryReport {
     ///
     pub interners: InternerSubReport,
@@ -1224,7 +1207,7 @@ impl ::std::ops::AddAssign for InterningMemoryReport {
 /// cbindgen:derive-eq=false
 #[repr(C)]
 #[allow(missing_docs)]
-#[derive(AddAssign, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(AddAssign, Clone, Debug, Default)]
 pub struct MemoryReport {
     //
     // CPU Memory.
@@ -1239,6 +1222,7 @@ pub struct MemoryReport {
     pub rasterized_blobs: usize,
     pub shader_cache: usize,
     pub interning: InterningMemoryReport,
+    pub display_list: usize,
 
     //
     // GPU memory.
@@ -1263,7 +1247,7 @@ struct ResourceId(pub u32);
 
 /// An opaque pointer-sized value.
 #[repr(C)]
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct ExternalEvent {
     raw: usize,
 }
@@ -1294,25 +1278,22 @@ pub enum ScrollClamping {
 ///
 /// This object is created along with the `Renderer` and it's main use from a
 /// user perspective is to create one or several `RenderApi` objects.
-#[derive(Clone, Deserialize, Serialize)]
 pub struct RenderApiSender {
-    api_sender: MsgSender<ApiMsg>,
-    payload_sender: PayloadSender,
+    api_sender: Sender<ApiMsg>,
+
 }
 
 impl RenderApiSender {
     /// Used internally by the `Renderer`.
-    pub fn new(api_sender: MsgSender<ApiMsg>, payload_sender: PayloadSender) -> Self {
+    pub fn new(api_sender: Sender<ApiMsg>) -> Self {
         RenderApiSender {
             api_sender,
-            payload_sender,
         }
     }
 
     /// Creates a new resource API object with a dedicated namespace.
     pub fn create_api(&self) -> RenderApi {
-        let (sync_tx, sync_rx) =
-            channel::msg_channel().expect("Failed to create channel");
+        let (sync_tx, sync_rx) = channel();
         let msg = ApiMsg::CloneApi(sync_tx);
         self.api_sender.send(msg).expect("Failed to send CloneApi message");
         let namespace_id = match sync_rx.recv() {
@@ -1329,7 +1310,6 @@ impl RenderApiSender {
         };
         RenderApi {
             api_sender: self.api_sender.clone(),
-            payload_sender: self.payload_sender.clone(),
             namespace_id,
             next_id: Cell::new(ResourceId(0)),
         }
@@ -1345,7 +1325,6 @@ impl RenderApiSender {
         self.api_sender.send(msg).expect("Failed to send CloneApiByClient message");
         RenderApi {
             api_sender: self.api_sender.clone(),
-            payload_sender: self.payload_sender.clone(),
             namespace_id,
             next_id: Cell::new(ResourceId(0)),
         }
@@ -1427,13 +1406,16 @@ bitflags! {
         const INVALIDATION_DBG = 1 << 28;
         /// Log tile cache to memory for later saving as part of wr-capture
         const TILE_CACHE_LOGGING_DBG   = 1 << 29;
+        /// For debugging, force-disable automatic scaling of establishes_raster_root
+        /// pictures that are too large (ie go back to old behavior that prevents those
+        /// large pictures from establishing a raster root).
+        const DISABLE_RASTER_ROOT_SCALING = 1 << 30;
     }
 }
 
 /// The main entry point to interact with WebRender.
 pub struct RenderApi {
-    api_sender: MsgSender<ApiMsg>,
-    payload_sender: PayloadSender,
+    api_sender: Sender<ApiMsg>,
     namespace_id: IdNamespace,
     next_id: Cell<ResourceId>,
 }
@@ -1445,8 +1427,10 @@ impl RenderApi {
     }
 
     ///
-    pub fn clone_sender(&self) -> RenderApiSender {
-        RenderApiSender::new(self.api_sender.clone(), self.payload_sender.clone())
+    pub fn create_sender(&self) -> RenderApiSender {
+        RenderApiSender::new(
+            self.api_sender.clone(),
+        )
     }
 
     /// Add a document to the WebRender instance.
@@ -1497,20 +1481,28 @@ impl RenderApi {
     /// This means that glyph dimensions e.g. for spaces (' ') will mostly be None.
     pub fn get_glyph_dimensions(
         &self,
-        font: font::FontInstanceKey,
+        key: font::FontInstanceKey,
         glyph_indices: Vec<font::GlyphIndex>,
     ) -> Vec<Option<font::GlyphDimensions>> {
-        let (tx, rx) = channel::msg_channel().unwrap();
-        let msg = ApiMsg::GetGlyphDimensions(font, glyph_indices, tx);
+        let (sender, rx) = channel();
+        let msg = ApiMsg::GetGlyphDimensions(font::GlyphDimensionRequest {
+            key,
+            glyph_indices,
+            sender
+        });
         self.api_sender.send(msg).unwrap();
         rx.recv().unwrap()
     }
 
     /// Gets the glyph indices for the supplied string. These
     /// can be used to construct GlyphKeys.
-    pub fn get_glyph_indices(&self, font_key: font::FontKey, text: &str) -> Vec<Option<u32>> {
-        let (tx, rx) = channel::msg_channel().unwrap();
-        let msg = ApiMsg::GetGlyphIndices(font_key, text.to_string(), tx);
+    pub fn get_glyph_indices(&self, key: font::FontKey, text: &str) -> Vec<Option<u32>> {
+        let (sender, rx) = channel();
+        let msg = ApiMsg::GetGlyphIndices(font::GlyphIndexRequest {
+            key,
+            text: text.to_string(),
+            sender,
+        });
         self.api_sender.send(msg).unwrap();
         rx.recv().unwrap()
     }
@@ -1524,16 +1516,6 @@ impl RenderApi {
     /// Creates a `BlobImageKey`.
     pub fn generate_blob_image_key(&self) -> BlobImageKey {
         BlobImageKey(self.generate_image_key())
-    }
-
-    /// Add/remove/update resources such as images and fonts.
-    pub fn update_resources(&self, resources: Vec<ResourceUpdate>) {
-        if resources.is_empty() {
-            return;
-        }
-        self.api_sender
-            .send(ApiMsg::UpdateResources(resources))
-            .unwrap();
     }
 
     /// A Gecko-specific notification mechanism to get some code executed on the
@@ -1552,7 +1534,7 @@ impl RenderApi {
 
     /// Synchronously requests memory report.
     pub fn report_memory(&self) -> MemoryReport {
-        let (tx, rx) = channel::msg_channel().unwrap();
+        let (tx, rx) = channel();
         self.api_sender.send(ApiMsg::ReportMemory(tx)).unwrap();
         *rx.recv().unwrap()
     }
@@ -1566,7 +1548,7 @@ impl RenderApi {
     /// Shut the WebRender instance down.
     pub fn shut_down(&self, synchronously: bool) {
         if synchronously {
-            let (tx, rx) = channel::msg_channel().unwrap();
+            let (tx, rx) = channel();
             self.api_sender.send(ApiMsg::ShutDown(Some(tx))).unwrap();
             rx.recv().unwrap();
         } else {
@@ -1600,14 +1582,6 @@ impl RenderApi {
         self.api_sender.send(msg).unwrap();
     }
 
-    // For use in Wrench only
-    #[doc(hidden)]
-    pub fn send_payload(&self, data: &[u8]) {
-        self.payload_sender
-            .send(Payload::from_data(data))
-            .unwrap();
-    }
-
     /// A helper method to send document messages.
     fn send_scene_msg(&self, document_id: DocumentId, msg: SceneMsg) {
         // This assertion fails on Servo use-cases, because it creates different
@@ -1629,29 +1603,18 @@ impl RenderApi {
     }
 
     /// Send a transaction to WebRender.
-    pub fn send_transaction(&self, document_id: DocumentId, transaction: Transaction) {
-        let (msg, payloads) = transaction.finalize();
-        for payload in payloads {
-            self.payload_sender.send(payload).unwrap();
-        }
+    pub fn send_transaction(&mut self, document_id: DocumentId, transaction: Transaction) {
+        let msg = transaction.finalize();
         self.api_sender.send(ApiMsg::UpdateDocuments(vec![document_id], vec![msg])).unwrap();
     }
 
     /// Send multiple transactions.
-    pub fn send_transactions(&self, document_ids: Vec<DocumentId>, mut transactions: Vec<Transaction>) {
+    pub fn send_transactions(&mut self, document_ids: Vec<DocumentId>, mut transactions: Vec<Transaction>) {
         debug_assert!(document_ids.len() == transactions.len());
-        let length = document_ids.len();
-        let (msgs, mut document_payloads) = transactions.drain(..)
-            .fold((Vec::with_capacity(length), Vec::with_capacity(length)),
-                |(mut msgs, mut document_payloads), transaction| {
-                    let (msg, payloads) = transaction.finalize();
-                    msgs.push(msg);
-                    document_payloads.push(payloads);
-                    (msgs, document_payloads)
-                });
-        for payload in document_payloads.drain(..).flatten() {
-            self.payload_sender.send(payload).unwrap();
-        }
+        let msgs = transactions.drain(..)
+            .map(|txn| txn.finalize())
+            .collect();
+
         self.api_sender.send(ApiMsg::UpdateDocuments(document_ids, msgs)).unwrap();
     }
 
@@ -1667,13 +1630,24 @@ impl RenderApi {
                     point: WorldPoint,
                     flags: HitTestFlags)
                     -> HitTestResult {
-        let (tx, rx) = channel::msg_channel().unwrap();
+        let (tx, rx) = channel();
 
         self.send_frame_msg(
             document_id,
             FrameMsg::HitTest(pipeline_id, point, flags, tx)
         );
         rx.recv().unwrap()
+    }
+
+    /// Synchronously request an object that can perform fast hit testing queries.
+    pub fn request_hit_tester(&self, document_id: DocumentId) -> HitTesterRequest {
+        let (tx, rx) = channel();
+        self.send_frame_msg(
+            document_id,
+            FrameMsg::RequestHitTester(tx)
+        );
+
+        HitTesterRequest { rx }
     }
 
     /// Setup the output region in the framebuffer for a given document.
@@ -1706,7 +1680,7 @@ impl RenderApi {
 
     ///
     pub fn get_scroll_node_state(&self, document_id: DocumentId) -> Vec<ScrollNodeState> {
-        let (tx, rx) = channel::msg_channel().unwrap();
+        let (tx, rx) = channel();
         self.send_frame_msg(document_id, FrameMsg::GetScrollNodeState(tx));
         rx.recv().unwrap()
     }
@@ -1722,7 +1696,7 @@ impl RenderApi {
     /// ensures that any transactions (including ones deferred to the scene
     /// builder thread) have been processed.
     pub fn flush_scene_builder(&self) {
-        let (tx, rx) = channel::msg_channel().unwrap();
+        let (tx, rx) = channel();
         self.send_message(ApiMsg::FlushSceneBuilder(tx));
         rx.recv().unwrap(); // block until done
     }
@@ -1734,13 +1708,13 @@ impl RenderApi {
     }
 
     /// Load a capture of the current frame state for debugging.
-    pub fn load_capture(&self, path: PathBuf) -> Vec<CapturedDocument> {
+    pub fn load_capture(&self, path: PathBuf, ids: Option<(u32, u32)>) -> Vec<CapturedDocument> {
         // First flush the scene builder otherwise async scenes might clobber
         // the capture we are about to load.
         self.flush_scene_builder();
 
-        let (tx, rx) = channel::msg_channel().unwrap();
-        let msg = ApiMsg::DebugCommand(DebugCommand::LoadCapture(path, tx));
+        let (tx, rx) = channel();
+        let msg = ApiMsg::DebugCommand(DebugCommand::LoadCapture(path, ids, tx));
         self.send_message(msg);
 
         let mut documents = Vec::new();
@@ -1748,6 +1722,18 @@ impl RenderApi {
             documents.push(captured_doc);
         }
         documents
+    }
+
+    /// Start capturing a sequence of frames.
+    pub fn start_capture_sequence(&self, path: PathBuf, bits: CaptureBits) {
+        let msg = ApiMsg::DebugCommand(DebugCommand::StartCaptureSequence(path, bits));
+        self.send_message(msg);
+    }
+
+    /// Stop capturing sequences of frames.
+    pub fn stop_capture_sequence(&self) {
+        let msg = ApiMsg::DebugCommand(DebugCommand::StopCaptureSequence);
+        self.send_message(msg);
     }
 
     /// Update the state of builtin debugging facilities.
@@ -1764,8 +1750,22 @@ impl Drop for RenderApi {
     }
 }
 
+/// A hit tester requested to the render backend thread but not necessarily ready yet.
 ///
-#[derive(Clone, Deserialize, Serialize)]
+/// The request should be resolved as late as possible to reduce the likelihood of blocking.
+pub struct HitTesterRequest {
+    rx: Receiver<Arc<dyn ApiHitTester>>,
+}
+
+impl HitTesterRequest {
+    /// Block until the hit tester is available and return it, consuming teh request.
+    pub fn resolve(self) -> Arc<dyn ApiHitTester> {
+        self.rx.recv().unwrap()
+    }
+}
+
+///
+#[derive(Clone)]
 pub struct ScrollNodeState {
     ///
     pub id: di::ExternalScrollId,
@@ -1774,7 +1774,7 @@ pub struct ScrollNodeState {
 }
 
 ///
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug)]
 pub enum ScrollLocation {
     /// Scroll by a certain amount.
     Delta(LayoutVector2D),
@@ -1785,7 +1785,7 @@ pub enum ScrollLocation {
 }
 
 /// Represents a zoom factor.
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ZoomFactor(f32);
 
 impl ZoomFactor {
@@ -1821,7 +1821,7 @@ impl PropertyBindingId {
 /// A unique key that is used for connecting animated property
 /// values to bindings in the display list.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
 pub struct PropertyBindingKey<T> {
     ///
     pub id: PropertyBindingId,
@@ -1853,7 +1853,7 @@ impl<T> PropertyBindingKey<T> {
 /// used for the case where the animation is still in-delay phase
 /// (i.e. the animation doesn't produce any animation values).
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, PeekPoke)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
 pub enum PropertyBinding<T> {
     /// Non-animated value.
     Value(T),
@@ -1870,6 +1870,46 @@ impl<T: Default> Default for PropertyBinding<T> {
 impl<T> From<T> for PropertyBinding<T> {
     fn from(value: T) -> PropertyBinding<T> {
         PropertyBinding::Value(value)
+    }
+}
+
+impl From<PropertyBindingKey<ColorF>> for PropertyBindingKey<ColorU> {
+    fn from(key: PropertyBindingKey<ColorF>) -> PropertyBindingKey<ColorU> {
+        PropertyBindingKey {
+            id: key.id.clone(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl From<PropertyBindingKey<ColorU>> for PropertyBindingKey<ColorF> {
+    fn from(key: PropertyBindingKey<ColorU>) -> PropertyBindingKey<ColorF> {
+        PropertyBindingKey {
+            id: key.id.clone(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl From<PropertyBinding<ColorF>> for PropertyBinding<ColorU> {
+    fn from(value: PropertyBinding<ColorF>) -> PropertyBinding<ColorU> {
+        match value {
+            PropertyBinding::Value(value) => PropertyBinding::Value(value.into()),
+            PropertyBinding::Binding(k, v) => {
+                PropertyBinding::Binding(k.into(), v.into())
+            }
+        }
+    }
+}
+
+impl From<PropertyBinding<ColorU>> for PropertyBinding<ColorF> {
+    fn from(value: PropertyBinding<ColorU>) -> PropertyBinding<ColorF> {
+        match value {
+            PropertyBinding::Value(value) => PropertyBinding::Value(value.into()),
+            PropertyBinding::Binding(k, v) => {
+                PropertyBinding::Binding(k.into(), v.into())
+            }
+        }
     }
 }
 
@@ -1890,8 +1930,10 @@ pub struct PropertyValue<T> {
 pub struct DynamicProperties {
     ///
     pub transforms: Vec<PropertyValue<LayoutTransform>>,
-    ///
+    /// opacity
     pub floats: Vec<PropertyValue<f32>>,
+    /// background color
+    pub colors: Vec<PropertyValue<ColorF>>,
 }
 
 /// A handler to integrate WebRender with the thread that contains the `Renderer`.
@@ -1916,7 +1958,7 @@ pub trait RenderNotifier: Send {
 
 /// A stage of the rendering pipeline.
 #[repr(u32)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Checkpoint {
     ///
     SceneBuilt,
@@ -1968,6 +2010,18 @@ impl NotificationRequest {
     }
 }
 
+/// An object that can perform hit-testing without doing synchronous queries to
+/// the RenderBackendThread.
+pub trait ApiHitTester: Send + Sync {
+    /// Does a hit test on display items in the specified document, at the given
+    /// point. If a pipeline_id is specified, it is used to further restrict the
+    /// hit results so that only items inside that pipeline are matched. If the
+    /// HitTestFlags argument contains the FIND_ALL flag, then the vector of hit
+    /// results will contain all display items that match, ordered from front
+    /// to back.
+    fn hit_test(&self, pipeline_id: Option<PipelineId>, point: WorldPoint, flags: HitTestFlags) -> HitTestResult;
+}
+
 impl Drop for NotificationRequest {
     fn drop(&mut self) {
         if let Some(ref mut handler) = self.handler {
@@ -1988,5 +2042,28 @@ impl Clone for NotificationRequest {
             when: self.when,
             handler: None,
         }
+    }
+}
+
+
+bitflags! {
+    /// Each bit of the edge AA mask is:
+    /// 0, when the edge of the primitive needs to be considered for AA
+    /// 1, when the edge of the segment needs to be considered for AA
+    ///
+    /// *Note*: the bit values have to match the shader logic in
+    /// `write_transform_vertex()` function.
+    #[cfg_attr(feature = "serialize", derive(Serialize))]
+    #[cfg_attr(feature = "deserialize", derive(Deserialize))]
+    #[derive(MallocSizeOf)]
+    pub struct EdgeAaSegmentMask: u8 {
+        ///
+        const LEFT = 0x1;
+        ///
+        const TOP = 0x2;
+        ///
+        const RIGHT = 0x4;
+        ///
+        const BOTTOM = 0x8;
     }
 }

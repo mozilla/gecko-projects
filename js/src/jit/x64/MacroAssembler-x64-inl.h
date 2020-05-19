@@ -131,6 +131,11 @@ void MacroAssembler::xor64(const Operand& src, Register64 dest) {
 }
 
 // ===============================================================
+// Swap instructions
+
+void MacroAssembler::swap64(Register64 reg) { bswapq(reg.reg); }
+
+// ===============================================================
 // Arithmetic functions
 
 void MacroAssembler::addPtr(Register src, Register dest) { addq(src, dest); }
@@ -744,6 +749,61 @@ void MacroAssembler::spectreBoundsCheck32(Register index, const Address& length,
   if (JitOptions.spectreIndexMasking) {
     cmovCCl(Assembler::AboveOrEqual, scratch, index);
   }
+}
+
+// ========================================================================
+// SIMD
+
+// Any lane true, ie any bit set
+
+void MacroAssembler::anyTrueSimd128(FloatRegister src, Register dest) {
+  ScratchRegisterScope one(*this);
+  movl(Imm32(1), one);
+  movl(Imm32(0), dest);
+  vptest(src, src);  // SSE4.1
+  cmovCCl(NonZero, one, dest);
+}
+
+void MacroAssembler::mulInt64x2(FloatRegister rhs, FloatRegister lhsDest,
+                                Register64 temp) {
+  ScratchRegisterScope t1(*this);
+  Register t2 = temp.reg;
+  vpextrq(0, lhsDest, t1);
+  vpextrq(0, rhs, t2);
+  imulq(t2, t1);
+  vpinsrq(0, t1, lhsDest, lhsDest);
+  vpextrq(1, lhsDest, t1);
+  vpextrq(1, rhs, t2);
+  imulq(t2, t1);
+  vpinsrq(1, t1, lhsDest, lhsDest);
+}
+
+void MacroAssembler::rightShiftInt64x2(Register rhs, FloatRegister lhsDest) {
+  ScratchRegisterScope scratch(*this);
+
+  MOZ_ASSERT(rhs == rcx);  // We need CL
+
+  vpextrq(0, lhsDest, scratch);
+  sarq_cl(scratch);
+  vpinsrq(0, scratch, lhsDest, lhsDest);
+  vpextrq(1, lhsDest, scratch);
+  sarq_cl(scratch);
+  vpinsrq(1, scratch, lhsDest, lhsDest);
+}
+
+void MacroAssembler::extractLaneInt64x2(uint32_t lane, FloatRegister src,
+                                        Register64 dest) {
+  vpextrq(lane, src, dest.reg);
+}
+
+void MacroAssembler::replaceLaneInt64x2(unsigned lane, Register64 rhs,
+                                        FloatRegister lhsDest) {
+  vpinsrq(lane, rhs.reg, lhsDest, lhsDest);
+}
+
+void MacroAssembler::splatX2(Register64 src, FloatRegister dest) {
+  vpinsrq(0, src.reg, dest, dest);
+  vpinsrq(1, src.reg, dest, dest);
 }
 
 // ========================================================================

@@ -265,12 +265,11 @@ bool ContentPrincipal::SubsumesInternal(
     }
   }
 
-  nsCOMPtr<nsIURI> otherURI;
-  rv = aOther->GetURI(getter_AddRefs(otherURI));
-  NS_ENSURE_SUCCESS(rv, false);
-
   // Compare uris.
-  return nsScriptSecurityManager::SecurityCompareURIs(mURI, otherURI);
+  bool isSameOrigin = false;
+  rv = aOther->IsSameOrigin(mURI, false, &isSameOrigin);
+  NS_ENSURE_SUCCESS(rv, false);
+  return isSameOrigin;
 }
 
 NS_IMETHODIMP
@@ -400,7 +399,10 @@ static nsresult GetSpecialBaseDomain(const nsCOMPtr<nsIURI>& aURI,
     return rv;
   }
 
-  if (hasNoRelativeFlag) {
+  // In case of FTP we want to get base domain via TLD service even if FTP
+  // protocol handler is disabled and the scheme is handled by external protocol
+  // handler which returns URI_NORELATIVE flag.
+  if (hasNoRelativeFlag && !aURI->SchemeIs("ftp")) {
     *aHandled = true;
     return aURI->GetSpec(aBaseDomain);
   }

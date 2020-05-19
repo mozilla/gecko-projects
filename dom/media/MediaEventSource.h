@@ -8,12 +8,12 @@
 #define MediaEventSource_h_
 
 #include <type_traits>
+#include <utility>
 
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Tuple.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 
 #include "nsISupportsImpl.h"
@@ -35,7 +35,7 @@ class RevocableToken {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RevocableToken);
 
  public:
-  RevocableToken() : mRevoked(false) {}
+  RevocableToken() = default;
 
   void Revoke() { mRevoked = true; }
 
@@ -44,10 +44,10 @@ class RevocableToken {
  protected:
   // Virtual destructor is required since we might delete a Listener object
   // through its base type pointer.
-  virtual ~RevocableToken() {}
+  virtual ~RevocableToken() = default;
 
  private:
-  Atomic<bool> mRevoked;
+  Atomic<bool> mRevoked{false};
 };
 
 enum class ListenerPolicy : int8_t {
@@ -89,11 +89,11 @@ class TakeArgsHelper {
   template <typename C>
   static std::false_type test(void (C::*)() const volatile, int);
   template <typename F>
-  static std::false_type test(F&&, decltype(DeclVal<F>()(), 0));
+  static std::false_type test(F&&, decltype(std::declval<F>()(), 0));
   static std::true_type test(...);
 
  public:
-  typedef decltype(test(DeclVal<T>(), 0)) type;
+  typedef decltype(test(std::declval<T>(), 0)) type;
 };
 
 template <typename T>
@@ -264,7 +264,7 @@ class MediaEventListener {
   friend class MediaEventSourceImpl;
 
  public:
-  MediaEventListener() {}
+  MediaEventListener() = default;
 
   MediaEventListener(MediaEventListener&& aOther)
       : mToken(std::move(aOther.mToken)) {}

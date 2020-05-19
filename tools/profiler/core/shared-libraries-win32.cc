@@ -144,23 +144,31 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf() {
 
     nsAutoString modulePathStr(modulePath);
     nsAutoString moduleNameStr = modulePathStr;
-    int32_t pos = moduleNameStr.RFindChar('\\');
+    int32_t pos = moduleNameStr.RFindCharInSet(u"\\/");
     if (pos != kNotFound) {
       moduleNameStr.Cut(0, pos + 1);
     }
 
-    // Hackaround for Bug 1607574.  Nvidia's shim driver nvd3d9wrapx.dll detours
-    // LoadLibraryExW when it's loaded and the detour function causes AV when
-    // the code tries to access data pointing to an address within unloaded
-    // nvinitx.dll.
+    // Hackaround for Bug 1607574.  Nvidia's shim driver nvd3d9wrap[x].dll
+    // detours LoadLibraryExW when it's loaded and the detour function causes
+    // AV when the code tries to access data pointing to an address within
+    // unloaded nvinit[x].dll.
     // The crashing code is executed when a given parameter is "detoured.dll"
     // and OS version is older than 6.2.  We hit that crash at the following
     // call to LoadLibraryEx even if we specify LOAD_LIBRARY_AS_DATAFILE.
     // We work around it by skipping LoadLibraryEx, and add a library info with
     // a dummy breakpad id instead.
+#if !defined(_M_ARM64)
+#  if defined(_M_AMD64)
+    LPCWSTR kNvidiaShimDriver = L"nvd3d9wrapx.dll";
+    LPCWSTR kNvidiaInitDriver = L"nvinitx.dll";
+#  elif defined(_M_IX86)
+    LPCWSTR kNvidiaShimDriver = L"nvd3d9wrap.dll";
+    LPCWSTR kNvidiaInitDriver = L"nvinit.dll";
+#  endif
     if (moduleNameStr.LowerCaseEqualsLiteral("detoured.dll") &&
-        !mozilla::IsWin8OrLater() && ::GetModuleHandle(L"nvd3d9wrapx.dll") &&
-        !::GetModuleHandle(L"nvinitx.dll")) {
+        !mozilla::IsWin8OrLater() && ::GetModuleHandle(kNvidiaShimDriver) &&
+        !::GetModuleHandle(kNvidiaInitDriver)) {
       NS_NAMED_LITERAL_STRING(pdbNameStr, "detoured.pdb");
       SharedLibrary shlib(
           (uintptr_t)module.lpBaseOfDll,
@@ -168,10 +176,11 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf() {
           0,  // DLLs are always mapped at offset 0 on Windows
           NS_LITERAL_CSTRING("000000000000000000000000000000000"),
           moduleNameStr, modulePathStr, pdbNameStr, pdbNameStr,
-          GetVersion(modulePath), "");
+          NS_LITERAL_CSTRING(""), "");
       sharedLibraryInfo.AddSharedLibrary(shlib);
       continue;
     }
+#endif  // !defined(_M_ARM64)
 
     nsCString breakpadId;
     // Load the module again to make sure that its handle will remain
@@ -210,7 +219,7 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf() {
 
       pdbPathStr = NS_ConvertUTF8toUTF16(pdbName);
       pdbNameStr = pdbPathStr;
-      int32_t pos = pdbNameStr.RFindChar('\\');
+      int32_t pos = pdbNameStr.RFindCharInSet(u"\\/");
       if (pos != kNotFound) {
         pdbNameStr.Cut(0, pos + 1);
       }

@@ -11,6 +11,8 @@
 #include "gfxFontConstants.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/java/GeckoAppShellWrappers.h"
+#include "mozilla/java/GeckoSystemStateListenerWrappers.h"
 
 using namespace mozilla;
 using mozilla::dom::ContentChild;
@@ -140,12 +142,17 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
       aColor = mSystemColors.textColorPrimary;
       break;
     case ColorID::TextSelectBackground:
+      /* matched to action_accent in java codebase */
+      aColor = NS_RGBA(10, 132, 255, 153);
+      break;
+    case ColorID::TextSelectForeground:
+      aColor = NS_RGB(0, 0, 0);
+      break;
     case ColorID::IMESelectedRawTextBackground:
     case ColorID::IMESelectedConvertedTextBackground:
       // still used
       aColor = mSystemColors.textColorHighlight;
       break;
-    case ColorID::TextSelectForeground:
     case ColorID::IMESelectedRawTextForeground:
     case ColorID::IMESelectedConvertedTextForeground:
       // still used
@@ -188,21 +195,21 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
       // desktop background
       aColor = mSystemColors.colorBackground;
       break;
-    case ColorID::Captiontext:
-      // text in active window caption, size box, and scrollbar arrow box (!)
-      aColor = mSystemColors.colorForeground;
-      break;
     case ColorID::Graytext:
       // disabled text in windows, menus, etc.
-      aColor = mSystemColors.textColorTertiary;
+      aColor = NS_RGB(0xb1, 0xa5, 0x98);
       break;
+    case ColorID::MozCellhighlight:
+    case ColorID::MozHtmlCellhighlight:
     case ColorID::Highlight:
       // background of selected item
-      aColor = mSystemColors.textColorHighlight;
+      aColor = NS_RGB(0xfa, 0xd1, 0x84);
       break;
+    case ColorID::MozCellhighlighttext:
+    case ColorID::MozHtmlCellhighlighttext:
     case ColorID::Highlighttext:
-      // text of selected item
-      aColor = mSystemColors.textColorPrimaryInverse;
+    case ColorID::Fieldtext:
+      aColor = NS_RGB(0x1a, 0x1a, 0x1a);
       break;
     case ColorID::Inactiveborder:
       // inactive window border
@@ -217,20 +224,13 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
       aColor = mSystemColors.textColorTertiary;
       break;
     case ColorID::Infobackground:
-      // tooltip background color
-      aColor = mSystemColors.colorBackground;
+      aColor = NS_RGB(0xf5, 0xf5, 0xb5);
       break;
     case ColorID::Infotext:
-      // tooltip text color
-      aColor = mSystemColors.colorForeground;
+      aColor = BLACK_COLOR;
       break;
     case ColorID::Menu:
-      // menu background
-      aColor = mSystemColors.colorBackground;
-      break;
-    case ColorID::Menutext:
-      // menu text
-      aColor = mSystemColors.colorForeground;
+      aColor = NS_RGB(0xf7, 0xf5, 0xf3);
       break;
     case ColorID::Scrollbar:
       // scrollbar gray area
@@ -239,32 +239,21 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
 
     case ColorID::Threedface:
     case ColorID::Buttonface:
-      // 3-D face color
-      aColor = mSystemColors.colorBackground;
-      break;
-
-    case ColorID::Buttontext:
-      // text on push buttons
-      aColor = mSystemColors.colorForeground;
+    case ColorID::Threedlightshadow:
+      aColor = NS_RGB(0xec, 0xe7, 0xe2);
       break;
 
     case ColorID::Buttonhighlight:
-      // 3-D highlighted edge color
+    case ColorID::Field:
     case ColorID::Threedhighlight:
-      // 3-D highlighted outer edge color
-      aColor = LIGHT_GRAY_COLOR;
-      break;
-
-    case ColorID::Threedlightshadow:
-      // 3-D highlighted inner edge color
-      aColor = mSystemColors.colorBackground;
+    case ColorID::MozCombobox:
+    case ColorID::MozEventreerow:
+      aColor = NS_RGB(0xff, 0xff, 0xff);
       break;
 
     case ColorID::Buttonshadow:
-      // 3-D shadow edge color
     case ColorID::Threedshadow:
-      // 3-D shadow inner edge color
-      aColor = GRAY_COLOR;
+      aColor = NS_RGB(0xae, 0xa1, 0x94);
       break;
 
     case ColorID::Threeddarkshadow:
@@ -272,27 +261,19 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
       aColor = BLACK_COLOR;
       break;
 
+    case ColorID::MozDialog:
     case ColorID::Window:
     case ColorID::Windowframe:
-      aColor = mSystemColors.colorBackground;
+      aColor = NS_RGB(0xef, 0xeb, 0xe7);
       break;
-
-    case ColorID::Windowtext:
-      aColor = mSystemColors.textColorPrimary;
-      break;
-
-    case ColorID::MozEventreerow:
-    case ColorID::Field:
-      aColor = mSystemColors.colorBackground;
-      break;
-    case ColorID::Fieldtext:
-      aColor = mSystemColors.textColorPrimary;
-      break;
-    case ColorID::MozDialog:
-      aColor = mSystemColors.colorBackground;
-      break;
+    case ColorID::Buttontext:
+    case ColorID::Captiontext:
+    case ColorID::Menutext:
+    case ColorID::MozButtonhovertext:
     case ColorID::MozDialogtext:
-      aColor = mSystemColors.colorForeground;
+    case ColorID::MozComboboxtext:
+    case ColorID::Windowtext:
+      aColor = NS_RGB(0x10, 0x10, 0x10);
       break;
     case ColorID::MozDragtargetzone:
       aColor = mSystemColors.textColorHighlight;
@@ -302,18 +283,7 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
       aColor = BLACK_COLOR;
       break;
     case ColorID::MozButtonhoverface:
-      aColor = BG_PRELIGHT_COLOR;
-      break;
-    case ColorID::MozButtonhovertext:
-      aColor = FG_PRELIGHT_COLOR;
-      break;
-    case ColorID::MozCellhighlight:
-    case ColorID::MozHtmlCellhighlight:
-      aColor = mSystemColors.textColorHighlight;
-      break;
-    case ColorID::MozCellhighlighttext:
-    case ColorID::MozHtmlCellhighlighttext:
-      aColor = mSystemColors.textColorPrimaryInverse;
+      aColor = NS_RGB(0xf3, 0xf0, 0xed);
       break;
     case ColorID::MozMenuhover:
       aColor = BG_PRELIGHT_COLOR;
@@ -326,12 +296,6 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
       break;
     case ColorID::MozNativehyperlinktext:
       aColor = NS_SAME_AS_FOREGROUND_COLOR;
-      break;
-    case ColorID::MozComboboxtext:
-      aColor = mSystemColors.colorForeground;
-      break;
-    case ColorID::MozCombobox:
-      aColor = mSystemColors.colorBackground;
       break;
     case ColorID::MozMenubartext:
       aColor = mSystemColors.colorForeground;
@@ -510,13 +474,8 @@ void nsLookAndFeel::EnsureInitSystemColors() {
 }
 
 void nsLookAndFeel::EnsureInitShowPassword() {
-  if (!mInitializedShowPassword) {
-    if (XRE_IsParentProcess()) {
-      mShowPassword =
-          jni::IsAvailable() && java::GeckoAppShell::GetShowPasswordSetting();
-    } else {
-      ContentChild::GetSingleton()->SendGetShowPasswordSetting(&mShowPassword);
-    }
+  if (!mInitializedShowPassword && jni::IsAvailable()) {
+    mShowPassword = java::GeckoAppShell::GetShowPasswordSetting();
     mInitializedShowPassword = true;
   }
 }

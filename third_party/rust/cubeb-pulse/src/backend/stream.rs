@@ -174,23 +174,12 @@ impl BufferManager {
         match &mut self.producer {
             RingBufferProducer::FloatRingBufferProducer(p) => {
                 let input_data = unsafe { slice::from_raw_parts::<f32>(input_data as *const f32, read_samples) };
-                match p.push_slice(input_data) {
-                    Ok(_) => { }
-                    Err(_) => {
-                        // do nothing: the data are ignored. This happens when underruning the
-                        // output callback.
-                    }
-                }
+                // we don't do anything in particular if we can't push everything
+                p.push_slice(input_data);
             }
             RingBufferProducer::IntegerRingBufferProducer(p) => {
                 let input_data = unsafe { slice::from_raw_parts::<i16>(input_data as *const i16, read_samples) };
-                match p.push_slice(input_data) {
-                    Ok(_) => { }
-                    Err(_) => {
-                        // do nothing: the data are ignored. This happens when underruning the
-                        // output callback.
-                    }
-                }
+                p.push_slice(input_data);
             }
         }
     }
@@ -199,37 +188,19 @@ impl BufferManager {
         match &mut self.consumer {
             IntegerRingBufferConsumer(p) => {
                 let mut input: &mut[i16] = unsafe { slice::from_raw_parts_mut::<i16>(input_data as *mut i16, needed_samples) };
-                match p.pop_slice(&mut input) {
-                    Ok(read) => {
-                        if read < needed_samples {
-                            for i in 0..(needed_samples - read) {
-                                input[read + i] = 0;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // Buffer empty
-                        for i in input.iter_mut() {
-                            *i = 0;
-                        }
+                let read = p.pop_slice(&mut input);
+                if read < needed_samples {
+                    for i in 0..(needed_samples - read) {
+                        input[read + i] = 0;
                     }
                 }
             }
             FloatRingBufferConsumer(p) => {
                 let mut input: &mut[f32] = unsafe { slice::from_raw_parts_mut::<f32>(input_data as *mut f32, needed_samples) };
-                match p.pop_slice(&mut input) {
-                    Ok(read) => {
-                        if read < needed_samples {
-                            for i in 0..(needed_samples - read) {
-                                input[read + i] = 0.;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // Buffer empty
-                        for i in input.iter_mut() {
-                            *i = 0.;
-                        }
+                let read = p.pop_slice(&mut input);
+                if read < needed_samples {
+                    for i in 0..(needed_samples - read) {
+                        input[read + i] = 0.;
                     }
                 }
             }
@@ -418,13 +389,20 @@ impl<'ctx> PulseStream<'ctx> {
                             minreq: buffer_size_bytes / 4
                         };
                         let device_name = super::try_cstr_from(output_device as *const _);
+                        let mut stream_flags = pulse::StreamFlags::AUTO_TIMING_UPDATE
+                            | pulse::StreamFlags::INTERPOLATE_TIMING
+                            | pulse::StreamFlags::START_CORKED
+                            | pulse::StreamFlags::ADJUST_LATENCY;
+                        if device_name.is_some()
+                            || stream_params
+                                .prefs()
+                                .contains(StreamPrefs::DISABLE_DEVICE_SWITCHING) {
+                          stream_flags |= pulse::StreamFlags::DONT_MOVE;
+                        }
                         let _ = s.connect_playback(
                             device_name,
                             &battr,
-                            pulse::StreamFlags::AUTO_TIMING_UPDATE
-                                | pulse::StreamFlags::INTERPOLATE_TIMING
-                                | pulse::StreamFlags::START_CORKED
-                                | pulse::StreamFlags::ADJUST_LATENCY,
+                            stream_flags,
                             None,
                             None,
                         );
@@ -457,13 +435,20 @@ impl<'ctx> PulseStream<'ctx> {
                             minreq: buffer_size_bytes
                         };
                         let device_name = super::try_cstr_from(input_device as *const _);
+                        let mut stream_flags = pulse::StreamFlags::AUTO_TIMING_UPDATE
+                            | pulse::StreamFlags::INTERPOLATE_TIMING
+                            | pulse::StreamFlags::START_CORKED
+                            | pulse::StreamFlags::ADJUST_LATENCY;
+                        if device_name.is_some()
+                            || stream_params
+                                .prefs()
+                                .contains(StreamPrefs::DISABLE_DEVICE_SWITCHING) {
+                            stream_flags |= pulse::StreamFlags::DONT_MOVE;
+                        }
                         let _ = s.connect_record(
                             device_name,
                             &battr,
-                            pulse::StreamFlags::AUTO_TIMING_UPDATE
-                                | pulse::StreamFlags::INTERPOLATE_TIMING
-                                | pulse::StreamFlags::START_CORKED
-                                | pulse::StreamFlags::ADJUST_LATENCY,
+                            stream_flags,
                         );
 
                         stm.input_stream = Some(s);
@@ -655,6 +640,10 @@ impl<'ctx> StreamOps for PulseStream<'ctx> {
                 Err(_) => Err(Error::error()),
             },
         }
+    }
+
+    fn input_latency(&mut self) -> Result<u32> {
+        Err(Error::error())
     }
 
     fn set_volume(&mut self, volume: f32) -> Result<()> {

@@ -20,6 +20,7 @@
 #include "js/ContextOptions.h"
 #include "js/SavedFrameAPI.h"
 #include "js/StructuredClone.h"
+#include "mozilla/AppShutdown.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/LoadContext.h"
@@ -161,7 +162,7 @@ nsXPCComponents_Interfaces::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-nsXPCComponents_Interfaces::nsXPCComponents_Interfaces() {}
+nsXPCComponents_Interfaces::nsXPCComponents_Interfaces() = default;
 
 nsXPCComponents_Interfaces::~nsXPCComponents_Interfaces() {
   // empty
@@ -314,7 +315,7 @@ nsXPCComponents_Classes::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-nsXPCComponents_Classes::nsXPCComponents_Classes() {}
+nsXPCComponents_Classes::nsXPCComponents_Classes() = default;
 
 nsXPCComponents_Classes::~nsXPCComponents_Classes() {
   // empty
@@ -456,7 +457,7 @@ nsXPCComponents_Results::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-nsXPCComponents_Results::nsXPCComponents_Results() {}
+nsXPCComponents_Results::nsXPCComponents_Results() = default;
 
 nsXPCComponents_Results::~nsXPCComponents_Results() {
   // empty
@@ -597,7 +598,7 @@ nsXPCComponents_ID::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-nsXPCComponents_ID::nsXPCComponents_ID() {}
+nsXPCComponents_ID::nsXPCComponents_ID() = default;
 
 nsXPCComponents_ID::~nsXPCComponents_ID() {
   // empty
@@ -748,7 +749,7 @@ nsXPCComponents_Exception::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-nsXPCComponents_Exception::nsXPCComponents_Exception() {}
+nsXPCComponents_Exception::nsXPCComponents_Exception() = default;
 
 nsXPCComponents_Exception::~nsXPCComponents_Exception() {
   // empty
@@ -1042,7 +1043,7 @@ nsXPCComponents_Constructor::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-nsXPCComponents_Constructor::nsXPCComponents_Constructor() {}
+nsXPCComponents_Constructor::nsXPCComponents_Constructor() = default;
 
 nsXPCComponents_Constructor::~nsXPCComponents_Constructor() {
   // empty
@@ -1158,7 +1159,7 @@ nsresult nsXPCComponents_Constructor::CallOrConstruct(
   XPCWrappedNativeScope* scope = ObjectScope(obj);
   nsCOMPtr<nsIXPCComponents> comp;
 
-  if (!xpc || !scope || !(comp = do_QueryInterface(scope->GetComponents()))) {
+  if (!xpc || !scope || !(comp = scope->GetComponents())) {
     return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
   }
 
@@ -1290,10 +1291,10 @@ class nsXPCComponents_Utils final : public nsIXPCComponents_Utils,
   NS_DECL_NSIXPCCOMPONENTS_UTILS
 
  public:
-  nsXPCComponents_Utils() {}
+  nsXPCComponents_Utils() = default;
 
  private:
-  virtual ~nsXPCComponents_Utils() {}
+  virtual ~nsXPCComponents_Utils() = default;
   nsCOMPtr<nsIXPCComponents_utils_Sandbox> mSandbox;
 };
 
@@ -1332,18 +1333,23 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
   nsGlobalWindowInner* win = CurrentWindowOrNull(cx);
   const uint64_t innerWindowID = win ? win->WindowID() : 0;
 
-  RootedObject errorObj(cx, error.isObject() ? &error.toObject() : nullptr);
-  JSErrorReport* err = errorObj ? JS_ErrorFromException(cx, errorObj) : nullptr;
+  Rooted<Maybe<Value>> exception(cx, Some(error));
+  if (!innerWindowID) {
+    // Leak mitigation: nsConsoleService::ClearMessagesForWindowID needs
+    // a WindowID for cleanup and exception values could hold arbitrary
+    // objects alive.
+    exception = Nothing();
+  }
 
   nsCOMPtr<nsIScriptError> scripterr;
-
+  RootedObject errorObj(cx, error.isObject() ? &error.toObject() : nullptr);
   if (errorObj) {
     JS::RootedObject stackVal(cx);
     JS::RootedObject stackGlobal(cx);
     FindExceptionStackForConsoleReport(win, error, nullptr, &stackVal,
                                        &stackGlobal);
     if (stackVal) {
-      scripterr = new nsScriptErrorWithStack(stackVal, stackGlobal);
+      scripterr = CreateScriptError(win, exception, stackVal, stackGlobal);
     }
   }
 
@@ -1397,14 +1403,15 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
     }
 
     if (stackObj) {
-      scripterr = new nsScriptErrorWithStack(stackObj, stackGlobal);
+      scripterr = CreateScriptError(win, exception, stackObj, stackGlobal);
     }
   }
 
   if (!scripterr) {
-    scripterr = new nsScriptError();
+    scripterr = CreateScriptError(win, exception, nullptr, nullptr);
   }
 
+  JSErrorReport* err = errorObj ? JS_ErrorFromException(cx, errorObj) : nullptr;
   if (err) {
     // It's a proper JS Error
     nsAutoString fileUni;
@@ -1413,6 +1420,8 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
     uint32_t column = err->tokenOffset();
 
     const char16_t* linebuf = err->linebuf();
+    uint32_t flags = err->isWarning() ? nsIScriptError::warningFlag
+                                      : nsIScriptError::errorFlag;
 
     nsresult rv = scripterr->InitWithWindowID(
         err->message() ? NS_ConvertUTF8toUTF16(err->message().c_str())
@@ -1420,7 +1429,8 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
         fileUni,
         linebuf ? nsDependentString(linebuf, err->linebufLength())
                 : EmptyString(),
-        err->lineno, column, err->flags, "XPConnect JavaScript", innerWindowID);
+        err->lineno, column, flags, "XPConnect JavaScript", innerWindowID,
+        innerWindowID == 0 ? true : false);
     NS_ENSURE_SUCCESS(rv, NS_OK);
 
     console->LogMessage(scripterr);
@@ -1438,9 +1448,9 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
     return NS_OK;
   }
 
-  nsresult rv =
-      scripterr->InitWithWindowID(msg, fileName, EmptyString(), lineNo, 0, 0,
-                                  "XPConnect JavaScript", innerWindowID, true);
+  nsresult rv = scripterr->InitWithWindowID(
+      msg, fileName, EmptyString(), lineNo, 0, 0, "XPConnect JavaScript",
+      innerWindowID, innerWindowID == 0 ? true : false);
   NS_ENSURE_SUCCESS(rv, NS_OK);
 
   console->LogMessage(scripterr);
@@ -1973,34 +1983,6 @@ nsXPCComponents_Utils::IsCrossProcessWrapper(HandleValue obj, bool* out) {
 }
 
 NS_IMETHODIMP
-nsXPCComponents_Utils::GetCrossProcessWrapperTag(HandleValue obj,
-                                                 nsACString& out) {
-  if (obj.isPrimitive() || !jsipc::IsWrappedCPOW(&obj.toObject())) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  jsipc::GetWrappedCPOWTag(&obj.toObject(), out);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCComponents_Utils::PermitCPOWsInScope(HandleValue obj) {
-  if (!obj.isObject()) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  JSObject* scopeObj = js::UncheckedUnwrap(&obj.toObject());
-  JS::Compartment* scopeComp = js::GetObjectCompartment(scopeObj);
-  JS::Compartment* systemComp =
-      js::GetObjectCompartment(xpc::PrivilegedJunkScope());
-  MOZ_RELEASE_ASSERT(scopeComp != systemComp,
-                     "Don't call Cu.PermitCPOWsInScope() on scopes in the "
-                     "shared system compartment");
-  CompartmentPrivate::Get(scopeComp)->allowCPOWs = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsXPCComponents_Utils::RecomputeWrappers(HandleValue vobj, JSContext* cx) {
   // Determine the compartment of the given object, if any.
   JS::Compartment* c =
@@ -2095,8 +2077,6 @@ nsXPCComponents_Utils::Dispatch(HandleValue runnableArg, HandleValue scope,
     return NS_OK;                                                       \
   }
 
-GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Strict, extraWarnings, setExtraWarnings)
-GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Werror, werror, setWerror)
 GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Strict_mode, strictMode, setStrictMode)
 
 #undef GENERATE_JSCONTEXTOPTION_GETTER_SETTER
@@ -2114,6 +2094,18 @@ nsXPCComponents_Utils::GetIsInAutomation(bool* aResult) {
   NS_ENSURE_ARG_POINTER(aResult);
 
   *aResult = xpc::IsInAutomation();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::ExitIfInAutomation() {
+  NS_ENSURE_TRUE(xpc::IsInAutomation(), NS_ERROR_FAILURE);
+
+#ifdef MOZ_GECKO_PROFILER
+  profiler_shutdown(IsFastShutdown::Yes);
+#endif
+
+  mozilla::AppShutdown::DoImmediateExit();
   return NS_OK;
 }
 
@@ -2164,6 +2156,13 @@ nsXPCComponents_Utils::UnblockScriptForGlobal(HandleValue globalArg,
     return NS_ERROR_FAILURE;
   }
   Scriptability::Get(global).Unblock();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::IsOpaqueWrapper(HandleValue obj, bool* aRetval) {
+  *aRetval =
+      obj.isObject() && xpc::WrapperFactory::IsOpaqueWrapper(&obj.toObject());
   return NS_OK;
 }
 
@@ -2263,12 +2262,12 @@ nsXPCComponents_Utils::GetIncumbentGlobal(HandleValue aCallback, JSContext* aCx,
 
 class WrappedJSHolder : public nsISupports {
   NS_DECL_ISUPPORTS
-  WrappedJSHolder() {}
+  WrappedJSHolder() = default;
 
   RefPtr<nsXPCWrappedJS> mWrappedJS;
 
  private:
-  virtual ~WrappedJSHolder() {}
+  virtual ~WrappedJSHolder() = default;
 };
 
 NS_IMPL_ADDREF(WrappedJSHolder)
@@ -2553,31 +2552,21 @@ nsXPCComponents_Utils::GetComponentLoadStack(const nsACString& aLocation,
 /***************************************************************************/
 /***************************************************************************/
 
-nsXPCComponentsBase::nsXPCComponentsBase(XPCWrappedNativeScope* aScope)
+nsXPCComponents::nsXPCComponents(XPCWrappedNativeScope* aScope)
     : mScope(aScope) {
   MOZ_ASSERT(aScope, "aScope must not be null");
 }
 
-nsXPCComponents::nsXPCComponents(XPCWrappedNativeScope* aScope)
-    : nsXPCComponentsBase(aScope) {}
-
-nsXPCComponentsBase::~nsXPCComponentsBase() {}
-
-nsXPCComponents::~nsXPCComponents() {}
-
-void nsXPCComponentsBase::ClearMembers() {
-  mInterfaces = nullptr;
-  mResults = nullptr;
-}
+nsXPCComponents::~nsXPCComponents() = default;
 
 void nsXPCComponents::ClearMembers() {
+  mInterfaces = nullptr;
+  mResults = nullptr;
   mClasses = nullptr;
   mID = nullptr;
   mException = nullptr;
   mConstructor = nullptr;
   mUtils = nullptr;
-
-  nsXPCComponentsBase::ClearMembers();
 }
 
 /*******************************************/
@@ -2590,9 +2579,9 @@ void nsXPCComponents::ClearMembers() {
     return NS_OK;                                                \
   }
 
-XPC_IMPL_GET_OBJ_METHOD(nsXPCComponentsBase, Interfaces)
+XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, Interfaces)
 XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, Classes)
-XPC_IMPL_GET_OBJ_METHOD(nsXPCComponentsBase, Results)
+XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, Results)
 XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, ID)
 XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, Exception)
 XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, Constructor)
@@ -2602,7 +2591,7 @@ XPC_IMPL_GET_OBJ_METHOD(nsXPCComponents, Utils)
 /*******************************************/
 
 NS_IMETHODIMP
-nsXPCComponentsBase::IsSuccessCode(nsresult result, bool* out) {
+nsXPCComponents::IsSuccessCode(nsresult result, bool* out) {
   *out = NS_SUCCEEDED(result);
   return NS_OK;
 }
@@ -2667,13 +2656,6 @@ NS_IMETHODIMP_(MozExternalRefCountType) ComponentsSH::Release(void) {
 
 NS_IMPL_QUERY_INTERFACE(ComponentsSH, nsIXPCScriptable)
 
-#define NSXPCCOMPONENTSBASE_CID                      \
-  {                                                  \
-    0xc62998e5, 0x95f1, 0x4058, {                    \
-      0xa5, 0x09, 0xec, 0x21, 0x66, 0x18, 0x92, 0xb9 \
-    }                                                \
-  }
-
 #define NSXPCCOMPONENTS_CID                          \
   {                                                  \
     0x3649f405, 0xf0ec, 0x4c28, {                    \
@@ -2681,20 +2663,8 @@ NS_IMPL_QUERY_INTERFACE(ComponentsSH, nsIXPCScriptable)
     }                                                \
   }
 
-NS_IMPL_CLASSINFO(nsXPCComponentsBase, &ComponentsSH::Get, 0,
-                  NSXPCCOMPONENTSBASE_CID)
-NS_IMPL_ISUPPORTS_CI(nsXPCComponentsBase, nsIXPCComponentsBase)
-
 NS_IMPL_CLASSINFO(nsXPCComponents, &ComponentsSH::Get, 0, NSXPCCOMPONENTS_CID)
-// Below is more or less what NS_IMPL_ISUPPORTS_CI_INHERITED1 would look like
-// if it existed.
-NS_IMPL_ADDREF_INHERITED(nsXPCComponents, nsXPCComponentsBase)
-NS_IMPL_RELEASE_INHERITED(nsXPCComponents, nsXPCComponentsBase)
-NS_INTERFACE_MAP_BEGIN(nsXPCComponents)
-  NS_INTERFACE_MAP_ENTRY(nsIXPCComponents)
-  NS_IMPL_QUERY_CLASSINFO(nsXPCComponents)
-NS_INTERFACE_MAP_END_INHERITING(nsXPCComponentsBase)
-NS_IMPL_CI_INTERFACE_GETTER(nsXPCComponents, nsIXPCComponents)
+NS_IMPL_ISUPPORTS_CI(nsXPCComponents, nsIXPCComponents)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us
 #define XPC_MAP_CLASSNAME ComponentsSH
@@ -2705,7 +2675,7 @@ NS_IMPL_CI_INTERFACE_GETTER(nsXPCComponents, nsIXPCComponents)
 NS_IMETHODIMP
 ComponentsSH::PreCreate(nsISupports* nativeObj, JSContext* cx,
                         JSObject* globalObj, JSObject** parentObj) {
-  nsXPCComponentsBase* self = static_cast<nsXPCComponentsBase*>(nativeObj);
+  nsXPCComponents* self = static_cast<nsXPCComponents*>(nativeObj);
   // this should never happen
   if (!self->GetScope()) {
     NS_WARNING(

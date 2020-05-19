@@ -21,18 +21,8 @@ const { classifySite } = ChromeUtils.import(
 
 ChromeUtils.defineModuleGetter(
   this,
-  "ASRouterPreferences",
-  "resource://activity-stream/lib/ASRouterPreferences.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "perfService",
-  "resource://activity-stream/common/PerfService.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "AboutNewTabStartupRecorder",
-  "resource:///modules/AboutNewTabService.jsm"
+  "AboutNewTab",
+  "resource:///modules/AboutNewTab.jsm"
 );
 ChromeUtils.defineModuleGetter(
   this,
@@ -71,15 +61,13 @@ ChromeUtils.defineModuleGetter(
 );
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  ExperimentAPI: "resource://messaging-system/experiments/ExperimentAPI.jsm",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
+  TelemetrySession: "resource://gre/modules/TelemetrySession.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   gUUIDGenerator: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
-  aboutNewTabService: [
-    "@mozilla.org/browser/aboutnewtab-service;1",
-    "nsIAboutNewTabService",
-  ],
 });
 
 const ACTIVITY_STREAM_ID = "activity-stream";
@@ -121,6 +109,12 @@ const ONBOARDING_ALLOWED_PAGE_VALUES = [
   "about:newtab",
 ];
 
+XPCOMUtils.defineLazyGetter(
+  this,
+  "browserSessionId",
+  () => TelemetrySession.getMetadata("").sessionId
+);
+
 this.TelemetryFeed = class TelemetryFeed {
   constructor(options) {
     this.sessions = new Map();
@@ -129,6 +123,7 @@ this.TelemetryFeed = class TelemetryFeed {
     this._aboutHomeSeen = false;
     this._classifySite = classifySite;
     this._addWindowListeners = this._addWindowListeners.bind(this);
+    this._browserOpenNewtabStart = null;
     this.handleEvent = this.handleEvent.bind(this);
   }
 
@@ -153,6 +148,16 @@ this.TelemetryFeed = class TelemetryFeed {
       value: ClientID.getClientID(),
     });
     return this.telemetryClientId;
+  }
+
+  get processStartTs() {
+    let startupInfo = Services.startup.getStartupInfo();
+    let processStartTs = startupInfo.process.getTime();
+
+    Object.defineProperty(this, "processStartTs", {
+      value: processStartTs,
+    });
+    return this.processStartTs;
   }
 
   init() {
@@ -235,7 +240,14 @@ this.TelemetryFeed = class TelemetryFeed {
   }
 
   browserOpenNewtabStart() {
-    perfService.mark("browser-open-newtab-start");
+    let now = Cu.now();
+    this._browserOpenNewtabStart = Math.round(this.processStartTs + now);
+
+    ChromeUtils.addProfilerMarker(
+      "UserTiming",
+      now,
+      "browser-open-newtab-start"
+    );
   }
 
   setLoadTriggerInfo(port) {
@@ -262,10 +274,11 @@ this.TelemetryFeed = class TelemetryFeed {
 
     let data_to_save;
     try {
+      if (!this._browserOpenNewtabStart) {
+        throw new Error("No browser-open-newtab-start recorded.");
+      }
       data_to_save = {
-        load_trigger_ts: perfService.getMostRecentAbsMarkStartByName(
-          "browser-open-newtab-start"
-        ),
+        load_trigger_ts: this._browserOpenNewtabStart,
         load_trigger_type: "menu_plus_or_keyboard",
       };
     } catch (e) {
@@ -308,13 +321,19 @@ this.TelemetryFeed = class TelemetryFeed {
   }
 
   /**
-   *  Check if it is in the CFR experiment cohort. ASRouterPreferences lazily parses AS router pref.
+   *  Check if it is in the CFR experiment cohort by querying against the
+   *  experiment manager of Messaging System
    */
   get isInCFRCohort() {
-    for (let provider of ASRouterPreferences.providers) {
-      if (provider.id === "cfr" && provider.enabled && provider.cohort) {
+    try {
+      const experimentData = ExperimentAPI.getExperiment({
+        group: "cfr",
+      });
+      if (experimentData && experimentData.slug) {
         return true;
       }
+    } catch (e) {
+      return false;
     }
     return false;
   }
@@ -352,21 +371,9 @@ this.TelemetryFeed = class TelemetryFeed {
       load_trigger_type = "first_window_opened";
 
       // The real perceived trigger of first_window_opened is the OS-level
-      // clicking of the icon.  We use perfService.timeOrigin because it's the
-      // earliest number on this time scale that's easy to get.; We could
-      // actually use 0, but maybe that could be before the browser started?
-      // [bug 1401406](https://bugzilla.mozilla.org/show_bug.cgi?id=1401406)
-      // getting sorted out may help clarify. Even better, presumably, would be
-      // to use the process creation time for the main process, which is
-      // available, but somewhat harder to get. However, these are all more or
-      // less proxies for the same thing, so it's not clear how much the better
-      // numbers really matter, since we (activity stream) only control a
-      // relatively small amount of the code that's executing between the
-      // OS-click and when the first <browser> element starts loading.  That
-      // said, it's conceivable that it could help us catch regressions in the
-      // number of cycles early chrome code takes to execute, but it's likely
-      // that there are more direct ways to measure that.
-      load_trigger_ts = perfService.timeOrigin;
+      // clicking of the icon. We express this by using the process start
+      // absolute timestamp.
+      load_trigger_ts = this.processStartTs;
     }
 
     const session = {
@@ -404,8 +411,9 @@ this.TelemetryFeed = class TelemetryFeed {
     this.sendDiscoveryStreamImpressions(portID, session);
 
     if (session.perf.visibility_event_rcvd_ts) {
+      let absNow = this.processStartTs + Cu.now();
       session.session_duration = Math.round(
-        perfService.absNow() - session.perf.visibility_event_rcvd_ts
+        absNow - session.perf.visibility_event_rcvd_ts
       );
 
       // Rounding all timestamps in perf to ease the data processing on the backend.
@@ -665,6 +673,7 @@ this.TelemetryFeed = class TelemetryFeed {
    */
   async applyOnboardingPolicy(ping, session) {
     ping.client_id = await this.telemetryClientId;
+    ping.browser_session_id = browserSessionId;
     // Attach page info to `event_context` if there is a session associated with this ping
     if (ping.action === "onboarding_user_event" && session && session.page) {
       let event_context;
@@ -710,6 +719,7 @@ this.TelemetryFeed = class TelemetryFeed {
   async sendEventPing(ping) {
     delete ping.action;
     ping.client_id = await this.telemetryClientId;
+    ping.browser_session_id = browserSessionId;
     if (ping.value && typeof ping.value === "object") {
       ping.value = JSON.stringify(ping.value);
     }
@@ -761,8 +771,7 @@ this.TelemetryFeed = class TelemetryFeed {
     if (this.telemetryEnabled && this.structuredIngestionTelemetryEnabled) {
       this.pingCentre.sendStructuredIngestionPing(
         eventObject,
-        this._generateStructuredIngestionEndpoint(namespace, pingType, version),
-        { filter: ACTIVITY_STREAM_ID }
+        this._generateStructuredIngestionEndpoint(namespace, pingType, version)
       );
     }
   }
@@ -822,11 +831,11 @@ this.TelemetryFeed = class TelemetryFeed {
       // If so, classify them.
       if (
         Services.prefs.getBoolPref("browser.newtabpage.enabled") &&
-        aboutNewTabService.overridden &&
-        !aboutNewTabService.newTabURL.startsWith("moz-extension://")
+        AboutNewTab.newTabURLOverridden &&
+        !AboutNewTab.newTabURL.startsWith("moz-extension://")
       ) {
         value.newtab_url_category = await this._classifySite(
-          aboutNewTabService.newTabURL
+          AboutNewTab.newTabURL
         );
         newtabAffected = true;
       }
@@ -1069,7 +1078,7 @@ this.TelemetryFeed = class TelemetryFeed {
       !HomePage.overridden &&
       Services.prefs.getIntPref("browser.startup.page") === 1
     ) {
-      AboutNewTabStartupRecorder.maybeRecordTopsitesPainted(timestamp);
+      AboutNewTab.maybeRecordTopsitesPainted(timestamp);
     }
 
     Object.assign(session.perf, data);

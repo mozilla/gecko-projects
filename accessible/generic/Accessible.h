@@ -39,6 +39,7 @@ class EmbeddedObjCollector;
 class EventTree;
 class HTMLImageMapAccessible;
 class HTMLLIAccessible;
+class HTMLLinkAccessible;
 class HyperTextAccessible;
 class ImageAccessible;
 class KeyBinding;
@@ -172,15 +173,7 @@ class Accessible : public nsISupports {
   /**
    * Return the unique identifier of the accessible.
    */
-  void* UniqueID() {
-    // When recording or replaying, use an ID which will be consistent when
-    // recording/replaying (pointer values are not consistent), so that IPC
-    // messages from the parent process can be handled when replaying.
-    if (recordreplay::IsRecordingOrReplaying()) {
-      return reinterpret_cast<void*>(recordreplay::ThingIndex(this));
-    }
-    return static_cast<void*>(this);
-  }
+  void* UniqueID() { return static_cast<void*>(this); }
 
   /**
    * Return language associated with the accessible.
@@ -275,15 +268,6 @@ class Accessible : public nsISupports {
     uint64_t state = NativeLinkState();
     ApplyARIAState(&state);
     return state;
-  }
-
-  /**
-   * Return if accessible is unavailable.
-   */
-  bool Unavailable() const {
-    uint64_t state = NativelyUnavailable() ? states::UNAVAILABLE : 0;
-    ApplyARIAState(&state);
-    return state & states::UNAVAILABLE;
   }
 
   /**
@@ -593,6 +577,9 @@ class Accessible : public nsISupports {
   bool IsHTMLListItem() const { return mType == eHTMLLiType; }
   HTMLLIAccessible* AsHTMLListItem();
 
+  bool IsHTMLLink() const { return mType == eHTMLLinkType; }
+  HTMLLinkAccessible* AsHTMLLink();
+
   bool IsHTMLOptGroup() const { return mType == eHTMLOptGroupType; }
 
   bool IsHTMLTable() const { return mType == eHTMLTableType; }
@@ -675,6 +662,8 @@ class Accessible : public nsISupports {
   bool IsXULListItem() const { return mType == eXULListItemType; }
 
   bool IsXULTabpanels() const { return mType == eXULTabpanelsType; }
+
+  bool IsXULTooltip() const { return mType == eXULTooltipType; }
 
   bool IsXULTree() const { return mType == eXULTreeType; }
   XULTreeAccessible* AsXULTree();
@@ -987,6 +976,12 @@ class Accessible : public nsISupports {
 
   void Announce(const nsAString& aAnnouncement, uint16_t aPriority);
 
+  /**
+   * Fire a focusable state change event if the previous state
+   * was different.
+   */
+  void MaybeFireFocusableStateChange(bool aPreviouslyFocusable);
+
  protected:
   virtual ~Accessible();
 
@@ -1074,6 +1069,11 @@ class Accessible : public nsISupports {
    * Returns the accessible name specified by ARIA.
    */
   void ARIAName(nsString& aName) const;
+
+  /**
+   * Returns the accessible description specified by ARIA.
+   */
+  void ARIADescription(nsString& aDescription) const;
 
   /**
    * Returns the accessible name specified for this control using XUL

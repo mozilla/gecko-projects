@@ -4,25 +4,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <sys/mman.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+#include "mozilla/Assertions.h"
+#include "mozilla/Sprintf.h"
+
 #include "BaseProfiler.h"
+#include "PlatformMacros.h"
+#include "AutoObjectMapper.h"
 
-#ifdef MOZ_BASE_PROFILER
-
-#  include <sys/mman.h>
-#  include <unistd.h>
-#  include <sys/types.h>
-#  include <sys/stat.h>
-#  include <fcntl.h>
-
-#  include "mozilla/Assertions.h"
-#  include "mozilla/Sprintf.h"
-
-#  include "PlatformMacros.h"
-#  include "AutoObjectMapper.h"
-
-#  if defined(MOZ_LINKER)
-#    include <dlfcn.h>
-#    include "mozilla/Types.h"
+#if defined(MOZ_LINKER)
+#  include <dlfcn.h>
+#  include "mozilla/Types.h"
+#  if defined(ANDROID)
+#    include <sys/system_properties.h>
+#  endif
 // FIXME move these out of mozglue/linker/ElfLoader.h into their
 // own header, so as to avoid conflicts arising from two definitions
 // of Array
@@ -31,7 +31,7 @@ MFBT_API size_t __dl_get_mappable_length(void* handle);
 MFBT_API void* __dl_mmap(void* handle, void* addr, size_t length, off_t offset);
 MFBT_API void __dl_munmap(void* handle, void* addr, size_t length);
 }
-#  endif
+#endif
 
 // A helper function for creating failure error messages in
 // AutoObjectMapper*::Map.
@@ -95,7 +95,23 @@ bool AutoObjectMapperPOSIX::Map(/*OUT*/ void** start, /*OUT*/ size_t* length,
   return true;
 }
 
-#  if defined(MOZ_LINKER)
+#if defined(MOZ_LINKER)
+#  if defined(ANDROID)
+static int GetAndroidSDKVersion() {
+  static int version = 0;
+  if (version) {
+    return version;
+  }
+
+  char version_string[PROP_VALUE_MAX] = {'\0'};
+  int len = __system_property_get("ro.build.version.sdk", version_string);
+  if (len) {
+    version = static_cast<int>(strtol(version_string, nullptr, 10));
+  }
+  return version;
+}
+#  endif
+
 AutoObjectMapperFaultyLib::AutoObjectMapperFaultyLib(void (*aLog)(const char*))
     : AutoObjectMapperPOSIX(aLog), mHdl(nullptr) {}
 
@@ -122,9 +138,14 @@ bool AutoObjectMapperFaultyLib::Map(/*OUT*/ void** start,
                                     /*OUT*/ size_t* length,
                                     std::string fileName) {
   MOZ_ASSERT(!mHdl);
+
+#  if defined(ANDROID)
+  if (GetAndroidSDKVersion() >= 23) {
+    return AutoObjectMapperPOSIX::Map(start, length, fileName);
+  }
+#  endif
+
   return false;
 }
 
-#  endif  // defined(MOZ_LINKER)
-
-#endif  // MOZ_BASE_PROFILER
+#endif  // defined(MOZ_LINKER)

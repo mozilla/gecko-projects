@@ -27,14 +27,14 @@ namespace gmp {
 
 class GMPCapability {
  public:
-  explicit GMPCapability() {}
+  explicit GMPCapability() = default;
   GMPCapability(GMPCapability&& aOther)
       : mAPIName(std::move(aOther.mAPIName)),
         mAPITags(std::move(aOther.mAPITags)) {}
   explicit GMPCapability(const nsCString& aAPIName) : mAPIName(aAPIName) {}
   explicit GMPCapability(const GMPCapability& aOther) = default;
   nsCString mAPIName;
-  nsTArray<nsCString> mAPITags;
+  CopyableTArray<nsCString> mAPITags;
 
   static bool Supports(const nsTArray<GMPCapability>& aCapabilities,
                        const nsCString& aAPI, const nsTArray<nsCString>& aTags);

@@ -20,10 +20,13 @@
 #include "frontend/BinASTTokenReaderContext.h"
 #include "frontend/BinASTTokenReaderMultipart.h"
 #include "frontend/FullParseHandler.h"
+#include "frontend/FunctionSyntaxKind.h"  // FunctionSyntaxKind
 #include "frontend/ParseNode.h"
 #include "frontend/Parser.h"
 #include "frontend/SharedContext.h"
 #include "js/Result.h"
+#include "vm/FunctionFlags.h"          // js::FunctionFlags
+#include "vm/GeneratorAndAsyncKind.h"  // js::GeneratorKind, js::FunctionAsyncKind
 #include "vm/RegExpObject.h"
 
 #include "frontend/ParseContext-inl.h"
@@ -84,15 +87,13 @@ template <typename Tok>
 BinASTParserPerTokenizer<Tok>::BinASTParserPerTokenizer(
     JSContext* cx, CompilationInfo& compilationInfo,
     const JS::ReadOnlyCompileOptions& options,
-    HandleScriptSourceObject sourceObject,
-    Handle<LazyScript*> lazyScript /* = nullptr */)
-    : BinASTParserBase(cx, compilationInfo, sourceObject),
+    Handle<BaseScript*> lazyScript /* = nullptr */)
+    : BinASTParserBase(cx, compilationInfo),
       options_(options),
       lazyScript_(cx, lazyScript),
       handler_(cx, compilationInfo.allocScope.alloc(), nullptr,
                SourceKind::Binary),
-      variableDeclarationKind_(VariableDeclarationKind::Var),
-      treeHolder_(cx) {
+      variableDeclarationKind_(VariableDeclarationKind::Var) {
   MOZ_ASSERT_IF(lazyScript_, lazyScript_->isBinAST());
 }
 
@@ -223,7 +224,7 @@ void BinASTParserPerTokenizer<Tok>::forceStrictIfNecessary(
 
   for (const ParseNode* directive : directives->contents()) {
     if (directive->as<NameNode>().atom() == useStrict) {
-      sc->strictScript = true;
+      sc->setStrictScript();
       break;
     }
   }
@@ -262,11 +263,20 @@ JS::Result<FunctionBox*> BinASTParserPerTokenizer<Tok>::buildFunctionBox(
   // Allocate the function before walking down the tree.
   RootedFunction fun(cx_);
   if (pc_) {
-    Rooted<FunctionCreationData> fcd(
-        cx_,
-        FunctionCreationData(atom, syntax, generatorKind, functionAsyncKind));
-    BINJS_TRY_VAR(fun, AllocNewFunction(cx_, fcd));
-    MOZ_ASSERT(fun->explicitName() == atom);
+    FunctionFlags flags =
+        InitialFunctionFlags(syntax, generatorKind, functionAsyncKind);
+
+    RootedObject proto(cx_);
+    BINJS_TRY(
+        GetFunctionPrototype(cx_, generatorKind, functionAsyncKind, &proto));
+
+    gc::AllocKind allocKind = flags.isExtended()
+                                  ? gc::AllocKind::FUNCTION_EXTENDED
+                                  : gc::AllocKind::FUNCTION;
+
+    BINJS_TRY_VAR(
+        fun, NewFunctionWithProto(cx_, nullptr, 0, flags, nullptr, atom, proto,
+                                  allocKind, TenuredObject));
   } else {
     BINJS_TRY_VAR(fun, lazyScript_->function());
   }
@@ -278,20 +288,30 @@ JS::Result<FunctionBox*> BinASTParserPerTokenizer<Tok>::buildFunctionBox(
     directives.emplace(lazyScript_->strict());
   }
 
+  size_t index = this->getCompilationInfo().funcData.length();
+  if (!this->getCompilationInfo().funcData.emplaceBack(
+          mozilla::AsVariant(fun.get()))) {
+    return nullptr;
+  }
+
+  // This extent will be further filled in during parse.
+  SourceExtent extent;
   auto* funbox = alloc_.new_<FunctionBox>(
-      cx_, traceListHead_, fun, /* toStringStart = */ 0, getCompilationInfo(),
-      *directives,
-      /* extraWarning = */ false, generatorKind, functionAsyncKind);
+      cx_, compilationInfo_.traceListHead, extent, getCompilationInfo(),
+      *directives, generatorKind, functionAsyncKind, fun->displayAtom(),
+      fun->flags(), index);
   if (MOZ_UNLIKELY(!funbox)) {
     return raiseOOM();
   }
 
-  traceListHead_ = funbox;
+  compilationInfo_.traceListHead = funbox;
   if (pc_) {
-    funbox->initWithEnclosingParseContext(pc_, fun, syntax);
+    funbox->initWithEnclosingParseContext(pc_, fun->flags(), syntax);
   } else {
+    frontend::ScopeContext scopeContext(fun->enclosingScope());
     funbox->initFromLazyFunction(fun);
-    funbox->initWithEnclosingScope(fun);
+    funbox->initWithEnclosingScope(scopeContext, fun->enclosingScope(),
+                                   fun->flags(), syntax);
   }
   return funbox;
 }
@@ -300,7 +320,7 @@ template <typename Tok>
 JS::Result<FunctionNode*> BinASTParserPerTokenizer<Tok>::makeEmptyFunctionNode(
     const size_t start, const FunctionSyntaxKind syntaxKind,
     FunctionBox* funbox) {
-  // LazyScript compilation requires basically none of the fields filled out.
+  // Lazy script compilation requires basically none of the fields filled out.
   TokenPos pos = tokenizer_->pos(start);
 
   BINJS_TRY_DECL(result, handler_.newFunction(syntaxKind, pos));
@@ -333,6 +353,9 @@ JS::Result<Ok> BinASTParserPerTokenizer<Tok>::finishEagerFunction(
     funbox->setArgCount(nargs);
   }
 
+  // BCE will need to generate bytecode for this.
+  funbox->emitBytecode = true;
+
   const bool canSkipLazyClosedOverBindings = false;
   BINJS_TRY(pc_->declareFunctionArgumentsObject(usedNames_,
                                                 canSkipLazyClosedOverBindings));
@@ -342,12 +365,17 @@ JS::Result<Ok> BinASTParserPerTokenizer<Tok>::finishEagerFunction(
   // Check all our bindings after maybe adding function metavars.
   MOZ_TRY(checkFunctionClosedVars());
 
-  BINJS_TRY_DECL(bindings,
-                 NewFunctionScopeData(cx_, pc_->functionScope(),
-                                      /* hasParameterExprs = */ false,
-                                      IsFieldInitializer::No, alloc_, pc_));
+  BINJS_TRY_DECL(bindings, NewFunctionScopeData(cx_, pc_->functionScope(),
+                                                /* hasParameterExprs = */ false,
+                                                alloc_, pc_));
 
   funbox->functionScopeBindings().set(*bindings);
+
+  // See: JSFunction::needsCallObject()
+  if (FunctionScopeHasClosedOverBindings(pc_) ||
+      funbox->needsCallObjectRegardlessOfBindings()) {
+    funbox->setNeedsFunctionEnvironmentObjects();
+  }
 
   if (funbox->isNamedLambda()) {
     BINJS_TRY_DECL(
@@ -355,6 +383,11 @@ JS::Result<Ok> BinASTParserPerTokenizer<Tok>::finishEagerFunction(
         NewLexicalScopeData(cx_, pc_->namedLambdaScope(), alloc_, pc_));
 
     funbox->namedLambdaBindings().set(*recursiveBinding);
+
+    // See: JSFunction::needsNamedLambdaEnvironment()
+    if (LexicalScopeHasClosedOverBindings(pc_, pc_->namedLambdaScope())) {
+      funbox->setNeedsFunctionEnvironmentObjects();
+    }
   }
 
   return Ok();
@@ -368,18 +401,27 @@ JS::Result<Ok> BinASTParserPerTokenizer<Tok>::finishLazyFunction(
   funbox->setArgCount(nargs);
   funbox->synchronizeArgCount();
 
+  using ImmutableFlags = ImmutableScriptFlagsEnum;
+  ImmutableScriptFlags immutableFlags = funbox->immutableFlags();
+
+  // Compute the flags that frontend doesn't directly compute.
+  immutableFlags.setFlag(ImmutableFlags::HasMappedArgsObj,
+                         funbox->hasMappedArgsObj());
+  immutableFlags.setFlag(ImmutableFlags::IsLikelyConstructorWrapper,
+                         funbox->isLikelyConstructorWrapper());
+
   SourceExtent extent(start, end, start, end,
                       /* lineno = */ 0, start);
-  BINJS_TRY_DECL(lazy,
-                 LazyScript::Create(cx_, fun, sourceObject_,
-                                    pc_->closedOverBindingsForLazy(),
-                                    pc_->innerFunctionBoxesForLazy, extent));
 
-  if (funbox->strict()) {
-    lazy->setStrict();
-  }
+  // NOTE: Lazy functions generated by BinAST do not track inner functions or
+  //       closed-over-binding data on the VM. Instead they use out-of-band data
+  //       from the BinAST stream during delazification.
+  BINJS_TRY_DECL(lazy, BaseScript::CreateRawLazy(cx_, /* ngcthings = */ 0, fun,
+                                                 compilationInfo_.sourceObject,
+                                                 extent, immutableFlags));
+
   MOZ_ASSERT(lazy->isBinAST());
-  funbox->initLazyScript(lazy);
+  fun->initScript(lazy);
 
   MOZ_TRY(tokenizer_->registerLazyScript(lazy));
 
@@ -774,12 +816,9 @@ bool BinASTParserPerTokenizer<Tok>::computeErrorMetadata(
   return true;
 }
 
-void TraceBinASTParser(JSTracer* trc, JS::AutoGCRooter* parser) {
-  static_cast<BinASTParserBase*>(parser)->trace(trc);
-}
-
 template <typename Tok>
-void BinASTParserPerTokenizer<Tok>::doTrace(JSTracer* trc) {
+void BinASTParserPerTokenizer<Tok>::trace(JSTracer* trc) {
+  BinASTParserBase::trace(trc);
   if (tokenizer_) {
     tokenizer_->traceMetadata(trc);
   }
@@ -790,9 +829,8 @@ inline typename BinASTParserPerTokenizer<Tok>::FinalParser*
 BinASTParserPerTokenizer<Tok>::asFinalParser() {
   // Same as GeneralParser::asFinalParser, verify the inheritance to
   // make sure the static downcast works.
-  static_assert(
-      std::is_base_of<BinASTParserPerTokenizer<Tok>, FinalParser>::value,
-      "inheritance relationship required by the static_cast<> below");
+  static_assert(std::is_base_of_v<BinASTParserPerTokenizer<Tok>, FinalParser>,
+                "inheritance relationship required by the static_cast<> below");
 
   return static_cast<FinalParser*>(this);
 }
@@ -800,9 +838,8 @@ BinASTParserPerTokenizer<Tok>::asFinalParser() {
 template <typename Tok>
 inline const typename BinASTParserPerTokenizer<Tok>::FinalParser*
 BinASTParserPerTokenizer<Tok>::asFinalParser() const {
-  static_assert(
-      std::is_base_of<BinASTParserPerTokenizer<Tok>, FinalParser>::value,
-      "inheritance relationship required by the static_cast<> below");
+  static_assert(std::is_base_of_v<BinASTParserPerTokenizer<Tok>, FinalParser>,
+                "inheritance relationship required by the static_cast<> below");
 
   return static_cast<const FinalParser*>(this);
 }

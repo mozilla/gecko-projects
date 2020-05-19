@@ -34,8 +34,8 @@ from mod_pywebsocket import standalone as pywebsocket
 
 
 EDIT_HOSTS_HELP = ("Please ensure all the necessary WPT subdomains "
-                   "are mapped to a loopback device in /etc/hosts. "
-                   "See https://github.com/web-platform-tests/wpt#running-the-tests "
+                   "are mapped to a loopback device in /etc/hosts.\n"
+                   "See https://web-platform-tests.org/running-tests/from-local-system.html#system-setup "
                    "for instructions.")
 
 
@@ -366,6 +366,7 @@ class RoutesBuilder(object):
             ("GET", "*.any.serviceworker.html", ServiceWorkersHandler),
             ("GET", "*.any.worker.js", AnyWorkerHandler),
             ("GET", "*.asis", handlers.AsIsHandler),
+            ("GET", "/.well-known/origin-policy", handlers.PythonScriptHandler),
             ("*", "*.py", handlers.PythonScriptHandler),
             ("GET", "*", handlers.FileHandler)
         ]
@@ -418,10 +419,10 @@ class ServerProc(object):
         try:
             self.daemon = init_func(host, port, paths, routes, bind_address, config, **kwargs)
         except socket.error:
-            print("Socket error on port %s" % port, file=sys.stderr)
+            logger.critical("Socket error on port %s" % port, file=sys.stderr)
             raise
         except Exception:
-            print(traceback.format_exc(), file=sys.stderr)
+            logger.critical(traceback.format_exc())
             raise
 
         if self.daemon:
@@ -537,50 +538,68 @@ def start_servers(host, ports, paths, routes, bind_address, config, **kwargs):
     return servers
 
 
+def startup_failed(log=True):
+    # Log=False is a workaround for https://github.com/web-platform-tests/wpt/issues/22719
+    if log:
+        logger.critical(EDIT_HOSTS_HELP)
+    else:
+        print("CRITICAL %s" % EDIT_HOSTS_HELP, file=sys.stderr)
+    sys.exit(1)
+
+
 def start_http_server(host, port, paths, routes, bind_address, config, **kwargs):
-    return wptserve.WebTestHttpd(host=host,
-                                 port=port,
-                                 doc_root=paths["doc_root"],
-                                 routes=routes,
-                                 rewrites=rewrites,
-                                 bind_address=bind_address,
-                                 config=config,
-                                 use_ssl=False,
-                                 key_file=None,
-                                 certificate=None,
-                                 latency=kwargs.get("latency"))
+    try:
+        return wptserve.WebTestHttpd(host=host,
+                                     port=port,
+                                     doc_root=paths["doc_root"],
+                                     routes=routes,
+                                     rewrites=rewrites,
+                                     bind_address=bind_address,
+                                     config=config,
+                                     use_ssl=False,
+                                     key_file=None,
+                                     certificate=None,
+                                     latency=kwargs.get("latency"))
+    except Exception:
+        startup_failed()
 
 
 def start_https_server(host, port, paths, routes, bind_address, config, **kwargs):
-    return wptserve.WebTestHttpd(host=host,
-                                 port=port,
-                                 doc_root=paths["doc_root"],
-                                 routes=routes,
-                                 rewrites=rewrites,
-                                 bind_address=bind_address,
-                                 config=config,
-                                 use_ssl=True,
-                                 key_file=config.ssl_config["key_path"],
-                                 certificate=config.ssl_config["cert_path"],
-                                 encrypt_after_connect=config.ssl_config["encrypt_after_connect"],
-                                 latency=kwargs.get("latency"))
+    try:
+        return wptserve.WebTestHttpd(host=host,
+                                     port=port,
+                                     doc_root=paths["doc_root"],
+                                     routes=routes,
+                                     rewrites=rewrites,
+                                     bind_address=bind_address,
+                                     config=config,
+                                     use_ssl=True,
+                                     key_file=config.ssl_config["key_path"],
+                                     certificate=config.ssl_config["cert_path"],
+                                     encrypt_after_connect=config.ssl_config["encrypt_after_connect"],
+                                     latency=kwargs.get("latency"))
+    except Exception:
+        startup_failed()
 
 
 def start_http2_server(host, port, paths, routes, bind_address, config, **kwargs):
-    return wptserve.WebTestHttpd(host=host,
-                                 port=port,
-                                 handler_cls=wptserve.Http2WebTestRequestHandler,
-                                 doc_root=paths["doc_root"],
-                                 routes=routes,
-                                 rewrites=rewrites,
-                                 bind_address=bind_address,
-                                 config=config,
-                                 use_ssl=True,
-                                 key_file=config.ssl_config["key_path"],
-                                 certificate=config.ssl_config["cert_path"],
-                                 encrypt_after_connect=config.ssl_config["encrypt_after_connect"],
-                                 latency=kwargs.get("latency"),
-                                 http2=True)
+    try:
+        return wptserve.WebTestHttpd(host=host,
+                                     port=port,
+                                     handler_cls=wptserve.Http2WebTestRequestHandler,
+                                     doc_root=paths["doc_root"],
+                                     routes=routes,
+                                     rewrites=rewrites,
+                                     bind_address=bind_address,
+                                     config=config,
+                                     use_ssl=True,
+                                     key_file=config.ssl_config["key_path"],
+                                     certificate=config.ssl_config["cert_path"],
+                                     encrypt_after_connect=config.ssl_config["encrypt_after_connect"],
+                                     latency=kwargs.get("latency"),
+                                     http2=True)
+    except Exception:
+        startup_failed()
 
 
 class WebSocketDaemon(object):
@@ -591,21 +610,9 @@ class WebSocketDaemon(object):
                     "-w", handlers_root]
 
         if ssl_config is not None:
-            # This is usually done through pywebsocket.main, however we're
-            # working around that to get the server instance and manually
-            # setup the wss server.
-            if pywebsocket._import_ssl():
-                tls_module = pywebsocket._TLS_BY_STANDARD_MODULE
-            elif pywebsocket._import_pyopenssl():
-                tls_module = pywebsocket._TLS_BY_PYOPENSSL
-            else:
-                print("No SSL module available")
-                sys.exit(1)
-
             cmd_args += ["--tls",
                          "--private-key", ssl_config["key_path"],
-                         "--certificate", ssl_config["cert_path"],
-                         "--tls-module", tls_module]
+                         "--certificate", ssl_config["cert_path"]]
 
         if (bind_address):
             cmd_args = ["-H", host] + cmd_args
@@ -615,6 +622,12 @@ class WebSocketDaemon(object):
 
         self.server = pywebsocket.WebSocketServer(opts)
         ports = [item[0].getsockname()[1] for item in self.server._sockets]
+        if not ports:
+            # TODO: Fix the logging configuration in WebSockets processes
+            # see https://github.com/web-platform-tests/wpt/issues/22719
+            print("Failed to start websocket server on port %s, "
+                  "is something already using that port?" % port, file=sys.stderr)
+            raise OSError()
         assert all(item == ports[0] for item in ports)
         self.port = ports[0]
         self.started = False
@@ -663,12 +676,15 @@ def start_ws_server(host, port, paths, routes, bind_address, config, **kwargs):
     # in the logging module unlocked
     reload_module(logging)
     release_mozlog_lock()
-    return WebSocketDaemon(host,
-                           str(port),
-                           repo_root,
-                           config.paths["ws_doc_root"],
-                           bind_address,
-                           ssl_config=None)
+    try:
+        return WebSocketDaemon(host,
+                               str(port),
+                               repo_root,
+                               config.paths["ws_doc_root"],
+                               bind_address,
+                               ssl_config=None)
+    except Exception:
+        startup_failed(log=False)
 
 
 def start_wss_server(host, port, paths, routes, bind_address, config, **kwargs):
@@ -676,12 +692,15 @@ def start_wss_server(host, port, paths, routes, bind_address, config, **kwargs):
     # in the logging module unlocked
     reload_module(logging)
     release_mozlog_lock()
-    return WebSocketDaemon(host,
-                           str(port),
-                           repo_root,
-                           config.paths["ws_doc_root"],
-                           bind_address,
-                           config.ssl_config)
+    try:
+        return WebSocketDaemon(host,
+                               str(port),
+                               repo_root,
+                               config.paths["ws_doc_root"],
+                               bind_address,
+                               config.ssl_config)
+    except Exception:
+        startup_failed(log=False)
 
 
 def start(config, routes, **kwargs):
@@ -743,6 +762,9 @@ def build_config(override_path=None, **kwargs):
 def _make_subdomains_product(s, depth=2):
     return {u".".join(x) for x in chain(*(product(s, repeat=i) for i in range(1, depth+1)))}
 
+def _make_origin_policy_subdomains(limit):
+    return {u"op%d" % x for x in range(1,limit+1)}
+
 
 _subdomains = {u"www",
                u"www1",
@@ -753,6 +775,12 @@ _subdomains = {u"www",
 _not_subdomains = {u"nonexistent"}
 
 _subdomains = _make_subdomains_product(_subdomains)
+
+# Origin policy subdomains need to not be reused by any other tests, since origin policies have
+# origin-wide impacts like installing a CSP or Feature Policy that could interfere with features
+# under test.
+# See https://github.com/web-platform-tests/rfcs/pull/44.
+_subdomains |= _make_origin_policy_subdomains(99)
 
 _not_subdomains = _make_subdomains_product(_not_subdomains)
 
@@ -895,7 +923,8 @@ def run(**kwargs):
             signal.signal(signal.SIGTERM, handle_signal)
             signal.signal(signal.SIGINT, handle_signal)
 
-            while all(item.is_alive() for item in iter_procs(servers)) and not received_signal.is_set():
+            while (all(item.is_alive() for item in iter_procs(servers)) and
+                   not received_signal.is_set()):
                 for item in iter_procs(servers):
                     item.join(1)
             exited = [item for item in iter_procs(servers) if not item.is_alive()]

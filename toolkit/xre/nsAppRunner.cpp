@@ -27,7 +27,6 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/Utf8.h"
 #include "mozilla/intl/LocaleService.h"
-#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/JSONWriter.h"
 #include "BaseProfiler.h"
 
@@ -109,6 +108,10 @@
 
 #  if defined(MOZ_LAUNCHER_PROCESS)
 #    include "mozilla/LauncherRegistryInfo.h"
+#  endif
+
+#  if defined(MOZ_DEFAULT_BROWSER_AGENT)
+#    include "nsIWindowsRegKey.h"
 #  endif
 
 #  ifndef PROCESS_DEP_ENABLE
@@ -214,7 +217,7 @@
 #include "GTestRunner.h"
 
 #ifdef MOZ_WIDGET_ANDROID
-#  include "GeneratedJNIWrappers.h"
+#  include "mozilla/java/GeckoAppShellWrappers.h"
 #endif
 
 #if defined(MOZ_SANDBOX)
@@ -245,10 +248,15 @@ extern void InstallSignalHandlers(const char* ProgramName);
 #define FILE_INVALIDATE_CACHES NS_LITERAL_CSTRING(".purgecaches")
 #define FILE_STARTUP_INCOMPLETE NS_LITERAL_STRING(".startup-incomplete")
 
-#if defined(MOZ_BLOCK_PROFILE_DOWNGRADE) || defined(MOZ_LAUNCHER_PROCESS)
+#if defined(MOZ_BLOCK_PROFILE_DOWNGRADE) || defined(MOZ_LAUNCHER_PROCESS) || \
+    defined(MOZ_DEFAULT_BROWSER_AGENT)
 static const char kPrefHealthReportUploadEnabled[] =
     "datareporting.healthreport.uploadEnabled";
 #endif  // defined(MOZ_BLOCK_PROFILE_DOWNGRADE) || defined(MOZ_LAUNCHER_PROCESS)
+        // || defined(MOZ_DEFAULT_BROWSER_AGENT)
+#if defined(MOZ_DEFAULT_BROWSER_AGENT)
+static const char kPrefDefaultAgentEnabled[] = "default-browser-agent.enabled";
+#endif  // defined(MOZ_DEFAULT_BROWSER_AGENT)
 
 int gArgc;
 char** gArgv;
@@ -440,7 +448,7 @@ class nsXULAppInfo : public nsIXULAppInfo,
 
 {
  public:
-  constexpr nsXULAppInfo() {}
+  constexpr nsXULAppInfo() = default;
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIPLATFORMINFO
   NS_DECL_NSIXULAPPINFO
@@ -578,6 +586,18 @@ nsXULAppInfo::GetSourceURL(nsACString& aResult) {
 }
 
 NS_IMETHODIMP
+nsXULAppInfo::GetUpdateURL(nsACString& aResult) {
+  if (XRE_IsContentProcess()) {
+    ContentChild* cc = ContentChild::GetSingleton();
+    aResult = cc->GetAppInfo().updateURL;
+    return NS_OK;
+  }
+  aResult.Assign(gAppData->updateURL);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsXULAppInfo::GetLogConsoleErrors(bool* aResult) {
   *aResult = gLogConsoleErrors;
   return NS_OK;
@@ -679,6 +699,39 @@ nsXULAppInfo::GetRemoteType(nsAString& aRemoteType) {
     SetDOMStringToNull(aRemoteType);
   }
 
+  return NS_OK;
+}
+
+static nsCString gLastAppVersion;
+static nsCString gLastAppBuildID;
+
+NS_IMETHODIMP
+nsXULAppInfo::GetLastAppVersion(nsACString& aResult) {
+  if (XRE_IsContentProcess()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  if (!gLastAppVersion.IsVoid() && gLastAppVersion.IsEmpty()) {
+    NS_WARNING("Attempt to retrieve lastAppVersion before it has been set.");
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aResult.Assign(gLastAppVersion);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXULAppInfo::GetLastAppBuildID(nsACString& aResult) {
+  if (XRE_IsContentProcess()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  if (!gLastAppBuildID.IsVoid() && gLastAppBuildID.IsEmpty()) {
+    NS_WARNING("Attempt to retrieve lastAppBuildID before it has been set.");
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aResult.Assign(gLastAppBuildID);
   return NS_OK;
 }
 
@@ -1148,12 +1201,6 @@ nsXULAppInfo::SaveMemoryReport() {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsXULAppInfo::SetTelemetrySessionId(const nsACString& id) {
-  CrashReporter::SetTelemetrySessionId(id);
-  return NS_OK;
-}
-
 // This method is from nsIFInishDumpingCallback.
 NS_IMETHODIMP
 nsXULAppInfo::Callback(nsISupports* aData) {
@@ -1288,7 +1335,7 @@ class nsSingletonFactory final : public nsIFactory {
   explicit nsSingletonFactory(nsISupports* aSingleton);
 
  private:
-  ~nsSingletonFactory() {}
+  ~nsSingletonFactory() = default;
   nsCOMPtr<nsISupports> mSingleton;
 };
 
@@ -1380,6 +1427,7 @@ static void DumpHelp() {
   printf(
       "  -h or --help       Print this message.\n"
       "  -v or --version    Print %s version.\n"
+      "  --full-version     Print %s version, build and platform build ids.\n"
       "  -P <profile>       Start with <profile>.\n"
       "  --profile <path>   Start with profile at <path>.\n"
       "  --migration        Start with migration wizard.\n"
@@ -1405,7 +1453,7 @@ static void DumpHelp() {
       "                     argument or as an environment variable, logging "
       "will be\n"
       "                     written to stdout.\n",
-      (const char*)gAppData->name);
+      (const char*)gAppData->name, (const char*)gAppData->name);
 
 #if defined(XP_WIN)
   printf("  --console          Start %s with a debugging console.\n",
@@ -1415,10 +1463,6 @@ static void DumpHelp() {
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) || defined(XP_MACOSX)
   printf("  --headless         Run without a GUI.\n");
 #endif
-
-  printf(
-      "  --save-recordings  Save recordings for all content processes to a "
-      "directory.\n");
 
   // this works, but only after the components have registered.  so if you drop
   // in a new command line handler, --help won't not until the second run. out
@@ -1436,6 +1480,24 @@ static inline void DumpVersion() {
   // For example, for beta, we would display 42.0b2 instead of 42.0
   printf("%s", MOZ_STRINGIFY(MOZ_APP_VERSION_DISPLAY));
 
+  if (gAppData->copyright) {
+    printf(", %s", (const char*)gAppData->copyright);
+  }
+  printf("\n");
+}
+
+static inline void DumpFullVersion() {
+  if (gAppData->vendor) {
+    printf("%s ", (const char*)gAppData->vendor);
+  }
+  printf("%s ", (const char*)gAppData->name);
+
+  // Use the displayed version
+  // For example, for beta, we would display 42.0b2 instead of 42.0
+  printf("%s ", MOZ_STRINGIFY(MOZ_APP_VERSION_DISPLAY));
+
+  printf("%s ", (const char*)gAppData->buildID);
+  printf("%s ", (const char*)PlatformBuildID());
   if (gAppData->copyright) {
     printf(", %s", (const char*)gAppData->copyright);
   }
@@ -1551,6 +1613,50 @@ static void SetupLauncherProcessPref() {
 }
 
 #  endif  // defined(MOZ_LAUNCHER_PROCESS)
+
+#  if defined(MOZ_DEFAULT_BROWSER_AGENT)
+static void OnDefaultAgentTelemetryPrefChanged(const char* aPref, void* aData) {
+  bool prefVal = Preferences::GetBool(aPref, true);
+
+  nsresult rv;
+  nsCOMPtr<nsIWindowsRegKey> regKey =
+      do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  nsAutoString keyName;
+  keyName.AppendLiteral("SOFTWARE\\" MOZ_APP_VENDOR "\\" MOZ_APP_NAME
+                        "\\Default Browser Agent");
+
+  nsCOMPtr<nsIFile> binaryPath;
+  rv = XRE_GetBinaryPath(getter_AddRefs(binaryPath));
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  nsCOMPtr<nsIFile> binaryDir;
+  rv = binaryPath->GetParent(getter_AddRefs(binaryDir));
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  nsAutoString valueName;
+  rv = binaryDir->GetPath(valueName);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  if (strcmp(aPref, kPrefHealthReportUploadEnabled) == 0) {
+    valueName.AppendLiteral("|DisableTelemetry");
+  } else if (strcmp(aPref, kPrefDefaultAgentEnabled) == 0) {
+    valueName.AppendLiteral("|DisableDefaultBrowserAgent");
+  } else {
+    return;
+  }
+
+  rv = regKey->Create(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER, keyName,
+                      nsIWindowsRegKey::ACCESS_WRITE);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  // We're recording whether the pref is *disabled*, so invert the value.
+  rv = regKey->WriteIntValue(valueName, prefVal ? 0 : 1);
+  NS_ENSURE_SUCCESS_VOID(rv);
+}
+
+#  endif  // defined(MOZ_DEFAULT_BROWSER_AGENT)
 
 #endif  // XP_WIN
 
@@ -1732,12 +1838,12 @@ static ReturnAbortOnError ProfileLockedDialog(nsIFile* aProfileDir,
     NS_ENSURE_TRUE_LOG(sbs, NS_ERROR_FAILURE);
 
     NS_ConvertUTF8toUTF16 appName(gAppData->name);
-    AutoTArray<nsString, 2> params = {appName, appName};
+    AutoTArray<nsString, 3> params = {appName, appName, appName};
 
     nsAutoString killMessage;
 #ifndef XP_MACOSX
     rv = sb->FormatStringFromName(
-        aUnlocker ? "restartMessageUnlocker" : "restartMessageNoUnlocker",
+        aUnlocker ? "restartMessageUnlocker" : "restartMessageNoUnlocker2",
         params, killMessage);
 #else
     rv = sb->FormatStringFromName(
@@ -2022,6 +2128,9 @@ struct FileWriteFunc : public JSONWriteFunc {
   explicit FileWriteFunc(FILE* aFile) : mFile(aFile) {}
 
   void Write(const char* aStr) override { fprintf(mFile, "%s", aStr); }
+  void Write(const char* aStr, size_t aLen) override {
+    fprintf(mFile, "%s", aStr);
+  }
 };
 
 static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
@@ -2314,8 +2423,7 @@ static ReturnAbortOnError CheckDowngrade(nsIFile* aProfileDir,
  */
 static void ExtractCompatVersionInfo(const nsACString& aCompatVersion,
                                      nsACString& aAppVersion,
-                                     nsACString& aAppBuildID,
-                                     nsACString& aPlatformBuildID) {
+                                     nsACString& aAppBuildID) {
   int32_t underscorePos = aCompatVersion.FindChar('_');
   int32_t slashPos = aCompatVersion.FindChar('/');
 
@@ -2327,78 +2435,12 @@ static void ExtractCompatVersionInfo(const nsACString& aCompatVersion,
     // Fall back to just using the entire string as the version.
     aAppVersion = aCompatVersion;
     aAppBuildID.Truncate(0);
-    aPlatformBuildID.Truncate(0);
     return;
   }
 
   aAppVersion = Substring(aCompatVersion, 0, underscorePos);
   aAppBuildID = Substring(aCompatVersion, underscorePos + 1,
                           slashPos - (underscorePos + 1));
-  aPlatformBuildID = Substring(aCompatVersion, slashPos + 1);
-}
-
-/**
- * Compares two build IDs. Returns 0 if they match, < 0 if newID is considered
- * newer than oldID and > 0 if the oldID is considered newer than newID.
- */
-static int32_t CompareBuildIDs(nsACString& oldID, nsACString& newID) {
-  // For Mozilla builds the build ID is a numeric date string. But it is too
-  // large a number for the version comparator to handle so try to just compare
-  // them as integer values first.
-
-  // ToInteger64 succeeds if the strings contain trailing non-digits so first
-  // check that all the characters are digits.
-  bool isNumeric = true;
-  const char* pos = oldID.BeginReading();
-  const char* end = oldID.EndReading();
-  while (pos != end) {
-    if (!IsAsciiDigit(*pos)) {
-      isNumeric = false;
-      break;
-    }
-    pos++;
-  }
-
-  if (isNumeric) {
-    pos = newID.BeginReading();
-    end = newID.EndReading();
-    while (pos != end) {
-      if (!IsAsciiDigit(*pos)) {
-        isNumeric = false;
-        break;
-      }
-      pos++;
-    }
-  }
-
-  if (isNumeric) {
-    nsresult rv;
-    CheckedInt<uint64_t> oldVal = oldID.ToInteger64(&rv);
-
-    if (NS_SUCCEEDED(rv) && oldVal.isValid()) {
-      CheckedInt<uint64_t> newVal = newID.ToInteger64(&rv);
-
-      if (NS_SUCCEEDED(rv) && newVal.isValid()) {
-        // We have simple numbers for both IDs.
-        if (oldVal.value() == newVal.value()) {
-          return 0;
-        }
-
-        if (oldVal.value() > newVal.value()) {
-          return 1;
-        }
-
-        return -1;
-      }
-    }
-  }
-
-  // If either could not be parsed as a number then something (likely a Linux
-  // distribution could have modified the build ID in some way. We don't know
-  // what format this may be so let's just fall back to assuming that it's a
-  // valid toolkit version.
-  return CompareVersions(PromiseFlatCString(oldID).get(),
-                         PromiseFlatCString(newID).get());
 }
 
 /**
@@ -2408,14 +2450,6 @@ static int32_t CompareBuildIDs(nsACString& oldID, nsACString& newID) {
  */
 int32_t CompareCompatVersions(const nsACString& aOldCompatVersion,
                               const nsACString& aNewCompatVersion) {
-  // Quick path for the common case.
-  if (aOldCompatVersion.Equals(aNewCompatVersion)) {
-    return 0;
-  }
-
-  // The versions differ for some reason so we will only ever return false from
-  // here onwards. We just have to figure out if this is a downgrade or not.
-
   // Hardcode the case where the last run was in safe mode (Bug 1556612). We
   // cannot tell if this is a downgrade or not so just assume it isn't and let
   // the user proceed.
@@ -2423,41 +2457,30 @@ int32_t CompareCompatVersions(const nsACString& aOldCompatVersion,
     return -1;
   }
 
-  nsCString oldVersion;
-  nsCString oldAppBuildID;
-  nsCString oldPlatformBuildID;
-  ExtractCompatVersionInfo(aOldCompatVersion, oldVersion, oldAppBuildID,
-                           oldPlatformBuildID);
+  // Extract the major version part from the version string and only use that
+  // for version comparison.
+  int32_t index = aOldCompatVersion.FindChar('.');
+  const nsACString& oldMajorVersion = Substring(
+      aOldCompatVersion, 0, index < 0 ? aOldCompatVersion.Length() : index);
+  index = aNewCompatVersion.FindChar('.');
+  const nsACString& newMajorVersion = Substring(
+      aNewCompatVersion, 0, index < 0 ? aNewCompatVersion.Length() : index);
 
-  nsCString newVersion;
-  nsCString newAppBuildID;
-  nsCString newPlatformBuildID;
-  ExtractCompatVersionInfo(aNewCompatVersion, newVersion, newAppBuildID,
-                           newPlatformBuildID);
-
-  // In most cases the app version will differ and this is an easy check.
-  int32_t result = CompareVersions(oldVersion.get(), newVersion.get());
-  if (result != 0) {
-    return result;
-  }
-
-  // Fall back to build ID comparison.
-  result = CompareBuildIDs(oldAppBuildID, newAppBuildID);
-  if (result != 0) {
-    return result;
-  }
-
-  return CompareBuildIDs(oldPlatformBuildID, newPlatformBuildID);
+  return CompareVersions(PromiseFlatCString(oldMajorVersion).get(),
+                         PromiseFlatCString(newMajorVersion).get());
 }
 
 /**
  * Checks the compatibility.ini file to see if we have updated our application
  * or otherwise invalidated our caches. If the application has been updated,
- * we return false; otherwise, we return true. We also write the status
- * of the caches (valid/invalid) into the return param aCachesOK. The aCachesOK
- * is always invalid if the application has been updated. aIsDowngrade is set to
- * true if the current application is older than that previously used by the
- * profile.
+ * we return false; otherwise, we return true.
+ *
+ * We also write the status of the caches (valid/invalid) into the return param
+ * aCachesOK. The aCachesOK is always invalid if the application has been
+ * updated.
+ *
+ * Finally, aIsDowngrade is set to true if the current application is older
+ * than that previously used by the profile.
  */
 static bool CheckCompatibility(nsIFile* aProfileDir, const nsCString& aVersion,
                                const nsCString& aOSABI, nsIFile* aXULRunnerDir,
@@ -2466,6 +2489,8 @@ static bool CheckCompatibility(nsIFile* aProfileDir, const nsCString& aVersion,
                                nsCString& aLastVersion) {
   *aCachesOK = false;
   *aIsDowngrade = false;
+  gLastAppVersion.SetIsVoid(true);
+  gLastAppBuildID.SetIsVoid(true);
 
   nsCOMPtr<nsIFile> file;
   aProfileDir->Clone(getter_AddRefs(file));
@@ -2481,11 +2506,19 @@ static bool CheckCompatibility(nsIFile* aProfileDir, const nsCString& aVersion,
     return false;
   }
 
-  int32_t result = CompareCompatVersions(aLastVersion, aVersion);
-  if (result != 0) {
-    *aIsDowngrade = result > 0;
+  if (!aLastVersion.Equals(aVersion)) {
+    // The version is not the same. Whether it's a downgrade depends on an
+    // actual comparison:
+    *aIsDowngrade = 0 < CompareCompatVersions(aLastVersion, aVersion);
+    ExtractCompatVersionInfo(aLastVersion, gLastAppVersion, gLastAppBuildID);
     return false;
   }
+
+  // If we get here, the version matched, but there may still be other
+  // differences between us and the build that the profile last ran under.
+
+  gLastAppVersion.Assign(gAppData->version);
+  gLastAppBuildID.Assign(gAppData->buildID);
 
   nsAutoCString buf;
   rv = parser.GetString("Compatibility", "LastOSABI", buf);
@@ -3386,7 +3419,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
     mStartOffline = true;
   }
 
-  // Handle --help and --version command line arguments.
+  // Handle --help, --full-version and --version command line arguments.
   // They should return quickly, so we deal with them here.
   if (CheckArg("h") || CheckArg("help") || CheckArg("?")) {
     DumpHelp();
@@ -3396,6 +3429,12 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
 
   if (CheckArg("v") || CheckArg("version")) {
     DumpVersion();
+    *aExitFlag = true;
+    return 0;
+  }
+
+  if (CheckArg("full-version")) {
+    DumpFullVersion();
     *aExitFlag = true;
     return 0;
   }
@@ -4032,7 +4071,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   // profile was started with.  The format of the version stamp is defined
   // by the BuildVersion function.
   // Also check to see if something has happened to invalidate our
-  // fastload caches, like an extension upgrade or installation.
+  // fastload caches, like an app upgrade.
 
   // If we see .purgecaches, that means someone did a make.
   // Re-register components to catch potential changes.
@@ -4051,7 +4090,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
       mProfD, version, osABI, mDirProvider.GetGREDir(), mAppData->directory,
       flagFile, &cachesOK, &isDowngrade, lastVersion);
 
-  MOZ_RELEASE_ASSERT(!cachesOK || versionOK,
+  MOZ_RELEASE_ASSERT(!cachesOK || lastVersion.Equals(version),
                      "Caches cannot be good if the version has changed.");
 
 #ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
@@ -4453,6 +4492,12 @@ nsresult XREMain::XRE_mainRun() {
 #  if defined(MOZ_LAUNCHER_PROCESS)
     SetupLauncherProcessPref();
 #  endif  // defined(MOZ_LAUNCHER_PROCESS)
+#  if defined(MOZ_DEFAULT_BROWSER_AGENT)
+    Preferences::RegisterCallbackAndCall(&OnDefaultAgentTelemetryPrefChanged,
+                                         kPrefHealthReportUploadEnabled);
+    Preferences::RegisterCallbackAndCall(&OnDefaultAgentTelemetryPrefChanged,
+                                         kPrefDefaultAgentEnabled);
+#  endif  // defined(MOZ_DEFAULT_BROWSER_AGENT)
 #endif
 
 #if defined(HAVE_DESKTOP_STARTUP_ID) && defined(MOZ_WIDGET_GTK)
@@ -4662,6 +4707,13 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   mozilla::IOInterposerInit ioInterposerGuard;
 
 #if defined(XP_WIN)
+  // Initializing COM below may load modules via SetWindowHookEx, some of
+  // which may modify the executable's IAT for ntdll.dll.  If that happens,
+  // this browser process fails to launch sandbox processes because we cannot
+  // copy a modified IAT into a remote process (See SandboxBroker::LaunchApp).
+  // To prevent that, we cache the intact IAT before COM initialization.
+  mozilla::ipc::GeckoChildProcessHost::CacheNtDllThunk();
+
   // Some COM settings are global to the process and must be set before any non-
   // trivial COM is run in the application. Since these settings may affect
   // stability, we should instantiate COM ASAP so that we can ensure that these
@@ -4726,6 +4778,9 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   mProfileLock->Unlock();
   gProfileLock = nullptr;
 
+  gLastAppVersion.Truncate();
+  gLastAppBuildID.Truncate();
+
   mozilla::AppShutdown::MaybeDoRestart();
 
 #ifdef MOZ_WIDGET_GTK
@@ -4788,8 +4843,7 @@ nsresult XRE_InitCommandLine(int aArgc, char* aArgv[]) {
   delete[] canonArgs;
 #endif
 
-  recordreplay::parent::InitializeUIProcess(gArgc, gArgv);
-
+#if defined(MOZ_WIDGET_ANDROID)
   const char* path = nullptr;
   ArgResult ar = CheckArg("greomni", &path);
   if (ar == ARG_BAD) {
@@ -4825,6 +4879,8 @@ nsresult XRE_InitCommandLine(int aArgc, char* aArgv[]) {
   }
 
   mozilla::Omnijar::Init(greOmni, appOmni);
+#endif
+
   return rv;
 }
 
@@ -4872,18 +4928,6 @@ bool XRE_UseNativeEventProcessing() {
 
   return true;
 }
-
-#if defined(XP_WIN)
-bool XRE_Win32kCallsAllowed() {
-  switch (XRE_GetProcessType()) {
-    case GeckoProcessType_GMPlugin:
-    case GeckoProcessType_RDD:
-      return false;
-    default:
-      return true;
-  }
-}
-#endif
 
 // If you add anything to this enum, please update about:support to reflect it
 enum {

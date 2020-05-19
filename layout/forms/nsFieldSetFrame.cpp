@@ -14,6 +14,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/Maybe.h"
 #include "nsCSSAnonBoxes.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsCSSRendering.h"
 #include "nsDisplayList.h"
 #include "nsGkAtoms.h"
@@ -196,7 +197,7 @@ bool nsDisplayFieldSetBorder::CreateWebRenderCommands(
       region.radii = wr::EmptyBorderRadius();
       nsTArray<mozilla::wr::ComplexClipRegion> array{region};
 
-      auto clip = aBuilder.DefineClip(Nothing(), layoutRect, &array, nullptr);
+      auto clip = aBuilder.DefineClip(Nothing(), layoutRect, &array);
       auto clipChain = aBuilder.DefineClipChain({clip}, true);
       clipOut.emplace(aBuilder, clipChain);
     }
@@ -385,7 +386,7 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
                              ReflowOutput& aDesiredSize,
                              const ReflowInput& aReflowInput,
                              nsReflowStatus& aStatus) {
-  using LegendAlignValue = HTMLLegendElement::LegendAlignValue;
+  using LegendAlignValue = mozilla::dom::HTMLLegendElement::LegendAlignValue;
 
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsFieldSetFrame");
@@ -887,15 +888,15 @@ void nsFieldSetFrame::EnsureChildContinuation(nsIFrame* aChild,
   nsIFrame* nif = aChild->GetNextInFlow();
   if (aStatus.IsFullyComplete()) {
     if (nif) {
-      RemoveFrame(kPrincipalList, nif);
+      // NOTE: we want to avoid our DEBUG version of RemoveFrame above.
+      nsContainerFrame::RemoveFrame(kNoReflowPrincipalList, nif);
       MOZ_ASSERT(!aChild->GetNextInFlow());
     }
   } else {
     nsFrameList nifs;
     if (!nif) {
-      auto* pc = PresContext();
-      auto* fc = pc->PresShell()->FrameConstructor();
-      nif = fc->CreateContinuingFrame(pc, aChild, this);
+      auto* fc = PresShell()->FrameConstructor();
+      nif = fc->CreateContinuingFrame(aChild, this);
       if (aStatus.IsOverflowIncomplete()) {
         nif->AddStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
       }

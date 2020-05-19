@@ -64,11 +64,12 @@ class MIRGenerator;
 class LIRGraph;
 class CodeGenerator;
 class LazyLinkExitFrameLayout;
+class WarpSnapshot;
 
 MOZ_MUST_USE bool OptimizeMIR(MIRGenerator* mir);
 LIRGraph* GenerateLIR(MIRGenerator* mir);
 CodeGenerator* GenerateCode(MIRGenerator* mir, LIRGraph* lir);
-CodeGenerator* CompileBackEnd(MIRGenerator* mir);
+CodeGenerator* CompileBackEnd(MIRGenerator* mir, WarpSnapshot* snapshot);
 
 void LinkIonScript(JSContext* cx, HandleScript calleescript);
 uint8_t* LazyLinkTopActivation(JSContext* cx, LazyLinkExitFrameLayout* frame);
@@ -133,10 +134,20 @@ void ForbidCompilation(JSContext* cx, JSScript* script);
 size_t SizeOfIonData(JSScript* script, mozilla::MallocSizeOf mallocSizeOf);
 
 inline bool IsIonEnabled(JSContext* cx) {
-  if (MOZ_UNLIKELY(!IsBaselineJitEnabled(cx) || cx->options().disableIon() ||
-                   !IsTypeInferenceEnabled())) {
+  if (MOZ_UNLIKELY(!IsBaselineJitEnabled(cx) || cx->options().disableIon())) {
     return false;
   }
+
+  // If TI is disabled, Ion can only be used if WarpBuilder is enabled.
+  if (MOZ_LIKELY(IsTypeInferenceEnabled())) {
+    MOZ_ASSERT(!JitOptions.warpBuilder,
+               "Shouldn't enable WarpBuilder without disabling TI!");
+  } else {
+    if (!JitOptions.warpBuilder) {
+      return false;
+    }
+  }
+
   if (MOZ_LIKELY(JitOptions.ion)) {
     return true;
   }

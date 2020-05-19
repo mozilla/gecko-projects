@@ -43,7 +43,6 @@
 #include "jit/RangeAnalysis.h"
 #include "jit/ScalarReplacement.h"
 #include "jit/Sink.h"
-#include "jit/StupidAllocator.h"
 #include "jit/ValueNumbering.h"
 #include "jit/WasmBCE.h"
 #include "js/Printf.h"
@@ -156,7 +155,13 @@ bool jit::InitializeJit() {
   return true;
 }
 
-bool jit::JitSupportsSimd() { return js::jit::MacroAssembler::SupportsSimd(); }
+bool jit::JitSupportsWasmSimd() {
+#if defined(ENABLE_WASM_SIMD)
+  return js::jit::MacroAssembler::SupportsWasmSimd();
+#else
+  MOZ_CRASH("Do not call");
+#endif
+}
 
 bool jit::JitSupportsAtomics() {
 #if defined(JS_CODEGEN_ARM)

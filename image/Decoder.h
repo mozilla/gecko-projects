@@ -13,7 +13,6 @@
 #include "mozilla/RefPtr.h"
 #include "AnimationParams.h"
 #include "DecoderFlags.h"
-#include "Downscaler.h"
 #include "ImageMetadata.h"
 #include "Orientation.h"
 #include "SourceBuffer.h"
@@ -105,7 +104,7 @@ class IDecoderFrameRecycler {
 
 class Decoder {
  public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_RECORDED(Decoder)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Decoder)
 
   explicit Decoder(RasterImage* aImage);
 
@@ -329,10 +328,7 @@ class Decoder {
    * Get or set the SurfaceFlags that select the kind of output this decoder
    * will produce.
    */
-  void SetSurfaceFlags(SurfaceFlags aSurfaceFlags) {
-    MOZ_ASSERT(!mInitialized);
-    mSurfaceFlags = aSurfaceFlags;
-  }
+  void SetSurfaceFlags(SurfaceFlags aSurfaceFlags);
   SurfaceFlags GetSurfaceFlags() const { return mSurfaceFlags; }
 
   /// @return true if we know the intrinsic size of the image we're decoding.
@@ -435,6 +431,7 @@ class Decoder {
  protected:
   friend class AutoRecordDecoderTelemetry;
   friend class DecoderTestHelper;
+  friend class nsBMPDecoder;
   friend class nsICODecoder;
   friend class PalettedSurfaceSink;
   friend class SurfaceSink;
@@ -455,6 +452,9 @@ class Decoder {
   virtual nsresult BeforeFinishInternal();
   virtual nsresult FinishInternal();
   virtual nsresult FinishWithErrorInternal();
+
+  qcms_profile* GetCMSOutputProfile() const;
+  qcms_transform* GetCMSsRGBTransform(gfx::SurfaceFormat aFormat) const;
 
   /**
    * @return the per-image-format telemetry ID for recording this decoder's
@@ -558,8 +558,6 @@ class Decoder {
       RawAccessFrameRef&& aPreviousFrame);
 
  protected:
-  Maybe<Downscaler> mDownscaler;
-
   /// Color management profile from the ICCP chunk in the image.
   qcms_profile* mInProfile;
 
@@ -568,6 +566,8 @@ class Decoder {
 
   uint8_t* mImageData;  // Pointer to image data in BGRA/X
   uint32_t mImageDataLength;
+
+  uint32_t mCMSMode;
 
  private:
   RefPtr<RasterImage> mImage;

@@ -333,8 +333,7 @@ FormAutoComplete.prototype = {
         client,
         [],
         aInputName,
-        aUntrimmedSearchString,
-        null
+        aUntrimmedSearchString
       );
     if (!this._enabled) {
       if (aListener) {
@@ -472,8 +471,7 @@ FormAutoComplete.prototype = {
             client,
             [],
             aInputName,
-            aUntrimmedSearchString,
-            null
+            aUntrimmedSearchString
           )
         : emptyResult;
 
@@ -609,18 +607,11 @@ FormAutoComplete.prototype = {
 }; // end of FormAutoComplete implementation
 
 // nsIAutoCompleteResult implementation
-function FormAutoCompleteResult(
-  client,
-  entries,
-  fieldName,
-  searchString,
-  messageManager
-) {
+function FormAutoCompleteResult(client, entries, fieldName, searchString) {
   this.client = client;
   this.entries = entries;
   this.fieldName = fieldName;
   this.searchString = searchString;
-  this.messageManager = messageManager;
 }
 
 FormAutoCompleteResult.prototype = {
@@ -696,14 +687,12 @@ FormAutoCompleteResult.prototype = {
     return this.getValueAt(index);
   },
 
-  removeValueAt(index, removeFromDB) {
+  removeValueAt(index) {
     this._checkIndexBounds(index);
 
     let [removedEntry] = this.entries.splice(index, 1);
 
-    if (removeFromDB) {
-      this.client.remove(removedEntry.text, removedEntry.guid);
-    }
+    this.client.remove(removedEntry.text, removedEntry.guid);
   },
 };
 

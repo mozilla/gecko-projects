@@ -7,8 +7,8 @@
 #ifndef mozilla_net_UrlClassifierCommon_h
 #define mozilla_net_UrlClassifierCommon_h
 
+#include "mozilla/Logging.h"
 #include "nsString.h"
-#include "mozilla/AntiTrackingCommon.h"
 
 #include <vector>
 
@@ -76,6 +76,12 @@ class UrlClassifierCommon final {
   static uint32_t TablesToClassificationFlags(
       const nsTArray<nsCString>& aList,
       const std::vector<ClassificationData>& aData, uint32_t aDefaultFlag);
+
+  static bool IsPassiveContent(nsIChannel* aChannel);
+
+  static void SetClassificationFlagsHelper(nsIChannel* aChannel,
+                                           uint32_t aClassificationFlags,
+                                           bool aIsThirdParty);
 
  private:
   static uint32_t TableToClassificationFlag(

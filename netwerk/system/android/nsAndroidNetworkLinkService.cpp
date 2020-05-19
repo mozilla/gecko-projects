@@ -11,9 +11,9 @@
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/Services.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Telemetry.h"
 
 #include "AndroidBridge.h"
+#include "mozilla/java/GeckoAppShellWrappers.h"
 
 namespace java = mozilla::java;
 
@@ -160,13 +160,6 @@ nsAndroidNetworkLinkService::GetPlatformDNSIndications(
 
 void nsAndroidNetworkLinkService::OnNetworkChanged() {
   if (mozilla::StaticPrefs::network_notify_changed()) {
-    if (!mNetworkChangeTime.IsNull()) {
-      mozilla::Telemetry::AccumulateTimeDelta(
-          mozilla::Telemetry::NETWORK_TIME_BETWEEN_NETWORK_CHANGE_EVENTS,
-          mNetworkChangeTime);
-    }
-    mNetworkChangeTime = mozilla::TimeStamp::Now();
-
     RefPtr<nsAndroidNetworkLinkService> self = this;
     NS_DispatchToMainThread(NS_NewRunnableFunction(
         "nsAndroidNetworkLinkService::OnNetworkChanged", [self]() {

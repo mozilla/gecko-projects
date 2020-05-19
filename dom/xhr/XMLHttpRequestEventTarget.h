@@ -17,9 +17,10 @@ class XMLHttpRequestEventTarget : public DOMEventTargetHelper {
   explicit XMLHttpRequestEventTarget(DOMEventTargetHelper* aOwner)
       : DOMEventTargetHelper(aOwner) {}
 
-  XMLHttpRequestEventTarget() {}
+  explicit XMLHttpRequestEventTarget(nsIGlobalObject* aGlobalObject)
+      : DOMEventTargetHelper(aGlobalObject) {}
 
-  virtual ~XMLHttpRequestEventTarget() {}
+  virtual ~XMLHttpRequestEventTarget() = default;
 
  public:
   NS_DECL_ISUPPORTS_INHERITED

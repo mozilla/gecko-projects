@@ -6,7 +6,7 @@ use crate::cdsl::instructions::{
 use crate::cdsl::operands::Operand;
 use crate::cdsl::types::ValueType;
 use crate::cdsl::typevar::{Interval, TypeSetBuilder, TypeVar};
-
+use crate::shared::entities::EntityRefs;
 use crate::shared::formats::Formats;
 use crate::shared::immediates::Immediates;
 use crate::shared::types;
@@ -16,6 +16,7 @@ pub(crate) fn define(
     mut all_instructions: &mut AllInstructions,
     formats: &Formats,
     immediates: &Immediates,
+    entities: &EntityRefs,
 ) -> InstructionGroup {
     let mut ig = InstructionGroupBuilder::new(&mut all_instructions);
 
@@ -273,7 +274,7 @@ pub(crate) fn define(
     );
     let a = &Operand::new("a", TxN).with_doc("A vector value (i.e. held in an XMM register)");
     let b = &Operand::new("b", TxN).with_doc("A vector value (i.e. held in an XMM register)");
-    let i = &Operand::new("i", uimm8,).with_doc( "An ordering operand controlling the copying of data from the source to the destination; see PSHUFD in Intel manual for details");
+    let i = &Operand::new("i", uimm8).with_doc("An ordering operand controlling the copying of data from the source to the destination; see PSHUFD in Intel manual for details");
 
     ig.push(
         Inst::new(
@@ -371,6 +372,69 @@ pub(crate) fn define(
             &formats.insert_lane,
         )
         .operands_in(vec![x, Idx, y])
+        .operands_out(vec![a]),
+    );
+
+    let x = &Operand::new("x", TxN);
+    let y = &Operand::new("y", TxN);
+    let a = &Operand::new("a", TxN);
+
+    ig.push(
+        Inst::new(
+            "x86_punpckh",
+            r#"
+        Unpack the high-order lanes of ``x`` and ``y`` and interleave into ``a``. With notional
+        i8x4 vectors, where ``x = [x3, x2, x1, x0]`` and ``y = [y3, y2, y1, y0]``, this operation
+        would result in ``a = [y3, x3, y2, x2]`` (using the Intel manual's right-to-left lane
+        ordering). 
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    ig.push(
+        Inst::new(
+            "x86_punpckl",
+            r#"
+        Unpack the low-order lanes of ``x`` and ``y`` and interleave into ``a``. With notional
+        i8x4 vectors, where ``x = [x3, x2, x1, x0]`` and ``y = [y3, y2, y1, y0]``, this operation
+        would result in ``a = [y1, x1, y0, x0]`` (using the Intel manual's right-to-left lane
+        ordering).
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    let I16xN = &TypeVar::new(
+        "I16xN",
+        "A SIMD vector type containing integers 16-bits wide and up",
+        TypeSetBuilder::new()
+            .ints(16..32)
+            .simd_lanes(4..8)
+            .includes_scalars(false)
+            .build(),
+    );
+
+    let x = &Operand::new("x", I16xN);
+    let y = &Operand::new("y", I16xN);
+    let a = &Operand::new("a", &I16xN.split_lanes());
+
+    ig.push(
+        Inst::new(
+            "x86_packss",
+            r#"
+        Convert packed signed integers the lanes of ``x`` and ``y`` into half-width integers, using
+        signed saturation to handle overflows. For example, with notional i16x2 vectors, where 
+        ``x = [x1, x0]`` and ``y = [y1, y0]``, this operation would result in 
+        ``a = [y1', y0', x1', x0']`` (using the Intel manual's right-to-left lane ordering).
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
         .operands_out(vec![a]),
     );
 
@@ -540,6 +604,46 @@ pub(crate) fn define(
         )
         .operands_in(vec![x, y])
         .operands_out(vec![a]),
+    );
+
+    let i64_t = &TypeVar::new(
+        "i64_t",
+        "A scalar 64bit integer",
+        TypeSetBuilder::new().ints(64..64).build(),
+    );
+
+    let GV = &Operand::new("GV", &entities.global_value);
+    let addr = &Operand::new("addr", i64_t);
+
+    ig.push(
+        Inst::new(
+            "x86_elf_tls_get_addr",
+            r#"
+        Elf tls get addr -- This implements the GD TLS model for ELF. The clobber output should
+        not be used.
+            "#,
+            &formats.unary_global_value,
+        )
+        // This is a bit overly broad to mark as clobbering *all* the registers, because it should
+        // only preserve caller-saved registers. There's no way to indicate this to register
+        // allocation yet, though, so mark as clobbering all registers instead.
+        .clobbers_all_regs(true)
+        .operands_in(vec![GV])
+        .operands_out(vec![addr]),
+    );
+    ig.push(
+        Inst::new(
+            "x86_macho_tls_get_addr",
+            r#"
+        Mach-O tls get addr -- This implements TLS access for Mach-O. The clobber output should
+        not be used.
+            "#,
+            &formats.unary_global_value,
+        )
+        // See above comment for x86_elf_tls_get_addr.
+        .clobbers_all_regs(true)
+        .operands_in(vec![GV])
+        .operands_out(vec![addr]),
     );
 
     ig.build()

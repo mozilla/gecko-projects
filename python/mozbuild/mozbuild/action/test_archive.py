@@ -113,6 +113,9 @@ ARCHIVE_FILES = {
                 'web-platform/**',
                 'xpcshell/**',
                 'updater-dep/**',
+                'jsreftest/**',
+                'jit-test/**',
+                'jittest/**',  # To make the ignore checker happy
             ],
         },
         {
@@ -169,42 +172,6 @@ ARCHIVE_FILES = {
             'base': 'toolkit/components/telemetry/tests/marionette',
             'pattern': '/**',
             'dest': 'telemetry/marionette',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'js/src',
-            'pattern': 'jit-test/**',
-            'dest': 'jit-test',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'js/src/tests',
-            'pattern': 'non262/shell.js',
-            'dest': 'jit-test/tests',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'js/src/tests',
-            'pattern': 'non262/Math/shell.js',
-            'dest': 'jit-test/tests',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'js/src/tests',
-            'pattern': 'non262/reflect-parse/Match.js',
-            'dest': 'jit-test/tests',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'js/src/tests',
-            'pattern': 'lib/**',
-            'dest': 'jit-test/tests',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'js/src',
-            'pattern': 'jsapi.h',
-            'dest': 'jit-test',
         },
         {
             'source': buildconfig.topsrcdir,
@@ -295,9 +262,7 @@ ARCHIVE_FILES = {
             'base': 'dist/bin',
             'patterns': [
                 'dmd.py',
-                'fix_linux_stack.py',
-                'fix_macosx_stack.py',
-                'fix_stack_using_bpsyms.py',
+                'fix_stacks.py',
             ],
             'dest': 'bin',
         },
@@ -463,6 +428,7 @@ ARCHIVE_FILES = {
             'base': '',
             'manifests': [
                 'layout/reftests/reftest.list',
+                'layout/reftests/reftest-qr.list',
                 'testing/crashtest/crashtests.list',
             ],
             'dest': 'reftest/tests',
@@ -525,6 +491,12 @@ ARCHIVE_FILES = {
         },
         {
             'source': buildconfig.topsrcdir,
+            'base': 'testing/mozbase/mozlog',
+            'pattern': '**',
+            'dest': 'condprofile/mozlog',
+        },
+        {
+            'source': buildconfig.topsrcdir,
             'base': 'third_party/python/virtualenv',
             'pattern': '**',
             'dest': 'condprofile/virtualenv',
@@ -571,6 +543,10 @@ ARCHIVE_FILES = {
             'source': buildconfig.topsrcdir,
             'base': 'testing',
             'pattern': 'web-platform/tests/**',
+            'ignore': [
+                'web-platform/tests/tools/wptserve',
+                'web-platform/tests/tools/wpt_third_party',
+            ],
         },
         {
             'source': buildconfig.topobjdir,
@@ -625,6 +601,18 @@ ARCHIVE_FILES = {
             'pattern': '**',
             'dest': 'xpcshell/profile_data',
         },
+        {
+            'source': buildconfig.topobjdir,
+            'base': 'dist/bin',
+            'pattern': 'http3server%s' % buildconfig.substs['BIN_SUFFIX'],
+            'dest': 'xpcshell/http3server',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'netwerk/test/http3serverDB',
+            'pattern': '**',
+            'dest': 'xpcshell/http3server/http3serverDB',
+        },
     ],
     'updater-dep': [
         {
@@ -641,6 +629,51 @@ ARCHIVE_FILES = {
             'dest': 'updater-dep',
         },
     ],
+    'jsreftest': [
+        {
+            'source': STAGE,
+            'base': '',
+            'pattern': 'jsreftest/**',
+        },
+    ],
+    'jittest': [
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'js/src',
+            'pattern': 'jit-test/**',
+            'dest': 'jit-test',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'js/src/tests',
+            'pattern': 'non262/shell.js',
+            'dest': 'jit-test/tests',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'js/src/tests',
+            'pattern': 'non262/Math/shell.js',
+            'dest': 'jit-test/tests',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'js/src/tests',
+            'pattern': 'non262/reflect-parse/Match.js',
+            'dest': 'jit-test/tests',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'js/src/tests',
+            'pattern': 'lib/**',
+            'dest': 'jit-test/tests',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'js/src',
+            'pattern': 'jsapi.h',
+            'dest': 'jit-test',
+        },
+    ]
 }
 
 if buildconfig.substs.get('MOZ_CODE_COVERAGE'):

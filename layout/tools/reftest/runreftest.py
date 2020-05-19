@@ -339,13 +339,21 @@ class RefTest(object):
             profile = mozprofile.Profile(**kwargs)
 
         # First set prefs from the base profiles under testing/profiles.
-        profile_data_dir = os.path.join(SCRIPT_DIRECTORY, 'profile_data')
 
+        # In test packages used in CI, the profile_data directory is installed
+        # in the SCRIPT_DIRECTORY.
+        profile_data_dir = os.path.join(SCRIPT_DIRECTORY, 'profile_data')
         # If possible, read profile data from topsrcdir. This prevents us from
         # requiring a re-build to pick up newly added extensions in the
         # <profile>/extensions directory.
         if build_obj:
             path = os.path.join(build_obj.topsrcdir, 'testing', 'profiles')
+            if os.path.isdir(path):
+                profile_data_dir = path
+        # Still not found? Look for testing/profiles relative to layout/tools/reftest.
+        if not os.path.isdir(profile_data_dir):
+            path = os.path.abspath(os.path.join(SCRIPT_DIRECTORY, '..', '..', '..',
+                                                'testing', 'profiles'))
             if os.path.isdir(path):
                 profile_data_dir = path
 
@@ -888,6 +896,10 @@ class RefTest(object):
         cmdargs = []
         self.runApp(options, cmdargs=cmdargs, prefs=prefs)
 
+        if not os.path.isfile(self.testDumpFile):
+            print("Error: parsing manifests failed!")
+            sys.exit(1)
+
         with open(self.testDumpFile, 'r') as fh:
             tests = json.load(fh)
 
@@ -953,7 +965,10 @@ class RefTest(object):
         ids_by_manifest = defaultdict(list)
         for t in tests:
             tests_by_manifest[t['manifest']].append(t)
-            ids_by_manifest[t['manifestID']].append(t['identifier'])
+            test_id = t['identifier']
+            if not isinstance(test_id, string_types):
+                test_id = ' '.join(test_id)
+            ids_by_manifest[t['manifestID']].append(test_id)
 
         self.log.suite_start(ids_by_manifest, name=options.suite)
 

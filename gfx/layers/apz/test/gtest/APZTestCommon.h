@@ -239,21 +239,9 @@ class TestAPZCTreeManager : public APZCTreeManager {
    **/
   void CancelAnimation() { EXPECT_TRUE(false); }
 
-  using APZCTreeManager::SetTargetAPZC;  // silence clang warning about overload
-  void SetTargetAPZC(uint64_t aInputBlockId,
-                     const nsTArray<ScrollableLayerGuid>& aTargets) {
-    nsTArray<SLGuidAndRenderRoot> wrapped;
-    for (const ScrollableLayerGuid& target : aTargets) {
-      wrapped.AppendElement(
-          SLGuidAndRenderRoot(target, wr::RenderRoot::Default));
-    }
-    this->SetTargetAPZC(aInputBlockId, wrapped);
-  }
-
  protected:
-  AsyncPanZoomController* NewAPZCInstance(LayersId aLayersId,
-                                          GeckoContentController* aController,
-                                          wr::RenderRoot aRenderRoot) override;
+  AsyncPanZoomController* NewAPZCInstance(
+      LayersId aLayersId, GeckoContentController* aController) override;
 
   TimeStamp GetFrameTime() override { return mcc->Time(); }
 
@@ -266,11 +254,9 @@ class TestAsyncPanZoomController : public AsyncPanZoomController {
   TestAsyncPanZoomController(LayersId aLayersId,
                              MockContentControllerDelayed* aMcc,
                              TestAPZCTreeManager* aTreeManager,
-                             wr::RenderRoot aRenderRoot,
                              GestureBehavior aBehavior = DEFAULT_GESTURES)
       : AsyncPanZoomController(aLayersId, aTreeManager,
-                               aTreeManager->GetInputQueue(), aMcc, aRenderRoot,
-                               aBehavior),
+                               aTreeManager->GetInputQueue(), aMcc, aBehavior),
         mWaitForMainThread(false),
         mcc(aMcc) {}
 
@@ -883,10 +869,8 @@ void APZCTesterBase::PinchWithPinchInput(
   mcc->AdvanceBy(TIME_BETWEEN_PINCH_INPUT);
 
   actualStatus = aTarget->ReceiveInputEvent(
-      CreatePinchGestureInput(
-          PinchGestureInput::PINCHGESTURE_END,
-          PinchGestureInput::BothFingersLifted<ScreenPixel>(), 10.0 * aScale,
-          10.0 * aScale, mcc->Time()),
+      CreatePinchGestureInput(PinchGestureInput::PINCHGESTURE_END, aSecondFocus,
+                              10.0 * aScale, 10.0 * aScale, mcc->Time()),
       nullptr);
   if (aOutEventStatuses) {
     (*aOutEventStatuses)[2] = actualStatus;
@@ -901,20 +885,18 @@ void APZCTesterBase::PinchWithPinchInputAndCheckStatus(
   PinchWithPinchInput(aTarget, aFocus, aFocus, aScale, &statuses);
 
   nsEventStatus expectedStatus = aShouldTriggerPinch
-                                     ? nsEventStatus_eConsumeNoDefault
+                                     ? nsEventStatus_eConsumeDoDefault
                                      : nsEventStatus_eIgnore;
   EXPECT_EQ(expectedStatus, statuses[0]);
   EXPECT_EQ(expectedStatus, statuses[1]);
 }
 
 AsyncPanZoomController* TestAPZCTreeManager::NewAPZCInstance(
-    LayersId aLayersId, GeckoContentController* aController,
-    wr::RenderRoot aRenderRoot) {
+    LayersId aLayersId, GeckoContentController* aController) {
   MockContentControllerDelayed* mcc =
       static_cast<MockContentControllerDelayed*>(aController);
   return new TestAsyncPanZoomController(
-      aLayersId, mcc, this, aRenderRoot,
-      AsyncPanZoomController::USE_GESTURE_DETECTOR);
+      aLayersId, mcc, this, AsyncPanZoomController::USE_GESTURE_DETECTOR);
 }
 
 inline FrameMetrics TestFrameMetrics() {

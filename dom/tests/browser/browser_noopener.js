@@ -39,9 +39,7 @@ async function doTests(private, container) {
   }
 
   for (let test of TESTS) {
-    const testid = `${
-      test.id
-    } (private=${private}, container=${container}, alwaysNewWindow=${alwaysNewWindow})`;
+    const testid = `${test.id} (private=${private}, container=${container}, alwaysNewWindow=${alwaysNewWindow})`;
     let originalTab = BrowserTestUtils.addTab(
       window.gBrowser,
       TEST_URL,
@@ -141,14 +139,20 @@ add_task(async function prepare() {
 
 add_task(async function newtab_sameproc() {
   await SpecialPowers.pushPrefEnv({
-    set: [[OPEN_NEWWINDOW_PREF, OPEN_NEWTAB], [NOOPENER_NEWPROC_PREF, false]],
+    set: [
+      [OPEN_NEWWINDOW_PREF, OPEN_NEWTAB],
+      [NOOPENER_NEWPROC_PREF, false],
+    ],
   });
   await doAllTests();
 });
 
 add_task(async function newtab_newproc() {
   await SpecialPowers.pushPrefEnv({
-    set: [[OPEN_NEWWINDOW_PREF, OPEN_NEWTAB], [NOOPENER_NEWPROC_PREF, true]],
+    set: [
+      [OPEN_NEWWINDOW_PREF, OPEN_NEWTAB],
+      [NOOPENER_NEWPROC_PREF, true],
+    ],
   });
   await doAllTests();
 });
@@ -165,7 +169,10 @@ add_task(async function newwindow_sameproc() {
 
 add_task(async function newwindow_newproc() {
   await SpecialPowers.pushPrefEnv({
-    set: [[OPEN_NEWWINDOW_PREF, OPEN_NEWWINDOW], [NOOPENER_NEWPROC_PREF, true]],
+    set: [
+      [OPEN_NEWWINDOW_PREF, OPEN_NEWWINDOW],
+      [NOOPENER_NEWPROC_PREF, true],
+    ],
   });
   await doAllTests();
 });

@@ -14,25 +14,28 @@
 .meta {
   display: flex;
   align-items: center;
-  padding: 5px 16px;
+  padding: 9px 16px;
   border-bottom: 1px solid var(--in-content-box-border-color);
   background-color: var(--in-content-box-background);
   color: var(--in-content-deemphasized-text);
   font-size: 0.8em;
 }
 
+.meta > label > span {
+  margin-inline-end: 2px;
+}
+
 #login-sort {
   background-color: transparent;
-  margin-inline-start: 0;
-  padding-inline-start: 0;
-  padding-inline-end: 16px;
+  margin: 0;
+  padding-inline: 0 16px;
   min-height: initial;
   font: inherit;
   font-weight: 600;
   color: var(--in-content-text-color) !important;
 }
 
-#login-sort:hover {
+#login-sort:hover:not([disabled]) {
   background-color: var(--in-content-button-background);
 }
 
@@ -86,8 +89,7 @@
 }
 
 ol {
-  margin-top: 0;
-  margin-bottom: 0;
+  margin-block: 0;
   padding-inline-start: 0;
   overflow: hidden auto;
   flex-grow: 1;
@@ -106,9 +108,8 @@ ol {
 .login-list-item {
   display: flex;
   align-items: center;
-  padding: 10px;
-  padding-inline-end: 18px;
-  padding-inline-start: 12px;
+  padding-block: 10px;
+  padding-inline: 12px 18px;
   border-inline-start: 4px solid transparent;
   border-bottom: 1px solid var(--in-content-border-color);
   user-select: none;
@@ -177,27 +178,16 @@ ol {
   color: var(--in-content-deemphasized-text);
 }
 
-:not(.breached) > .list-item-warning-icon {
-  display: none;
-}
-
-.list-item-warning-icon {
-  -moz-context-properties: fill;
-  fill: var(--red-90);
+.alert-icon {
   min-width: 16px;
+  width: 16px;
   margin-inline-start: 12px;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 0.75;
 }
 
-@media (-moz-windows-default-theme: 0) {
-  .list-item-warning-icon {
-    fill: currentColor;
-  }
-}
-
-@supports -moz-bool-pref("browser.in-content.dark-mode") {
-  @media (prefers-color-scheme: dark) {
-    .breached > .list-item-warning-icon {
-      fill: var(--red-60);
-    }
-  }
+.breached > .alert-icon {
+  fill: var(--red-60);
+  fill-opacity: 1;
 }

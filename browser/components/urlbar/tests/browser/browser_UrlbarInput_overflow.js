@@ -4,7 +4,7 @@
 
 async function testVal(aExpected, overflowSide = "") {
   info(`Testing ${aExpected}`);
-  URLBarSetURI(makeURI(aExpected));
+  gURLBar.setURI(makeURI(aExpected));
 
   Assert.equal(
     gURLBar.selectionStart,
@@ -60,7 +60,10 @@ async function testVal(aExpected, overflowSide = "") {
   );
   if (overflowSide) {
     let side =
-      gURLBar.inputField.scrollLeft == 0 && !gURLBar.hasAttribute("rtltext")
+      gURLBar.getAttribute("domaindir") == "ltr" ||
+      (gURLBar.inputField.scrollLeft == 0 &&
+        !gURLBar.hasAttribute("rtltext") &&
+        !gURLBar.hasAttribute("domaindir"))
         ? "right"
         : "left";
     Assert.equal(side, overflowSide, "Check the overflow side");
@@ -95,7 +98,7 @@ add_task(async function() {
   // override the value we set with an empty value.
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser);
   registerCleanupFunction(function() {
-    URLBarSetURI();
+    gURLBar.setURI();
     BrowserTestUtils.removeTab(tab);
   });
 

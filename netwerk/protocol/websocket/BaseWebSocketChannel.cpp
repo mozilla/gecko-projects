@@ -73,7 +73,7 @@ BaseWebSocketChannel::GetOriginalURI(nsIURI** aOriginalURI) {
   LOG(("BaseWebSocketChannel::GetOriginalURI() %p\n", this));
 
   if (!mOriginalURI) return NS_ERROR_NOT_INITIALIZED;
-  NS_ADDREF(*aOriginalURI = mOriginalURI);
+  *aOriginalURI = do_AddRef(mOriginalURI).take();
   return NS_OK;
 }
 
@@ -82,10 +82,11 @@ BaseWebSocketChannel::GetURI(nsIURI** aURI) {
   LOG(("BaseWebSocketChannel::GetURI() %p\n", this));
 
   if (!mOriginalURI) return NS_ERROR_NOT_INITIALIZED;
-  if (mURI)
-    NS_ADDREF(*aURI = mURI);
-  else
-    NS_ADDREF(*aURI = mOriginalURI);
+  if (mURI) {
+    *aURI = do_AddRef(mURI).take();
+  } else {
+    *aURI = do_AddRef(mOriginalURI).take();
+  }
   return NS_OK;
 }
 
@@ -200,19 +201,17 @@ BaseWebSocketChannel::SetPingTimeout(uint32_t aSeconds) {
 }
 
 NS_IMETHODIMP
-BaseWebSocketChannel::InitLoadInfoNative(nsINode* aLoadingNode,
-                                         nsIPrincipal* aLoadingPrincipal,
-                                         nsIPrincipal* aTriggeringPrincipal,
-                                         nsICookieSettings* aCookieSettings,
-                                         uint32_t aSecurityFlags,
-                                         uint32_t aContentPolicyType,
-                                         uint32_t aSandboxFlags) {
+BaseWebSocketChannel::InitLoadInfoNative(
+    nsINode* aLoadingNode, nsIPrincipal* aLoadingPrincipal,
+    nsIPrincipal* aTriggeringPrincipal,
+    nsICookieJarSettings* aCookieJarSettings, uint32_t aSecurityFlags,
+    uint32_t aContentPolicyType, uint32_t aSandboxFlags) {
   mLoadInfo = new LoadInfo(
       aLoadingPrincipal, aTriggeringPrincipal, aLoadingNode, aSecurityFlags,
       aContentPolicyType, Maybe<mozilla::dom::ClientInfo>(),
       Maybe<mozilla::dom::ServiceWorkerDescriptor>(), aSandboxFlags);
-  if (aCookieSettings) {
-    mLoadInfo->SetCookieSettings(aCookieSettings);
+  if (aCookieJarSettings) {
+    mLoadInfo->SetCookieJarSettings(aCookieJarSettings);
   }
   return NS_OK;
 }
@@ -356,10 +355,10 @@ BaseWebSocketChannel::ListenerAndContextContainer::
     ~ListenerAndContextContainer() {
   MOZ_ASSERT(mListener);
 
-  NS_ReleaseOnMainThreadSystemGroup(
+  NS_ReleaseOnMainThread(
       "BaseWebSocketChannel::ListenerAndContextContainer::mListener",
       mListener.forget());
-  NS_ReleaseOnMainThreadSystemGroup(
+  NS_ReleaseOnMainThread(
       "BaseWebSocketChannel::ListenerAndContextContainer::mContext",
       mContext.forget());
 }

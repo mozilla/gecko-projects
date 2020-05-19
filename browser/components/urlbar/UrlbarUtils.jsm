@@ -30,16 +30,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 });
 
 var UrlbarUtils = {
-  // Values for browser.urlbar.insertMethod
-  INSERTMETHOD: {
-    // Just append new results.
-    APPEND: 0,
-    // Merge previous and current results if search strings are related.
-    MERGE_RELATED: 1,
-    // Always merge previous and current results.
-    MERGE: 2,
-  },
-
   // Extensions are allowed to add suggestions if they have registered a keyword
   // with the omnibox API. This is the maximum number of suggestions an extension
   // is allowed to add for a given search string.
@@ -58,8 +48,8 @@ var UrlbarUtils = {
   // Defines provider types.
   PROVIDER_TYPE: {
     // Should be executed immediately, because it returns heuristic results
-    // that must be handled to the user asap.
-    IMMEDIATE: 1,
+    // that must be handed to the user asap.
+    HEURISTIC: 1,
     // Can be delayed, contains results coming from the session or the profile.
     PROFILE: 2,
     // Can be delayed, contains results coming from the network.
@@ -69,32 +59,25 @@ var UrlbarUtils = {
   },
 
   // Defines UrlbarResult types.
-  // If you add new result types, consider checking if consumers of
-  // "urlbar-user-start-navigation" need update as well.
   RESULT_TYPE: {
     // An open tab.
-    // Payload: { icon, url, userContextId }
     TAB_SWITCH: 1,
     // A search suggestion or engine.
-    // Payload: { icon, suggestion, keyword, query }
     SEARCH: 2,
     // A common url/title tuple, may be a bookmark with tags.
-    // Payload: { icon, url, title, tags }
     URL: 3,
     // A bookmark keyword.
-    // Payload: { icon, url, keyword, postData }
     KEYWORD: 4,
     // A WebExtension Omnibox result.
-    // Payload: { icon, keyword, title, content }
     OMNIBOX: 5,
     // A tab from another synced device.
-    // Payload: { url, icon, device, title }
     REMOTE_TAB: 6,
     // An actionable message to help the user with their query.
-    // textData and buttonTextData are objects containing an l10n id and args.
-    // If a tip is untranslated it's possible to provide text and buttonText.
-    // Payload: { icon, textData, buttonTextData, [buttonUrl], [helpUrl] }
     TIP: 7,
+
+    // When you add a new type, also add its schema to
+    // UrlbarUtils.RESULT_PAYLOAD_SCHEMA below.  Also consider checking if
+    // consumers of "urlbar-user-start-navigation" need updating.
   },
 
   // This defines the source of results returned by a provider. Each provider
@@ -160,9 +143,19 @@ var UrlbarUtils = {
   // unit separator.
   TITLE_TAGS_SEPARATOR: "\x1F",
 
-  // Regex matching single words (no spaces, dots or url-like chars).
-  // We accept a trailing dot though.
-  REGEXP_SINGLE_WORD: /^[^\s.?@:/]+\.?$/,
+  // Regex matching single word hosts with an optional port; no spaces, auth or
+  // path-like chars are admitted.
+  REGEXP_SINGLE_WORD: /^[^\s@:/?#]+(:\d+)?$/,
+
+  /**
+   * Returns the payload schema for the given type of result.
+   *
+   * @param {number} type One of the UrlbarUtils.RESULT_TYPE values.
+   * @returns {object} The schema for the given type.
+   */
+  getPayloadSchema(type) {
+    return UrlbarUtils.RESULT_PAYLOAD_SCHEMA[type];
+  },
 
   /**
    * Adds a url to history as long as it isn't in a private browsing window,
@@ -272,6 +265,8 @@ var UrlbarUtils = {
     return mimeStream.QueryInterface(Ci.nsIInputStream);
   },
 
+  _compareIgnoringDiacritics: null,
+
   /**
    * Returns a list of all the token substring matches in a string.  Matching is
    * case insensitive.  Each match in the returned list is a tuple: [matchIndex,
@@ -280,8 +275,11 @@ var UrlbarUtils = {
    *
    * @param {array} tokens The tokens to search for.
    * @param {string} str The string to match against.
-   * @param {boolean} highlightType If HIGHLIGHT.SUGGESTED, return a list of all
-   *   the token string non-matches. Otherwise, return matches.
+   * @param {boolean} highlightType
+   *   One of the HIGHLIGHT values:
+   *     TYPED: match ranges matching the tokens; or
+   *     SUGGESTED: match ranges for words not matching the tokens and the
+   *                endings of words that start with a token.
    * @returns {array} An array: [
    *            [matchIndex_0, matchLength_0],
    *            [matchIndex_1, matchLength_1],
@@ -294,10 +292,11 @@ var UrlbarUtils = {
     str = str.toLocaleLowerCase();
     // To generate non-overlapping ranges, we start from a 0-filled array with
     // the same length of the string, and use it as a collision marker, setting
-    // 1 where a token matches.
+    // 1 where the text should be highlighted.
     let hits = new Array(str.length).fill(
       highlightType == this.HIGHLIGHT.SUGGESTED ? 1 : 0
     );
+    let compareIgnoringDiacritics;
     for (let { lowerCaseValue: needle } of tokens) {
       // Ideally we should never hit the empty token case, but just in case
       // the `needle` check protects us from an infinite loop.
@@ -312,6 +311,20 @@ var UrlbarUtils = {
         if (index < 0) {
           break;
         }
+
+        if (highlightType == UrlbarUtils.HIGHLIGHT.SUGGESTED) {
+          // We de-emphasize the match only if it's preceded by a space, thus
+          // it's a perfect match or the beginning of a longer word.
+          let previousSpaceIndex = str.lastIndexOf(" ", index) + 1;
+          if (index != previousSpaceIndex) {
+            index += needle.length;
+            // We found the token but we won't de-emphasize it, because it's not
+            // after a word boundary.
+            found = true;
+            continue;
+          }
+        }
+
         hits.fill(
           highlightType == this.HIGHLIGHT.SUGGESTED ? 0 : 1,
           index,
@@ -323,11 +336,29 @@ var UrlbarUtils = {
       // If that fails to match anything, try a (computationally intensive)
       // diacritic-insensitive search.
       if (!found) {
-        const options = { sensitivity: "base" };
+        if (!compareIgnoringDiacritics) {
+          if (!this._compareIgnoringDiacritics) {
+            // Diacritic insensitivity in the search engine follows a set of
+            // general rules that are not locale-dependent, so use a generic
+            // English collator for highlighting matching words instead of a
+            // collator for the user's particular locale.
+            this._compareIgnoringDiacritics = new Intl.Collator("en", {
+              sensitivity: "base",
+            }).compare;
+          }
+          compareIgnoringDiacritics = this._compareIgnoringDiacritics;
+        }
         index = 0;
         while (index < str.length) {
           let hay = str.substr(index, needle.length);
-          if (needle.localeCompare(hay, [], options) == 0) {
+          if (compareIgnoringDiacritics(needle, hay) === 0) {
+            if (highlightType == UrlbarUtils.HIGHLIGHT.SUGGESTED) {
+              let previousSpaceIndex = str.lastIndexOf(" ", index) + 1;
+              if (index != previousSpaceIndex) {
+                index += needle.length;
+                continue;
+              }
+            }
             hits.fill(
               highlightType == this.HIGHLIGHT.SUGGESTED ? 0 : 1,
               index,
@@ -529,7 +560,7 @@ var UrlbarUtils = {
    * Given a string, checks if it looks like a single word host, not containing
    * spaces nor dots (apart from a possible trailing one).
    * @note This matching should stay in sync with the related code in
-   * nsDefaultURIFixup::KeywordURIFixup
+   * URIFixup::KeywordURIFixup
    * @param {string} value
    * @returns {boolean} Whether the value looks like a single word host.
    */
@@ -548,6 +579,244 @@ XPCOMUtils.defineLazyGetter(UrlbarUtils, "strings", () => {
     "chrome://global/locale/autocomplete.properties"
   );
 });
+
+/**
+ * Payload JSON schemas for each result type.  Payloads are validated against
+ * these schemas using JsonSchemaValidator.jsm.
+ */
+UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
+  [UrlbarUtils.RESULT_TYPE.TAB_SWITCH]: {
+    type: "object",
+    required: ["url"],
+    properties: {
+      displayUrl: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      title: {
+        type: "string",
+      },
+      url: {
+        type: "string",
+      },
+      userContextId: {
+        type: "number",
+      },
+    },
+  },
+  [UrlbarUtils.RESULT_TYPE.SEARCH]: {
+    type: "object",
+    properties: {
+      displayUrl: {
+        type: "string",
+      },
+      engine: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      isPinned: {
+        type: "boolean",
+      },
+      inPrivateWindow: {
+        type: "boolean",
+      },
+      isPrivateEngine: {
+        type: "boolean",
+      },
+      keyword: {
+        type: "string",
+      },
+      keywordOffer: {
+        type: "number", // UrlbarUtils.KEYWORD_OFFER
+      },
+      query: {
+        type: "string",
+      },
+      isSearchHistory: {
+        type: "boolean",
+      },
+      suggestion: {
+        type: "string",
+      },
+      tail: {
+        type: "string",
+      },
+      title: {
+        type: "string",
+      },
+      url: {
+        type: "string",
+      },
+    },
+  },
+  [UrlbarUtils.RESULT_TYPE.URL]: {
+    type: "object",
+    required: ["url"],
+    properties: {
+      displayUrl: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      isPinned: {
+        type: "boolean",
+      },
+      tags: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+      title: {
+        type: "string",
+      },
+      url: {
+        type: "string",
+      },
+    },
+  },
+  [UrlbarUtils.RESULT_TYPE.KEYWORD]: {
+    type: "object",
+    required: ["keyword", "url"],
+    properties: {
+      displayUrl: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      input: {
+        type: "string",
+      },
+      keyword: {
+        type: "string",
+      },
+      postData: {
+        type: "string",
+      },
+      title: {
+        type: "string",
+      },
+      url: {
+        type: "string",
+      },
+    },
+  },
+  [UrlbarUtils.RESULT_TYPE.OMNIBOX]: {
+    type: "object",
+    required: ["keyword"],
+    properties: {
+      content: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      keyword: {
+        type: "string",
+      },
+      title: {
+        type: "string",
+      },
+    },
+  },
+  [UrlbarUtils.RESULT_TYPE.REMOTE_TAB]: {
+    type: "object",
+    required: ["device", "url"],
+    properties: {
+      device: {
+        type: "string",
+      },
+      displayUrl: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      title: {
+        type: "string",
+      },
+      url: {
+        type: "string",
+      },
+    },
+  },
+  [UrlbarUtils.RESULT_TYPE.TIP]: {
+    type: "object",
+    required: ["type"],
+    properties: {
+      // Prefer `buttonTextData` if your string is translated.  This is for
+      // untranslated strings.
+      buttonText: {
+        type: "string",
+      },
+      // l10n { id, args }
+      buttonTextData: {
+        type: "object",
+        required: ["id"],
+        properties: {
+          id: {
+            type: "string",
+          },
+          args: {
+            type: "array",
+          },
+        },
+      },
+      buttonUrl: {
+        type: "string",
+      },
+      helpUrl: {
+        type: "string",
+      },
+      icon: {
+        type: "string",
+      },
+      // Prefer `text` if your string is translated.  This is for untranslated
+      // strings.
+      text: {
+        type: "string",
+      },
+      // l10n { id, args }
+      textData: {
+        type: "object",
+        required: ["id"],
+        properties: {
+          id: {
+            type: "string",
+          },
+          args: {
+            type: "array",
+          },
+        },
+      },
+      // `type` is used in the names of keys in the `urlbar.tips` keyed scalar
+      // telemetry (see telemetry.rst).  If you add a new type, then you are
+      // also adding new `urlbar.tips` keys and therefore need an expanded data
+      // collection review.
+      type: {
+        type: "string",
+        enum: [
+          "extension",
+          "intervention_clear",
+          "intervention_refresh",
+          "intervention_update_ask",
+          "intervention_update_refresh",
+          "intervention_update_restart",
+          "intervention_update_web",
+          "searchTip_onboard",
+          "searchTip_redirect",
+          "test", // for tests only
+        ],
+      },
+    },
+  },
+};
 
 /**
  * UrlbarQueryContext defines a user's autocomplete input from within the urlbar.
@@ -577,6 +846,11 @@ class UrlbarQueryContext {
    *   If sources is restricting to just SEARCH, this property can be used to
    *   pick a specific search engine, by setting it to the name under which the
    *   engine is registered with the search service.
+   * @param {boolean} [options.allowSearchSuggestions]
+   *   Whether to allow search suggestions.  This is a veto, meaning that when
+   *   false, suggestions will not be fetched, but when true, some other
+   *   condition may still prohibit suggestions, like private browsing mode.
+   *   Defaults to true.
    */
   constructor(options = {}) {
     this._checkRequiredOptions(options, [
@@ -593,16 +867,20 @@ class UrlbarQueryContext {
     }
 
     // Manage optional properties of options.
-    for (let [prop, checkFn] of [
+    for (let [prop, checkFn, defaultValue] of [
       ["providers", v => Array.isArray(v) && v.length],
       ["sources", v => Array.isArray(v) && v.length],
       ["engineName", v => typeof v == "string" && !!v.length],
+      ["currentPage", v => typeof v == "string" && !!v.length],
+      ["allowSearchSuggestions", v => true, true],
     ]) {
-      if (options[prop]) {
+      if (prop in options) {
         if (!checkFn(options[prop])) {
           throw new Error(`Invalid value for option "${prop}"`);
         }
         this[prop] = options[prop];
+      } else if (defaultValue !== undefined) {
+        this[prop] = defaultValue;
       }
     }
 
@@ -675,6 +953,26 @@ class UrlbarProvider {
    */
   get type() {
     throw new Error("Trying to access the base class, must be overridden");
+  }
+
+  /**
+   * Calls a method on the provider in a try-catch block and reports any error.
+   * Unlike most other provider methods, `tryMethod` is not intended to be
+   * overridden.
+   *
+   * @param {string} methodName The name of the method to call.
+   * @param {*} args The method arguments.
+   * @returns {*} The return value of the method, or undefined if the method
+   *          throws an error.
+   * @abstract
+   */
+  tryMethod(methodName, ...args) {
+    try {
+      return this[methodName](...args);
+    } catch (ex) {
+      Cu.reportError(ex);
+    }
+    return undefined;
   }
 
   /**

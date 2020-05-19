@@ -8,7 +8,6 @@
 #define mozilla_dom_XMLHttpRequestMainThread_h
 
 #include <bitset>
-#include "nsAutoPtr.h"
 #include "nsISupportsUtils.h"
 #include "nsIURI.h"
 #include "nsIHttpChannel.h"
@@ -164,7 +163,8 @@ class RequestHeaders {
   void MergeOrSet(const char* aName, const nsACString& aValue);
   void MergeOrSet(const nsACString& aName, const nsACString& aValue);
   void Clear();
-  void ApplyToChannel(nsIHttpChannel* aChannel) const;
+  void ApplyToChannel(nsIHttpChannel* aChannel,
+                      bool aStripRequestBodyHeader) const;
   void GetCORSUnsafeHeaders(nsTArray<nsCString>& aArray) const;
 };
 
@@ -210,19 +210,18 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
     ENUM_MAX
   };
 
-  XMLHttpRequestMainThread();
+  explicit XMLHttpRequestMainThread(nsIGlobalObject* aGlobalObject);
 
-  void Construct(nsIPrincipal* aPrincipal, nsIGlobalObject* aGlobalObject,
-                 nsICookieSettings* aCookieSettings, bool aForWorker,
+  void Construct(nsIPrincipal* aPrincipal,
+                 nsICookieJarSettings* aCookieJarSettings, bool aForWorker,
                  nsIURI* aBaseURI = nullptr, nsILoadGroup* aLoadGroup = nullptr,
                  PerformanceStorage* aPerformanceStorage = nullptr,
                  nsICSPEventListener* aCSPEventListener = nullptr) {
     MOZ_ASSERT(aPrincipal);
     mPrincipal = aPrincipal;
-    BindToOwner(aGlobalObject);
     mBaseURI = aBaseURI;
     mLoadGroup = aLoadGroup;
-    mCookieSettings = aCookieSettings;
+    mCookieJarSettings = aCookieJarSettings;
     mForWorker = aForWorker;
     mPerformanceStorage = aPerformanceStorage;
     mCSPEventListener = aCSPEventListener;
@@ -516,7 +515,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
 
   nsCOMPtr<nsIStreamListener> mXMLParserStreamListener;
 
-  nsCOMPtr<nsICookieSettings> mCookieSettings;
+  nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
 
   RefPtr<PerformanceStorage> mPerformanceStorage;
   nsCOMPtr<nsICSPEventListener> mCSPEventListener;
@@ -577,7 +576,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
     }
 
    private:
-    virtual ~nsHeaderVisitor() {}
+    virtual ~nsHeaderVisitor() = default;
 
     nsTArray<HeaderEntry> mHeaderList;
     nsCString mHeaders;
@@ -859,7 +858,7 @@ class nsXHRParseEndListener : public nsIDOMEventListener {
   void SetIsStale() { mXHR = nullptr; }
 
  private:
-  virtual ~nsXHRParseEndListener() {}
+  virtual ~nsXHRParseEndListener() = default;
 
   XMLHttpRequestMainThread* mXHR;
 };

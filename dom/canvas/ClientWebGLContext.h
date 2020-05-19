@@ -20,6 +20,7 @@
 
 #include "mozilla/Logging.h"
 #include "WebGLCrossProcessCommandQueue.h"
+#include "WebGLCommandQueue.h"
 
 #include <memory>
 #include <unordered_map>
@@ -177,6 +178,7 @@ class ContextGenerationInfo final {
   std::array<float, 4> mClearColor = {{0, 0, 0, 0}};
   std::array<float, 4> mBlendColor = {{0, 0, 0, 0}};
   std::array<float, 2> mDepthRange = {{0, 1}};
+  webgl::PixelPackState mPixelPackState;
 
   std::vector<GLenum> mCompressedTextureFormats;
 
@@ -196,7 +198,8 @@ struct RemotingData final {
   //
   // where 'A -> B' means "A owns B"
   RefPtr<mozilla::dom::WebGLChild> mWebGLChild;
-  UniquePtr<ClientWebGLCommandSource> mCommandSource;
+  UniquePtr<ClientWebGLCommandSourceP> mCommandSourcePcq;
+  UniquePtr<ClientWebGLCommandSourceI> mCommandSourceIpdl;
 };
 
 struct NotLostData final {
@@ -308,7 +311,10 @@ class WebGLFramebufferJS final : public nsWrapperCache, public webgl::ObjectJS {
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLFramebufferJS)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLFramebufferJS)
 
-  explicit WebGLFramebufferJS(const ClientWebGLContext&);
+  explicit WebGLFramebufferJS(const ClientWebGLContext&, bool opaque = false);
+
+  const bool mOpaque;
+  bool mInOpaqueRAF = false;
 
  private:
   ~WebGLFramebufferJS() = default;
@@ -603,9 +609,9 @@ class WebGLVertexArrayJS final : public nsWrapperCache, public webgl::ObjectJS {
 
 ////////////////////////////////////
 
-typedef dom::Float32ArrayOrUnrestrictedFloatSequence Float32ListU;
-typedef dom::Int32ArrayOrLongSequence Int32ListU;
-typedef dom::Uint32ArrayOrUnsignedLongSequence Uint32ListU;
+typedef dom::MaybeSharedFloat32ArrayOrUnrestrictedFloatSequence Float32ListU;
+typedef dom::MaybeSharedInt32ArrayOrLongSequence Int32ListU;
+typedef dom::MaybeSharedUint32ArrayOrUnsignedLongSequence Uint32ListU;
 
 inline Range<const float> MakeRange(const Float32ListU& list) {
   if (list.IsFloat32Array()) return MakeRangeAbv(list.GetAsFloat32Array());
@@ -737,6 +743,11 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
 
  public:
   const auto& Limits() const { return mNotLost->info.limits; }
+  // https://www.khronos.org/registry/webgl/specs/latest/1.0/#actual-context-parameters
+  const WebGLContextOptions& ActualContextParameters() const {
+    MOZ_ASSERT(mNotLost != nullptr);
+    return mNotLost->info.options;
+  }
 
   auto& State() { return mNotLost->state; }
   const auto& State() const {
@@ -825,10 +836,15 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
 #ifdef __clang__
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wformat-security"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wformat-security"
 #endif
     text.AppendPrintf(format, args...);
 #ifdef __clang__
 #  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
 #endif
 
     EnqueueErrorImpl(error, text);
@@ -979,7 +995,8 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
 
   void Present();
 
-  RefPtr<layers::SharedSurfaceTextureClient> GetVRFrame() const;
+  RefPtr<layers::SharedSurfaceTextureClient> GetVRFrame(
+      const WebGLFramebufferJS*) const;
   void ClearVRFrame() const;
 
  private:
@@ -1037,6 +1054,8 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
 
   already_AddRefed<WebGLBufferJS> CreateBuffer() const;
   already_AddRefed<WebGLFramebufferJS> CreateFramebuffer() const;
+  already_AddRefed<WebGLFramebufferJS> CreateOpaqueFramebuffer(
+      const webgl::OpaqueFramebufferOptions&) const;
   already_AddRefed<WebGLProgramJS> CreateProgram() const;
   already_AddRefed<WebGLQueryJS> CreateQuery() const;
   already_AddRefed<WebGLRenderbufferJS> CreateRenderbuffer() const;
@@ -1049,7 +1068,7 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
   already_AddRefed<WebGLVertexArrayJS> CreateVertexArray() const;
 
   void DeleteBuffer(WebGLBufferJS*);
-  void DeleteFramebuffer(WebGLFramebufferJS*);
+  void DeleteFramebuffer(WebGLFramebufferJS*, bool canDeleteOpaque = false);
   void DeleteProgram(WebGLProgramJS*) const;
   void DeleteQuery(WebGLQueryJS*);
   void DeleteRenderbuffer(WebGLRenderbufferJS*);
@@ -1372,7 +1391,7 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
                                    GLsizei numViewLayers) const {
     const FuncScope funcScope(*this, "framebufferTextureMultiview");
     if (IsContextLost()) return;
-    if (numViewLayers < 1) {
+    if (tex && numViewLayers < 1) {
       EnqueueError(LOCAL_GL_INVALID_VALUE, "`numViewLayers` must be >=1.");
       return;
     }
@@ -2009,6 +2028,10 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
   void PauseTransformFeedback();
   void ResumeTransformFeedback();
 
+  // -------------------------- Opaque Framebuffers ---------------------------
+
+  void SetFramebufferIsInOpaqueRAF(WebGLFramebufferJS*, bool);
+
   // ------------------------------ Extensions ------------------------------
  public:
   void GetSupportedExtensions(dom::Nullable<nsTArray<nsString>>& retval,
@@ -2060,9 +2083,9 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
    template <size_t command, typename... Args>
    void DispatchAsync(Args&&... aArgs) const {
      const auto& oop = *mNotLost->outOfProcess;
-     PcqStatus status = oop.mCommandSource->RunAsyncCommand(command, aArgs...);
-     if (!IsSuccess(status)) {
-       if (status == PcqStatus::PcqOOMError) {
+     QueueStatus status = oop.mCommandSource->RunAsyncCommand(command,
+   aArgs...);
+     if (!IsSuccess(status)) { if (status == QueueStatus::kOOMError) {
          JsWarning("Ran out-of-memory during WebGL IPC.");
        }
        // Not much to do but shut down.  Since this was a Pcq failure and
@@ -2077,11 +2100,11 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
    ReturnType DispatchSync(Args&&... aArgs) const {
      const auto& oop = *mNotLost->outOfProcess;
      ReturnType returnValue;
-     PcqStatus status =
+     QueueStatus status =
          oop.mCommandSource->RunSyncCommand(command, returnValue, aArgs...);
 
      if (!IsSuccess(status)) {
-       if (status == PcqStatus::PcqOOMError) {
+       if (status == QueueStatus::kOOMError) {
          JsWarning("Ran out-of-memory during WebGL IPC.");
        }
        // Not much to do but shut down.  Since this was a Pcq failure and
@@ -2099,7 +2122,7 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
      const auto status =
          oop.mCommandSource->RunVoidSyncCommand(command, aArgs...);
      if (!IsSuccess(status)) {
-       if (status == PcqStatus::PcqOOMError) {
+       if (status == QueueStatus::kOOMError) {
          JsWarning("Ran out-of-memory during WebGL IPC.");
        }
        // Not much to do but shut down.  Since this was a Pcq failure and
@@ -2115,7 +2138,7 @@ class ClientWebGLContext final : public nsICanvasRenderingContextInternal,
   friend struct WebGLClientDispatcher;
 
   template <typename MethodType, MethodType method, typename ReturnType,
-            size_t Id, typename... Args>
+            typename... Args>
   friend ReturnType RunOn(const ClientWebGLContext& context, Args&&... aArgs);
 
   // If we are running WebGL in this process then call the HostWebGLContext

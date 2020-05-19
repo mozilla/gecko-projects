@@ -16,7 +16,7 @@
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 
-#include "GeneratedJNIWrappers.h"
+#include "mozilla/jni/Refs.h"
 
 #include "nsIMutableArray.h"
 #include "nsIMIMEInfo.h"
@@ -357,9 +357,6 @@ class nsAndroidBridge final : public nsIAndroidBridge, public nsIObserver {
   void AddObservers();
   void RemoveObservers();
 
-  void UpdateAudioPlayingWindows(bool aPlaying);
-
-  int32_t mAudibleWindowsNum;
   nsCOMPtr<nsIAndroidEventDispatcher> mEventDispatcher;
 
  protected:

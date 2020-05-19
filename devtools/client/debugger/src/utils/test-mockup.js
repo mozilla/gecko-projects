@@ -23,24 +23,20 @@ import type {
   SourceWithContentAndType,
   SourceWithContent,
   TextSourceContent,
+  URL,
   WasmSourceContent,
   Why,
 } from "../types";
 import * as asyncValue from "./async-value";
 import type { SourceBase } from "../reducers/sources";
 
-function makeMockSource(
-  url: string = "url",
-  id: SourceId = "source"
-): SourceBase {
+function makeMockSource(url: URL = "url", id: SourceId = "source"): SourceBase {
   return {
     id,
     url,
     isBlackBoxed: false,
     isPrettyPrinted: false,
     relativeUrl: url,
-    introductionUrl: null,
-    introductionType: undefined,
     isWasm: false,
     extensionName: null,
     isExtension: false,
@@ -93,8 +89,6 @@ function makeMockWasmSource(): SourceBase {
     isBlackBoxed: false,
     isPrettyPrinted: false,
     relativeUrl: "url",
-    introductionUrl: null,
-    introductionType: undefined,
     isWasm: true,
     extensionName: null,
     isExtension: false,
@@ -186,7 +180,7 @@ function makeMockFrame(
   };
 }
 
-function makeMockFrameWithURL(url: string): Frame {
+function makeMockFrameWithURL(url: URL): Frame {
   return makeMockFrame(undefined, makeMockSource(url));
 }
 

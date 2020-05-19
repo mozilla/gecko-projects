@@ -19,6 +19,7 @@
 #include "nsIMemoryReporter.h"
 #include "nsINamed.h"
 #include "nsIRunnable.h"
+#include "nsIThreadInternal.h"
 #include "nsITimer.h"
 #include "AsyncLogger.h"
 
@@ -93,11 +94,13 @@ class MessageBlock {
 class MediaTrackGraphImpl : public MediaTrackGraph,
                             public GraphInterface,
                             public nsIMemoryReporter,
+                            public nsIThreadObserver,
                             public nsITimerCallback,
                             public nsINamed {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIMEMORYREPORTER
+  NS_DECL_NSITHREADOBSERVER
   NS_DECL_NSITIMERCALLBACK
   NS_DECL_NSINAMED
 
@@ -112,6 +115,7 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
   explicit MediaTrackGraphImpl(GraphDriverType aGraphDriverRequested,
                                GraphRunType aRunTypeRequested,
                                TrackRate aSampleRate, uint32_t aChannelCount,
+                               CubebUtils::AudioDeviceID aOutputDeviceID,
                                AbstractThread* aWindow);
 
   // Intended only for assertions, either on graph thread or not running (in
@@ -170,7 +174,8 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
    * Make this MediaTrackGraph enter forced-shutdown state. This state
    * will be noticed by the media graph thread, which will shut down all tracks
    * and other state controlled by the media graph thread.
-   * This is called during application shutdown.
+   * This is called during application shutdown, and on document unload if an
+   * AudioContext is using the graph.
    */
   void ForceShutDown();
 
@@ -304,8 +309,16 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
    */
   void RunMessageAfterProcessing(UniquePtr<ControlMessage> aMessage);
 
-  void NotifyWhenGraphStarted(RefPtr<AudioNodeTrack> aTrack,
-                              MozPromiseHolder<GraphStartedPromise>&& aHolder);
+  /**
+   * Resolve the GraphStartedPromise when the driver has started processing.
+   * Processing of the audio can happen in two different threads, the
+   * FallbackDriver's thread, while the device is starting, and the audio
+   * thread when the device has started.
+   */
+  enum class ProcessingThread { FALLBACK_THREAD, AUDIO_THREAD };
+  void NotifyWhenGraphStarted(RefPtr<MediaTrack> aTrack,
+                              MozPromiseHolder<GraphStartedPromise>&& aHolder,
+                              ProcessingThread aProcessingThread);
 
   /**
    * Apply an AudioContext operation (suspend/resume/close), on the graph
@@ -611,6 +624,12 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
 
   Watchable<GraphTime>& CurrentTime() override;
 
+  /**
+   * Interrupt any JS running on the graph thread.
+   * Called on the main thread when shutting down the graph.
+   */
+  void InterruptJS();
+
   class TrackSet {
    public:
     class iterator {
@@ -823,13 +842,13 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
    * creation after this point will create a new graph. An async event is
    * dispatched to Shutdown() the graph's threads and then delete the graph
    * object.
-   * 2) Forced shutdown at application shutdown, or completion of a
-   * non-realtime graph. A flag is set, RunThread() detects the flag and
-   * exits, the next RunInStableState() detects the flag, and dispatches the
-   * async event to Shutdown() the graph's threads. However the graph object
-   * is not deleted. New messages for the graph are processed synchronously on
-   * the main thread if necessary. When the last track is destroyed, the
-   * graph object is deleted.
+   * 2) Forced shutdown at application shutdown, completion of a non-realtime
+   * graph, or document unload. A flag is set, RunThread() detects the flag
+   * and exits, the next RunInStableState() detects the flag, and dispatches
+   * the async event to Shutdown() the graph's threads. However the graph
+   * object is not deleted. New messages for the graph are processed
+   * synchronously on the main thread if necessary. When the last track is
+   * destroyed, the graph object is deleted.
    *
    * This should be kept in sync with the LifecycleState_str array in
    * MediaTrackGraph.cpp
@@ -884,13 +903,21 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
   }
 
   /**
-   * True when we need to do a forced shutdown, during application shutdown or
-   * when shutting down a non-realtime graph.
+   * True once the graph thread has received the message from ForceShutDown().
+   * This is checked in the decision to shut down the
+   * graph thread so that control messages dispatched before forced shutdown
+   * are processed on the graph thread.
    * Only set on the graph thread.
    * Can be read safely on the thread currently owning the graph, as indicated
    * by mLifecycleState.
    */
-  bool mForceShutDown;
+  bool mForceShutDownReceived = false;
+  /**
+   * true when InterruptJS() has been called, because shutdown (normal or
+   * forced) has commenced.  Set on the main thread under mMonitor and read on
+   * the graph thread under mMonitor.
+   **/
+  bool mInterruptJSCalled = false;
 
   /**
    * Remove this blocker to unblock shutdown.
@@ -904,6 +931,14 @@ class MediaTrackGraphImpl : public MediaTrackGraph,
    * Accessed on both main and MTG thread, mMonitor must be held.
    */
   bool mPostedRunInStableStateEvent;
+
+  /**
+   * The JSContext of the graph thread.  Set under mMonitor on only the graph
+   * or GraphRunner thread.  Once set this does not change until reset when
+   * the thread is about to exit.  Read under mMonitor on the main thread to
+   * interrupt running JS for forced shutdown.
+   **/
+  JSContext* mJSContext = nullptr;
 
   // Main thread only
 

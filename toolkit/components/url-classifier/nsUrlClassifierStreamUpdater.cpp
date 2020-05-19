@@ -136,7 +136,7 @@ nsresult nsUrlClassifierStreamUpdater::FetchUpdate(
                      nsContentUtils::GetSystemPrincipal(),
                      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                      nsIContentPolicy::TYPE_OTHER,
-                     nullptr,  // nsICookieSettings
+                     nullptr,  // nsICookieJarSettings
                      nullptr,  // aPerformanceStorage
                      nullptr,  // aLoadGroup
                      this,     // aInterfaceRequestor
@@ -148,6 +148,8 @@ nsresult nsUrlClassifierStreamUpdater::FetchUpdate(
   mozilla::OriginAttributes attrs;
   attrs.mFirstPartyDomain.AssignLiteral(NECKO_SAFEBROWSING_FIRST_PARTY_DOMAIN);
   loadInfo->SetOriginAttributes(attrs);
+  // allow deprecated HTTP request from SystemPrincipal
+  loadInfo->SetAllowDeprecatedSystemRequests(true);
 
   mBeganStream = false;
 

@@ -8,6 +8,8 @@
 #include "nsArray.h"
 #include "nsCRT.h"
 #include "nsCOMPtr.h"
+#include "nsITransferable.h"
+#include "nsLiteralString.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
 
@@ -16,9 +18,9 @@
 #include "nsIDocumentEncoder.h"
 #include "nsContentUtils.h"
 
-nsHTMLFormatConverter::nsHTMLFormatConverter() {}
+nsHTMLFormatConverter::nsHTMLFormatConverter() = default;
 
-nsHTMLFormatConverter::~nsHTMLFormatConverter() {}
+nsHTMLFormatConverter::~nsHTMLFormatConverter() = default;
 
 NS_IMPL_ISUPPORTS(nsHTMLFormatConverter, nsIFormatConverter)
 

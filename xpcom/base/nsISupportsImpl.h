@@ -19,6 +19,7 @@
 #include "nsDebug.h"
 #include "nsXPCOM.h"
 #include <atomic>
+#include <type_traits>
 #include "mozilla/Attributes.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
@@ -68,14 +69,11 @@ class nsAutoOwningThread {
 };
 
 #  define NS_DECL_OWNINGTHREAD nsAutoOwningThread _mOwningThread;
-#  define NS_ASSERT_OWNINGTHREAD_AGGREGATE(agg, _class) \
-    agg->_mOwningThread.AssertOwnership(#_class " not thread-safe")
 #  define NS_ASSERT_OWNINGTHREAD(_class) \
-    NS_ASSERT_OWNINGTHREAD_AGGREGATE(this, _class)
+    _mOwningThread.AssertOwnership(#_class " not thread-safe")
 #else  // !MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
 
 #  define NS_DECL_OWNINGTHREAD /* nothing */
-#  define NS_ASSERT_OWNINGTHREAD_AGGREGATE(agg, _class) ((void)0)
 #  define NS_ASSERT_OWNINGTHREAD(_class) ((void)0)
 
 #endif  // MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
@@ -89,9 +87,8 @@ class nsAutoOwningThread {
 
 #  define NS_LOG_RELEASE(_p, _rc, _type) NS_LogRelease((_p), (_rc), (_type))
 
-#  include "mozilla/TypeTraits.h"
-#  define MOZ_ASSERT_CLASSNAME(_type)             \
-    static_assert(mozilla::IsClass<_type>::value, \
+#  define MOZ_ASSERT_CLASSNAME(_type)     \
+    static_assert(std::is_class_v<_type>, \
                   "Token '" #_type "' is not a class type.")
 
 #  define MOZ_ASSERT_NOT_ISUPPORTS(_type)                                     \
@@ -310,16 +307,13 @@ class nsAutoRefCnt {
 };
 
 namespace mozilla {
-template <recordreplay::Behavior Recording>
-class ThreadSafeAutoRefCntWithRecording {
+class ThreadSafeAutoRefCnt {
  public:
-  ThreadSafeAutoRefCntWithRecording() : mValue(0) {}
-  explicit ThreadSafeAutoRefCntWithRecording(nsrefcnt aValue)
-      : mValue(aValue) {}
+  ThreadSafeAutoRefCnt() : mValue(0) {}
+  explicit ThreadSafeAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
 
-  ThreadSafeAutoRefCntWithRecording(const ThreadSafeAutoRefCntWithRecording&) =
-      delete;
-  void operator=(const ThreadSafeAutoRefCntWithRecording&) = delete;
+  ThreadSafeAutoRefCnt(const ThreadSafeAutoRefCnt&) = delete;
+  void operator=(const ThreadSafeAutoRefCnt&) = delete;
 
   // only support prefix increment/decrement
   MOZ_ALWAYS_INLINE nsrefcnt operator++() {
@@ -331,7 +325,6 @@ class ThreadSafeAutoRefCntWithRecording {
     // first increment on that thread.  The necessary memory
     // synchronization is done by the mechanism that transfers the
     // pointer between threads.
-    detail::AutoRecordAtomicAccess<Recording> record(this);
     return mValue.fetch_add(1, std::memory_order_relaxed) + 1;
   }
   MOZ_ALWAYS_INLINE nsrefcnt operator--() {
@@ -339,7 +332,6 @@ class ThreadSafeAutoRefCntWithRecording {
     // release semantics so that prior writes on this thread are visible
     // to the thread that destroys the object when it reads mValue with
     // acquire semantics.
-    detail::AutoRecordAtomicAccess<Recording> record(this);
     nsrefcnt result = mValue.fetch_sub(1, std::memory_order_release) - 1;
     if (result == 0) {
       // We're going to destroy the object on this thread, so we need
@@ -361,7 +353,6 @@ class ThreadSafeAutoRefCntWithRecording {
   MOZ_ALWAYS_INLINE nsrefcnt operator=(nsrefcnt aValue) {
     // Use release semantics since we're not sure what the caller is
     // doing.
-    detail::AutoRecordAtomicAccess<Recording> record(this);
     mValue.store(aValue, std::memory_order_release);
     return aValue;
   }
@@ -369,7 +360,6 @@ class ThreadSafeAutoRefCntWithRecording {
   MOZ_ALWAYS_INLINE nsrefcnt get() const {
     // Use acquire semantics since we're not sure what the caller is
     // doing.
-    detail::AutoRecordAtomicAccess<Recording> record(this);
     return mValue.load(std::memory_order_acquire);
   }
 
@@ -380,9 +370,6 @@ class ThreadSafeAutoRefCntWithRecording {
   nsrefcnt operator--(int) = delete;
   std::atomic<nsrefcnt> mValue;
 };
-
-typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
-    ThreadSafeAutoRefCnt;
 
 }  // namespace mozilla
 
@@ -398,42 +385,49 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override; \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;             \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;            \
-  typedef mozilla::FalseType HasThreadSafeRefCnt;                         \
+  using HasThreadSafeRefCnt = std::false_type;                            \
                                                                           \
  protected:                                                               \
   nsAutoRefCnt mRefCnt;                                                   \
   NS_DECL_OWNINGTHREAD                                                    \
  public:
 
-#define NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(_recording)           \
+#define NS_DECL_THREADSAFE_ISUPPORTS                                      \
  public:                                                                  \
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override; \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;             \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;            \
-  typedef mozilla::TrueType HasThreadSafeRefCnt;                          \
+  using HasThreadSafeRefCnt = std::true_type;                             \
                                                                           \
  protected:                                                               \
-  ::mozilla::ThreadSafeAutoRefCntWithRecording<_recording> mRefCnt;       \
+  ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                                \
   NS_DECL_OWNINGTHREAD                                                    \
  public:
 
-#define NS_DECL_THREADSAFE_ISUPPORTS           \
-  NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING( \
-      mozilla::recordreplay::Behavior::DontPreserve)
+#define NS_DECL_CYCLE_COLLECTING_ISUPPORTS          \
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_META(override) \
+  NS_IMETHOD_(void) DeleteCycleCollectable(void);   \
+                                                    \
+ public:
 
-#define NS_DECL_CYCLE_COLLECTING_ISUPPORTS \
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_META(override)
+#define NS_DECL_CYCLE_COLLECTING_ISUPPORTS_FINAL  \
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_META(final)  \
+  NS_IMETHOD_(void) DeleteCycleCollectable(void); \
+                                                  \
+ public:
 
-#define NS_DECL_CYCLE_COLLECTING_ISUPPORTS_FINAL \
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_META(final)
+#define NS_DECL_CYCLE_COLLECTING_ISUPPORTS_FINAL_DELETECYCLECOLLECTABLE \
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_META(override)                     \
+  NS_IMETHOD_(void) DeleteCycleCollectable(void) final;                 \
+                                                                        \
+ public:
 
 #define NS_DECL_CYCLE_COLLECTING_ISUPPORTS_META(...)                         \
  public:                                                                     \
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) __VA_ARGS__; \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) __VA_ARGS__;             \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) __VA_ARGS__;            \
-  NS_IMETHOD_(void) DeleteCycleCollectable(void);                            \
-  typedef mozilla::FalseType HasThreadSafeRefCnt;                            \
+  using HasThreadSafeRefCnt = std::false_type;                               \
                                                                              \
  protected:                                                                  \
   nsCycleCollectingAutoRefCnt mRefCnt;                                       \
@@ -538,7 +532,7 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
       Release(void) __VA_ARGS__ {                                              \
     NS_IMPL_CC_NATIVE_RELEASE_BODY(_class)                                     \
   }                                                                            \
-  typedef mozilla::FalseType HasThreadSafeRefCnt;                              \
+  using HasThreadSafeRefCnt = std::false_type;                                 \
                                                                                \
  protected:                                                                    \
   nsCycleCollectingAutoRefCnt mRefCnt;                                         \
@@ -553,7 +547,7 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
       _class)} NS_METHOD_(MozExternalRefCountType) Release(void) {           \
     NS_IMPL_CC_MAIN_THREAD_ONLY_NATIVE_RELEASE_BODY(_class)                  \
   }                                                                          \
-  typedef mozilla::FalseType HasThreadSafeRefCnt;                            \
+  using HasThreadSafeRefCnt = std::false_type;                               \
                                                                              \
  protected:                                                                  \
   nsCycleCollectingAutoRefCnt mRefCnt;                                       \
@@ -595,7 +589,7 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
     }                                                                 \
     return mRefCnt;                                                   \
   }                                                                   \
-  typedef mozilla::FalseType HasThreadSafeRefCnt;                     \
+  using HasThreadSafeRefCnt = std::false_type;                        \
                                                                       \
  protected:                                                           \
   nsAutoRefCnt mRefCnt;                                               \
@@ -631,31 +625,30 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
 #define NS_INLINE_DECL_REFCOUNTING(_class, ...) \
   NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(_class, delete (this), __VA_ARGS__)
 
-#define NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, _decl, _recording, \
-                                                   ...)                       \
- public:                                                                      \
-  _decl(MozExternalRefCountType) AddRef(void) __VA_ARGS__ {                   \
-    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
-    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
-    nsrefcnt count = ++mRefCnt;                                               \
-    NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                       \
-    return (nsrefcnt)count;                                                   \
-  }                                                                           \
-  _decl(MozExternalRefCountType) Release(void) __VA_ARGS__ {                  \
-    MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                          \
-    nsrefcnt count = --mRefCnt;                                               \
-    NS_LOG_RELEASE(this, count, #_class);                                     \
-    if (count == 0) {                                                         \
-      delete (this);                                                          \
-      return 0;                                                               \
-    }                                                                         \
-    return count;                                                             \
-  }                                                                           \
-  typedef mozilla::TrueType HasThreadSafeRefCnt;                              \
-                                                                              \
- protected:                                                                   \
-  ::mozilla::ThreadSafeAutoRefCntWithRecording<_recording> mRefCnt;           \
-                                                                              \
+#define NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, _decl, ...) \
+ public:                                                               \
+  _decl(MozExternalRefCountType) AddRef(void) __VA_ARGS__ {            \
+    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                         \
+    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");               \
+    nsrefcnt count = ++mRefCnt;                                        \
+    NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                \
+    return (nsrefcnt)count;                                            \
+  }                                                                    \
+  _decl(MozExternalRefCountType) Release(void) __VA_ARGS__ {           \
+    MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                   \
+    nsrefcnt count = --mRefCnt;                                        \
+    NS_LOG_RELEASE(this, count, #_class);                              \
+    if (count == 0) {                                                  \
+      delete (this);                                                   \
+      return 0;                                                        \
+    }                                                                  \
+    return count;                                                      \
+  }                                                                    \
+  using HasThreadSafeRefCnt = std::true_type;                          \
+                                                                       \
+ protected:                                                            \
+  ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                             \
+                                                                       \
  public:
 
 /**
@@ -666,37 +659,15 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
  *
  * @param _class The name of the class implementing the method
  */
-#define NS_INLINE_DECL_THREADSAFE_REFCOUNTING(_class, ...)               \
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(                            \
-      _class, NS_METHOD_, mozilla::recordreplay::Behavior::DontPreserve, \
-      __VA_ARGS__)
+#define NS_INLINE_DECL_THREADSAFE_REFCOUNTING(_class, ...) \
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, NS_METHOD_, __VA_ARGS__)
 
 /**
  * Like NS_INLINE_DECL_THREADSAFE_REFCOUNTING with AddRef & Release declared
  * virtual.
  */
-#define NS_INLINE_DECL_THREADSAFE_VIRTUAL_REFCOUNTING(_class, ...)        \
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(                             \
-      _class, NS_IMETHOD_, mozilla::recordreplay::Behavior::DontPreserve, \
-      __VA_ARGS__)
-
-/**
- * Like NS_INLINE_DECL_THREADSAFE_REFCOUNTING except that reference changes
- * are recorded and replayed.
- */
-#define NS_INLINE_DECL_THREADSAFE_REFCOUNTING_RECORDED(_class, ...)  \
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(                        \
-      _class, NS_METHOD_, mozilla::recordreplay::Behavior::Preserve, \
-      __VA_ARGS__)
-
-/**
- * Like NS_INLINE_DECL_THREADSAFE_VIRTUAL_REFCOUNTING except that reference
- * changes are recorded and replayed.
- */
-#define NS_INLINE_DECL_THREADSAFE_VIRTUAL_REFCOUNTING_RECORDED(_class, ...) \
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(                               \
-      _class, NS_IMETHOD_, mozilla::recordreplay::Behavior::Preserve,       \
-      __VA_ARGS__)
+#define NS_INLINE_DECL_THREADSAFE_VIRTUAL_REFCOUNTING(_class, ...) \
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, NS_IMETHOD_, __VA_ARGS__)
 
 /**
  * Use this macro in interface classes that you want to be able to reference
@@ -890,6 +861,30 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
   }                                                                          \
   NS_IMETHODIMP_(void) _class::DeleteCycleCollectable(void) { delete this; }
 
+// This macro is same as NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE
+// except it doesn't have DeleteCycleCollectable.
+#define NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE_AND_DESTROY(      \
+    _class, _last, _destroy)                                                 \
+  NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void) {            \
+    MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                         \
+    NS_ASSERT_OWNINGTHREAD(_class);                                          \
+    bool shouldDelete = false;                                               \
+    nsISupports* base = NS_CYCLE_COLLECTION_CLASSNAME(_class)::Upcast(this); \
+    nsrefcnt count = mRefCnt.decr(base, &shouldDelete);                      \
+    NS_LOG_RELEASE(this, count, #_class);                                    \
+    if (count == 0) {                                                        \
+      mRefCnt.incr(base);                                                    \
+      _last;                                                                 \
+      mRefCnt.decr(base);                                                    \
+      if (shouldDelete) {                                                    \
+        mRefCnt.stabilizeForDeletion();                                      \
+        DeleteCycleCollectable();                                            \
+      }                                                                      \
+    }                                                                        \
+    return count;                                                            \
+  }                                                                          \
+  NS_IMETHODIMP_(void) _class::DeleteCycleCollectable(void) { _destroy; }
+
 #define NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_RELEASE(_class)              \
   NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void) {              \
     MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                           \
@@ -961,6 +956,31 @@ typedef ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::DontPreserve>
     return count;                                                                          \
   }                                                                                        \
   NS_IMETHODIMP_(void) _class::DeleteCycleCollectable(void) { delete this; }
+
+// _LAST_RELEASE can be useful when certain resources should be released
+// as soon as we know the object will be deleted.
+#define NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE_AND_DESTROY( \
+    _class, _last, _destroy)                                                             \
+  NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void) {                        \
+    MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                                     \
+    NS_ASSERT_OWNINGTHREAD(_class);                                                      \
+    bool shouldDelete = false;                                                           \
+    nsISupports* base = NS_CYCLE_COLLECTION_CLASSNAME(_class)::Upcast(this);             \
+    nsrefcnt count = mRefCnt.decr<NS_CycleCollectorSuspectUsingNursery>(                 \
+        base, &shouldDelete);                                                            \
+    NS_LOG_RELEASE(this, count, #_class);                                                \
+    if (count == 0) {                                                                    \
+      mRefCnt.incr<NS_CycleCollectorSuspectUsingNursery>(base);                          \
+      _last;                                                                             \
+      mRefCnt.decr<NS_CycleCollectorSuspectUsingNursery>(base);                          \
+      if (shouldDelete) {                                                                \
+        mRefCnt.stabilizeForDeletion();                                                  \
+        DeleteCycleCollectable();                                                        \
+      }                                                                                  \
+    }                                                                                    \
+    return count;                                                                        \
+  }                                                                                      \
+  NS_IMETHODIMP_(void) _class::DeleteCycleCollectable(void) { _destroy; }
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1214,12 +1234,12 @@ namespace mozilla {
 class Runnable;
 }  // namespace mozilla
 
-#define NS_IMPL_ADDREF_INHERITED_GUTS(Class, Super)                 \
-  MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(Class)                         \
-  nsrefcnt r = Super::AddRef();                                     \
-  if (!mozilla::IsConvertible<Class*, mozilla::Runnable*>::value) { \
-    NS_LOG_ADDREF(this, r, #Class, sizeof(*this));                  \
-  }                                                                 \
+#define NS_IMPL_ADDREF_INHERITED_GUTS(Class, Super)         \
+  MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(Class)                 \
+  nsrefcnt r = Super::AddRef();                             \
+  if (!std::is_convertible_v<Class*, mozilla::Runnable*>) { \
+    NS_LOG_ADDREF(this, r, #Class, sizeof(*this));          \
+  }                                                         \
   return r /* Purposefully no trailing semicolon */
 
 #define NS_IMPL_ADDREF_INHERITED(Class, Super)                  \
@@ -1227,11 +1247,11 @@ class Runnable;
     NS_IMPL_ADDREF_INHERITED_GUTS(Class, Super);                \
   }
 
-#define NS_IMPL_RELEASE_INHERITED_GUTS(Class, Super)                \
-  nsrefcnt r = Super::Release();                                    \
-  if (!mozilla::IsConvertible<Class*, mozilla::Runnable*>::value) { \
-    NS_LOG_RELEASE(this, r, #Class);                                \
-  }                                                                 \
+#define NS_IMPL_RELEASE_INHERITED_GUTS(Class, Super)        \
+  nsrefcnt r = Super::Release();                            \
+  if (!std::is_convertible_v<Class*, mozilla::Runnable*>) { \
+    NS_LOG_RELEASE(this, r, #Class);                        \
+  }                                                         \
   return r /* Purposefully no trailing semicolon */
 
 #define NS_IMPL_RELEASE_INHERITED(Class, Super)                  \

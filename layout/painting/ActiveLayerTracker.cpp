@@ -8,6 +8,7 @@
 
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/MotionPathUtils.h"
@@ -194,7 +195,7 @@ void LayerActivityTracker::NotifyExpired(LayerActivity* aObject) {
   if (f) {
     // The pres context might have been detached during the delay -
     // that's fine, just skip the paint.
-    if (f->PresContext()->GetContainerWeak()) {
+    if (f->PresContext()->GetContainerWeak() && !gfxVars::UseWebRender()) {
       f->SchedulePaint(nsIFrame::PAINT_DEFAULT, false);
     }
     f->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
@@ -217,8 +218,8 @@ static LayerActivity* GetLayerActivityForUpdate(nsIFrame* aFrame) {
     gLayerActivityTracker->MarkUsed(layerActivity);
   } else {
     if (!gLayerActivityTracker) {
-      gLayerActivityTracker = new LayerActivityTracker(
-          SystemGroup::EventTargetFor(TaskCategory::Other));
+      gLayerActivityTracker =
+          new LayerActivityTracker(GetMainThreadSerialEventTarget());
     }
     layerActivity = new LayerActivity(aFrame);
     gLayerActivityTracker->AddObject(layerActivity);
@@ -238,8 +239,7 @@ void ActiveLayerTracker::TransferActivityToContent(nsIFrame* aFrame,
   if (!aFrame->HasAnyStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY)) {
     return;
   }
-  LayerActivity* layerActivity =
-      aFrame->TakeProperty(LayerActivityProperty());
+  LayerActivity* layerActivity = aFrame->TakeProperty(LayerActivityProperty());
   aFrame->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
   if (!layerActivity) {
     return;
@@ -597,8 +597,8 @@ bool ActiveLayerTracker::IsContentActive(nsIFrame* aFrame) {
 /* static */
 void ActiveLayerTracker::SetCurrentScrollHandlerFrame(nsIFrame* aFrame) {
   if (!gLayerActivityTracker) {
-    gLayerActivityTracker = new LayerActivityTracker(
-        SystemGroup::EventTargetFor(TaskCategory::Other));
+    gLayerActivityTracker =
+        new LayerActivityTracker(GetMainThreadSerialEventTarget());
   }
   gLayerActivityTracker->mCurrentScrollHandlerFrame = aFrame;
 }

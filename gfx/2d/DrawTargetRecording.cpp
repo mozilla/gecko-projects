@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DrawTargetRecording.h"
+#include "DrawTargetSkia.h"
 #include "PathRecording.h"
 #include <stdio.h>
 
@@ -12,7 +13,9 @@
 #include "Tools.h"
 #include "Filters.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/layers/SourceSurfaceSharedData.h"
 #include "mozilla/UniquePtr.h"
+#include "nsXULAppAPI.h"  // for XRE_IsContentProcess()
 #include "RecordingTypes.h"
 #include "RecordedEventImpl.h"
 
@@ -28,10 +31,8 @@ static void RecordingSourceSurfaceUserDataFunc(void* aUserData) {
   RecordingSourceSurfaceUserData* userData =
       static_cast<RecordingSourceSurfaceUserData*>(aUserData);
 
-  userData->recorder->RemoveSourceSurface((SourceSurface*)userData->refPtr);
-  userData->recorder->RemoveStoredObject(userData->refPtr);
-  userData->recorder->RecordEvent(
-      RecordedSourceSurfaceDestruction(ReferencePtr(userData->refPtr)));
+  userData->recorder->RecordSourceSurfaceDestruction(
+      static_cast<SourceSurface*>(userData->refPtr));
 
   delete userData;
 }
@@ -159,7 +160,7 @@ class FilterNodeRecording : public FilterNode {
   FORWARD_SET_ATTRIBUTE(const Matrix&, MATRIX);
   FORWARD_SET_ATTRIBUTE(const Matrix5x4&, MATRIX5X4);
   FORWARD_SET_ATTRIBUTE(const Point3D&, POINT3D);
-  FORWARD_SET_ATTRIBUTE(const Color&, COLOR);
+  FORWARD_SET_ATTRIBUTE(const DeviceColor&, COLOR);
 
 #undef FORWARD_SET_ATTRIBUTE
 
@@ -370,7 +371,7 @@ void DrawTargetRecording::DrawDependentSurface(
 }
 
 void DrawTargetRecording::DrawSurfaceWithShadow(
-    SourceSurface* aSurface, const Point& aDest, const Color& aColor,
+    SourceSurface* aSurface, const Point& aDest, const DeviceColor& aColor,
     const Point& aOffset, Float aSigma, CompositionOp aOp) {
   EnsureSurfaceStoredRecording(mRecorder, aSurface, "DrawSurfaceWithShadow");
 
@@ -496,6 +497,34 @@ DrawTargetRecording::CreateSourceSurfaceFromNativeSurface(
   return nullptr;
 }
 
+already_AddRefed<DrawTarget>
+DrawTargetRecording::CreateSimilarDrawTargetWithBacking(
+    const IntSize& aSize, SurfaceFormat aFormat) const {
+  RefPtr<DrawTarget> similarDT;
+  if (mFinalDT->CanCreateSimilarDrawTarget(aSize, aFormat)) {
+    // If the requested similar draw target is too big, then we should try to
+    // rasterize on the content side to avoid duplicating the effort when a
+    // blob image gets tiled. If we fail somehow to produce it, we can fall
+    // back to recording.
+    constexpr int32_t kRasterThreshold = 256 * 256 * 4;
+    int32_t stride = aSize.width * BytesPerPixel(aFormat);
+    int32_t surfaceBytes = aSize.height * stride;
+    if (surfaceBytes >= kRasterThreshold) {
+      auto surface = MakeRefPtr<SourceSurfaceSharedData>();
+      if (surface->Init(aSize, stride, aFormat)) {
+        auto dt = MakeRefPtr<DrawTargetSkia>();
+        if (dt->Init(std::move(surface))) {
+          return dt.forget();
+        } else {
+          MOZ_ASSERT_UNREACHABLE("Skia should initialize given surface!");
+        }
+      }
+    }
+  }
+
+  return CreateSimilarDrawTarget(aSize, aFormat);
+}
+
 already_AddRefed<DrawTarget> DrawTargetRecording::CreateSimilarDrawTarget(
     const IntSize& aSize, SurfaceFormat aFormat) const {
   RefPtr<DrawTarget> similarDT;
@@ -526,7 +555,7 @@ RefPtr<DrawTarget> DrawTargetRecording::CreateClippedDrawTarget(
   RefPtr<DrawTarget> similarDT;
   similarDT = new DrawTargetRecording(this, mRect, aFormat);
   mRecorder->RecordEvent(
-      RecordedCreateClippedDrawTarget(similarDT.get(), aBounds, aFormat));
+      RecordedCreateClippedDrawTarget(this, similarDT.get(), aBounds, aFormat));
   similarDT->SetTransform(mTransform);
   return similarDT;
 }
@@ -628,9 +657,16 @@ void DrawTargetRecording::EnsurePatternDependenciesStored(
     }
     case PatternType::RADIAL_GRADIENT: {
       MOZ_ASSERT_IF(
-          static_cast<const LinearGradientPattern*>(&aPattern)->mStops,
+          static_cast<const RadialGradientPattern*>(&aPattern)->mStops,
           mRecorder->HasStoredObject(
               static_cast<const RadialGradientPattern*>(&aPattern)->mStops));
+      return;
+    }
+    case PatternType::CONIC_GRADIENT: {
+      MOZ_ASSERT_IF(
+          static_cast<const ConicGradientPattern*>(&aPattern)->mStops,
+          mRecorder->HasStoredObject(
+              static_cast<const ConicGradientPattern*>(&aPattern)->mStops));
       return;
     }
     case PatternType::SURFACE: {

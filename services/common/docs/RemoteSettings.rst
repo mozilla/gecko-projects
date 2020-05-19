@@ -132,30 +132,43 @@ Remote files are not downloaded automatically. In order to keep attachments in s
     });
 
 The provided helper will:
-- fetch the remote binary content
-- write the file in the profile folder
-- check the file size
-- check the content SHA256 hash
-- do nothing if the file is already present and sound locally.
+  - fetch the remote binary content
+  - write the file in the profile folder
+  - check the file size
+  - check the content SHA256 hash
+  - do nothing if the file is already present and sound locally.
 
 .. important::
 
     The following aspects are not taken care of (yet! help welcome):
 
-    - report Telemetry when download fails
     - check available disk space
     - preserve bandwidth
     - resume downloads of large files
 
-.. notes::
+.. note::
 
     The ``download()`` method does not return a file path but instead a ``file://`` URL which points to the locally-downloaded file.
     This will allow us to package attachments as part of a Firefox release (see `Bug 1542177 <https://bugzilla.mozilla.org/show_bug.cgi?id=1542177>`_)
     and return them to calling code as ``resource://`` from within a package archive.
 
-.. notes::
+.. note::
+
+    By default, the ``download()`` method is prone to leaving extraneous files in the profile directory
+    (see `Bug 1634127 <https://bugzilla.mozilla.org/show_bug.cgi?id=1634127>`_).
+    Pass the ``useCache`` option to use an IndexedDB-based cache, and unlock the following features:
+
+    The ``fallbackToCache`` option allows callers to fall back to the cached file and record, if the requested record's attachment fails to download.
+    This enables callers to always have a valid pair of attachment and record,
+    provided that the attachment has been retrieved at least once.
+
+    The ``fallbackToDump`` option activates a fallback to a dump that has been
+    packaged with the client, when other ways to load the attachment have failed.
+
+.. note::
 
     A ``downloadAsBytes()`` method returning an ``ArrayBuffer`` is also available, if writing the attachment into the user profile is not necessary.
+
 
 
 .. _services/initial-data:
@@ -295,6 +308,12 @@ The synchronization of every known remote settings clients can be triggered manu
 
     await RemoteSettings.pollChanges()
 
+In order to ignore last synchronization status during polling for changes, set the ``full`` option:
+
+.. code-block:: js
+
+    await RemoteSettings.pollChanges({ full: true })
+
 The synchronization of a single client can be forced with the ``.sync()`` method:
 
 .. code-block:: js
@@ -312,6 +331,16 @@ Inspect local data
 The internal IndexedDB of Remote Settings can be accessed via the Storage Inspector in the `browser toolbox <https://developer.mozilla.org/en-US/docs/Tools/Browser_Toolbox>`_.
 
 For example, the local data of the ``"key"`` collection can be accessed in the ``remote-settings`` database at *Browser Toolbox* > *Storage* > *IndexedDB* > *chrome*, in the ``records`` store.
+
+
+Delete all local data
+---------------------
+
+All local data, of **every collection**, including downloaded attachments, can be deleted with:
+
+.. code-block:: js
+
+    await RemoteSettings.clearAll();
 
 
 Unit Tests
@@ -342,17 +371,17 @@ You can forge a ``payload`` that contains the events attributes as described abo
 Manipulate local data
 ---------------------
 
-A handle on the local collection can be obtained with ``openCollection()``.
+A handle on the underlying database can be obtained through the ``.db`` attribute.
 
 .. code-block:: js
 
-    const collection = await RemoteSettings("a-key").openCollection();
+    const db = await RemoteSettings("a-key").db;
 
 And records can be created manually (as if they were synchronized from the server):
 
 .. code-block:: js
 
-    const record = await collection.create({
+    const record = await db.create({
       id: "a-custom-string-or-uuid",
       domain: "website.com",
       usernameSelector: "#login-account",
@@ -363,13 +392,13 @@ If no timestamp is set, any call to ``.get()`` will trigger the load of initial 
 
 .. code-block:: js
 
-    await collection.db.saveLastModified(42);
+    await db.saveLastModified(42);
 
 In order to bypass the potential target filtering of ``RemoteSettings("key").get()``, the low-level listing of records can be obtained with ``collection.list()``:
 
 .. code-block:: js
 
-    const { data: subset } = await collection.list({
+    const { data: subset } = await db.list({
       filters: {
         "property": "value"
       }
@@ -379,9 +408,7 @@ The local data can be flushed with ``clear()``:
 
 .. code-block:: js
 
-    await collection.clear()
-
-For further documentation in collection API, checkout the `kinto.js library <https://kintojs.readthedocs.io/>`_, which is in charge of the IndexedDB interactions behind-the-scenes.
+    await db.clear()
 
 
 Misc

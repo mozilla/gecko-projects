@@ -6,6 +6,7 @@
 
 #include "mozilla/ArrayUtils.h"
 
+#include "nsAppRunner.h"
 #include "nsSystemInfo.h"
 #include "prsystem.h"
 #include "prio.h"
@@ -56,7 +57,7 @@
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "AndroidBuild.h"
-#  include "GeneratedJNIWrappers.h"
+#  include "mozilla/java/GeckoAppShellWrappers.h"
 #  include "mozilla/jni/Utils.h"
 #endif
 
@@ -265,22 +266,22 @@ static nsresult CollectDiskInfo(nsIFile* greDir, nsIFile* winDir,
 }
 
 static nsresult CollectOSInfo(OSInfo& info) {
-  HKEY hKey;
+  HKEY installYearHKey;
   LONG status = RegOpenKeyExW(
       HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0,
-      KEY_READ | KEY_WOW64_64KEY, &hKey);
+      KEY_READ | KEY_WOW64_64KEY, &installYearHKey);
 
   if (status != ERROR_SUCCESS) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsAutoRegKey key(hKey);
+  nsAutoRegKey installYearKey(installYearHKey);
 
   DWORD type = 0;
   time_t raw_time = 0;
   DWORD time_size = sizeof(time_t);
 
-  status = RegQueryValueExW(hKey, L"InstallDate", nullptr, &type,
+  status = RegQueryValueExW(installYearHKey, L"InstallDate", nullptr, &type,
                             (LPBYTE)&raw_time, &time_size);
 
   if (status != ERROR_SUCCESS) {
@@ -297,6 +298,84 @@ static nsresult CollectOSInfo(OSInfo& info) {
   }
 
   info.installYear = 1900UL + time.tm_year;
+
+  nsAutoServiceHandle scm(
+      OpenSCManager(nullptr, SERVICES_ACTIVE_DATABASE, SC_MANAGER_CONNECT));
+
+  if (!scm) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  bool superfetchServiceRunning = false;
+
+  // Superfetch was introduced in Windows Vista as a service with the name
+  // SysMain. The service display name was also renamed to SysMain after Windows
+  // 10 build 1809.
+  nsAutoServiceHandle hService(OpenService(scm, L"SysMain", GENERIC_READ));
+
+  if (hService) {
+    SERVICE_STATUS superfetchStatus;
+    LPSERVICE_STATUS pSuperfetchStatus = &superfetchStatus;
+
+    if (!QueryServiceStatus(hService, pSuperfetchStatus)) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    superfetchServiceRunning =
+        superfetchStatus.dwCurrentState == SERVICE_RUNNING;
+  }
+
+  // If the SysMain (Superfetch) service is available, but not configured using
+  // the defaults, then it's disabled for our purposes, since it's not going to
+  // be operating as expected.
+  bool superfetchUsingDefaultParams = true;
+  bool prefetchUsingDefaultParams = true;
+
+  static const WCHAR prefetchParamsKeyName[] =
+      L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory "
+      L"Management\\PrefetchParameters";
+  static const DWORD SUPERFETCH_DEFAULT_PARAM = 3;
+  static const DWORD PREFETCH_DEFAULT_PARAM = 3;
+
+  HKEY prefetchParamsHKey;
+
+  LONG prefetchParamsStatus =
+      RegOpenKeyExW(HKEY_LOCAL_MACHINE, prefetchParamsKeyName, 0,
+                    KEY_READ | KEY_WOW64_64KEY, &prefetchParamsHKey);
+
+  if (prefetchParamsStatus == ERROR_SUCCESS) {
+    DWORD valueSize = sizeof(DWORD);
+    DWORD superfetchValue = 0;
+    nsAutoRegKey prefetchParamsKey(prefetchParamsHKey);
+    LONG superfetchParamStatus = RegQueryValueExW(
+        prefetchParamsHKey, L"EnableSuperfetch", nullptr, &type,
+        reinterpret_cast<LPBYTE>(&superfetchValue), &valueSize);
+
+    // If the EnableSuperfetch registry key doesn't exist, then it's using the
+    // default configuration.
+    if (superfetchParamStatus == ERROR_SUCCESS &&
+        superfetchValue != SUPERFETCH_DEFAULT_PARAM) {
+      superfetchUsingDefaultParams = false;
+    }
+
+    DWORD prefetchValue = 0;
+
+    LONG prefetchParamStatus = RegQueryValueExW(
+        prefetchParamsHKey, L"EnablePrefetcher", nullptr, &type,
+        reinterpret_cast<LPBYTE>(&prefetchValue), &valueSize);
+
+    // If the EnablePrefetcher registry key doesn't exist, then we interpret
+    // that as the Prefetcher being disabled (since Prefetch behaviour when
+    // the key is not available appears to be undefined).
+    if (prefetchParamStatus != ERROR_SUCCESS ||
+        prefetchValue != PREFETCH_DEFAULT_PARAM) {
+      prefetchUsingDefaultParams = false;
+    }
+  }
+
+  info.hasSuperfetch = superfetchServiceRunning && superfetchUsingDefaultParams;
+  info.hasPrefetch = prefetchUsingDefaultParams;
+
   return NS_OK;
 }
 
@@ -492,20 +571,20 @@ nsresult CollectProcessInfo(ProcessInfo& info) {
   typedef BOOL(WINAPI * LPFN_IWP2)(HANDLE, USHORT*, USHORT*);
   LPFN_IWP2 iwp2 = reinterpret_cast<LPFN_IWP2>(
       GetProcAddress(GetModuleHandle(L"kernel32"), "IsWow64Process2"));
-  BOOL isWow64 = false;
+  BOOL isWow64 = FALSE;
   USHORT processMachine = IMAGE_FILE_MACHINE_UNKNOWN;
   USHORT nativeMachine = IMAGE_FILE_MACHINE_UNKNOWN;
   BOOL gotWow64Value;
   if (iwp2) {
     gotWow64Value = iwp2(GetCurrentProcess(), &processMachine, &nativeMachine);
     if (gotWow64Value) {
-      info.isWow64 = (processMachine != IMAGE_FILE_MACHINE_UNKNOWN);
+      isWow64 = (processMachine != IMAGE_FILE_MACHINE_UNKNOWN);
     }
   } else {
     gotWow64Value = IsWow64Process(GetCurrentProcess(), &isWow64);
     // The function only indicates a WOW64 environment if it's 32-bit x86
     // running on x86-64, so emulate what IsWow64Process2 would have given.
-    if (gotWow64Value && info.isWow64) {
+    if (gotWow64Value && isWow64) {
       processMachine = IMAGE_FILE_MACHINE_I386;
       nativeMachine = IMAGE_FILE_MACHINE_AMD64;
     }
@@ -513,6 +592,7 @@ nsresult CollectProcessInfo(ProcessInfo& info) {
   NS_WARNING_ASSERTION(gotWow64Value, "IsWow64Process failed");
   if (gotWow64Value) {
     // Set this always, even for the x86-on-arm64 case.
+    info.isWow64 = !!isWow64;
     // Additional information if we're running x86-on-arm64
     info.isWowARM64 = (processMachine == IMAGE_FILE_MACHINE_I386 &&
                        nativeMachine == IMAGE_FILE_MACHINE_ARM64);
@@ -622,7 +702,7 @@ nsresult CollectProcessInfo(ProcessInfo& info) {
   MOZ_ASSERT(sizeof(sysctlValue32) == len);
 
 #elif defined(XP_LINUX) && !defined(ANDROID)
-  // Get vendor, family, model, stepping, physical cores, L3 cache size
+  // Get vendor, family, model, stepping, physical cores
   // from /proc/cpuinfo file
   {
     std::map<nsCString, nsCString> keyValuePairs;
@@ -670,23 +750,6 @@ nsresult CollectProcessInfo(ProcessInfo& info) {
         physicalCPUs = static_cast<int>(t.AsInteger());
       }
     }
-
-    {
-      // cacheSizeL3 from "cache size"
-      Tokenizer::Token t;
-      Tokenizer p(keyValuePairs[NS_LITERAL_CSTRING("cache size")]);
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cacheSizeL3 = static_cast<int>(t.AsInteger());
-        if (p.Next(t) && t.Type() == Tokenizer::TOKEN_WORD &&
-            t.AsString() != NS_LITERAL_CSTRING("KB")) {
-          // If we get here, there was some text after the cache size value
-          // and that text was not KB.  For now, just don't report the
-          // L3 cache.
-          cacheSizeL3 = -1;
-        }
-      }
-    }
   }
 
   {
@@ -714,6 +777,20 @@ nsresult CollectProcessInfo(ProcessInfo& info) {
       if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
           t.AsInteger() <= INT32_MAX) {
         cacheSizeL2 = static_cast<int>(t.AsInteger());
+      }
+    }
+  }
+
+  {
+    // Get cacheSizeL3 from yet another file
+    std::ifstream input("/sys/devices/system/cpu/cpu0/cache/index3/size");
+    std::string line;
+    if (getline(input, line)) {
+      Tokenizer::Token t;
+      Tokenizer p(line.c_str(), nullptr, "K");
+      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
+          t.AsInteger() <= INT32_MAX) {
+        cacheSizeL3 = static_cast<int>(t.AsInteger());
       }
     }
   }
@@ -951,9 +1028,9 @@ nsresult nsSystemInfo::Init() {
 // Chrome works around this by hardcoding an Android version when a
 // numeric version can't be obtained. We're doing the same.
 // This version will need to be updated whenever there is a new official
-// Android release.
-// See: https://cs.chromium.org/chromium/src/base/sys_info_android.cc?l=61
-#  define DEFAULT_ANDROID_VERSION "6.0.99"
+// Android release. Search for "kDefaultAndroidMajorVersion" in:
+// https://source.chromium.org/chromium/chromium/src/+/master:base/system/sys_info_android.cc
+#  define DEFAULT_ANDROID_VERSION "10.0.99"
 
 /* static */
 void nsSystemInfo::GetAndroidSystemInfo(AndroidSystemInfo* aInfo) {
@@ -1104,6 +1181,14 @@ JSObject* GetJSObjForOSInfo(JSContext* aCx, const OSInfo& info) {
 
   JS::Rooted<JS::Value> valInstallYear(aCx, JS::Int32Value(info.installYear));
   JS_SetProperty(aCx, jsInfo, "installYear", valInstallYear);
+
+  JS::Rooted<JS::Value> valHasSuperfetch(aCx,
+                                         JS::BooleanValue(info.hasSuperfetch));
+  JS_SetProperty(aCx, jsInfo, "hasSuperfetch", valHasSuperfetch);
+
+  JS::Rooted<JS::Value> valHasPrefetch(aCx, JS::BooleanValue(info.hasPrefetch));
+  JS_SetProperty(aCx, jsInfo, "hasPrefetch", valHasPrefetch);
+
   return jsInfo;
 }
 

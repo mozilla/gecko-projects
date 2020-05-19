@@ -63,7 +63,7 @@ struct CacheStorage::Entry final {
   CacheOpArgs mArgs;
   // We cannot add the requests until after the actor is present.  So store
   // the request data separately for now.
-  RefPtr<InternalRequest> mRequest;
+  SafeRefPtr<InternalRequest> mRequest;
 };
 
 namespace {
@@ -188,7 +188,7 @@ already_AddRefed<CacheStorage> CacheStorage::CreateOnWorker(
     return ref.forget();
   }
 
-  RefPtr<CacheWorkerRef> workerRef =
+  SafeRefPtr<CacheWorkerRef> workerRef =
       CacheWorkerRef::Create(aWorkerPrivate, CacheWorkerRef::eIPCWorkerRef);
   if (!workerRef) {
     NS_WARNING("Worker thread is shutting down.");
@@ -228,8 +228,8 @@ already_AddRefed<CacheStorage> CacheStorage::CreateOnWorker(
     return ref.forget();
   }
 
-  RefPtr<CacheStorage> ref =
-      new CacheStorage(aNamespace, aGlobal, principalInfo, workerRef);
+  RefPtr<CacheStorage> ref = new CacheStorage(
+      aNamespace, aGlobal, principalInfo, std::move(workerRef));
   return ref.forget();
 }
 
@@ -267,7 +267,7 @@ bool CacheStorage::DefineCaches(JSContext* aCx, JS::Handle<JSObject*> aGlobal) {
 
 CacheStorage::CacheStorage(Namespace aNamespace, nsIGlobalObject* aGlobal,
                            const PrincipalInfo& aPrincipalInfo,
-                           CacheWorkerRef* aWorkerRef)
+                           SafeRefPtr<CacheWorkerRef> aWorkerRef)
     : mNamespace(aNamespace),
       mGlobal(aGlobal),
       mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo)),
@@ -286,7 +286,8 @@ CacheStorage::CacheStorage(Namespace aNamespace, nsIGlobalObject* aGlobal,
   // WorkerRef ownership is passed to the CacheStorageChild actor and any
   // actors it may create.  The WorkerRef will keep the worker thread alive
   // until the actors can gracefully shutdown.
-  CacheStorageChild* newActor = new CacheStorageChild(this, aWorkerRef);
+  CacheStorageChild* newActor =
+      new CacheStorageChild(this, std::move(aWorkerRef));
   PCacheStorageChild* constructedActor = actor->SendPCacheStorageConstructor(
       newActor, mNamespace, *mPrincipalInfo);
 
@@ -319,7 +320,7 @@ already_AddRefed<Promise> CacheStorage::Match(
     return nullptr;
   }
 
-  RefPtr<InternalRequest> request =
+  SafeRefPtr<InternalRequest> request =
       ToInternalRequest(aCx, aRequest, IgnoreBody, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
@@ -333,10 +334,10 @@ already_AddRefed<Promise> CacheStorage::Match(
   CacheQueryParams params;
   ToCacheQueryParams(params, aOptions);
 
-  nsAutoPtr<Entry> entry(new Entry());
+  auto entry = MakeUnique<Entry>();
   entry->mPromise = promise;
   entry->mArgs = StorageMatchArgs(CacheRequest(), params, GetOpenMode());
-  entry->mRequest = request;
+  entry->mRequest = std::move(request);
 
   RunRequest(std::move(entry));
 
@@ -362,7 +363,7 @@ already_AddRefed<Promise> CacheStorage::Has(const nsAString& aKey,
     return nullptr;
   }
 
-  nsAutoPtr<Entry> entry(new Entry());
+  auto entry = MakeUnique<Entry>();
   entry->mPromise = promise;
   entry->mArgs = StorageHasArgs(nsString(aKey));
 
@@ -390,7 +391,7 @@ already_AddRefed<Promise> CacheStorage::Open(const nsAString& aKey,
     return nullptr;
   }
 
-  nsAutoPtr<Entry> entry(new Entry());
+  auto entry = MakeUnique<Entry>();
   entry->mPromise = promise;
   entry->mArgs = StorageOpenArgs(nsString(aKey));
 
@@ -418,7 +419,7 @@ already_AddRefed<Promise> CacheStorage::Delete(const nsAString& aKey,
     return nullptr;
   }
 
-  nsAutoPtr<Entry> entry(new Entry());
+  auto entry = MakeUnique<Entry>();
   entry->mPromise = promise;
   entry->mArgs = StorageDeleteArgs(nsString(aKey));
 
@@ -445,7 +446,7 @@ already_AddRefed<Promise> CacheStorage::Keys(ErrorResult& aRv) {
     return nullptr;
   }
 
-  nsAutoPtr<Entry> entry(new Entry());
+  auto entry = MakeUnique<Entry>();
   entry->mPromise = promise;
   entry->mArgs = StorageKeysArgs();
 
@@ -540,23 +541,21 @@ CacheStorage::~CacheStorage() {
   }
 }
 
-void CacheStorage::RunRequest(nsAutoPtr<Entry>&& aEntry) {
+void CacheStorage::RunRequest(UniquePtr<Entry> aEntry) {
   MOZ_ASSERT(mActor);
 
-  nsAutoPtr<Entry> entry(std::move(aEntry));
+  AutoChildOpArgs args(this, aEntry->mArgs, 1);
 
-  AutoChildOpArgs args(this, entry->mArgs, 1);
-
-  if (entry->mRequest) {
+  if (aEntry->mRequest) {
     ErrorResult rv;
-    args.Add(entry->mRequest, IgnoreBody, IgnoreInvalidScheme, rv);
+    args.Add(*aEntry->mRequest, IgnoreBody, IgnoreInvalidScheme, rv);
     if (NS_WARN_IF(rv.Failed())) {
-      entry->mPromise->MaybeReject(std::move(rv));
+      aEntry->mPromise->MaybeReject(std::move(rv));
       return;
     }
   }
 
-  mActor->ExecuteOp(mGlobal, entry->mPromise, this, args.SendAsOpArgs());
+  mActor->ExecuteOp(mGlobal, aEntry->mPromise, this, args.SendAsOpArgs());
 }
 
 OpenMode CacheStorage::GetOpenMode() const {

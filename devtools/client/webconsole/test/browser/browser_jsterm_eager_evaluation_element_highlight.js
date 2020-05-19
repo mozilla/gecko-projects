@@ -17,12 +17,10 @@ const TEST_URI = `data:text/html;charset=utf8,
 
 // Test that when the eager evaluation result is an element, it gets highlighted.
 add_task(async function() {
-  await pushPref("devtools.webconsole.input.eagerEvaluation", true);
   const hud = await openNewTabAndConsole(TEST_URI);
   const { jsterm, toolbox } = hud;
   const { autocompletePopup } = jsterm;
 
-  await registerTestActor(toolbox.target.client);
   const testActor = await getTestActor(toolbox);
   const inspectorFront = await toolbox.target.getFront("inspector");
 

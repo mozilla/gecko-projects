@@ -24,6 +24,10 @@ static StaticRefPtr<NetworkConnectivityService> gConnService;
 // static
 already_AddRefed<NetworkConnectivityService>
 NetworkConnectivityService::GetSingleton() {
+  if (!XRE_IsParentProcess()) {
+    return nullptr;
+  }
+
   if (gConnService) {
     return do_AddRef(gConnService);
   }
@@ -112,13 +116,6 @@ NetworkConnectivityService::OnLookupComplete(nsICancelable* aRequest,
 }
 
 NS_IMETHODIMP
-NetworkConnectivityService::OnLookupByTypeComplete(nsICancelable* aRequest,
-                                                   nsIDNSByTypeRecord* aRes,
-                                                   nsresult aStatus) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 NetworkConnectivityService::RecheckDNS() {
   bool enabled =
       Preferences::GetBool("network.connectivity-service.enabled", false);
@@ -196,7 +193,7 @@ static inline already_AddRefed<nsIChannel> SetupIPCheckChannel(bool ipv4) {
       getter_AddRefs(channel), uri, nsContentUtils::GetSystemPrincipal(),
       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
       nsIContentPolicy::TYPE_OTHER,
-      nullptr,  // nsICookieSettings
+      nullptr,  // nsICookieJarSettings
       nullptr,  // aPerformanceStorage
       nullptr,  // aLoadGroup
       nullptr,
@@ -205,6 +202,17 @@ static inline already_AddRefed<nsIChannel> SetupIPCheckChannel(bool ipv4) {
           nsIRequest::LOAD_ANONYMOUS);   // prevent privacy leaks
 
   channel->SetTRRMode(nsIRequest::TRR_DISABLED_MODE);
+
+  {
+    // Prevent HTTPS-Only Mode from upgrading the OCSP request.
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+    uint32_t httpsOnlyStatus = loadInfo->GetHttpsOnlyStatus();
+    httpsOnlyStatus |= nsILoadInfo::HTTPS_ONLY_EXEMPT;
+    loadInfo->SetHttpsOnlyStatus(httpsOnlyStatus);
+
+    // allow deprecated HTTP request from SystemPrincipal
+    loadInfo->SetAllowDeprecatedSystemRequests(true);
+  }
 
   NS_ENSURE_SUCCESS(rv, nullptr);
 

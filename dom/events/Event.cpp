@@ -21,6 +21,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/ViewportUtils.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Event.h"
@@ -146,9 +147,13 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Event)
       case eClipboardEventClass:
         tmp->mEvent->AsClipboardEvent()->mClipboardData = nullptr;
         break;
-      case eEditorInputEventClass:
-        tmp->mEvent->AsEditorInputEvent()->mDataTransfer = nullptr;
+      case eEditorInputEventClass: {
+        InternalEditorInputEvent* inputEvent =
+            tmp->mEvent->AsEditorInputEvent();
+        inputEvent->mDataTransfer = nullptr;
+        inputEvent->mTargetRanges.Clear();
         break;
+      }
       case eMutationEventClass:
         tmp->mEvent->AsMutationEvent()->mRelatedNode = nullptr;
         break;
@@ -187,6 +192,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Event)
       case eEditorInputEventClass:
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mDataTransfer");
         cb.NoteXPCOMChild(tmp->mEvent->AsEditorInputEvent()->mDataTransfer);
+        NS_IMPL_CYCLE_COLLECTION_TRAVERSE(
+            mEvent->AsEditorInputEvent()->mTargetRanges);
         break;
       case eMutationEventClass:
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mRelatedNode");
@@ -543,11 +550,6 @@ CSSIntPoint Event::GetScreenCoords(nsPresContext* aPresContext,
       rounded,
       aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
 
-  if (PresShell* presShell = aPresContext->GetPresShell()) {
-    pt = pt.RemoveResolution(
-        nsLayoutUtils::GetCurrentAPZResolutionScale(presShell));
-  }
-
   pt += LayoutDevicePixel::ToAppUnits(
       guiEvent->mWidget->TopLevelWidgetToScreenOffset(),
       aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
@@ -606,8 +608,8 @@ CSSIntPoint Event::GetClientCoords(nsPresContext* aPresContext,
   if (!rootFrame) {
     return CSSIntPoint(0, 0);
   }
-  nsPoint pt =
-      nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, aPoint, rootFrame);
+  nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(
+      aEvent, aPoint, RelativeTo{rootFrame});
 
   return CSSIntPoint::FromAppUnitsRounded(pt);
 }
@@ -640,8 +642,8 @@ CSSIntPoint Event::GetOffsetCoords(nsPresContext* aPresContext,
   CSSIntPoint clientCoords =
       GetClientCoords(aPresContext, aEvent, aPoint, aDefaultPoint);
   nsPoint pt = CSSPixel::ToAppUnits(clientCoords);
-  if (nsLayoutUtils::TransformPoint(rootFrame, frame, pt) ==
-      nsLayoutUtils::TRANSFORM_SUCCEEDED) {
+  if (nsLayoutUtils::TransformPoint(RelativeTo{rootFrame}, RelativeTo{frame},
+                                    pt) == nsLayoutUtils::TRANSFORM_SUCCEEDED) {
     pt -= frame->GetPaddingRectRelativeToSelf().TopLeft();
     return CSSPixel::FromAppUnitsRounded(pt);
   }
@@ -717,20 +719,22 @@ double Event::TimeStamp() {
     double ret =
         perf->GetDOMTiming()->TimeStampToDOMHighRes(mEvent->mTimeStamp);
     MOZ_ASSERT(mOwner->PrincipalOrNull());
-    if (mOwner->PrincipalOrNull()->IsSystemPrincipal()) return ret;
 
     return nsRFPService::ReduceTimePrecisionAsMSecs(
-        ret, perf->GetRandomTimelineSeed());
+        ret, perf->GetRandomTimelineSeed(),
+        mOwner->PrincipalOrNull()->IsSystemPrincipal(),
+        mOwner->CrossOriginIsolated());
   }
 
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
 
   double ret = workerPrivate->TimeStampToDOMHighRes(mEvent->mTimeStamp);
-  if (workerPrivate->UsesSystemPrincipal()) return ret;
 
   return nsRFPService::ReduceTimePrecisionAsMSecs(
-      ret, workerPrivate->GetRandomTimelineSeed());
+      ret, workerPrivate->GetRandomTimelineSeed(),
+      workerPrivate->UsesSystemPrincipal(),
+      workerPrivate->CrossOriginIsolated());
 }
 
 void Event::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType) {

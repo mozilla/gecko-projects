@@ -10,6 +10,12 @@
 
 #ifdef WR_VERTEX_SHADER
 
+#ifdef WR_FEATURE_TEXTURE_RECT
+    #define TEX_SIZE(sampler) vec2(1.0)
+#else
+    #define TEX_SIZE(sampler) vec2(textureSize(sampler, 0).xy)
+#endif
+
 #define YUV_COLOR_SPACE_REC601      0
 #define YUV_COLOR_SPACE_REC709      1
 #define YUV_COLOR_SPACE_REC2020     2
@@ -68,6 +74,24 @@ mat3 get_yuv_color_matrix(int color_space) {
             return YuvColorMatrixRec2020;
     }
 }
+
+void write_uv_rect(
+    vec2 uv0,
+    vec2 uv1,
+    vec2 f,
+    vec2 texture_size,
+    out vec2 uv,
+    out vec4 uv_bounds
+) {
+    uv = mix(uv0, uv1, f);
+
+    uv_bounds = vec4(uv0 + vec2(0.5), uv1 - vec2(0.5));
+
+    #ifndef WR_FEATURE_TEXTURE_RECT
+        uv /= texture_size;
+        uv_bounds /= texture_size.xyxy;
+    #endif
+}
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
@@ -76,9 +100,10 @@ vec4 sample_yuv(
     int format,
     mat3 yuv_color_matrix,
     float coefficient,
-    vec3 in_uv_y,
-    vec3 in_uv_u,
-    vec3 in_uv_v,
+    vec3 yuv_layers,
+    vec2 in_uv_y,
+    vec2 in_uv_u,
+    vec2 in_uv_v,
     vec4 uv_bounds_y,
     vec4 uv_bounds_u,
     vec4 uv_bounds_v
@@ -89,21 +114,21 @@ vec4 sample_yuv(
         case YUV_FORMAT_PLANAR:
             {
                 // The yuv_planar format should have this third texture coordinate.
-                vec2 uv_y = clamp(in_uv_y.xy, uv_bounds_y.xy, uv_bounds_y.zw);
-                vec2 uv_u = clamp(in_uv_u.xy, uv_bounds_u.xy, uv_bounds_u.zw);
-                vec2 uv_v = clamp(in_uv_v.xy, uv_bounds_v.xy, uv_bounds_v.zw);
-                yuv_value.x = TEX_SAMPLE(sColor0, vec3(uv_y, in_uv_y.z)).r;
-                yuv_value.y = TEX_SAMPLE(sColor1, vec3(uv_u, in_uv_u.z)).r;
-                yuv_value.z = TEX_SAMPLE(sColor2, vec3(uv_v, in_uv_v.z)).r;
+                vec2 uv_y = clamp(in_uv_y, uv_bounds_y.xy, uv_bounds_y.zw);
+                vec2 uv_u = clamp(in_uv_u, uv_bounds_u.xy, uv_bounds_u.zw);
+                vec2 uv_v = clamp(in_uv_v, uv_bounds_v.xy, uv_bounds_v.zw);
+                yuv_value.x = TEX_SAMPLE(sColor0, vec3(uv_y, yuv_layers.x)).r;
+                yuv_value.y = TEX_SAMPLE(sColor1, vec3(uv_u, yuv_layers.y)).r;
+                yuv_value.z = TEX_SAMPLE(sColor2, vec3(uv_v, yuv_layers.z)).r;
             }
             break;
 
         case YUV_FORMAT_NV12:
             {
-                vec2 uv_y = clamp(in_uv_y.xy, uv_bounds_y.xy, uv_bounds_y.zw);
-                vec2 uv_uv = clamp(in_uv_u.xy, uv_bounds_u.xy, uv_bounds_u.zw);
-                yuv_value.x = TEX_SAMPLE(sColor0, vec3(uv_y, in_uv_y.z)).r;
-                yuv_value.yz = TEX_SAMPLE(sColor1, vec3(uv_uv, in_uv_u.z)).rg;
+                vec2 uv_y = clamp(in_uv_y, uv_bounds_y.xy, uv_bounds_y.zw);
+                vec2 uv_uv = clamp(in_uv_u, uv_bounds_u.xy, uv_bounds_u.zw);
+                yuv_value.x = TEX_SAMPLE(sColor0, vec3(uv_y, yuv_layers.x)).r;
+                yuv_value.yz = TEX_SAMPLE(sColor1, vec3(uv_uv, yuv_layers.y)).rg;
             }
             break;
 
@@ -112,8 +137,8 @@ vec4 sample_yuv(
                 // "The Y, Cb and Cr color channels within the 422 data are mapped into
                 // the existing green, blue and red color channels."
                 // https://www.khronos.org/registry/OpenGL/extensions/APPLE/APPLE_rgb_422.txt
-                vec2 uv_y = clamp(in_uv_y.xy, uv_bounds_y.xy, uv_bounds_y.zw);
-                yuv_value = TEX_SAMPLE(sColor0, vec3(uv_y, in_uv_y.z)).gbr;
+                vec2 uv_y = clamp(in_uv_y, uv_bounds_y.xy, uv_bounds_y.zw);
+                yuv_value = TEX_SAMPLE(sColor0, vec3(uv_y, yuv_layers.x)).gbr;
             }
             break;
 

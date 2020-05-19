@@ -17,10 +17,12 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
+#include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/PublicSSL.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/Telemetry.h"
@@ -36,6 +38,7 @@
 #include "nsIFile.h"
 #include "nsILocalFileWin.h"
 #include "nsIObserverService.h"
+#include "nsIOService.h"
 #include "nsIPrompt.h"
 #include "nsIProperties.h"
 #include "nsITokenPasswordDialogs.h"
@@ -60,6 +63,7 @@
 #include "sslproto.h"
 #include "SSLTokensCache.h"
 #include "prmem.h"
+#include "GeckoProfiler.h"
 
 #if defined(XP_LINUX) && !defined(ANDROID)
 #  include <linux/magic.h>
@@ -580,9 +584,9 @@ nsresult nsNSSComponent::CommonGetEnterpriseCerts(
       if (NS_FAILED(rv)) {
         return rv;
       }
-      if (!enterpriseCerts.AppendElement(std::move(certCopy))) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
+      // XXX(Bug 1631371) Check if this should use a fallible operation as it
+      // pretended earlier.
+      enterpriseCerts.AppendElement(std::move(certCopy));
     }
   }
   return NS_OK;
@@ -598,6 +602,31 @@ NS_IMETHODIMP
 nsNSSComponent::GetEnterpriseIntermediates(
     nsTArray<nsTArray<uint8_t>>& enterpriseIntermediates) {
   return CommonGetEnterpriseCerts(enterpriseIntermediates, false);
+}
+
+NS_IMETHODIMP
+nsNSSComponent::AddEnterpriseIntermediate(
+    const nsTArray<uint8_t>& intermediateBytes) {
+  nsresult rv = BlockUntilLoadableCertsLoaded();
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  EnterpriseCert intermediate;
+  rv = intermediate.Init(intermediateBytes.Elements(),
+                         intermediateBytes.Length(), false);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  {
+    MutexAutoLock nsNSSComponentLock(mMutex);
+    if (!mEnterpriseCerts.append(std::move(intermediate))) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+
+  UpdateCertVerifierWithEnterpriseRoots();
+  return NS_OK;
 }
 
 class LoadLoadableCertsTask final : public Runnable {
@@ -644,6 +673,9 @@ nsresult LoadLoadableCertsTask::Dispatch() {
 
 NS_IMETHODIMP
 LoadLoadableCertsTask::Run() {
+  Telemetry::AutoScalarTimer<Telemetry::ScalarID::NETWORKING_LOADING_CERTS_TASK>
+      timer;
+
   nsresult loadLoadableRootsResult = LoadLoadableRoots();
   if (NS_WARN_IF(NS_FAILED(loadLoadableRootsResult))) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("LoadLoadableRoots failed"));
@@ -823,8 +855,24 @@ nsresult nsNSSComponent::BlockUntilLoadableCertsLoaded() {
   return mLoadableCertsLoadedResult;
 }
 
+#ifndef MOZ_NO_SMART_CARDS
+static StaticMutex sCheckForSmartCardChangesMutex;
+static TimeStamp sLastCheckedForSmartCardChanges = TimeStamp::Now();
+#endif
+
 nsresult nsNSSComponent::CheckForSmartCardChanges() {
 #ifndef MOZ_NO_SMART_CARDS
+  {
+    StaticMutexAutoLock lock(sCheckForSmartCardChangesMutex);
+    // Do this at most once every 3 seconds.
+    TimeStamp now = TimeStamp::Now();
+    if (now - sLastCheckedForSmartCardChanges <
+        TimeDuration::FromSeconds(3.0)) {
+      return NS_OK;
+    }
+    sLastCheckedForSmartCardChanges = now;
+  }
+
   // SECMOD_UpdateSlotList attempts to acquire the list lock as well,
   // so we have to do this in two steps. The lock protects the list itself, so
   // if we get our own owned references to the modules we're interested in,
@@ -1233,6 +1281,33 @@ void SetValidationOptionsCommon() {
       ctMode != CertVerifier::CertificateTransparencyMode::Disabled;
   PublicSSLState()->SetSignedCertTimestampsEnabled(sctsEnabled);
   PrivateSSLState()->SetSignedCertTimestampsEnabled(sctsEnabled);
+
+  CertVerifier::PinningMode pinningMode =
+      static_cast<CertVerifier::PinningMode>(
+          Preferences::GetInt("security.cert_pinning.enforcement_level",
+                              CertVerifier::pinningDisabled));
+  if (pinningMode > CertVerifier::pinningEnforceTestMode) {
+    pinningMode = CertVerifier::pinningDisabled;
+  }
+  PublicSSLState()->SetPinningMode(pinningMode);
+  PrivateSSLState()->SetPinningMode(pinningMode);
+
+  BRNameMatchingPolicy::Mode nameMatchingMode =
+      static_cast<BRNameMatchingPolicy::Mode>(Preferences::GetInt(
+          "security.pki.name_matching_mode",
+          static_cast<int32_t>(BRNameMatchingPolicy::Mode::DoNotEnforce)));
+  switch (nameMatchingMode) {
+    case BRNameMatchingPolicy::Mode::Enforce:
+    case BRNameMatchingPolicy::Mode::EnforceAfter23August2015:
+    case BRNameMatchingPolicy::Mode::EnforceAfter23August2016:
+    case BRNameMatchingPolicy::Mode::DoNotEnforce:
+      break;
+    default:
+      nameMatchingMode = BRNameMatchingPolicy::Mode::DoNotEnforce;
+      break;
+  }
+  PublicSSLState()->SetNameMatchingMode(nameMatchingMode);
+  PrivateSSLState()->SetNameMatchingMode(nameMatchingMode);
 }
 
 namespace {
@@ -1245,11 +1320,11 @@ class CipherSuiteChangeObserver : public nsIObserver {
   static nsresult StartObserve();
 
  protected:
-  virtual ~CipherSuiteChangeObserver() {}
+  virtual ~CipherSuiteChangeObserver() = default;
 
  private:
   static StaticRefPtr<CipherSuiteChangeObserver> sObserver;
-  CipherSuiteChangeObserver() {}
+  CipherSuiteChangeObserver() = default;
 };
 
 NS_IMPL_ISUPPORTS(CipherSuiteChangeObserver, nsIObserver)
@@ -1296,7 +1371,7 @@ nsresult CipherSuiteChangeObserver::Observe(nsISupports* /*aSubject*/,
         bool cipherEnabled =
             Preferences::GetBool(cp[i].pref, cp[i].enabledByDefault);
         SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
-        nsNSSComponent::ClearSSLExternalAndInternalSessionCacheNative();
+        nsNSSComponent::DoClearSSLExternalAndInternalSessionCache();
         break;
       }
     }
@@ -1354,14 +1429,6 @@ void nsNSSComponent::setValidationOptions(
     Telemetry::Accumulate(Telemetry::CERT_OCSP_REQUIRED, ocspRequired);
   }
 
-  CertVerifier::PinningMode pinningMode =
-      static_cast<CertVerifier::PinningMode>(
-          Preferences::GetInt("security.cert_pinning.enforcement_level",
-                              CertVerifier::pinningDisabled));
-  if (pinningMode > CertVerifier::pinningEnforceTestMode) {
-    pinningMode = CertVerifier::pinningDisabled;
-  }
-
   CertVerifier::SHA1Mode sha1Mode =
       static_cast<CertVerifier::SHA1Mode>(Preferences::GetInt(
           "security.pki.sha1_enforcement_level",
@@ -1381,21 +1448,6 @@ void nsNSSComponent::setValidationOptions(
   // Convert a previously-available setting to a safe one.
   if (sha1Mode == CertVerifier::SHA1Mode::UsedToBeBefore2016ButNowIsForbidden) {
     sha1Mode = CertVerifier::SHA1Mode::Forbidden;
-  }
-
-  BRNameMatchingPolicy::Mode nameMatchingMode =
-      static_cast<BRNameMatchingPolicy::Mode>(Preferences::GetInt(
-          "security.pki.name_matching_mode",
-          static_cast<int32_t>(BRNameMatchingPolicy::Mode::DoNotEnforce)));
-  switch (nameMatchingMode) {
-    case BRNameMatchingPolicy::Mode::Enforce:
-    case BRNameMatchingPolicy::Mode::EnforceAfter23August2015:
-    case BRNameMatchingPolicy::Mode::EnforceAfter23August2016:
-    case BRNameMatchingPolicy::Mode::DoNotEnforce:
-      break;
-    default:
-      nameMatchingMode = BRNameMatchingPolicy::Mode::DoNotEnforce;
-      break;
   }
 
   NetscapeStepUpPolicy netscapeStepUpPolicy =
@@ -1447,8 +1499,9 @@ void nsNSSComponent::setValidationOptions(
                                  softTimeout, hardTimeout, proofOfLock);
 
   mDefaultCertVerifier = new SharedCertVerifier(
-      odc, osc, softTimeout, hardTimeout, certShortLifetimeInDays, pinningMode,
-      sha1Mode, nameMatchingMode, netscapeStepUpPolicy, ctMode,
+      odc, osc, softTimeout, hardTimeout, certShortLifetimeInDays,
+      PublicSSLState()->PinningMode(), sha1Mode,
+      PublicSSLState()->NameMatchingMode(), netscapeStepUpPolicy, ctMode,
       distrustedCAPolicy, crliteMode, mEnterpriseCerts);
 }
 
@@ -1477,7 +1530,7 @@ void nsNSSComponent::UpdateCertVerifierWithEnterpriseRoots() {
 nsresult nsNSSComponent::SetEnabledTLSVersions() {
   // Keep these values in sync with all.js.
   // 1 means TLS 1.0, 2 means TLS 1.1, etc.
-  static const uint32_t PSM_DEFAULT_MIN_TLS_VERSION = 3;
+  static const uint32_t PSM_DEFAULT_MIN_TLS_VERSION = 1;
   static const uint32_t PSM_DEFAULT_MAX_TLS_VERSION = 4;
   static const uint32_t PSM_DEPRECATED_TLS_VERSION = 1;
 
@@ -1914,6 +1967,8 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
 
 nsresult nsNSSComponent::InitializeNSS() {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::InitializeNSS\n"));
+  AUTO_PROFILER_LABEL("nsNSSComponent::InitializeNSS", OTHER);
+  AUTO_PROFILER_TRACING_MARKER("NSS", "nsNSSComponent::InitializeNSS", OTHER);
 
   static_assert(
       nsINSSErrorsService::NSS_SEC_ERROR_BASE == SEC_ERROR_BASE &&
@@ -1968,6 +2023,9 @@ nsresult nsNSSComponent::InitializeNSS() {
   if (NS_FAILED(rv)) {
     return NS_ERROR_UNEXPECTED;
   }
+
+  nsCOMPtr<nsIClientAuthRemember> cars =
+      do_GetService(NS_CLIENTAUTHREMEMBER_CONTRACTID);
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS Initialization done\n"));
 
@@ -2072,6 +2130,9 @@ nsresult nsNSSComponent::Init() {
   if (!XRE_IsParentProcess()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
+
+  Telemetry::AutoScalarTimer<Telemetry::ScalarID::NETWORKING_NSS_INITIALIZATION>
+      timer;
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Beginning NSS initialization\n"));
 
@@ -2199,7 +2260,14 @@ nsresult nsNSSComponent::LogoutAuthenticatedPK11() {
         NS_LITERAL_CSTRING("all:temporary-certificates"), 0);
   }
 
-  nsClientAuthRememberService::ClearAllRememberedDecisions();
+  nsCOMPtr<nsIClientAuthRemember> svc =
+      do_GetService(NS_CLIENTAUTHREMEMBER_CONTRACTID);
+
+  if (svc) {
+    nsresult rv = svc->ClearRememberedDecisions();
+
+    Unused << NS_WARN_IF(NS_FAILED(rv));
+  }
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
@@ -2297,7 +2365,7 @@ nsNSSComponent::IssuerMatchesMitmCanary(const char* aCertIssuer) {
   return NS_ERROR_FAILURE;
 }
 
-SharedCertVerifier::~SharedCertVerifier() {}
+SharedCertVerifier::~SharedCertVerifier() = default;
 
 NS_IMETHODIMP
 nsNSSComponent::GetDefaultCertVerifier(SharedCertVerifier** result) {
@@ -2310,6 +2378,21 @@ nsNSSComponent::GetDefaultCertVerifier(SharedCertVerifier** result) {
 
 // static
 void nsNSSComponent::ClearSSLExternalAndInternalSessionCacheNative() {
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  if (mozilla::net::nsIOService::UseSocketProcess()) {
+    if (mozilla::net::gIOService) {
+      mozilla::net::gIOService->CallOrWaitForSocketProcess([]() {
+        Unused << mozilla::net::SocketProcessParent::GetSingleton()
+                      ->SendClearSessionCache();
+      });
+    }
+  }
+  DoClearSSLExternalAndInternalSessionCache();
+}
+
+// static
+void nsNSSComponent::DoClearSSLExternalAndInternalSessionCache() {
   SSL_ClearSessionCache();
   mozilla::net::SSLTokensCache::Clear();
 }
@@ -2364,6 +2447,10 @@ UniqueCERTCertList FindClientCertificatesWithPrivateKeys() {
       PK11SlotInfo* slot = list->module->slots[i];
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
               ("    slot '%s'", PK11_GetSlotName(slot)));
+      if (!PK11_IsPresent(slot)) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (not present)"));
+        continue;
+      }
       // We may need to log in to be able to find private keys.
       if (PK11_Authenticate(slot, true, nullptr) != SECSuccess) {
         MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (couldn't authenticate)"));
@@ -2431,9 +2518,9 @@ UniqueCERTCertList FindClientCertificatesWithPrivateKeys() {
 
 NS_IMPL_ISUPPORTS(PipUIContext, nsIInterfaceRequestor)
 
-PipUIContext::PipUIContext() {}
+PipUIContext::PipUIContext() = default;
 
-PipUIContext::~PipUIContext() {}
+PipUIContext::~PipUIContext() = default;
 
 NS_IMETHODIMP
 PipUIContext::GetInterface(const nsIID& uuid, void** result) {

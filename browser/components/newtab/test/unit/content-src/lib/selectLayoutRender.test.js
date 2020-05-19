@@ -65,7 +65,12 @@ describe("selectLayoutRender", () => {
       type: "foo",
       feed: { url: "foo.com" },
       properties: { items: 2 },
-      data: { recommendations: [{ id: "foo", pos: 0 }, { id: "bar", pos: 1 }] },
+      data: {
+        recommendations: [
+          { id: "foo", pos: 0 },
+          { id: "bar", pos: 1 },
+        ],
+      },
     });
   });
 
@@ -107,7 +112,7 @@ describe("selectLayoutRender", () => {
 
     assert.lengthOf(layoutRender, 1);
     assert.propertyVal(layoutRender[0], "width", 3);
-    assert.deepEqual(layoutRender[0].components[0].data.spocs.items, []);
+    assert.deepEqual(layoutRender[0].components[0].data.spocs, []);
   });
 
   it("should return layout with spocs data if feed isn't defined but spocs is", () => {
@@ -126,7 +131,14 @@ describe("selectLayoutRender", () => {
     store.dispatch({ type: at.DISCOVERY_STREAM_FEEDS_UPDATE });
     store.dispatch({
       type: at.DISCOVERY_STREAM_SPOCS_UPDATE,
-      data: { lastUpdated: 0, spocs: { spocs: { items: [1, 2, 3] } } },
+      data: {
+        lastUpdated: 0,
+        spocs: {
+          spocs: {
+            items: [{ id: 1 }, { id: 2 }, { id: 3 }],
+          },
+        },
+      },
     });
 
     const { layoutRender } = selectLayoutRender({
@@ -135,7 +147,46 @@ describe("selectLayoutRender", () => {
 
     assert.lengthOf(layoutRender, 1);
     assert.propertyVal(layoutRender[0], "width", 3);
-    assert.deepEqual(layoutRender[0].components[0].data.spocs, [1]);
+    assert.deepEqual(layoutRender[0].components[0].data.spocs, [
+      { id: 1, pos: 0 },
+      { id: 2, pos: 1 },
+      { id: 3, pos: 2 },
+    ]);
+  });
+
+  it("should return layout with no spocs data if feed and spocs are unavailable", () => {
+    const fakeLayout = [
+      {
+        width: 3,
+        components: [
+          { type: "foo", spocs: { probability: 1, positions: [{ index: 0 }] } },
+        ],
+      },
+    ];
+    store.dispatch({
+      type: at.DISCOVERY_STREAM_LAYOUT_UPDATE,
+      data: { layout: fakeLayout },
+    });
+    store.dispatch({ type: at.DISCOVERY_STREAM_FEEDS_UPDATE });
+    store.dispatch({
+      type: at.DISCOVERY_STREAM_SPOCS_UPDATE,
+      data: {
+        lastUpdated: 0,
+        spocs: {
+          spocs: {
+            items: [],
+          },
+        },
+      },
+    });
+
+    const { layoutRender } = selectLayoutRender({
+      state: store.getState().DiscoveryStream,
+    });
+
+    assert.lengthOf(layoutRender, 1);
+    assert.propertyVal(layoutRender[0], "width", 3);
+    assert.equal(layoutRender[0].components[0].data.spocs.length, 0);
   });
 
   it("should return feed data offset by layout set prop", () => {

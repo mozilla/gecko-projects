@@ -13,7 +13,9 @@ import glob
 from mozboot.base import BaseBootstrapper
 from mozboot.linux_common import (
     ClangStaticAnalysisInstall,
+    FixStacksInstall,
     LucetcInstall,
+    MinidumpStackwalkInstall,
     NodeInstall,
     SccacheInstall,
     StyloInstall,
@@ -28,8 +30,15 @@ if sys.version_info < (3,):
 
 
 class ArchlinuxBootstrapper(
-        NodeInstall, StyloInstall, SccacheInstall, ClangStaticAnalysisInstall,
-        LucetcInstall, WasiSysrootInstall, BaseBootstrapper):
+        ClangStaticAnalysisInstall,
+        FixStacksInstall,
+        LucetcInstall,
+        MinidumpStackwalkInstall,
+        NodeInstall,
+        SccacheInstall,
+        StyloInstall,
+        WasiSysrootInstall,
+        BaseBootstrapper):
     '''Archlinux experimental bootstrapper.'''
 
     SYSTEM_PACKAGES = [
@@ -39,6 +48,7 @@ class ArchlinuxBootstrapper(
         'python2',
         'python2-setuptools',
         'python',  # This is Python 3 on Arch.
+        'python-pip',
         'unzip',
         'zip',
     ]
@@ -183,6 +193,7 @@ class ArchlinuxBootstrapper(
     def makepkg(self, name):
         command = ['makepkg', '-s']
         makepkg_env = os.environ.copy()
+        makepkg_env['PKGDEST'] = '.'
         makepkg_env['PKGEXT'] = '.pkg.tar.xz'
         self.run(command, env=makepkg_env)
         pack = glob.glob(name + '*.pkg.tar.xz')[0]

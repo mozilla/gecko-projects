@@ -14,6 +14,10 @@
 #include "WebGL2Context.h"
 #include "WebGLFramebuffer.h"
 #include "WebGLTypes.h"
+#include "WebGLCommandQueue.h"
+#include "WebGLCrossProcessCommandQueue.h"
+#include "ProducerConsumerQueue.h"
+#include "IpdlQueue.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -27,8 +31,6 @@
 #endif  // WEBGL_BRIDGE_LOG_
 
 namespace mozilla {
-
-class HostWebGLCommandSink;
 
 extern LazyLogModule gWebGLBridgeLog;
 
@@ -79,7 +81,8 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
 
   struct RemotingData final {
     dom::WebGLParent& mParent;
-    UniquePtr<HostWebGLCommandSink> mCommandSink;
+    UniquePtr<HostWebGLCommandSinkP> mCommandSinkP;
+    UniquePtr<HostWebGLCommandSinkI> mCommandSinkI;
   };
   struct OwnerData final {
     Maybe<ClientWebGLContext*> inProcess;
@@ -196,11 +199,6 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
 
   void DidRefresh() { mContext->DidRefresh(); }
 
-  RefPtr<gfx::SourceSurface> GetSurfaceSnapshot(
-      gfxAlphaType* out_alphaType) const {
-    return mContext->GetSurfaceSnapshot(out_alphaType);
-  }
-
   void GenerateError(const GLenum error, const std::string& text) const {
     mContext->GenerateErrorImpl(error, text);
   }
@@ -221,6 +219,8 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
 
   void CreateBuffer(ObjectId);
   void CreateFramebuffer(ObjectId);
+  bool CreateOpaqueFramebuffer(ObjectId,
+                               const webgl::OpaqueFramebufferOptions& options);
   void CreateProgram(ObjectId);
   void CreateQuery(ObjectId);
   void CreateRenderbuffer(ObjectId);
@@ -414,7 +414,7 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
     mContext->LinkProgram(*obj);
   }
 
-  void PixelStorei(GLenum pname, GLint param) const {
+  void PixelStorei(GLenum pname, uint32_t param) const {
     mContext->PixelStorei(pname, param);
   }
 
@@ -632,11 +632,9 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
     return mContext->GetVertexAttrib(index, pname);
   }
 
-  void VertexAttribPointer(bool isFuncInt, GLuint index, GLint size,
-                           GLenum type, bool normalized, uint32_t stride,
-                           uint64_t byteOffset) const {
-    mContext->VertexAttribPointer(isFuncInt, index, size, type, normalized,
-                                  stride, byteOffset);
+  void VertexAttribPointer(GLuint index,
+                           const webgl::VertAttribPointerDesc& desc) const {
+    mContext->VertexAttribPointer(index, desc);
   }
 
   // --------------------------- Buffer Operations --------------------------
@@ -651,15 +649,15 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
   }
 
   // ------------------------------ Readback -------------------------------
-  void ReadPixelsPbo(GLint x, GLint y, GLsizei width, GLsizei height,
-                     GLenum format, GLenum type, uint64_t offset) const {
-    mContext->ReadPixelsPbo(x, y, width, height, format, type, offset);
+  void ReadPixelsPbo(const webgl::ReadPixelsDesc& desc,
+                     const uint64_t offset) const {
+    mContext->ReadPixelsPbo(desc, offset);
   }
 
-  void ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                  GLenum format, GLenum type, RawBuffer<uint8_t>& dest) const {
+  void ReadPixels(const webgl::ReadPixelsDesc& desc,
+                  RawBuffer<uint8_t>& dest) const {
     const auto range = MakeRange(dest);
-    mContext->ReadPixels(x, y, width, height, format, type, range);
+    mContext->ReadPixels(desc, range);
   }
 
   // ----------------------------- Sampler -----------------------------------
@@ -723,6 +721,14 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
     GetWebGL2Context()->TransformFeedbackVaryings(*obj, varyings, bufferMode);
   }
 
+  // -------------------------- Opaque Framebuffers ---------------------------
+  void SetFramebufferIsInOpaqueRAF(ObjectId id, bool value) {
+    WebGLFramebuffer* fb = AutoResolve(id);
+    if (fb) {
+      fb->mInOpaqueRAF = value;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Host-side extension methods.  Calls in the client are forwarded to the
   // host. Some extension methods are also available in WebGL2 Contexts.  For
@@ -781,7 +787,7 @@ class HostWebGLContext final : public SupportsWeakPtr<HostWebGLContext> {
 
   // Etc
  public:
-  RefPtr<layers::SharedSurfaceTextureClient> GetVRFrame() const;
+  RefPtr<layers::SharedSurfaceTextureClient> GetVRFrame(ObjectId id) const;
 
  protected:
   WebGL2Context* GetWebGL2Context() const {

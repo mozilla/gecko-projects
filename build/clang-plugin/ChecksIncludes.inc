@@ -11,7 +11,7 @@
 #include "DanglingOnTemporaryChecker.h"
 #include "ExplicitImplicitChecker.h"
 #include "ExplicitOperatorBoolChecker.h"
-#ifdef _WIN32
+#ifdef TARGET_IS_WINDOWS
 #include "LoadLibraryUsageChecker.h"
 #include "FopenUsageChecker.h"
 #endif
@@ -20,11 +20,13 @@
 #include "MustReturnFromCallerChecker.h"
 #include "MustUseChecker.h"
 #include "NaNExprChecker.h"
+#include "NoPrincipalGetURI.h"
 #include "NeedsNoVTableTypeChecker.h"
 #include "NoAddRefReleaseOnReturnChecker.h"
 #include "NoAutoTypeChecker.h"
 #include "NoDuplicateRefCntMemberChecker.h"
 #include "NoExplicitMoveConstructorChecker.h"
+#include "NoNewThreadsChecker.h"
 #include "NonMemMovableMemberChecker.h"
 #include "NonMemMovableTemplateArgChecker.h"
 #include "NonParamInsideFunctionDeclChecker.h"
@@ -37,6 +39,5 @@
 #include "RefCountedInsideLambdaChecker.h"
 #include "ScopeChecker.h"
 #include "SprintfLiteralChecker.h"
-#include "TempRefPtrChecker.h"
 #include "TrivialCtorDtorChecker.h"
 #include "TrivialDtorChecker.h"

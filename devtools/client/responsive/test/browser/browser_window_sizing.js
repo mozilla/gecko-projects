@@ -12,22 +12,27 @@ const WIDTH = 375;
 const HEIGHT = 450;
 const ZOOM_LEVELS = [0.3, 0.5, 0.9, 1, 1.5, 2, 2.4];
 
-add_task(async function() {
-  const tab = await addTab(TEST_URL);
-  const browser = tab.linkedBrowser;
+addRDMTask(
+  null,
+  async function() {
+    const tab = await addTab(TEST_URL);
+    const browser = tab.linkedBrowser;
 
-  const { ui, manager } = await openRDM(tab);
-  await setViewportSize(ui, manager, WIDTH, HEIGHT);
+    const { ui, manager } = await openRDM(tab);
+    await waitForDeviceAndViewportState(ui);
+    await setViewportSize(ui, manager, WIDTH, HEIGHT);
 
-  info("Ensure outer size values are unchanged at different zoom levels.");
-  for (let i = 0; i < ZOOM_LEVELS.length; i++) {
-    info(`Setting zoom level to ${ZOOM_LEVELS[i]}`);
-    await promiseRDMZoom(ui, browser, ZOOM_LEVELS[i]);
+    info("Ensure outer size values are unchanged at different zoom levels.");
+    for (let i = 0; i < ZOOM_LEVELS.length; i++) {
+      info(`Setting zoom level to ${ZOOM_LEVELS[i]}`);
+      await promiseRDMZoom(ui, browser, ZOOM_LEVELS[i]);
 
-    await checkWindowOuterSize(ui, ZOOM_LEVELS[i]);
-    await checkWindowScreenSize(ui, ZOOM_LEVELS[i]);
-  }
-});
+      await checkWindowOuterSize(ui, ZOOM_LEVELS[i]);
+      await checkWindowScreenSize(ui, ZOOM_LEVELS[i]);
+    }
+  },
+  { usingBrowserUI: true, onlyPrefAndTask: true }
+);
 
 async function checkWindowOuterSize(ui, zoom_level) {
   return SpecialPowers.spawn(
@@ -41,15 +46,11 @@ async function checkWindowOuterSize(ui, zoom_level) {
       // Some of the drift is also due to full zoom scaling effects; see Bug 1577775.
       ok(
         Math.abs(content.outerWidth - width) <= 2,
-        `window.outerWidth zoom ${zoom} should be ${width} and we got ${
-          content.outerWidth
-        }.`
+        `window.outerWidth zoom ${zoom} should be ${width} and we got ${content.outerWidth}.`
       );
       ok(
         Math.abs(content.outerHeight - height) <= 2,
-        `window.outerHeight zoom ${zoom} should be ${height} and we got ${
-          content.outerHeight
-        }.`
+        `window.outerHeight zoom ${zoom} should be ${height} and we got ${content.outerHeight}.`
       );
     }
   );
@@ -64,30 +65,22 @@ async function checkWindowScreenSize(ui, zoom_level) {
 
       ok(
         Math.abs(screen.availWidth - width) <= 2,
-        `screen.availWidth zoom ${zoom} should be ${width} and we got ${
-          screen.availWidth
-        }.`
+        `screen.availWidth zoom ${zoom} should be ${width} and we got ${screen.availWidth}.`
       );
 
       ok(
         Math.abs(screen.availHeight - height) <= 2,
-        `screen.availHeight zoom ${zoom} should be ${height} and we got ${
-          screen.availHeight
-        }.`
+        `screen.availHeight zoom ${zoom} should be ${height} and we got ${screen.availHeight}.`
       );
 
       ok(
         Math.abs(screen.width - width) <= 2,
-        `screen.width zoom " ${zoom} should be ${width} and we got ${
-          screen.width
-        }.`
+        `screen.width zoom " ${zoom} should be ${width} and we got ${screen.width}.`
       );
 
       ok(
         Math.abs(screen.height - height) <= 2,
-        `screen.height zoom " ${zoom} should be ${height} and we got ${
-          screen.height
-        }.`
+        `screen.height zoom " ${zoom} should be ${height} and we got ${screen.height}.`
       );
     }
   );

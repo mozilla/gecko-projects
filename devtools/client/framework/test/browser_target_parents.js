@@ -5,7 +5,7 @@
 
 // Test a given Target's parentFront attribute returns the correct parent front.
 
-const { DevToolsClient } = require("devtools/shared/client/devtools-client");
+const { DevToolsClient } = require("devtools/client/devtools-client");
 const { DevToolsServer } = require("devtools/server/devtools-server");
 
 const TEST_URL = `data:text/html;charset=utf-8,<div id="test"></div>`;
@@ -15,140 +15,43 @@ add_task(async function() {
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
 
   const tab = await addTab(TEST_URL);
-  const target = await TargetFactory.forTab(tab);
-  const mainRoot = target.client.mainRoot;
 
-  is(
-    target.descriptorFront,
-    mainRoot,
-    "Got the correct descriptorFront from the target."
-  );
+  const client = await setupDebuggerClient();
+  const mainRoot = client.mainRoot;
+
+  const tabDescriptors = await mainRoot.listTabs();
+
+  await testGetTargetWithConcurrentCalls(tabDescriptors, tabTarget => {
+    // Tab Target is attached when it has a console front.
+    return !!tabTarget.getCachedFront("console");
+  });
+
+  await client.close();
   await removeTab(tab);
 });
 
 // Test against Process targets
 add_task(async function() {
-  // Instantiate a minimal server
-  DevToolsServer.init();
-  DevToolsServer.allowChromeProcess = true;
-  if (!DevToolsServer.createRootActor) {
-    DevToolsServer.registerAllActors();
-  }
-  const transport = DevToolsServer.connectPipe();
-  const client = new DevToolsClient(transport);
-  await client.connect();
-
+  const client = await setupDebuggerClient();
   const mainRoot = client.mainRoot;
 
-  const { processes } = await mainRoot.listProcesses();
+  const processes = await mainRoot.listProcesses();
 
   // Assert that concurrent calls to getTarget resolves the same target and that it is already attached
-  // We that, we were chasing a precise race, where a second call to ProcessDescriptor.getTarget()
+  // With that, we were chasing a precise race, where a second call to ProcessDescriptor.getTarget()
   // happens between the instantiation of ContentProcessTarget and its call to attach() from getTarget
   // function.
-  await Promise.all(
-    processes.map(async processDescriptor => {
-      const promises = [];
-      const concurrentCalls = 10;
-      for (let i = 0; i < concurrentCalls; i++) {
-        const targetPromise = processDescriptor.getTarget();
-        // Every odd runs, wait for a tick to introduce some more randomness
-        if (i % 2 == 0) {
-          await wait(0);
-        }
-        promises.push(
-          targetPromise.then(target => {
-            is(
-              target.descriptorFront,
-              processDescriptor,
-              "Got the correct descriptorFront from the process target."
-            );
-            // Content Process Target is attached when it has a console front.
-            ok(target.getCachedFront("console"), "The target is attached");
-            return target;
-          })
-        );
-      }
-      const targets = await Promise.all(promises);
-      for (let i = 1; i < concurrentCalls; i++) {
-        is(
-          targets[0],
-          targets[i],
-          "All the targets returned by concurrent calls to getTarget are the same"
-        );
-      }
-    })
-  );
-
-  await client.close();
-});
-
-// Test against Frame targets
-add_task(async function() {
-  // Instantiate a minimal server
-  DevToolsServer.init();
-  DevToolsServer.allowChromeProcess = true;
-  if (!DevToolsServer.createRootActor) {
-    DevToolsServer.registerAllActors();
-  }
-  const transport = DevToolsServer.connectPipe();
-  const client = new DevToolsClient(transport);
-  await client.connect();
-
-  const mainRoot = client.mainRoot;
-
-  const mainProcess = await mainRoot.getMainProcess();
-  const { frames } = await mainProcess.listRemoteFrames();
-
-  // Assert that concurrent calls to getTarget resolves the same target and that it is already attached
-  await Promise.all(
-    frames.map(async frameDescriptor => {
-      const promises = [];
-      const concurrentCalls = 10;
-      for (let i = 0; i < concurrentCalls; i++) {
-        const targetPromise = frameDescriptor.getTarget();
-        // Every odd runs, wait for a tick to introduce some more randomness
-        if (i % 2 == 0) {
-          await wait(0);
-        }
-        promises.push(
-          targetPromise.then(target => {
-            is(
-              target.descriptorFront,
-              frameDescriptor,
-              "Got the correct descriptorFront from the frame target."
-            );
-            // traits is one attribute to assert that a Frame Target is attached
-            ok(target.traits, "The target is attached");
-            return target;
-          })
-        );
-      }
-      const targets = await Promise.all(promises);
-      for (let i = 1; i < concurrentCalls; i++) {
-        is(
-          targets[0],
-          targets[i],
-          "All the targets returned by concurrent calls to getTarget are the same"
-        );
-      }
-    })
-  );
+  await testGetTargetWithConcurrentCalls(processes, processTarget => {
+    // Content Process Target is attached when it has a console front.
+    return !!processTarget.getCachedFront("console");
+  });
 
   await client.close();
 });
 
 // Test against Webextension targets
 add_task(async function() {
-  // Instantiate a minimal server
-  DevToolsServer.init();
-  DevToolsServer.allowChromeProcess = true;
-  if (!DevToolsServer.createRootActor) {
-    DevToolsServer.registerAllActors();
-  }
-  const transport = DevToolsServer.connectPipe();
-  const client = new DevToolsClient(transport);
-  await client.connect();
+  const client = await setupDebuggerClient();
 
   const mainRoot = client.mainRoot;
 
@@ -173,6 +76,25 @@ add_task(async function() {
 
 // Test against worker targets on parent process
 add_task(async function() {
+  const client = await setupDebuggerClient();
+
+  const mainRoot = client.mainRoot;
+
+  const { workers } = await mainRoot.listWorkers();
+  await Promise.all(
+    workers.map(workerTargetFront => {
+      is(
+        workerTargetFront.descriptorFront,
+        null,
+        "For now, worker target don't have descriptor fronts (see bug 1573779)"
+      );
+    })
+  );
+
+  await client.close();
+});
+
+async function setupDebuggerClient() {
   // Instantiate a minimal server
   DevToolsServer.init();
   DevToolsServer.allowChromeProcess = true;
@@ -182,19 +104,41 @@ add_task(async function() {
   const transport = DevToolsServer.connectPipe();
   const client = new DevToolsClient(transport);
   await client.connect();
+  return client;
+}
 
-  const mainRoot = client.mainRoot;
-
-  const { workers } = await mainRoot.listWorkers();
+async function testGetTargetWithConcurrentCalls(descriptors, isTargetAttached) {
+  // Assert that concurrent calls to getTarget resolves the same target and that it is already attached
   await Promise.all(
-    workers.map(workerTargetFront => {
-      is(
-        workerTargetFront.descriptorFront,
-        mainRoot,
-        "Got the Main Root as the descriptor for main root worker target."
-      );
+    descriptors.map(async descriptor => {
+      const promises = [];
+      const concurrentCalls = 10;
+      for (let i = 0; i < concurrentCalls; i++) {
+        const targetPromise = descriptor.getTarget();
+        // Every odd runs, wait for a tick to introduce some more randomness
+        if (i % 2 == 0) {
+          await wait(0);
+        }
+        promises.push(
+          targetPromise.then(target => {
+            is(
+              target.descriptorFront,
+              descriptor,
+              "Got the correct descriptorFront from the frame target."
+            );
+            ok(isTargetAttached(target), "The target is attached");
+            return target;
+          })
+        );
+      }
+      const targets = await Promise.all(promises);
+      for (let i = 1; i < concurrentCalls; i++) {
+        is(
+          targets[0],
+          targets[i],
+          "All the targets returned by concurrent calls to getTarget are the same"
+        );
+      }
     })
   );
-
-  await client.close();
-});
+}

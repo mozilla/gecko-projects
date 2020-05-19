@@ -73,9 +73,9 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/RefCounted.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/TypeTraits.h"
 
 #include <string.h>
+#include <type_traits>
 
 #if defined(MOZILLA_INTERNAL_API)
 // For thread safety checking.
@@ -217,6 +217,11 @@ class SupportsWeakPtr {
   ~SupportsWeakPtr() {
     static_assert(std::is_base_of<SupportsWeakPtr<T>, T>::value,
                   "T must derive from SupportsWeakPtr<T>");
+    DetachWeakPtr();
+  }
+
+ protected:
+  void DetachWeakPtr() {
     if (mSelfReferencingWeakPtr) {
       mSelfReferencingWeakPtr.mRef->detach();
     }
@@ -248,7 +253,7 @@ class SupportsWeakPtr {
 template <typename T>
 class WeakPtr {
   typedef detail::WeakReference<T> WeakReference;
-  typedef typename RemoveConst<T>::Type NonConstT;
+  using NonConstT = std::remove_const_t<T>;
 
  public:
   WeakPtr& operator=(const WeakPtr& aOther) {
@@ -329,6 +334,28 @@ class WeakPtr {
 
   RefPtr<WeakReference> mRef;
 };
+
+#define NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR tmp->DetachWeakPtr();
+
+#define NS_IMPL_CYCLE_COLLECTION_WEAK_PTR(class_, ...) \
+  NS_IMPL_CYCLE_COLLECTION_CLASS(class_)               \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(class_)        \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(__VA_ARGS__)       \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR           \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                  \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(class_)      \
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(__VA_ARGS__)     \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+#define NS_IMPL_CYCLE_COLLECTION_WEAK_PTR_INHERITED(class_, super_, ...) \
+  NS_IMPL_CYCLE_COLLECTION_CLASS(class_)                                 \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(class_, super_)        \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(__VA_ARGS__)                         \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR                             \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                    \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(class_, super_)      \
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(__VA_ARGS__)                       \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 }  // namespace mozilla
 

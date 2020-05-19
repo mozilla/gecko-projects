@@ -80,7 +80,7 @@ class TrackInfo {
   media::TimeUnit mMediaTime;
   CryptoTrack mCrypto;
 
-  nsTArray<MetadataTag> mTags;
+  CopyableTArray<MetadataTag> mTags;
 
   // True if the track is gonna be (decrypted)/decoded and
   // rendered directly by non-gecko components.
@@ -118,7 +118,7 @@ class TrackInfo {
     mCrypto = aOther.mCrypto;
     mIsRenderedExternally = aOther.mIsRenderedExternally;
     mType = aOther.mType;
-    mTags = aOther.mTags;
+    mTags = aOther.mTags.Clone();
     MOZ_COUNT_CTOR(TrackInfo);
   }
   bool IsEqualTo(const TrackInfo& rhs) const;
@@ -336,9 +336,9 @@ class EncryptionInfo {
     nsString mType;
 
     // Encryption data.
-    nsTArray<uint8_t> mInitData;
+    CopyableTArray<uint8_t> mInitData;
   };
-  typedef nsTArray<InitData> InitDatas;
+  typedef CopyableTArray<InitData> InitDatas;
 
   // True if the stream has encryption metadata
   bool IsEncrypted() const { return mEncrypted; }
@@ -456,7 +456,7 @@ class TrackInfoSharedPtr {
   }
 
  private:
-  ~TrackInfoSharedPtr() {}
+  ~TrackInfoSharedPtr() = default;
   UniquePtr<TrackInfo> mInfo;
   // A unique ID, guaranteed to change when changing streams.
   uint32_t mStreamSourceID;

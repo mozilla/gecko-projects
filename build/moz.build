@@ -6,8 +6,6 @@
 
 with Files('**'):
     BUG_COMPONENT = ('Firefox Build System', 'General')
-with Files("mobile/**"):
-    BUG_COMPONENT = ("Firefox for Android", "Testing")
 
 # This cannot be named "build" because of bug 922191.
 SPHINX_TREES['buildsystem'] = 'docs'
@@ -32,11 +30,7 @@ if CONFIG['MOZ_BUILD_APP'] == 'browser':
     ]
 
 if CONFIG['ENABLE_TESTS'] or CONFIG['MOZ_DMD']:
-    FINAL_TARGET_FILES += ['/tools/rb/fix_stack_using_bpsyms.py']
-    if CONFIG['OS_ARCH'] == 'Darwin':
-        FINAL_TARGET_FILES += ['/tools/rb/fix_macosx_stack.py']
-    if CONFIG['OS_ARCH'] == 'Linux':
-        FINAL_TARGET_FILES += ['/tools/rb/fix_linux_stack.py']
+    FINAL_TARGET_FILES += ['/tools/rb/fix_stacks.py']
 
 if CONFIG['MOZ_DMD']:
     FINAL_TARGET_FILES += ['/memory/replace/dmd/dmd.py']
@@ -78,39 +72,28 @@ if CONFIG['MOZ_APP_BASENAME']:
     if CONFIG['MOZ_APP_PROFILE']:
         appini_defines['MOZ_APP_PROFILE'] = CONFIG['MOZ_APP_PROFILE']
 
-    for var in ('MOZ_CRASHREPORTER', 'MOZ_PROFILE_MIGRATOR'):
+    for var in ('MOZ_CRASHREPORTER', 'MOZ_PROFILE_MIGRATOR', 'MOZ_UPDATER'):
         if CONFIG[var]:
             appini_defines[var] = True
+
+    appini_defines['MOZ_APPUPDATE_HOST'] = 'aus5.mozilla.org'
+    if CONFIG['MOZ_APPUPDATE_HOST']:
+        appini_defines['MOZ_APPUPDATE_HOST'] = CONFIG['MOZ_APPUPDATE_HOST']
 
     GeneratedFile(
         'application.ini',
         script='../python/mozbuild/mozbuild/action/preprocessor.py',
         entry_point='generate',
         inputs=['application.ini.in'],
-        py2=True,
         flags=['-D%s=%s' % (k, '1' if v is True else v)
-               for k, v in appini_defines.iteritems()])
-    
+               for k, v in sorted(appini_defines.items(), key=lambda t: t[0])])
+
     FINAL_TARGET_FILES += ['!application.ini']
     if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android' and CONFIG['MOZ_UPDATER']:
         FINAL_TARGET_PP_FILES += ['update-settings.ini']
 
     GeneratedFile('application.ini.h', script='appini_header.py',
-                  py2=True,
                   inputs=['!application.ini'])
-
-if CONFIG['ENABLE_TESTS']:
-    GeneratedFile('automation.py', script='gen_automation.py',
-                  py2=True,
-                  inputs=['automation.py.in'])
-
-    TEST_HARNESS_FILES.reftest += [
-        '!automation.py',
-    ]
-
-    TEST_HARNESS_FILES.testing.mochitest += [
-        '!automation.py',
-    ]
 
 # NOTE: Keep .gdbinit in the topsrcdir for people who run gdb from the topsrcdir.
 OBJDIR_FILES += ['/.gdbinit']

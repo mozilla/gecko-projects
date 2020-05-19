@@ -82,9 +82,9 @@ class nsJSThunk : public nsIInputStream {
 //
 NS_IMPL_ISUPPORTS(nsJSThunk, nsIInputStream)
 
-nsJSThunk::nsJSThunk() {}
+nsJSThunk::nsJSThunk() = default;
 
-nsJSThunk::~nsJSThunk() {}
+nsJSThunk::~nsJSThunk() = default;
 
 nsresult nsJSThunk::Init(nsIURI* uri) {
   NS_ENSURE_ARG_POINTER(uri);
@@ -324,7 +324,7 @@ nsresult nsJSThunk::EvaluateScript(
       // For compatibility, if the result is ISO-8859-1, we use
       // windows-1252, so that people can compatibly create images
       // using javascript: URLs.
-      bytes = ToNewCString(result);
+      bytes = ToNewCString(result, mozilla::fallible);
       bytesLen = result.Length();
       charset = &isoCharset;
     } else {
@@ -375,7 +375,6 @@ class nsJSChannel : public nsIChannel,
 
   void CleanupStrongRefs();
 
- protected:
   nsCOMPtr<nsIChannel> mStreamChannel;
   nsCOMPtr<nsIPropertyBag2> mPropertyBag;
   nsCOMPtr<nsIStreamListener> mListener;              // Our final listener
@@ -408,7 +407,7 @@ nsJSChannel::nsJSChannel()
       mIsActive(false),
       mOpenedStreamChannel(false) {}
 
-nsJSChannel::~nsJSChannel() {}
+nsJSChannel::~nsJSChannel() = default;
 
 nsresult nsJSChannel::StopAll() {
   nsresult rv = NS_ERROR_UNEXPECTED;

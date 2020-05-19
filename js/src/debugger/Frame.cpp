@@ -73,6 +73,7 @@
 #include "wasm/WasmTypes.h"                // for DebugFrame
 
 #include "debugger/Debugger-inl.h"  // for Debugger::fromJSObject
+#include "gc/WeakMap-inl.h"         // for WeakMap::remove
 #include "vm/Compartment-inl.h"     // for Compartment::wrap
 #include "vm/JSContext-inl.h"       // for JSContext::check
 #include "vm/JSObject-inl.h"        // for NewObjectWithGivenProto
@@ -236,8 +237,6 @@ DebuggerFrame* DebuggerFrame::create(
     JSContext* cx, HandleObject proto, HandleNativeObject debugger,
     const FrameIter* maybeIter,
     Handle<AbstractGeneratorObject*> maybeGenerator) {
-  MOZ_ASSERT(maybeIter || maybeGenerator);
-
   DebuggerFrame* frame = NewObjectWithGivenProto<DebuggerFrame>(cx, proto);
   if (!frame) {
     return nullptr;
@@ -970,6 +969,8 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     options.setForceStrictMode();
   }
 
+  SourceExtent extent = SourceExtent::makeGlobalExtent(chars.length(), options);
+
   SourceText<char16_t> srcBuf;
   if (!srcBuf.init(cx, chars.begin().get(), chars.length(),
                    SourceOwnership::Borrowed)) {
@@ -985,6 +986,7 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     scopeKind = ScopeKind::Global;
   } else {
     scopeKind = ScopeKind::NonSyntactic;
+    options.setNonSyntacticScope(true);
   }
 
   if (frame) {
@@ -996,15 +998,15 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     }
 
     LifoAllocScope allocScope(&cx->tempLifoAlloc());
-    frontend::CompilationInfo compilationInfo(cx, allocScope, options);
+    frontend::CompilationInfo compilationInfo(cx, allocScope, options, scope,
+                                              env);
     if (!compilationInfo.init(cx)) {
       return false;
     }
 
-    frontend::EvalSharedContext evalsc(cx, env, compilationInfo, scope,
-                                       compilationInfo.directives,
-                                       options.extraWarningsOption);
-    script = frontend::CompileEvalScript(compilationInfo, evalsc, env, srcBuf);
+    frontend::EvalSharedContext evalsc(cx, compilationInfo, scope,
+                                       compilationInfo.directives, extent);
+    script = frontend::CompileEvalScript(compilationInfo, evalsc, srcBuf);
     if (!script) {
       return false;
     }
@@ -1023,16 +1025,18 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     MOZ_ASSERT(scopeKind == ScopeKind::Global ||
                scopeKind == ScopeKind::NonSyntactic);
 
-    frontend::GlobalSharedContext globalsc(
-        cx, scopeKind, compilationInfo, compilationInfo.directives,
-        compilationInfo.options.extraWarningsOption);
+    frontend::GlobalSharedContext globalsc(cx, scopeKind, compilationInfo,
+                                           compilationInfo.directives, extent);
     script = frontend::CompileGlobalScript(compilationInfo, globalsc, srcBuf);
     if (!script) {
       return false;
     }
   }
 
-  return ExecuteKernel(cx, script, *env, NullValue(), frame, rval.address());
+  // Note: pass NullHandleValue for newTarget because the parser doesn't accept
+  // new.target in debugger eval frames (bug 1169076). Once that changes we need
+  // to compute newTarget here based on |frame|.
+  return ExecuteKernel(cx, script, env, NullHandleValue, frame, rval);
 }
 
 Result<Completion> js::DebuggerGenericEval(

@@ -12,7 +12,7 @@
 #include "nsIMutableArray.h"
 #include "mozilla/dom/PContentPermissionRequestChild.h"
 #include "mozilla/dom/ipc/IdType.h"
-#include "PermissionDelegateHandler.h"
+#include "mozilla/PermissionDelegateHandler.h"
 
 // Microsoft's API Name hackery sucks
 // XXXbz Doing this in a header is a gigantic footgun. See
@@ -199,7 +199,7 @@ class nsContentPermissionRequestProxy : public nsIContentPermissionRequest {
     void NotifyVisibilityResult(const bool& aIsVisible);
 
    private:
-    virtual ~nsContentPermissionRequesterProxy() {}
+    virtual ~nsContentPermissionRequesterProxy() = default;
 
     ContentPermissionRequestParent* mParent;
     bool mWaitGettingResult;

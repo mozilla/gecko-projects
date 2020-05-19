@@ -690,12 +690,6 @@ nsresult nsPluginHost::InstantiatePluginInstance(
     return NS_ERROR_FAILURE;
   }
 
-  // Plugins are not supported when recording or replaying executions.
-  // See bug 1483232.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return NS_ERROR_FAILURE;
-  }
-
   RefPtr<nsPluginInstanceOwner> instanceOwner = new nsPluginInstanceOwner();
   if (!instanceOwner) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -1905,9 +1899,9 @@ nsresult nsPluginHost::LoadPlugins() {
   // (yet) aware of flash being present), and then again after we've actually
   // looked for it on disk.
   nsresult rv = mPendingFinder->DoFullSearch(
-      [self](
-          bool aPluginsChanged, RefPtr<nsPluginTag> aPlugins,
-          const nsTArray<Pair<bool, RefPtr<nsPluginTag>>>& aBlocklistRequests) {
+      [self](bool aPluginsChanged, RefPtr<nsPluginTag> aPlugins,
+             const nsTArray<std::pair<bool, RefPtr<nsPluginTag>>>&
+                 aBlocklistRequests) {
         MOZ_ASSERT(NS_IsMainThread(),
                    "Callback should only be called on the main thread.");
         self->mPluginsLoaded = true;
@@ -1924,8 +1918,8 @@ nsresult nsPluginHost::LoadPlugins() {
 
         // Do blocklist queries immediately after.
         for (auto pair : aBlocklistRequests) {
-          RefPtr<nsPluginTag> pluginTag = pair.second();
-          bool shouldSoftblock = pair.first();
+          RefPtr<nsPluginTag> pluginTag = pair.second;
+          bool shouldSoftblock = pair.first;
           self->UpdatePluginBlocklistState(pluginTag, shouldSoftblock);
         }
 
@@ -2026,11 +2020,10 @@ nsresult nsPluginHost::SetPluginsInContent(
           tag.id(), tag.name().get(), tag.description().get(),
           tag.filename().get(),
           "",  // aFullPath
-          tag.version().get(), nsTArray<nsCString>(tag.mimeTypes()),
-          nsTArray<nsCString>(tag.mimeDescriptions()),
-          nsTArray<nsCString>(tag.extensions()), tag.isFlashPlugin(),
-          tag.supportsAsyncRender(), tag.lastModifiedTime(), tag.sandboxLevel(),
-          tag.blocklistState());
+          tag.version().get(), tag.mimeTypes().Clone(),
+          tag.mimeDescriptions().Clone(), tag.extensions().Clone(),
+          tag.isFlashPlugin(), tag.supportsAsyncRender(),
+          tag.lastModifiedTime(), tag.sandboxLevel(), tag.blocklistState());
       AddPluginTag(pluginTag);
     }
 

@@ -7,8 +7,126 @@
 
 #import "mozTableAccessible.h"
 #import "nsCocoaUtils.h"
+#import "AccIterator.h"
+#import "TableAccessible.h"
+
+@implementation mozColumnContainer
+
+- (id)initWithIndex:(uint32_t)aIndex andParent:(mozAccessible*)aParent {
+  self = [super init];
+  mIndex = aIndex;
+  mParent = aParent;
+  return self;
+}
+
+- (NSString*)accessibilityRole {
+  return NSAccessibilityColumnRole;
+}
+
+- (NSString*)accessibilityRoleDescription {
+  return NSAccessibilityRoleDescription(NSAccessibilityColumnRole, nil);
+}
+
+- (mozAccessible*)accessibilityParent {
+  return mParent;
+}
+
+- (NSArray*)accessibilityChildren {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
+
+  if (mChildren) return mChildren;
+
+  mChildren = [[NSMutableArray alloc] init];
+
+  if (AccessibleWrap* accWrap = [mParent getGeckoAccessible]) {
+    TableAccessible* table = accWrap->AsTable();
+    NSAssert(table, @"Got null table when fetching column children!");
+    uint32_t numRows = table->RowCount();
+
+    for (uint32_t j = 0; j < numRows; j++) {
+      Accessible* cell = table->CellAt(j, mIndex);
+      mozAccessible* nativeCell = cell ? GetNativeFromGeckoAccessible(cell) : nil;
+      if ([nativeCell isAccessibilityElement]) {
+        [mChildren addObject:nativeCell];
+      }
+    }
+
+  } else if (ProxyAccessible* proxy = [mParent getProxyAccessible]) {
+    uint32_t numRows = proxy->TableRowCount();
+
+    for (uint32_t j = 0; j < numRows; j++) {
+      ProxyAccessible* cell = proxy->TableCellAt(j, mIndex);
+      mozAccessible* nativeCell = cell ? GetNativeFromProxy(cell) : nil;
+      if ([nativeCell isAccessibilityElement]) {
+        [mChildren addObject:nativeCell];
+      }
+    }
+  }
+
+  return mChildren;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+}
+
+- (BOOL)isAccessibilityElement {
+  return YES;
+}
+
+- (void)invalidateChildren {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  // make room for new children
+  if (mChildren) {
+    [mChildren release];
+    mChildren = nil;
+  }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (void)dealloc {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  [self invalidateChildren];
+  [super dealloc];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (void)expire {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  [self invalidateChildren];
+
+  mParent = nil;
+
+  NSAccessibilityPostNotification(self, NSAccessibilityUIElementDestroyedNotification);
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (BOOL)isExpired {
+  return (mChildren == nil) && (mParent == nil);
+}
+
+- (BOOL)accessibilityNotifiesWhenDestroyed {
+  return YES;
+}
+
+@end
 
 @implementation mozTablePartAccessible
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
+
+  if ([attribute isEqualToString:NSAccessibilityTitleAttribute]) return @"";
+
+  return [super accessibilityAttributeValue:attribute];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+}
+
 - (BOOL)isLayoutTablePart;
 {
   if (Accessible* accWrap = [self getGeckoAccessible]) {
@@ -39,6 +157,33 @@
 @end
 
 @implementation mozTableAccessible
+
+- (void)invalidateColumns {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+  if (mColContainers) {
+    [mColContainers release];
+    mColContainers = nil;
+  }
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (void)handleAccessibleEvent:(uint32_t)eventType {
+  if (eventType == nsIAccessibleEvent::EVENT_REORDER) {
+    [self invalidateColumns];
+  }
+
+  [super handleAccessibleEvent:eventType];
+}
+
+- (void)dealloc {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  [self invalidateColumns];
+  [super dealloc];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
 - (NSArray*)additionalAccessibilityAttributeNames {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
@@ -53,6 +198,7 @@
     [tempArray addObject:NSAccessibilityRowCountAttribute];
     [tempArray addObject:NSAccessibilityColumnCountAttribute];
     [tempArray addObject:NSAccessibilityRowsAttribute];
+    [tempArray addObject:NSAccessibilityColumnsAttribute];
     tableAttrs = [[NSArray alloc] initWithArray:tempArray];
     [tempArray release];
   }
@@ -75,10 +221,15 @@
       for (uint32_t i = 0; i < totalCount; i++) {
         if (accWrap->GetChildAt(i)->IsTableRow()) {
           mozAccessible* curNative = GetNativeFromGeckoAccessible(accWrap->GetChildAt(i));
-          if (curNative) [nativeArray addObject:GetObjectOrRepresentedView(curNative)];
+          if ([curNative isAccessibilityElement]) {
+            [nativeArray addObject:GetObjectOrRepresentedView(curNative)];
+          }
         }
       }
       return nativeArray;
+    }
+    if ([attribute isEqualToString:NSAccessibilityColumnsAttribute]) {
+      return [self getColContainerList];
     }
   } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
     if ([attribute isEqualToString:NSAccessibilityRowCountAttribute])
@@ -92,18 +243,65 @@
       for (uint32_t i = 0; i < totalCount; i++) {
         if (proxy->ChildAt(i)->IsTableRow()) {
           mozAccessible* curNative = GetNativeFromProxy(proxy->ChildAt(i));
-          if (curNative) [nativeArray addObject:GetObjectOrRepresentedView(curNative)];
+          if ([curNative isAccessibilityElement]) {
+            [nativeArray addObject:GetObjectOrRepresentedView(curNative)];
+          }
         }
       }
       return nativeArray;
+    }
+    if ([attribute isEqualToString:NSAccessibilityColumnsAttribute]) {
+      return [self getColContainerList];
     }
   }
 
   return [super accessibilityAttributeValue:attribute];
 }
+
+- (NSArray*)children {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
+
+  return [[super children] arrayByAddingObjectsFromArray:[self getColContainerList]];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+}
+
+- (NSArray*)getColContainerList {
+  if (mColContainers) {
+    return mColContainers;
+  }
+
+  mColContainers = [[NSMutableArray alloc] init];
+  uint32_t numCols = 0;
+
+  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
+    numCols = accWrap->AsTable()->ColCount();
+  } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
+    numCols = proxy->TableColumnCount();
+  }
+
+  for (uint32_t i = 0; i < numCols; i++) {
+    mozColumnContainer* container = [[mozColumnContainer alloc] initWithIndex:i andParent:self];
+    [mColContainers addObject:container];
+  }
+
+  return mColContainers;
+}
+
 @end
 
 @implementation mozTableRowAccessible
+- (void)handleAccessibleEvent:(uint32_t)eventType {
+  if (eventType == nsIAccessibleEvent::EVENT_REORDER) {
+    id parent = [self parent];
+    if ([parent isKindOfClass:[mozTableAccessible class]]) {
+      [parent invalidateColumns];
+    }
+  }
+
+  [super handleAccessibleEvent:eventType];
+}
+
 - (NSArray*)additionalAccessibilityAttributeNames {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 

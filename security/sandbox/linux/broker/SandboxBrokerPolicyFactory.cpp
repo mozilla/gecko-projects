@@ -86,10 +86,12 @@ static void AddMesaSysfsPaths(SandboxBroker::Policy* aPolicy) {
             // broker.  To match this, allow the canonical paths.
             UniqueFreePtr<char[]> realSysPath(realpath(sysPath.get(), nullptr));
             if (realSysPath) {
-              static const Array<const char*, 7> kMesaAttrSuffixes = {
-                  "revision",         "vendor", "device", "subsystem_vendor",
-                  "subsystem_device", "uevent", "config"};
-              for (const auto attrSuffix : kMesaAttrSuffixes) {
+              constexpr const char* kMesaAttrSuffixes[] = {
+                  "config",    "device",           "revision",
+                  "subsystem", "subsystem_device", "subsystem_vendor",
+                  "uevent",    "vendor",
+              };
+              for (const auto& attrSuffix : kMesaAttrSuffixes) {
                 nsPrintfCString attrPath("%s/%s", realSysPath.get(),
                                          attrSuffix);
                 aPolicy->AddPath(rdonly, attrPath.get());
@@ -252,6 +254,22 @@ static void AddLdconfigPaths(SandboxBroker::Policy* aPolicy) {
   AddPathsFromFile(aPolicy, ldConfig);
 }
 
+static void AddLdLibraryEnvPaths(SandboxBroker::Policy* aPolicy) {
+  nsAutoCString LdLibraryEnv(PR_GetEnv("LD_LIBRARY_PATH"));
+  // The items in LD_LIBRARY_PATH can be separated by either colons or
+  // semicolons, according to the ld.so(8) man page, and empirically it
+  // seems to be allowed to mix them (i.e., a:b;c is a list with 3 elements).
+  // There is no support for escaping the delimiters, fortunately (for us).
+  LdLibraryEnv.ReplaceChar(';', ':');
+  for (const nsACString& libPath : LdLibraryEnv.Split(':')) {
+    char* resolvedPath = realpath(PromiseFlatCString(libPath).get(), nullptr);
+    if (resolvedPath) {
+      aPolicy->AddDir(rdonly, resolvedPath);
+      free(resolvedPath);
+    }
+  }
+}
+
 static void AddSharedMemoryPaths(SandboxBroker::Policy* aPolicy, pid_t aPid) {
   std::string shmPath("/dev/shm");
   if (base::SharedMemory::AppendPosixShmPrefix(&shmPath, aPid)) {
@@ -293,9 +311,11 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
   policy->AddDir(rdonly, "/nix/store");
   policy->AddDir(rdonly, "/run/host/fonts");
   policy->AddDir(rdonly, "/run/host/user-fonts");
+  policy->AddDir(rdonly, "/var/cache/fontconfig");
 
   AddMesaSysfsPaths(policy);
   AddLdconfigPaths(policy);
+  AddLdLibraryEnvPaths(policy);
 
   // Bug 1385715: NVIDIA PRIME support
   policy->AddPath(rdonly, "/proc/modules");
@@ -326,12 +346,13 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
     policy->AddDir(rdonly, PromiseFlatCString(fontPath).get());
   }
 
-  // Extra configuration dirs in the homedir that we want to allow read
+  // Extra configuration/cache dirs in the homedir that we want to allow read
   // access to.
-  mozilla::Array<const char*, 3> extraConfDirs = {
+  mozilla::Array<const char*, 4> extraConfDirs = {
       ".config",  // Fallback if XDG_CONFIG_PATH isn't set
       ".themes",
       ".fonts",
+      ".cache/fontconfig",
   };
 
   nsCOMPtr<nsIFile> homeDir;
@@ -649,6 +670,50 @@ SandboxBrokerPolicyFactory::GetUtilityPolicy(int aPid) {
   auto policy = MakeUnique<SandboxBroker::Policy>();
 
   AddSharedMemoryPaths(policy.get(), aPid);
+
+  if (policy->IsEmpty()) {
+    policy = nullptr;
+  }
+  return policy;
+}
+
+/* static */ UniquePtr<SandboxBroker::Policy>
+SandboxBrokerPolicyFactory::GetSocketProcessPolicy(int aPid) {
+  auto policy = MakeUnique<SandboxBroker::Policy>();
+
+  policy->AddPath(rdonly, "/dev/urandom");
+  policy->AddPath(rdonly, "/proc/cpuinfo");
+  policy->AddPath(rdonly, "/proc/meminfo");
+  policy->AddDir(rdonly, "/sys/devices/cpu");
+  policy->AddDir(rdonly, "/sys/devices/system/cpu");
+  policy->AddDir(rdonly, "/lib");
+  policy->AddDir(rdonly, "/lib64");
+  policy->AddDir(rdonly, "/usr/lib");
+  policy->AddDir(rdonly, "/usr/lib32");
+  policy->AddDir(rdonly, "/usr/lib64");
+  policy->AddDir(rdonly, "/usr/share");
+  policy->AddDir(rdonly, "/usr/local/share");
+
+  AddLdconfigPaths(policy.get());
+
+  // Socket process sandbox needs to allow shmem in order to support
+  // profiling.  See Bug 1626385.
+  AddSharedMemoryPaths(policy.get(), aPid);
+
+  // Firefox binary dir.
+  // Note that unlike the previous cases, we use NS_GetSpecialDirectory
+  // instead of GetSpecialSystemDirectory. The former requires a working XPCOM
+  // system, which may not be the case for some tests. For querying for the
+  // location of XPCOM things, we can use it anyway.
+  nsCOMPtr<nsIFile> ffDir;
+  nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(ffDir));
+  if (NS_SUCCEEDED(rv)) {
+    nsAutoCString tmpPath;
+    rv = ffDir->GetNativePath(tmpPath);
+    if (NS_SUCCEEDED(rv)) {
+      policy->AddDir(rdonly, tmpPath.get());
+    }
+  }
 
   if (policy->IsEmpty()) {
     policy = nullptr;

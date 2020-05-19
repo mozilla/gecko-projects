@@ -13,7 +13,6 @@
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/dom/BrowserChild.h"  // for BrowserChild
-#include "mozilla/dom/TabGroup.h"      // for TabGroup
 #include "mozilla/hal_sandbox/PHal.h"  // for ScreenConfiguration
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositorBridgeChild.h"  // for CompositorBridgeChild
@@ -140,15 +139,6 @@ void ClientLayerManager::Destroy() {
 
   // Forget the widget pointer in case we outlive our owning widget.
   mWidget = nullptr;
-}
-
-TabGroup* ClientLayerManager::GetTabGroup() {
-  if (mWidget) {
-    if (BrowserChild* browserChild = mWidget->GetOwningBrowserChild()) {
-      return browserChild->TabGroup();
-    }
-  }
-  return nullptr;
 }
 
 int32_t ClientLayerManager::GetMaxTextureSize() const {
@@ -472,7 +462,7 @@ CompositorBridgeChild* ClientLayerManager::GetRemoteRenderer() {
 }
 
 CompositorBridgeChild* ClientLayerManager::GetCompositorBridgeChild() {
-  if (!XRE_IsParentProcess() && !recordreplay::IsRecordingOrReplaying()) {
+  if (!XRE_IsParentProcess()) {
     return CompositorBridgeChild::Get();
   }
   return GetRemoteRenderer();
@@ -495,8 +485,6 @@ void ClientLayerManager::DidComposite(TransactionId aTransactionId,
                                       const TimeStamp& aCompositeStart,
                                       const TimeStamp& aCompositeEnd) {
   if (!mWidget) {
-    // When recording/replaying this manager may have already been destroyed.
-    MOZ_ASSERT(recordreplay::IsRecordingOrReplaying());
     return;
   }
 

@@ -11,6 +11,7 @@
 #include <ostream>
 #include <sstream>
 #include <cstring>
+#include <functional>
 #include <vector>
 
 #include "RecordingTypes.h"
@@ -110,7 +111,7 @@ class Translator {
 };
 
 struct ColorPatternStorage {
-  Color mColor;
+  DeviceColor mColor;
 };
 
 struct LinearGradientPatternStorage {
@@ -125,6 +126,15 @@ struct RadialGradientPatternStorage {
   Point mCenter2;
   Float mRadius1;
   Float mRadius2;
+  ReferencePtr mStops;
+  Matrix mMatrix;
+};
+
+struct ConicGradientPatternStorage {
+  Point mCenter;
+  Float mAngle;
+  Float mStartOffset;
+  Float mEndOffset;
   ReferencePtr mStops;
   Matrix mMatrix;
 };
@@ -144,6 +154,7 @@ struct PatternStorage {
     char mColor[sizeof(ColorPatternStorage)];
     char mLinear[sizeof(LinearGradientPatternStorage)];
     char mRadial[sizeof(RadialGradientPatternStorage)];
+    char mConic[sizeof(ConicGradientPatternStorage)];
     char mSurface[sizeof(SurfacePatternStorage)];
   };
 };

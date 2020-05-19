@@ -14,6 +14,7 @@
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/LoadContext.h"
 #include "mozilla/StorageAccess.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "nsContentUtils.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsINetworkInterceptController.h"
@@ -90,7 +91,7 @@ WorkerLoadInfoData::WorkerLoadInfoData()
       mXHRParamsAllowed(false),
       mPrincipalIsSystem(false),
       mPrincipalIsAddonOrExpandedAddon(false),
-      mWatchedByDevtools(false),
+      mWatchedByDevTools(false),
       mStorageAccess(StorageAccess::eDeny),
       mFirstPartyStorageAccessGranted(false),
       mServiceWorkersTestingInWindow(false),
@@ -112,8 +113,8 @@ nsresult WorkerLoadInfo::SetPrincipalsAndCSPOnMainThread(
 
   if (mCSP) {
     mCSP->GetAllowsEval(&mReportCSPViolations, &mEvalAllowed);
-    mCSPInfo = new CSPInfo();
-    nsresult rv = CSPToCSPInfo(aCsp, mCSPInfo);
+    mCSPInfo = MakeUnique<CSPInfo>();
+    nsresult rv = CSPToCSPInfo(aCsp, mCSPInfo.get());
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -124,18 +125,20 @@ nsresult WorkerLoadInfo::SetPrincipalsAndCSPOnMainThread(
 
   mLoadGroup = aLoadGroup;
 
-  mPrincipalInfo = new PrincipalInfo();
-  mStoragePrincipalInfo = new PrincipalInfo();
-  mOriginAttributes = nsContentUtils::GetOriginAttributes(aLoadGroup);
+  mPrincipalInfo = MakeUnique<PrincipalInfo>();
+  mStoragePrincipalInfo = MakeUnique<PrincipalInfo>();
+  StoragePrincipalHelper::GetRegularPrincipalOriginAttributes(
+      aLoadGroup, mOriginAttributes);
 
-  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, mPrincipalInfo);
+  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, mPrincipalInfo.get());
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aPrincipal->Equals(aStoragePrincipal)) {
     *mStoragePrincipalInfo = *mPrincipalInfo;
   } else {
-    mStoragePrincipalInfo = new PrincipalInfo();
-    rv = PrincipalToPrincipalInfo(aStoragePrincipal, mStoragePrincipalInfo);
+    mStoragePrincipalInfo = MakeUnique<PrincipalInfo>();
+    rv = PrincipalToPrincipalInfo(aStoragePrincipal,
+                                  mStoragePrincipalInfo.get());
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -324,21 +327,24 @@ bool WorkerLoadInfo::PrincipalURIMatchesScriptURL() {
     return true;
   }
 
-  nsCOMPtr<nsIURI> principalURI;
-  rv = mPrincipal->GetURI(getter_AddRefs(principalURI));
-  NS_ENSURE_SUCCESS(rv, false);
-  NS_ENSURE_TRUE(principalURI, false);
+  bool isSameOrigin = false;
+  rv = mPrincipal->IsSameOrigin(mBaseURI, false, &isSameOrigin);
 
-  if (nsScriptSecurityManager::SecurityCompareURIs(mBaseURI, principalURI)) {
+  if (NS_SUCCEEDED(rv) && isSameOrigin) {
     return true;
   }
 
   // If strict file origin policy is in effect, local files will always fail
-  // SecurityCompareURIs unless they are identical. Explicitly check file origin
+  // IsSameOrigin unless they are identical. Explicitly check file origin
   // policy, in that case.
+
+  bool allowsRelaxedOriginPolicy = false;
+  rv = mPrincipal->AllowsRelaxStrictFileOriginPolicy(
+      mBaseURI, &allowsRelaxedOriginPolicy);
+
   if (nsScriptSecurityManager::GetStrictFileOriginPolicy() &&
       NS_URIIsLocalFile(mBaseURI) &&
-      NS_RelaxStrictFileOriginPolicy(mBaseURI, principalURI)) {
+      (NS_SUCCEEDED(rv) && allowsRelaxedOriginPolicy)) {
     return true;
   }
 

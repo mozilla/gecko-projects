@@ -17,6 +17,7 @@
 #include "base/win_util.h"
 #include "chrome/common/ipc_message_utils.h"
 #include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/LateWriteChecks.h"
 
 #ifdef FUZZING
 #  include "mozilla/ipc/Faulty.h"
@@ -265,7 +266,11 @@ bool Channel::ChannelImpl::Connect() {
   MessageLoopForIO::current()->RegisterIOHandler(pipe_, this);
 
   // Check to see if there is a client connected to our pipe...
-  if (waiting_connect_) ProcessConnection();
+  if (waiting_connect_) {
+    if (!ProcessConnection()) {
+      return false;
+    }
+  }
 
   if (!input_state_.is_pending) {
     // Complete setup asynchronously. By not setting input_state_.is_pending
@@ -303,6 +308,9 @@ bool Channel::ChannelImpl::ProcessConnection() {
     case ERROR_PIPE_CONNECTED:
       waiting_connect_ = false;
       break;
+    case ERROR_NO_DATA:
+      // The pipe is being closed.
+      return false;
     default:
       NOTREACHED();
       return false;
@@ -489,8 +497,15 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
   }
 
   Pickle::BufferList::IterImpl& iter = partial_write_iter_.ref();
+
+  // Don't count this write for the purposes of late write checking. If this
+  // message results in a legitimate file write, that will show up when it
+  // happens.
+  mozilla::PushSuspendLateWriteChecks();
   BOOL ok = WriteFile(pipe_, iter.Data(), iter.RemainingInSegment(),
                       &bytes_written, &output_state_.context.overlapped);
+  mozilla::PopSuspendLateWriteChecks();
+
   if (!ok) {
     DWORD err = GetLastError();
     if (err == ERROR_IO_PENDING) {

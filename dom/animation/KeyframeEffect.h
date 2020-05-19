@@ -77,10 +77,10 @@ struct AnimationProperty {
   // mPerformanceWarning.
   AnimationProperty() = default;
   AnimationProperty(const AnimationProperty& aOther)
-      : mProperty(aOther.mProperty), mSegments(aOther.mSegments) {}
+      : mProperty(aOther.mProperty), mSegments(aOther.mSegments.Clone()) {}
   AnimationProperty& operator=(const AnimationProperty& aOther) {
     mProperty = aOther.mProperty;
-    mSegments = aOther.mSegments;
+    mSegments = aOther.mSegments.Clone();
     return *this;
   }
 
@@ -101,8 +101,6 @@ struct AnimationProperty {
                              const dom::Element* aElement);
 };
 
-struct ElementPropertyTransition;
-
 namespace dom {
 
 class Animation;
@@ -112,6 +110,9 @@ class KeyframeEffect : public AnimationEffect {
  public:
   KeyframeEffect(Document* aDocument, OwningAnimationTarget&& aTarget,
                  TimingParams&& aTiming, const KeyframeEffectParams& aOptions);
+
+  KeyframeEffect(Document* aDocument, OwningAnimationTarget&& aTarget,
+                 const KeyframeEffect& aOther);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(KeyframeEffect,
@@ -166,7 +167,7 @@ class KeyframeEffect : public AnimationEffect {
   }
   void SetPseudoElement(const nsAString& aPseudoElement, ErrorResult& aRv);
 
-  void GetKeyframes(JSContext*& aCx, nsTArray<JSObject*>& aResult,
+  void GetKeyframes(JSContext* aCx, nsTArray<JSObject*>& aResult,
                     ErrorResult& aRv) const;
   void GetProperties(nsTArray<AnimationPropertyDetails>& aProperties,
                      ErrorResult& aRv) const;
@@ -182,10 +183,14 @@ class KeyframeEffect : public AnimationEffect {
   void NotifyAnimationTimingUpdated(PostRestyleMode aPostRestyle);
   void RequestRestyle(EffectCompositor::RestyleType aRestyleType);
   void SetAnimation(Animation* aAnimation) override;
-  void SetKeyframes(JSContext* aContext, JS::Handle<JSObject*> aKeyframes,
-                    ErrorResult& aRv);
+  virtual void SetKeyframes(JSContext* aContext,
+                            JS::Handle<JSObject*> aKeyframes, ErrorResult& aRv);
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
                     const ComputedStyle* aStyle);
+
+  // Replace the start value of the transition. This is used for updating
+  // transitions running on the compositor.
+  void ReplaceTransitionStartValue(AnimationValue&& aStartValue);
 
   // Returns the set of properties affected by this effect regardless of
   // whether any of these properties is overridden by an !important rule.
@@ -347,6 +352,10 @@ class KeyframeEffect : public AnimationEffect {
       const Nullable<double>& aProgressOnLastCompose,
       uint64_t aCurrentIterationOnLastCompose);
 
+  bool HasOpacityChange() const {
+    return mCumulativeChangeHint & nsChangeHint_UpdateOpacityLayer;
+  }
+
  protected:
   ~KeyframeEffect() override = default;
 
@@ -437,6 +446,9 @@ class KeyframeEffect : public AnimationEffect {
   // if our properties haven't changed.
   bool mNeedsStyleData = false;
 
+  // True if there is any current-color for background color in this keyframes.
+  bool mHasCurrentColor = false;
+
   // The non-animated values for properties in this effect that contain at
   // least one animation value that is composited with the underlying value
   // (i.e. it uses the additive or accumulate composite mode).
@@ -445,7 +457,7 @@ class KeyframeEffect : public AnimationEffect {
   BaseValuesHashmap mBaseValues;
 
  private:
-  nsChangeHint mCumulativeChangeHint;
+  nsChangeHint mCumulativeChangeHint = nsChangeHint{0};
 
   void ComposeStyleRule(RawServoAnimationValueMap& aAnimationValues,
                         const AnimationProperty& aProperty,

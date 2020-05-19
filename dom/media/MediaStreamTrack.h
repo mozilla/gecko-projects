@@ -235,7 +235,7 @@ class MediaStreamTrackSource : public nsISupports {
   }
 
  protected:
-  virtual ~MediaStreamTrackSource() {}
+  virtual ~MediaStreamTrackSource() = default;
 
   bool IsActive() {
     for (const WeakPtr<Sink>& sink : mSinks) {
@@ -261,8 +261,7 @@ class MediaStreamTrackSource : public nsISupports {
    */
   void PrincipalChanged() {
     MOZ_ASSERT(NS_IsMainThread());
-    nsTArray<WeakPtr<Sink>> sinks(mSinks);
-    for (auto& sink : sinks) {
+    for (auto& sink : mSinks.Clone()) {
       if (!sink) {
         MOZ_ASSERT_UNREACHABLE("Sink was not explicitly removed");
         mSinks.RemoveElement(sink);
@@ -279,8 +278,7 @@ class MediaStreamTrackSource : public nsISupports {
    */
   void MutedChanged(bool aNewState) {
     MOZ_ASSERT(NS_IsMainThread());
-    nsTArray<WeakPtr<Sink>> sinks(mSinks);
-    for (auto& sink : sinks) {
+    for (auto& sink : mSinks.Clone()) {
       if (!sink) {
         MOZ_ASSERT_UNREACHABLE("Sink was not explicitly removed");
         mSinks.RemoveElement(sink);
@@ -296,8 +294,7 @@ class MediaStreamTrackSource : public nsISupports {
    */
   void OverrideEnded() {
     MOZ_ASSERT(NS_IsMainThread());
-    nsTArray<WeakPtr<Sink>> sinks(mSinks);
-    for (auto& sink : sinks) {
+    for (auto& sink : mSinks.Clone()) {
       if (!sink) {
         MOZ_ASSERT_UNREACHABLE("Sink was not explicitly removed");
         mSinks.RemoveElement(sink);
@@ -339,7 +336,7 @@ class BasicTrackSource : public MediaStreamTrackSource {
   void Enable() override {}
 
  protected:
-  ~BasicTrackSource() {}
+  ~BasicTrackSource() = default;
 
   const MediaSourceEnum mMediaSource;
 };

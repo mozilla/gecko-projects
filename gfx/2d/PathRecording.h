@@ -19,19 +19,16 @@ namespace gfx {
 
 class PathOps {
  public:
-  PathOps() {}
+  PathOps() = default;
 
   template <class S>
   explicit PathOps(S& aStream);
 
-  PathOps(PathOps&& aOther) : mPathData(std::move(aOther.mPathData)) {}
+  PathOps(const PathOps& aOther) = default;
+  PathOps& operator=(const PathOps&) = delete;  // assign using std::move()!
 
-  PathOps(const PathOps& aOther) : mPathData(aOther.mPathData) {}
-
-  PathOps& operator=(PathOps&& aOther) {
-    mPathData = std::move(aOther.mPathData);
-    return *this;
-  }
+  PathOps(PathOps&& aOther) = default;
+  PathOps& operator=(PathOps&& aOther) = default;
 
   template <class S>
   void Record(S& aStream) const;
@@ -67,8 +64,6 @@ class PathOps {
   }
 
  private:
-  void operator=(const PathOps&) = delete;  // assign using std::move()!
-
   enum class OpType : uint32_t {
     OP_MOVETO = 0,
     OP_LINETO,
@@ -188,12 +183,7 @@ class PathRecording final : public Path {
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathRecording, override)
 
   PathRecording(Path* aPath, PathOps&& aOps, FillRule aFillRule,
-                const Point& aCurrentPoint, const Point& aBeginPoint)
-      : mPath(aPath),
-        mPathOps(std::move(aOps)),
-        mFillRule(aFillRule),
-        mCurrentPoint(aCurrentPoint),
-        mBeginPoint(aBeginPoint) {}
+                const Point& aCurrentPoint, const Point& aBeginPoint);
 
   ~PathRecording();
 

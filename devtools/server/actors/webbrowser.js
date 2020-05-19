@@ -18,8 +18,8 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "FrameTargetActorProxy",
-  "devtools/server/actors/targets/frame-proxy",
+  "TabDescriptorActor",
+  "devtools/server/actors/descriptors/tab",
   true
 );
 loader.lazyRequireGetter(
@@ -110,7 +110,7 @@ exports.createRootActor = function createRootActor(connection) {
 };
 
 /**
- * A live list of FrameTargetActorProxys representing the current browser tabs,
+ * A live list of TabDescriptorActors representing the current browser tabs,
  * to be provided to the root actor to answer 'listTabs' requests.
  *
  * This object also takes care of listening for TabClose events and
@@ -288,47 +288,27 @@ BrowserTabList.prototype._getChildren = function(window) {
   });
 };
 
-BrowserTabList.prototype.getList = function(browserActorOptions) {
-  const topAppWindow = Services.wm.getMostRecentWindow(
-    DevToolsServer.chromeWindowType
-  );
-  let selectedBrowser = null;
-  if (topAppWindow) {
-    selectedBrowser = this._getSelectedBrowser(topAppWindow);
-  }
-
+BrowserTabList.prototype.getList = async function() {
   // As a sanity check, make sure all the actors presently in our map get
   // picked up when we iterate over all windows' tabs.
   const initialMapSize = this._actorByBrowser.size;
   this._foundCount = 0;
 
-  // To avoid mysterious behavior if tabs are closed or opened mid-iteration,
-  // we update the map first, and then make a second pass over it to yield
-  // the actors. Thus, the sequence yielded is always a snapshot of the
-  // actors that were live when we began the iteration.
-
-  const actorPromises = [];
+  const actors = [];
 
   for (const browser of this._getBrowsers()) {
-    const selected = browser === selectedBrowser;
-    actorPromises.push(
-      this._getActorForBrowser(browser, browserActorOptions).then(
-        actor => {
-          // Set the 'selected' properties on all actors correctly.
-          actor.selected = selected;
-          return actor;
-        },
-        e => {
-          if (e.error === "tabDestroyed") {
-            // Return null if a tab was destroyed while retrieving the tab list.
-            return null;
-          }
+    try {
+      const actor = await this._getActorForBrowser(browser);
+      actors.push(actor);
+    } catch (e) {
+      if (e.error === "tabDestroyed") {
+        // Ignore the error if a tab was destroyed while retrieving the tab list.
+        continue;
+      }
 
-          // Forward unexpected errors.
-          throw e;
-        }
-      )
-    );
+      // Forward unexpected errors.
+      throw e;
+    }
   }
 
   if (this._testing && initialMapSize !== this._foundCount) {
@@ -338,45 +318,29 @@ BrowserTabList.prototype.getList = function(browserActorOptions) {
   this._mustNotify = true;
   this._checkListening();
 
-  return Promise.all(actorPromises).then(values => {
-    // Filter out null values if we received a tabDestroyed error.
-    return values.filter(value => value != null);
-  });
+  return actors;
 };
 
-/**
- * @param browserActorOptions see options argument of FrameTargetActorProxy constructor.
- */
-BrowserTabList.prototype._getActorForBrowser = function(
-  browser,
-  browserActorOptions
-) {
+BrowserTabList.prototype._getActorForBrowser = async function(browser) {
   // Do we have an existing actor for this browser? If not, create one.
   let actor = this._actorByBrowser.get(browser);
   if (actor) {
     this._foundCount++;
-    return actor.update(browserActorOptions);
+    return actor;
   }
 
-  actor = new FrameTargetActorProxy(
-    this._connection,
-    browser,
-    browserActorOptions
-  );
+  actor = new TabDescriptorActor(this._connection, browser);
   this._actorByBrowser.set(browser, actor);
   this._checkListening();
-  return actor.connect();
+  return actor;
 };
 
-BrowserTabList.prototype.getTab = function(
-  { outerWindowID, tabId },
-  browserActorOptions
-) {
+BrowserTabList.prototype.getTab = function({ outerWindowID, tabId }) {
   if (typeof outerWindowID == "number") {
     // First look for in-process frames with this ID
     const window = Services.wm.getOuterWindowWithId(outerWindowID);
     // Safety check to prevent debugging top level window via getTab
-    if (window && window.isChromeWindow) {
+    if (window?.isChromeWindow) {
       return Promise.reject({
         error: "forbidden",
         message: "Window with outerWindowID '" + outerWindowID + "' is chrome",
@@ -385,14 +349,14 @@ BrowserTabList.prototype.getTab = function(
     if (window) {
       const iframe = window.windowUtils.containerElement;
       if (iframe) {
-        return this._getActorForBrowser(iframe, browserActorOptions);
+        return this._getActorForBrowser(iframe);
       }
     }
     // Then also look on registered <xul:browsers> when using outerWindowID for
     // OOP tabs
     for (const browser of this._getBrowsers()) {
       if (browser.outerWindowID == outerWindowID) {
-        return this._getActorForBrowser(browser, browserActorOptions);
+        return this._getActorForBrowser(browser);
       }
     }
     return Promise.reject({
@@ -403,11 +367,10 @@ BrowserTabList.prototype.getTab = function(
     // Tabs OOP
     for (const browser of this._getBrowsers()) {
       if (
-        browser.frameLoader &&
-        browser.frameLoader.remoteTab &&
+        browser.frameLoader?.remoteTab &&
         browser.frameLoader.remoteTab.tabId === tabId
       ) {
-        return this._getActorForBrowser(browser, browserActorOptions);
+        return this._getActorForBrowser(browser);
       }
     }
     return Promise.reject({
@@ -421,7 +384,7 @@ BrowserTabList.prototype.getTab = function(
   );
   if (topAppWindow) {
     const selectedBrowser = this._getSelectedBrowser(topAppWindow);
-    return this._getActorForBrowser(selectedBrowser, browserActorOptions);
+    return this._getActorForBrowser(selectedBrowser);
   }
   return Promise.reject({
     error: "noTab",
@@ -468,7 +431,7 @@ BrowserTabList.prototype._handleActorClose = function(actor, browser) {
   if (this._testing) {
     if (this._actorByBrowser.get(browser) !== actor) {
       throw new Error(
-        "FrameTargetActorProxy not stored in map under given browser"
+        "TabDescriptorActor not stored in map under given browser"
       );
     }
     if (actor.browser !== browser) {
@@ -477,7 +440,7 @@ BrowserTabList.prototype._handleActorClose = function(actor, browser) {
   }
 
   this._actorByBrowser.delete(browser);
-  actor.exit();
+  actor.destroy();
 
   this._notifyListChanged();
   this._checkListening();
@@ -511,7 +474,7 @@ BrowserTabList.prototype._checkListening = function() {
   this._listenForEventsIf(
     this._actorByBrowser.size > 0,
     "_listeningForTabClose",
-    ["TabClose", "TabRemotenessChange"]
+    ["TabClose"]
   );
 
   /*
@@ -618,9 +581,8 @@ BrowserTabList.prototype._listenForMessagesIf = function(
 BrowserTabList.prototype._onAndroidDocumentEvent = function(event) {
   switch (event.type) {
     case "DOMTitleChanged": {
-      const win = event.currentTarget.ownerGlobal;
-      const browser = win.BrowserApp.getBrowserForDocument(event.target);
-      this._onDOMTitleChanged(browser);
+      const window = event.currentTarget.ownerGlobal;
+      this._onDOMTitleChanged(window.browser);
       break;
     }
   }
@@ -676,17 +638,6 @@ BrowserTabList.prototype.handleEvent = DevToolsUtils.makeInfallible(function(
       const actor = this._actorByBrowser.get(browser);
       if (actor) {
         this._handleActorClose(actor, browser);
-      }
-      break;
-    }
-    case "TabRemotenessChange": {
-      // We have to remove the cached actor as we have to create a new instance.
-      const actor = this._actorByBrowser.get(browser);
-      if (actor) {
-        this._actorByBrowser.delete(browser);
-        // Don't create a new actor; iterate will take care of that. Just notify.
-        this._notifyListChanged();
-        this._checkListening();
       }
       break;
     }
@@ -752,7 +703,6 @@ BrowserTabList.prototype.onOpenWindow = DevToolsUtils.makeInfallible(function(
     }
     if (this._listeningForTabClose) {
       window.addEventListener("TabClose", this);
-      window.addEventListener("TabRemotenessChange", this);
     }
     if (this._listeningForTitleChange) {
       window.messageManager.addMessageListener("DOMTitleChanged", this);

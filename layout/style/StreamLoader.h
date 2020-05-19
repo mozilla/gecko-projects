@@ -11,22 +11,27 @@
 #include "nsString.h"
 #include "mozilla/css/SheetLoadData.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/PreloaderBase.h"
 
 class nsIInputStream;
 
 namespace mozilla {
 namespace css {
 
-class StreamLoader : public nsIStreamListener {
+class StreamLoader : public PreloaderBase, public nsIStreamListener {
  public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
 
+  // PreloaderBase
+  static void PrioritizeAsPreload(nsIChannel* aChannel);
+  virtual void PrioritizeAsPreload() override;
+
   explicit StreamLoader(SheetLoadData&);
 
   void ChannelOpenFailed() {
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#ifdef NIGHTLY_BUILD
     mChannelOpenFailed = true;
 #endif
   }
@@ -52,7 +57,7 @@ class StreamLoader : public nsIStreamListener {
   nsCString mBytes;
   nsAutoCStringN<3> mBOMBytes;
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#ifdef NIGHTLY_BUILD
   bool mChannelOpenFailed = false;
   bool mOnStopRequestCalled = false;
 #endif

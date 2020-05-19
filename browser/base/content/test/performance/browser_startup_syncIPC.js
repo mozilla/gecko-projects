@@ -174,13 +174,13 @@ const startupPhases = {
     },
     {
       name: "PAPZInputBridge::Msg_ProcessUnhandledEvent",
-      condition: WIN && WEBRENDER,
+      condition: WIN,
       ignoreIfUnused: true, // intermittently occurs in "before becoming idle"
       maxCount: 1,
     },
     {
       name: "PAPZInputBridge::Msg_ReceiveMouseInputEvent",
-      condition: WIN && WEBRENDER,
+      condition: WIN,
       ignoreIfUnused: true, // intermittently occurs in "before becoming idle"
       maxCount: 1,
     },
@@ -189,6 +189,12 @@ const startupPhases = {
       name: "PLayerTransaction::Msg_GetTextureFactoryIdentifier",
       condition: WIN && WEBRENDER,
       ignoreIfUnused: true, // intermittently occurs in "before becoming idle"
+      maxCount: 1,
+    },
+    {
+      name: "PWebRenderBridge::Msg_EnsureConnected",
+      condition: WIN && WEBRENDER,
+      ignoreIfUnused: true,
       maxCount: 1,
     },
   ],
@@ -220,6 +226,12 @@ const startupPhases = {
       name: "PLayerTransaction::Msg_GetTextureFactoryIdentifier",
       condition: WIN && WEBRENDER,
       ignoreIfUnused: true, // intermittently occurs in "before handling user events"
+      maxCount: 1,
+    },
+    {
+      name: "PWebRenderBridge::Msg_EnsureConnected",
+      condition: WIN && WEBRENDER,
+      ignoreIfUnused: true,
       maxCount: 1,
     },
     {

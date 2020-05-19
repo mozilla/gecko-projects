@@ -45,7 +45,7 @@ class nsMixedContentBlocker : public nsIContentPolicy,
   NS_DECL_NSICONTENTPOLICY
   NS_DECL_NSICHANNELEVENTSINK
 
-  nsMixedContentBlocker();
+  nsMixedContentBlocker() = default;
 
   // See:
   // https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy
@@ -65,26 +65,17 @@ class nsMixedContentBlocker : public nsIContentPolicy,
    * Remaining parameters are from nsIContentPolicy::ShouldLoad().
    */
   static nsresult ShouldLoad(bool aHadInsecureImageRedirect,
-                             uint32_t aContentType, nsIURI* aContentLocation,
-                             nsIURI* aRequestingLocation,
-                             nsISupports* aRequestingContext,
-                             const nsACString& aMimeGuess,
-                             nsIPrincipal* aRequestPrincipal,
-                             int16_t* aDecision);
+                             nsIURI* aContentLocation, nsILoadInfo* aLoadInfo,
+                             const nsACString& aMimeGuess, int16_t* aDecision);
   static void AccumulateMixedContentHSTS(
       nsIURI* aURI, bool aActive, const OriginAttributes& aOriginAttributes);
 
   static bool URISafeToBeLoadedInSecureContext(nsIURI* aURI);
 
-  static bool ShouldUpgradeMixedDisplayContent();
   static void OnPrefChange(const char* aPref, void* aClosure);
   static void GetSecureContextWhiteList(nsACString& aList);
   static void Shutdown();
 
-  static bool sBlockMixedScript;
-  static bool sBlockMixedObjectSubrequest;
-  static bool sBlockMixedDisplay;
-  static bool sUpgradeMixedDisplay;
   static bool sSecurecontextWhitelistCached;
   static nsCString* sSecurecontextWhitelist;
 };

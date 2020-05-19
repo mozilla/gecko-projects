@@ -14,6 +14,7 @@
 
 #include "jsnum.h"
 
+#include "gc/MaybeRooted.h"
 #include "vm/Runtime.h"
 #include "vm/StringType.h"
 
@@ -27,7 +28,7 @@ inline jsid AtomToId(JSAtom* atom) {
     return INT_TO_JSID(int32_t(index));
   }
 
-  return JSID_FROM_BITS(size_t(atom) | JSID_TYPE_STRING);
+  return JS::PropertyKey::fromNonIntAtom(atom);
 }
 
 // Use the NameToId method instead!

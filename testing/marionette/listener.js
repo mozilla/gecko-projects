@@ -530,7 +530,10 @@ function dispatch(fn) {
     });
 
     req
-      .then(rv => sendResponse(rv, id), err => sendError(err, id))
+      .then(
+        rv => sendResponse(rv, id),
+        err => sendError(err, id)
+      )
       .catch(err => sendError(err, id));
   };
 }
@@ -1774,9 +1777,7 @@ async function reftestWait(url, remote) {
     win.innerHeight < document.documentElement.scrollHeight
   ) {
     logger.warn(
-      `${url} overflows viewport (width: ${
-        document.documentElement.scrollWidth
-      }, height: ${document.documentElement.scrollHeight})`
+      `${url} overflows viewport (width: ${document.documentElement.scrollWidth}, height: ${document.documentElement.scrollHeight})`
     );
   }
 }

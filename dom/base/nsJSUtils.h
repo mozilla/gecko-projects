@@ -226,10 +226,6 @@ class nsJSUtils {
                                 JS::CompileOptions& aCompileOptions,
                                 JS::MutableHandle<JSObject*> aModule);
 
-  static nsresult InitModuleSourceElement(JSContext* aCx,
-                                          JS::Handle<JSObject*> aModule,
-                                          nsIScriptElement* aElement);
-
   static nsresult ModuleInstantiate(JSContext* aCx,
                                     JS::Handle<JSObject*> aModule);
 
@@ -344,7 +340,7 @@ class nsTAutoJSString : public nsTAutoString<T> {
    * nsTAutoJSString should be default constructed, which leaves it empty
    * (this->IsEmpty()), and initialized with one of the init() methods below.
    */
-  nsTAutoJSString() {}
+  nsTAutoJSString() = default;
 
   bool init(JSContext* aContext, JSString* str) {
     return AssignJSString(aContext, *this, str);

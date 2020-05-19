@@ -24,7 +24,7 @@
 #  include "builtin/intl/PluralRules.h"
 #  include "builtin/intl/RelativeTimeFormat.h"
 #endif
-#include "builtin/FinalizationGroupObject.h"
+#include "builtin/FinalizationRegistryObject.h"
 #include "builtin/MapObject.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/Object.h"
@@ -205,7 +205,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
       return !cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled();
 
     case JSProto_WeakRef:
-    case JSProto_FinalizationGroup:
+    case JSProto_FinalizationRegistry:
       return !cx->realm()->creationOptions().getWeakRefsEnabled();
 
     case JSProto_AggregateError:
@@ -371,9 +371,28 @@ bool GlobalObject::resolveConstructor(JSContext* cx,
 
     // Fallible operation that modifies the global object.
     if (clasp->specShouldDefineConstructor()) {
-      RootedValue ctorValue(cx, ObjectValue(*ctor));
-      if (!DefineDataProperty(cx, global, id, ctorValue, JSPROP_RESOLVING)) {
-        return false;
+      bool shouldReallyDefine = true;
+
+      // On the web, it isn't presently possible to expose the global
+      // "SharedArrayBuffer" property unless the page is cross-site-isolated.
+      // Only define this constructor if an option on the realm indicates that
+      // it should be defined.
+      if (key == JSProto_SharedArrayBuffer) {
+        const JS::RealmCreationOptions& options =
+            global->realm()->creationOptions();
+
+        MOZ_ASSERT(options.getSharedMemoryAndAtomicsEnabled(),
+                   "shouldn't be defining SharedArrayBuffer if shared memory "
+                   "is disabled");
+
+        shouldReallyDefine = options.defineSharedArrayBufferConstructor();
+      }
+
+      if (shouldReallyDefine) {
+        RootedValue ctorValue(cx, ObjectValue(*ctor));
+        if (!DefineDataProperty(cx, global, id, ctorValue, JSPROP_RESOLVING)) {
+          return false;
+        }
       }
     }
 
@@ -437,8 +456,8 @@ const JSClass GlobalObject::OffThreadPlaceholderObject::class_ = {
 /* static */ GlobalObject::OffThreadPlaceholderObject*
 GlobalObject::OffThreadPlaceholderObject::New(JSContext* cx, unsigned slot) {
   Rooted<OffThreadPlaceholderObject*> placeholder(cx);
-  placeholder = NewObjectWithGivenTaggedProto<OffThreadPlaceholderObject>(
-      cx, AsTaggedProto(nullptr));
+  placeholder =
+      NewObjectWithGivenProto<OffThreadPlaceholderObject>(cx, nullptr);
   if (!placeholder) {
     return nullptr;
   }
@@ -601,7 +620,7 @@ GlobalObject* GlobalObject::createInternal(JSContext* cx,
   MOZ_ASSERT(clasp->flags & JSCLASS_IS_GLOBAL);
   MOZ_ASSERT(clasp->isTrace(JS_GlobalObjectTraceHook));
 
-  JSObject* obj = NewObjectWithGivenProto(cx, clasp, nullptr, SingletonObject);
+  JSObject* obj = NewSingletonObjectWithGivenProto(cx, clasp, nullptr);
   if (!obj) {
     return nullptr;
   }
@@ -856,13 +875,13 @@ static NativeObject* CreateBlankProto(JSContext* cx, const JSClass* clasp,
                                       HandleObject proto) {
   MOZ_ASSERT(clasp != &JSFunction::class_);
 
-  RootedNativeObject blankProto(
-      cx, NewNativeObjectWithGivenProto(cx, clasp, proto, SingletonObject));
+  RootedObject blankProto(cx,
+                          NewSingletonObjectWithGivenProto(cx, clasp, proto));
   if (!blankProto || !JSObject::setDelegate(cx, blankProto)) {
     return nullptr;
   }
 
-  return blankProto;
+  return &blankProto->as<NativeObject>();
 }
 
 /* static */
@@ -969,8 +988,7 @@ NativeObject* GlobalObject::getIntrinsicsHolder(JSContext* cx,
   if (isSelfHostingGlobal) {
     intrinsicsHolder = global;
   } else {
-    intrinsicsHolder =
-        NewObjectWithGivenProto<PlainObject>(cx, nullptr, TenuredObject);
+    intrinsicsHolder = NewTenuredObjectWithGivenProto<PlainObject>(cx, nullptr);
     if (!intrinsicsHolder) {
       return nullptr;
     }

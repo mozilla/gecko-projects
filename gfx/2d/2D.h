@@ -203,7 +203,7 @@ class GradientStops : public external::AtomicRefCounted<GradientStops> {
   virtual bool IsValid() const { return true; }
 
  protected:
-  GradientStops() {}
+  GradientStops() = default;
 };
 
 /**
@@ -226,11 +226,11 @@ class ColorPattern : public Pattern {
  public:
   // Explicit because consumers should generally use ToDeviceColor when
   // creating a ColorPattern.
-  explicit ColorPattern(const Color& aColor) : mColor(aColor) {}
+  explicit ColorPattern(const DeviceColor& aColor) : mColor(aColor) {}
 
   PatternType GetType() const override { return PatternType::COLOR; }
 
-  Color mColor;
+  DeviceColor mColor;
 };
 
 /**
@@ -283,6 +283,37 @@ class RadialGradientPattern : public Pattern {
   Point mCenter2;  //!< Center of the outer circle.
   Float mRadius1;  //!< Radius of the inner (focal) circle.
   Float mRadius2;  //!< Radius of the outer circle.
+  RefPtr<GradientStops>
+      mStops;      /**< GradientStops object for this gradient, this
+                        should match the backend type of the draw target
+                        this pattern will be used with. */
+  Matrix mMatrix;  //!< A matrix that transforms the pattern into user space
+};
+
+/**
+ * This class is used for Conic Gradient Patterns, the gradient stops are
+ * stored in a separate object and are backend dependent. This class itself
+ * may be used on the stack.
+ */
+class ConicGradientPattern : public Pattern {
+ public:
+  /// For constructor parameter description, see member data documentation.
+  ConicGradientPattern(const Point& aCenter, Float aAngle, Float aStartOffset,
+                       Float aEndOffset, GradientStops* aStops,
+                       const Matrix& aMatrix = Matrix())
+      : mCenter(aCenter),
+        mAngle(aAngle),
+        mStartOffset(aStartOffset),
+        mEndOffset(aEndOffset),
+        mStops(aStops),
+        mMatrix(aMatrix) {}
+
+  PatternType GetType() const override { return PatternType::CONIC_GRADIENT; }
+
+  Point mCenter;       //!< Center of the gradient
+  Float mAngle;        //!< Start angle of gradient
+  Float mStartOffset;  // Offset of first stop
+  Float mEndOffset;    // Offset of last stop
   RefPtr<GradientStops>
       mStops;      /**< GradientStops object for this gradient, this
                         should match the backend type of the draw target
@@ -871,18 +902,12 @@ class UnscaledFont : public SupportsThreadSafeWeakPtr<UnscaledFont> {
 
   typedef void (*FontFileDataOutput)(const uint8_t* aData, uint32_t aLength,
                                      uint32_t aIndex, void* aBaton);
-  typedef void (*WRFontDescriptorOutput)(const uint8_t* aData, uint32_t aLength,
-                                         uint32_t aIndex, void* aBaton);
   typedef void (*FontInstanceDataOutput)(const uint8_t* aData, uint32_t aLength,
                                          void* aBaton);
   typedef void (*FontDescriptorOutput)(const uint8_t* aData, uint32_t aLength,
                                        uint32_t aIndex, void* aBaton);
 
   virtual bool GetFontFileData(FontFileDataOutput, void*) { return false; }
-
-  virtual bool GetWRFontDescriptor(WRFontDescriptorOutput, void*) {
-    return false;
-  }
 
   virtual bool GetFontInstanceData(FontInstanceDataOutput, void*) {
     return false;
@@ -906,7 +931,7 @@ class UnscaledFont : public SupportsThreadSafeWeakPtr<UnscaledFont> {
   }
 
  protected:
-  UnscaledFont() {}
+  UnscaledFont() = default;
 
  private:
   static Atomic<uint32_t> sDeletionCounter;
@@ -1049,6 +1074,16 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget> {
    */
   virtual already_AddRefed<SourceSurface> Snapshot() = 0;
 
+  /**
+   * Returns a SourceSurface which wraps the buffer backing the DrawTarget. The
+   * contents of the buffer may change if there are drawing operations after
+   * calling but only guarantees that it reflects the state at the time it was
+   * called.
+   */
+  virtual already_AddRefed<SourceSurface> GetBackingSurface() {
+    return Snapshot();
+  }
+
   // Snapshots the contents and returns an alpha mask
   // based on the RGB values.
   virtual already_AddRefed<SourceSurface> IntoLuminanceSource(
@@ -1134,7 +1169,8 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget> {
    * @param aOperator Composition operator used
    */
   virtual void DrawSurfaceWithShadow(SourceSurface* aSurface,
-                                     const Point& aDest, const Color& aColor,
+                                     const Point& aDest,
+                                     const DeviceColor& aColor,
                                      const Point& aOffset, Float aSigma,
                                      CompositionOp aOperator) = 0;
 
@@ -1429,6 +1465,15 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget> {
    */
   virtual already_AddRefed<DrawTarget> CreateSimilarDrawTarget(
       const IntSize& aSize, SurfaceFormat aFormat) const = 0;
+
+  /**
+   * Create a DrawTarget whose backing surface is optimized for use with this
+   * DrawTarget.
+   */
+  virtual already_AddRefed<DrawTarget> CreateSimilarDrawTargetWithBacking(
+      const IntSize& aSize, SurfaceFormat aFormat) const {
+    return CreateSimilarDrawTarget(aSize, aFormat);
+  }
 
   /**
    * Create a DrawTarget whose snapshot is optimized for use with this
@@ -1750,8 +1795,8 @@ class GFX2D_API Factory {
 #ifdef XP_DARWIN
   static already_AddRefed<ScaledFont> CreateScaledFontForMacFont(
       CGFontRef aCGFont, const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
-      const Color& aFontSmoothingBackgroundColor, bool aUseFontSmoothing = true,
-      bool aApplySyntheticBold = false);
+      const DeviceColor& aFontSmoothingBackgroundColor,
+      bool aUseFontSmoothing = true, bool aApplySyntheticBold = false);
 #endif
 
 #ifdef MOZ_WIDGET_GTK

@@ -45,7 +45,6 @@
 #include "mozilla/dom/ServiceWorkerActors.h"
 #include "mozilla/dom/ServiceWorkerManagerChild.h"
 #include "mozilla/dom/BrowserChild.h"
-#include "mozilla/dom/TabGroup.h"
 #include "mozilla/ipc/IPCStreamAlloc.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "mozilla/ipc/PChildToParentStreamChild.h"
@@ -85,7 +84,6 @@ namespace mozilla::ipc {
 using mozilla::dom::UDPSocketChild;
 using mozilla::net::PUDPSocketChild;
 
-using mozilla::dom::LocalStorage;
 using mozilla::dom::PServiceWorkerChild;
 using mozilla::dom::PServiceWorkerContainerChild;
 using mozilla::dom::PServiceWorkerRegistrationChild;
@@ -172,22 +170,6 @@ bool BackgroundChildImpl::DeallocPBackgroundTestChild(
   return true;
 }
 
-BackgroundChildImpl::PBackgroundIDBFactoryChild*
-BackgroundChildImpl::AllocPBackgroundIDBFactoryChild(
-    const LoggingInfo& aLoggingInfo) {
-  MOZ_CRASH(
-      "PBackgroundIDBFactoryChild actors should be manually "
-      "constructed!");
-}
-
-bool BackgroundChildImpl::DeallocPBackgroundIDBFactoryChild(
-    PBackgroundIDBFactoryChild* aActor) {
-  MOZ_ASSERT(aActor);
-
-  delete aActor;
-  return true;
-}
-
 BackgroundChildImpl::PBackgroundIndexedDBUtilsChild*
 BackgroundChildImpl::AllocPBackgroundIndexedDBUtilsChild() {
   MOZ_CRASH(
@@ -205,6 +187,7 @@ bool BackgroundChildImpl::DeallocPBackgroundIndexedDBUtilsChild(
 
 BackgroundChildImpl::PBackgroundSDBConnectionChild*
 BackgroundChildImpl::AllocPBackgroundSDBConnectionChild(
+    const PersistenceType& aPersistenceType,
     const PrincipalInfo& aPrincipalInfo) {
   MOZ_CRASH(
       "PBackgroundSDBConnectionChild actor should be manually "

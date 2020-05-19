@@ -9,40 +9,29 @@
 
 #include "mozilla/Span.h"  // mozilla::Span
 
-#include <stdint.h>  // int32_t
-
 #include "frontend/Stencil.h"  // ScriptStencil
 #include "gc/Barrier.h"        // GCPtrAtom
 #include "js/HeapAPI.h"        // JS::GCCellPtr
-#include "vm/JSScript.h"       // JSTryNote, ScopeNote
+#include "js/TypeDecls.h"      // JSContext
+#include "js/UniquePtr.h"      // js::UniquePtr
+#include "vm/SharedStencil.h"  // js::ImmutableScriptData
 
-struct JSContext;
-
-namespace js {
-
-namespace frontend {
+namespace js::frontend {
 
 struct BytecodeEmitter;
 
 class BCEScriptStencil : public ScriptStencil {
   BytecodeEmitter& bce_;
 
-  void init(uint32_t nslots);
-  bool getNeedsFunctionEnvironmentObjects() const;
+  void init(BytecodeEmitter& bce, UniquePtr<ImmutableScriptData> immutableData);
 
  public:
-  explicit BCEScriptStencil(BytecodeEmitter& bce, uint32_t nslots);
+  BCEScriptStencil(BytecodeEmitter& bce,
+                   UniquePtr<ImmutableScriptData> immutableData);
 
-  virtual bool finishGCThings(JSContext* cx,
-                              mozilla::Span<JS::GCCellPtr> gcthings) const;
-  virtual void initAtomMap(GCPtrAtom* atoms) const;
-  virtual void finishResumeOffsets(mozilla::Span<uint32_t> resumeOffsets) const;
-  virtual void finishScopeNotes(mozilla::Span<ScopeNote> scopeNotes) const;
-  virtual void finishTryNotes(mozilla::Span<JSTryNote> tryNotes) const;
-  virtual void finishInnerFunctions() const;
+  virtual void initAtomMap(GCPtrAtom* atoms) const override;
 };
 
-} /* namespace frontend */
-} /* namespace js */
+} /* namespace js::frontend */
 
 #endif /* frontend_BCEScriptStencil_h */

@@ -12,6 +12,7 @@
 #include "openvr.h"
 #include "mozilla/TimeStamp.h"
 #include "moz_external_vr.h"
+#include "OpenVRControllerMapper.h"
 
 #if defined(XP_WIN)
 #  include <d3d11_1.h>
@@ -21,6 +22,7 @@ class nsITimer;
 namespace mozilla {
 namespace gfx {
 class VRThread;
+class OpenVRControllerMapper;
 
 static const int kNumOpenVRHaptics = 1;
 
@@ -30,57 +32,6 @@ enum OpenVRHand : int8_t {
   Total = 2,
 
   None = -1
-};
-
-struct ControllerAction {
-  nsCString name;
-  nsCString type;
-  vr::VRActionHandle_t handle = vr::k_ulInvalidActionHandle;
-
-  ControllerAction() = default;
-
-  ControllerAction(const char* aName, const char* aType)
-      : name(aName), type(aType) {}
-};
-
-struct ControllerInfo {
-  vr::VRInputValueHandle_t mSource = vr::k_ulInvalidInputValueHandle;
-
-  ControllerAction mActionPose;
-  ControllerAction mActionHaptic;
-
-  ControllerAction mActionTrackpad_Analog;
-  ControllerAction mActionTrackpad_Pressed;
-  ControllerAction mActionTrackpad_Touched;
-
-  ControllerAction mActionTrigger_Value;
-
-  ControllerAction mActionGrip_Pressed;
-  ControllerAction mActionGrip_Touched;
-  ControllerAction mActionMenu_Pressed;
-  ControllerAction mActionMenu_Touched;
-  ControllerAction mActionSystem_Pressed;
-  ControllerAction mActionSystem_Touched;
-
-  // --- Knuckles & Cosmos
-  ControllerAction mActionA_Pressed;
-  ControllerAction mActionA_Touched;
-  ControllerAction mActionB_Pressed;
-  ControllerAction mActionB_Touched;
-
-  // --- Knuckles, Cosmos, and WMR
-  ControllerAction mActionThumbstick_Analog;
-  ControllerAction mActionThumbstick_Pressed;
-  ControllerAction mActionThumbstick_Touched;
-
-  // --- Knuckles
-  ControllerAction mActionFingerIndex_Value;
-  ControllerAction mActionFingerMiddle_Value;
-  ControllerAction mActionFingerRing_Value;
-  ControllerAction mActionFingerPinky_Value;
-
-  // --- Cosmos
-  ControllerAction mActionBumper_Pressed;
 };
 
 class OpenVRSession : public VRSession {
@@ -114,8 +65,6 @@ class OpenVRSession : public VRSession {
   ::vr::IVRSystem* mVRSystem = nullptr;
   ::vr::IVRChaperone* mVRChaperone = nullptr;
   ::vr::IVRCompositor* mVRCompositor = nullptr;
-  ::vr::TrackedDeviceIndex_t
-      mControllerDeviceIndexObsolete[kVRControllerMaxCount];
   ::vr::VRActionSetHandle_t mActionsetFirefox = vr::k_ulInvalidActionSetHandle;
   OpenVRHand mControllerDeviceIndex[kVRControllerMaxCount];
   ControllerInfo mControllerHand[OpenVRHand::Total];
@@ -124,16 +73,14 @@ class OpenVRSession : public VRSession {
   bool mIsWindowsMR;
   TimeStamp mLastHapticUpdate;
 
+  static void HapticTimerCallback(nsITimer* aTimer, void* aClosure);
   bool InitState(mozilla::gfx::VRSystemState& aSystemState);
   void UpdateStageParameters(mozilla::gfx::VRDisplayState& aState);
   void UpdateEyeParameters(mozilla::gfx::VRSystemState& aState);
   void UpdateHeadsetPose(mozilla::gfx::VRSystemState& aState);
   void EnumerateControllers(VRSystemState& aState);
-  void EnumerateControllersObsolete(VRSystemState& aState);
   void UpdateControllerPoses(VRSystemState& aState);
-  void UpdateControllerPosesObsolete(VRSystemState& aState);
   void UpdateControllerButtons(VRSystemState& aState);
-  void UpdateControllerButtonsObsolete(VRSystemState& aState);
   void UpdateTelemetry(VRSystemState& aSystemState);
   bool SetupContollerActions();
 
@@ -146,17 +93,17 @@ class OpenVRSession : public VRSession {
 #endif
   void GetControllerDeviceId(::vr::ETrackedDeviceClass aDeviceType,
                              ::vr::TrackedDeviceIndex_t aDeviceIndex,
-                             nsCString& aId);
+                             nsCString& aId,
+                             mozilla::gfx::VRControllerType& aControllerType);
   void UpdateHaptics();
-  void UpdateHapticsObsolete();
   void StartHapticThread();
   void StopHapticThread();
   void StartHapticTimer();
   void StopHapticTimer();
-  static void HapticTimerCallback(nsITimer* aTimer, void* aClosure);
   RefPtr<nsITimer> mHapticTimer;
   RefPtr<VRThread> mHapticThread;
   mozilla::Mutex mControllerHapticStateMutex;
+  UniquePtr<OpenVRControllerMapper> mControllerMapper;
 };
 
 }  // namespace gfx

@@ -218,13 +218,13 @@ RefPtr<ClientOpPromise> ClientNavigateOpChild::DoNavigate(
     // 2, if the URL fails to parse, we reject with a TypeError.
     nsPrintfCString err("Invalid URL \"%s\"", aArgs.url().get());
     CopyableErrorResult result;
-    result.ThrowTypeError(NS_ConvertUTF8toUTF16(err));
+    result.ThrowTypeError(err);
     return ClientOpPromise::CreateAndReject(result, __func__);
   }
 
   if (url->GetSpecOrDefault().EqualsLiteral("about:blank")) {
     CopyableErrorResult result;
-    result.ThrowTypeError(u"Navigation to \"about:blank\" is not allowed");
+    result.ThrowTypeError("Navigation to \"about:blank\" is not allowed");
     return ClientOpPromise::CreateAndReject(result, __func__);
   }
 
@@ -247,17 +247,18 @@ RefPtr<ClientOpPromise> ClientNavigateOpChild::DoNavigate(
   }
 
   RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState(url);
-  nsCOMPtr<nsIReferrerInfo> referrerInfo = new ReferrerInfo();
-  referrerInfo->InitWithDocument(doc);
   loadState->SetTriggeringPrincipal(principal);
 
   loadState->SetCsp(doc->GetCsp());
 
+  auto referrerInfo = MakeRefPtr<ReferrerInfo>(*doc);
   loadState->SetReferrerInfo(referrerInfo);
   loadState->SetLoadType(LOAD_STOP_CONTENT);
-  loadState->SetSourceDocShell(docShell);
+  loadState->SetSourceBrowsingContext(docShell->GetBrowsingContext());
   loadState->SetLoadFlags(nsIWebNavigation::LOAD_FLAGS_NONE);
   loadState->SetFirstParty(true);
+  loadState->SetHasValidUserGestureActivation(
+      doc->HasValidTransientUserGestureActivation());
   rv = docShell->LoadURI(loadState, false);
   if (NS_FAILED(rv)) {
     /// There are tests that try sending file:/// and mixed-content URLs
@@ -267,7 +268,7 @@ RefPtr<ClientOpPromise> ClientNavigateOpChild::DoNavigate(
     /// out.
     nsPrintfCString err("Invalid URL \"%s\"", aArgs.url().get());
     CopyableErrorResult result;
-    result.ThrowTypeError(NS_ConvertUTF8toUTF16(err));
+    result.ThrowTypeError(err);
     return ClientOpPromise::CreateAndReject(result, __func__);
   }
 

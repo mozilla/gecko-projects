@@ -11,7 +11,7 @@
 
 #include "jstypes.h"
 
-#include "jit/IonCode.h"
+#include "jit/JitCode.h"
 #include "jit/Snapshots.h"
 #include "js/ProfilingFrameIterator.h"
 #include "vm/JSFunction.h"
@@ -23,7 +23,7 @@ class ArgumentsObject;
 
 namespace jit {
 
-typedef void* CalleeToken;
+using CalleeToken = void*;
 
 enum class FrameType {
   // A JS frame is analogous to a js::InterpreterFrame, representing one
@@ -87,8 +87,9 @@ class JitFrameLayout;
 class ExitFrameLayout;
 
 class BaselineFrame;
-
 class JitActivation;
+class SafepointIndex;
+class OsiIndex;
 
 // Iterate over the JIT stack to assert that all invariants are respected.
 //  - Check that all entry frames are aligned on JitStackAlignment.
@@ -186,6 +187,7 @@ class JSJitFrameIter {
   JSFunction* maybeCallee() const;
   unsigned numActualArgs() const;
   JSScript* script() const;
+  JSScript* maybeForwardedScript() const;
   void baselineScriptAndPc(JSScript** scriptRes, jsbytecode** pcRes) const;
   Value* actualArgs() const;
 

@@ -12,6 +12,8 @@ const {
   getTerminalEagerResult,
 } = require("devtools/client/webconsole/selectors/history");
 
+const actions = require("devtools/client/webconsole/actions/index");
+
 loader.lazyGetter(this, "REPS", function() {
   return require("devtools/client/shared/components/reps/reps").REPS;
 });
@@ -32,12 +34,17 @@ class EagerEvaluation extends Component {
     return {
       terminalEagerResult: PropTypes.any,
       serviceContainer: PropTypes.object.isRequired,
+      highlightDomElement: PropTypes.func.isRequired,
+      unHighlightDomElement: PropTypes.func.isRequired,
     };
   }
 
   componentDidUpdate(prevProps) {
-    const { serviceContainer, terminalEagerResult } = this.props;
-    const { highlightDomElement, unHighlightDomElement } = serviceContainer;
+    const {
+      highlightDomElement,
+      unHighlightDomElement,
+      terminalEagerResult,
+    } = this.props;
 
     if (canHighlightObject(prevProps.terminalEagerResult)) {
       unHighlightDomElement(prevProps.terminalEagerResult.getGrip());
@@ -49,10 +56,10 @@ class EagerEvaluation extends Component {
   }
 
   componentWillUnmount() {
-    const { serviceContainer, terminalEagerResult } = this.props;
+    const { unHighlightDomElement, terminalEagerResult } = this.props;
 
     if (canHighlightObject(terminalEagerResult)) {
-      serviceContainer.unHighlightDomElement(terminalEagerResult.getGrip());
+      unHighlightDomElement(terminalEagerResult.getGrip());
     }
   }
 
@@ -62,7 +69,7 @@ class EagerEvaluation extends Component {
     const result = terminalEagerResult.getGrip
       ? terminalEagerResult.getGrip()
       : terminalEagerResult;
-    const isError = result && result.class && result.class === "Error";
+    const isError = result?.class && result.class === "Error";
 
     return REPS.Rep({
       key: "rep",
@@ -74,19 +81,27 @@ class EagerEvaluation extends Component {
   render() {
     const hasResult = this.props.terminalEagerResult !== null;
 
-    return dom.span(
-      {
-        className: "devtools-monospace eager-evaluation-result",
-        key: "eager-evaluation-result",
-      },
-      hasResult ? dom.span({ className: "icon", key: "icon" }) : null,
-      hasResult ? this.renderRepsResult() : null
+    return dom.div(
+      { className: "eager-evaluation-result", key: "eager-evaluation-result" },
+      hasResult
+        ? dom.span(
+            { className: "eager-evaluation-result__row" },
+            dom.span({
+              className: "eager-evaluation-result__icon",
+              key: "icon",
+            }),
+            dom.span(
+              { className: "eager-evaluation-result__text", key: "text" },
+              this.renderRepsResult()
+            )
+          )
+        : null
     );
   }
 }
 
 function canHighlightObject(obj) {
-  const grip = obj && obj.getGrip && obj.getGrip();
+  const grip = obj?.getGrip && obj.getGrip();
   return (
     grip &&
     (REPS.ElementNode.supportsObject(grip) ||
@@ -101,4 +116,11 @@ function mapStateToProps(state) {
   };
 }
 
-module.exports = connect(mapStateToProps)(EagerEvaluation);
+function mapDispatchToProps(dispatch) {
+  return {
+    highlightDomElement: grip => dispatch(actions.highlightDomElement(grip)),
+    unHighlightDomElement: grip =>
+      dispatch(actions.unHighlightDomElement(grip)),
+  };
+}
+module.exports = connect(mapStateToProps, mapDispatchToProps)(EagerEvaluation);

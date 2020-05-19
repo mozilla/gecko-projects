@@ -6,7 +6,6 @@
 #ifndef mozilla_dom_HTMLMediaElement_h
 #define mozilla_dom_HTMLMediaElement_h
 
-#include "nsAutoPtr.h"
 #include "nsGenericHTMLElement.h"
 #include "AudioChannelService.h"
 #include "MediaEventSource.h"
@@ -30,6 +29,8 @@
 #include "PrincipalChangeObserver.h"
 #include "nsStubMutationObserver.h"
 #include "MediaSegment.h"  // for PrincipalHandle, GraphTime
+
+#include <utility>
 
 // X.h on Linux #defines CurrentTime as 0L, so we have to #undef it here.
 #ifdef CurrentTime
@@ -700,10 +701,14 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   void OnVisibilityChange(Visibility aNewVisibility);
 
-  // These are used for testing only
+  // Begin testing only methods
   float ComputedVolume() const;
   bool ComputedMuted() const;
-  nsSuspendedTypes ComputedSuspended() const;
+
+  // Return true if the media has been suspended media due to an inactive
+  // document or prohibiting by the docshell.
+  bool IsSuspendedByInactiveDocOrDocShell() const;
+  // End testing only methods
 
   void SetMediaInfo(const MediaInfo& aInfo);
 
@@ -736,7 +741,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // empty and the default device is being used.
   void GetSinkId(nsString& aSinkId) {
     MOZ_ASSERT(NS_IsMainThread());
-    aSinkId = mSink.first();
+    aSinkId = mSink.first;
   }
 
   // This is used to notify MediaElementAudioSourceNode that media element is
@@ -1228,9 +1233,6 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // Create or destroy the captured stream.
   void AudioCaptureTrackChange(bool aCapture);
 
-  // A method to check whether the media element is allowed to start playback.
-  bool AudioChannelAgentBlockedPlay();
-
   // If the network state is empty and then we would trigger DoLoad().
   void MaybeDoLoad();
 
@@ -1338,6 +1340,19 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // When playing state change, we have to notify MediaControl in the chrome
   // process in order to keep its playing state correct.
   void NotifyMediaControlPlaybackStateChanged();
+
+  // After media has been paused, trigger a timer to stop listening to the media
+  // control key events.
+  void CreateStopMediaControlTimerIfNeeded();
+  static void StopMediaControlTimerCallback(nsITimer* aTimer, void* aClosure);
+
+  // Clear the timer when we want to continue listening to the media control
+  // key events.
+  void ClearStopMediaControlTimerIfNeeded();
+
+  // This function is used to update the status of media control when the media
+  // changes its status of being used in the Picture-in-Picture mode.
+  void UpdateMediaControlAfterPictureInPictureModeChanged();
 
   // The current decoder. Load() has been called on this decoder.
   // At most one of mDecoder and mSrcStream can be non-null.
@@ -1557,6 +1572,9 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // Timer used to simulate video-suspend.
   nsCOMPtr<nsITimer> mVideoDecodeSuspendTimer;
 
+  // Timer used to stop listening media control events.
+  nsCOMPtr<nsITimer> mStopMediaControlTimer;
+
   // Encrypted Media Extension media keys.
   RefPtr<MediaKeys> mMediaKeys;
   RefPtr<MediaKeys> mIncomingMediaKeys;
@@ -1612,10 +1630,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // to raise the 'waiting' event as per 4.7.1.8 in HTML 5 specification.
   bool mPlayingBeforeSeek = false;
 
-  // True if this element is suspended because the document is inactive.
-  bool mSuspendedForInactiveDocument = false;
+  // True if this element is suspended because the document is inactive or the
+  // inactive docshell is not allowing media to play.
+  bool mSuspendedByInactiveDocOrDocshell = false;
 
-  // True if event delivery is suspended (mSuspendedForInactiveDocument
+  // True if event delivery is suspended (mSuspendedByInactiveDocOrDocshell
   // must also be true).
   bool mEventDeliveryPaused = false;
 
@@ -1885,6 +1904,10 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // AsyncRejectSeekDOMPromiseIfExists() methods.
   RefPtr<dom::Promise> mSeekDOMPromise;
 
+  // Return true if the docshell is inactive and explicitly wants to stop media
+  // playing in that shell.
+  bool ShouldBeSuspendedByInactiveDocShell() const;
+
   // For debugging bug 1407148.
   void AssertReadyStateIsNothing();
 
@@ -1894,7 +1917,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // unplugged. It can be set to ("", nullptr). It follows the spec attribute:
   // https://w3c.github.io/mediacapture-output/#htmlmediaelement-extensions
   // Read/Write from the main thread only.
-  Pair<nsString, RefPtr<AudioDeviceInfo>> mSink;
+  std::pair<nsString, RefPtr<AudioDeviceInfo>> mSink;
 
   // This flag is used to control when the user agent is to show a poster frame
   // for a video element instead of showing the video contents.
@@ -1916,6 +1939,9 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   void StartListeningMediaControlEventIfNeeded();
   void StopListeningMediaControlEventIfNeeded();
   RefPtr<MediaControlEventListener> mMediaControlEventListener;
+
+  // Return true if the media element is being used in picture in picture mode.
+  bool IsBeingUsedInPictureInPictureMode() const;
 };
 
 // Check if the context is chrome or has the debugger or tabs permission

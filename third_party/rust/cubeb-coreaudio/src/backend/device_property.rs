@@ -1,9 +1,5 @@
 use super::*;
 
-pub fn get_device_global_uid(id: AudioDeviceID) -> std::result::Result<StringRef, OSStatus> {
-    get_device_uid(id, DeviceType::INPUT | DeviceType::OUTPUT)
-}
-
 pub fn get_device_uid(
     id: AudioDeviceID,
     devtype: DeviceType,
@@ -16,6 +12,41 @@ pub fn get_device_uid(
     let err = audio_object_get_property_data(id, &address, &mut size, &mut uid);
     if err == NO_ERR {
         Ok(StringRef::new(uid as _))
+    } else {
+        Err(err)
+    }
+}
+
+pub fn get_device_model_uid(
+    id: AudioDeviceID,
+    devtype: DeviceType,
+) -> std::result::Result<StringRef, OSStatus> {
+    assert_ne!(id, kAudioObjectUnknown);
+
+    let address = get_property_address(Property::ModelUID, devtype);
+    let mut size = mem::size_of::<CFStringRef>();
+    let mut uid: CFStringRef = ptr::null();
+    let err = audio_object_get_property_data(id, &address, &mut size, &mut uid);
+    if err == NO_ERR {
+        Ok(StringRef::new(uid as _))
+    } else {
+        Err(err)
+    }
+}
+
+#[allow(dead_code)] // `pub` for running test
+pub fn get_device_transport_type(
+    id: AudioDeviceID,
+    devtype: DeviceType,
+) -> std::result::Result<u32, OSStatus> {
+    assert_ne!(id, kAudioObjectUnknown);
+
+    let address = get_property_address(Property::TransportType, devtype);
+    let mut size = mem::size_of::<u32>();
+    let mut transport: u32 = 0;
+    let err = audio_object_get_property_data(id, &address, &mut size, &mut transport);
+    if err == NO_ERR {
+        Ok(transport)
     } else {
         Err(err)
     }
@@ -77,13 +108,6 @@ pub fn get_device_name(
     } else {
         Err(err)
     }
-}
-
-pub fn get_device_label(
-    id: AudioDeviceID,
-    devtype: DeviceType,
-) -> std::result::Result<StringRef, OSStatus> {
-    get_device_source_name(id, devtype).or(get_device_name(id, devtype))
 }
 
 pub fn get_device_manufacturer(
@@ -217,6 +241,7 @@ pub fn get_device_stream_format(
     }
 }
 
+#[allow(clippy::cast_ptr_alignment)] // Allow casting *mut u8 to *mut AudioBufferList
 pub fn get_device_stream_configuration(
     id: AudioDeviceID,
     devtype: DeviceType,
@@ -278,7 +303,9 @@ pub enum Property {
     HardwareDefaultInputDevice,
     HardwareDefaultOutputDevice,
     HardwareDevices,
+    ModelUID,
     StreamLatency,
+    TransportType,
 }
 
 impl From<Property> for AudioObjectPropertySelector {
@@ -300,7 +327,9 @@ impl From<Property> for AudioObjectPropertySelector {
             Property::HardwareDefaultInputDevice => kAudioHardwarePropertyDefaultInputDevice,
             Property::HardwareDefaultOutputDevice => kAudioHardwarePropertyDefaultOutputDevice,
             Property::HardwareDevices => kAudioHardwarePropertyDevices,
+            Property::ModelUID => kAudioDevicePropertyModelUID,
             Property::StreamLatency => kAudioStreamPropertyLatency,
+            Property::TransportType => kAudioDevicePropertyTransportType,
         }
     }
 }

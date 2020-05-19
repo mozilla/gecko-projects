@@ -23,7 +23,6 @@
 #include "nsContentUtils.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "nsIContentSecurityPolicy.h"
-#include "mozilla/dom/TabGroup.h"
 #include "mozilla/TaskCategory.h"
 
 class nsIDOMWindow;
@@ -42,7 +41,7 @@ nsresult NS_NewContentPolicy(nsIContentPolicy** aResult) {
 
 nsContentPolicy::nsContentPolicy() : mPolicies(NS_CONTENTPOLICY_CATEGORY) {}
 
-nsContentPolicy::~nsContentPolicy() {}
+nsContentPolicy::~nsContentPolicy() = default;
 
 #ifdef DEBUG
 #  define WARN_IF_URI_UNINITIALIZED(uri, name)            \

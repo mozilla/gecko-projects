@@ -126,7 +126,7 @@ class nsXULPrototypeNode {
 
  protected:
   explicit nsXULPrototypeNode(Type aType) : mType(aType) {}
-  virtual ~nsXULPrototypeNode() {}
+  virtual ~nsXULPrototypeNode() = default;
 };
 
 class nsXULPrototypeElement : public nsXULPrototypeNode {
@@ -239,7 +239,7 @@ class nsXULPrototypeText : public nsXULPrototypeNode {
   nsXULPrototypeText() : nsXULPrototypeNode(eType_Text) {}
 
  private:
-  virtual ~nsXULPrototypeText() {}
+  virtual ~nsXULPrototypeText() = default;
 
  public:
   virtual nsresult Serialize(
@@ -258,7 +258,7 @@ class nsXULPrototypePI : public nsXULPrototypeNode {
   nsXULPrototypePI() : nsXULPrototypeNode(eType_PI) {}
 
  private:
-  virtual ~nsXULPrototypePI() {}
+  virtual ~nsXULPrototypePI() = default;
 
  public:
   virtual nsresult Serialize(
@@ -340,7 +340,7 @@ class nsXULElement : public nsStyledElement {
   MOZ_CAN_RUN_SCRIPT int32_t ScreenX();
   MOZ_CAN_RUN_SCRIPT int32_t ScreenY();
 
-  bool HasMenu();
+  MOZ_CAN_RUN_SCRIPT bool HasMenu();
   MOZ_CAN_RUN_SCRIPT void OpenMenu(bool aOpenFlag);
 
   virtual bool PerformAccesskey(bool aKeyCausesActivation,
@@ -482,7 +482,7 @@ class nsXULElement : public nsStyledElement {
     return parent ? parent : nsStyledElement::GetScopeChainParent();
   }
 
-  bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
+  bool IsInteractiveHTMLContent() const override;
 
   void MaybeUpdatePrivateLifetime();
 

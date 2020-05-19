@@ -29,7 +29,7 @@ StaticAutoPtr<nsTArray<CompositorManagerParent*>>
 /* static */
 already_AddRefed<CompositorManagerParent>
 CompositorManagerParent::CreateSameProcess() {
-  MOZ_ASSERT(XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying());
+  MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
   StaticMutexAutoLock lock(sMutex);
 
@@ -68,7 +68,7 @@ bool CompositorManagerParent::Create(
       NewRunnableMethod<Endpoint<PCompositorManagerParent>&&, bool>(
           "CompositorManagerParent::Bind", bridge,
           &CompositorManagerParent::Bind, std::move(aEndpoint), aIsRoot);
-  CompositorThreadHolder::Loop()->PostTask(runnable.forget());
+  CompositorThread()->Dispatch(runnable.forget());
   return true;
 }
 
@@ -77,7 +77,7 @@ already_AddRefed<CompositorBridgeParent>
 CompositorManagerParent::CreateSameProcessWidgetCompositorBridge(
     CSSToLayoutDeviceScale aScale, const CompositorOptions& aOptions,
     bool aUseExternalSurfaceSize, const gfx::IntSize& aSurfaceSize) {
-  MOZ_ASSERT(XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying());
+  MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
 
   // When we are in a combined UI / GPU process, InProcessCompositorSession
@@ -116,7 +116,7 @@ CompositorManagerParent::CreateSameProcessWidgetCompositorBridge(
 CompositorManagerParent::CompositorManagerParent()
     : mCompositorThreadHolder(CompositorThreadHolder::GetSingleton()) {}
 
-CompositorManagerParent::~CompositorManagerParent() {}
+CompositorManagerParent::~CompositorManagerParent() = default;
 
 void CompositorManagerParent::Bind(
     Endpoint<PCompositorManagerParent>&& aEndpoint, bool aIsRoot) {
@@ -201,7 +201,7 @@ void CompositorManagerParent::Shutdown() {
   MOZ_ASSERT(NS_IsMainThread());
 
 #ifdef COMPOSITOR_MANAGER_PARENT_EXPLICIT_SHUTDOWN
-  CompositorThreadHolder::Loop()->PostTask(NS_NewRunnableFunction(
+  CompositorThread()->Dispatch(NS_NewRunnableFunction(
       "layers::CompositorManagerParent::Shutdown",
       []() -> void { CompositorManagerParent::ShutdownInternal(); }));
 #endif
@@ -307,7 +307,7 @@ mozilla::ipc::IPCResult CompositorManagerParent::RecvReportMemory(
   // thread, so we can't just pass it over to the renderer thread. We use
   // an intermediate MozPromise instead.
   wr::RenderThread::AccumulateMemoryReport(aggregate)->Then(
-      CompositorThreadHolder::Loop()->SerialEventTarget(), __func__,
+      CompositorThread(), __func__,
       [resolver = std::move(aResolver)](MemoryReport aReport) {
         resolver(aReport);
       },

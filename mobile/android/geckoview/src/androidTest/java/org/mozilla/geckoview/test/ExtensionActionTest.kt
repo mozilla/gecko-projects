@@ -39,9 +39,12 @@ class ExtensionActionTest : BaseSessionTest() {
 
     @field:Parameterized.Parameter(0) @JvmField var id: String = ""
 
+    private val controller
+        get() = sessionRule.runtime.webExtensionController
+
     @Before
     fun setup() {
-        sessionRule.runtime.webExtensionController.setTabActive(mainSession, true)
+        controller.setTabActive(mainSession, true)
 
         // This method installs the extension, opens up ports with the background script and the
         // content script and captures the default action definition from the manifest
@@ -51,11 +54,10 @@ class ExtensionActionTest : BaseSessionTest() {
         val windowPortResult = GeckoResult<WebExtension.Port>()
         val backgroundPortResult = GeckoResult<WebExtension.Port>()
 
-        extension = WebExtension("resource://android/assets/web_extensions/actions/",
-                "actions", WebExtension.Flags.ALLOW_CONTENT_MESSAGING,
-                sessionRule.runtime.webExtensionController)
+        extension = sessionRule.waitForResult(
+                controller.installBuiltIn("resource://android/assets/web_extensions/actions/"));
 
-        sessionRule.session.setMessageDelegate(
+        sessionRule.session.webExtensionController.setMessageDelegate(
                 extension!!,
                 object : WebExtension.MessageDelegate {
                     override fun onConnect(port: WebExtension.Port) {
@@ -83,14 +85,15 @@ class ExtensionActionTest : BaseSessionTest() {
             }
         })
 
-        sessionRule.waitForResult(sessionRule.runtime.registerWebExtension(extension!!))
-
         sessionRule.session.loadUri("http://example.com")
         sessionRule.waitForPageStop()
 
+        val pageAction = sessionRule.waitForResult(pageActionDefaultResult)
+        val browserAction = sessionRule.waitForResult(browserActionDefaultResult)
+
         default = when (id) {
-            "#pageAction" -> sessionRule.waitForResult(pageActionDefaultResult)
-            "#browserAction" -> sessionRule.waitForResult(browserActionDefaultResult)
+            "#pageAction" -> pageAction
+            "#browserAction" -> browserAction
             else -> throw IllegalArgumentException()
         }
 
@@ -114,7 +117,11 @@ class ExtensionActionTest : BaseSessionTest() {
 
     @After
     fun tearDown() {
-        sessionRule.waitForResult(sessionRule.runtime.unregisterWebExtension(extension!!))
+        if (extension != null) {
+            extension!!.setMessageDelegate(null, "browser")
+            extension!!.setActionDelegate(null)
+            sessionRule.waitForResult(controller.uninstall(extension!!))
+        }
     }
 
     private fun testBackgroundActionApi(message: String, tester: (WebExtension.Action) -> Unit) {
@@ -166,8 +173,8 @@ class ExtensionActionTest : BaseSessionTest() {
         sessionRule.addExternalDelegateDuringNextWait(
                 WebExtension.ActionDelegate::class,
                 { delegate ->
-                    sessionRule.session.setWebExtensionActionDelegate(extension!!, delegate) },
-                { sessionRule.session.setWebExtensionActionDelegate(extension!!, null) },
+                    sessionRule.session.webExtensionController.setActionDelegate(extension!!, delegate) },
+                { sessionRule.session.webExtensionController.setActionDelegate(extension!!, null) },
         object : WebExtension.ActionDelegate {
             override fun onBrowserAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
                 assertEquals(id, "#browserAction")
@@ -495,7 +502,7 @@ class ExtensionActionTest : BaseSessionTest() {
         }"""))
 
         val openPopup = GeckoResult<Void>()
-        sessionRule.session.setWebExtensionActionDelegate(extension!!,
+        sessionRule.session.webExtensionController.setActionDelegate(extension!!,
                 object : WebExtension.ActionDelegate {
             override fun onOpenPopup(extension: WebExtension,
                                      popupAction: WebExtension.Action): GeckoResult<GeckoSession>? {

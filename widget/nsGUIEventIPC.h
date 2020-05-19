@@ -74,6 +74,8 @@ struct ParamTraits<mozilla::WidgetEvent> {
       // Reset cross process dispatching state here because the event has not
       // been dispatched to different process from current process.
       aResult->ResetCrossProcessDispatchingState();
+      // Mark the event comes from another process.
+      aResult->MarkAsComingFromAnotherProcess();
     }
     return ret;
   }
@@ -136,7 +138,6 @@ struct ParamTraits<mozilla::WidgetMouseEventBase> {
     WriteParam(aMsg, aParam.mButton);
     WriteParam(aMsg, aParam.mButtons);
     WriteParam(aMsg, aParam.mPressure);
-    WriteParam(aMsg, aParam.mHitCluster);
     WriteParam(aMsg, aParam.mInputSource);
   }
 
@@ -147,7 +148,6 @@ struct ParamTraits<mozilla::WidgetMouseEventBase> {
            ReadParam(aMsg, aIter, &aResult->mButton) &&
            ReadParam(aMsg, aIter, &aResult->mButtons) &&
            ReadParam(aMsg, aIter, &aResult->mPressure) &&
-           ReadParam(aMsg, aIter, &aResult->mHitCluster) &&
            ReadParam(aMsg, aIter, &aResult->mInputSource);
   }
 };
@@ -1297,6 +1297,7 @@ struct ParamTraits<mozilla::PinchGestureInput> {
     WriteParam(aMsg, aParam.mLocalFocusPoint);
     WriteParam(aMsg, aParam.mCurrentSpan);
     WriteParam(aMsg, aParam.mPreviousSpan);
+    WriteParam(aMsg, aParam.mHandledByAPZ);
   }
 
   static bool Read(const Message* aMsg, PickleIterator* aIter,
@@ -1307,7 +1308,8 @@ struct ParamTraits<mozilla::PinchGestureInput> {
            ReadParam(aMsg, aIter, &aResult->mFocusPoint) &&
            ReadParam(aMsg, aIter, &aResult->mLocalFocusPoint) &&
            ReadParam(aMsg, aIter, &aResult->mCurrentSpan) &&
-           ReadParam(aMsg, aIter, &aResult->mPreviousSpan);
+           ReadParam(aMsg, aIter, &aResult->mPreviousSpan) &&
+           ReadParam(aMsg, aIter, &aResult->mHandledByAPZ);
   }
 };
 

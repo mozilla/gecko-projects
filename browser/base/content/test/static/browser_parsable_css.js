@@ -57,7 +57,7 @@ let whitelist = [
     platforms: ["linux"],
     isFromDevTools: false,
   },
-  // The '-moz-menulist-button' value is only supported in chrome and UA sheets
+  // The '-moz-menulist-arrow-button' value is only supported in chrome and UA sheets
   // but forms.css is loaded as a document sheet by this test.
   // Maybe bug 1261237 will fix this?
   {
@@ -85,19 +85,6 @@ if (
   whitelist.push({
     sourceName: /(skin\/shared\/Heartbeat|((?:res|gre-resources)\/(ua|html)))\.css$/i,
     errorMessage: /Error in parsing value for .*\bdisplay\b/i,
-    isFromDevTools: false,
-  });
-}
-
-if (
-  !Services.prefs.getBoolPref(
-    "layout.css.line-height-moz-block-height.content.enabled"
-  )
-) {
-  // -moz-block-height is used in form controls but not exposed to the web.
-  whitelist.push({
-    sourceName: /(?:res|gre-resources)\/forms\.css$/i,
-    errorMessage: /Error in parsing value for \u2018line-height\u2019/iu,
     isFromDevTools: false,
   });
 }

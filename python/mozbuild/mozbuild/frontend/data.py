@@ -26,8 +26,9 @@ from mozpack.chrome.manifest import ManifestEntry
 import mozpack.path as mozpath
 from .context import FinalTargetValue
 
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import itertools
+import six
 
 from ..util import (
     group_unified_files,
@@ -189,7 +190,7 @@ class ComputedFlags(ContextDerived):
             if value:
                 for dest_var in dest_vars:
                     flags[dest_var].extend(value)
-        return flags.items()
+        return sorted(flags.items())
 
 
 class XPIDLModule(ContextDerived):
@@ -219,7 +220,7 @@ class BaseDefines(ContextDerived):
         self.defines = defines
 
     def get_defines(self):
-        for define, value in self.defines.iteritems():
+        for define, value in six.iteritems(self.defines):
             if value is True:
                 yield('-D%s' % define)
             elif value is False:
@@ -414,7 +415,7 @@ class Linkable(ContextDerived):
         self.cxx_link = False
         self.linked_libraries = []
         self.linked_system_libs = []
-        self.lib_defines = Defines(context, {})
+        self.lib_defines = Defines(context, OrderedDict())
         self.sources = defaultdict(list)
 
     def link_library(self, obj):
@@ -583,6 +584,13 @@ class BaseRustProgram(ContextDerived):
         ContextDerived.__init__(self, context)
         self.name = name
         self.cargo_file = cargo_file
+        # Skip setting properties below which depend on cargo
+        # when we don't have a compile environment. The required
+        # config keys won't be available, but the instance variables
+        # that we don't set should never be accessed by the actual
+        # build in that case.
+        if not context.config.substs.get('COMPILE_ENVIRONMENT'):
+            return
         cargo_dir = cargo_output_directory(context, self.TARGET_SUBST_VAR)
         exe_file = '%s%s' % (name, context.config.substs.get(self.SUFFIX_VAR, ''))
         self.location = mozpath.join(cargo_dir, exe_file)
@@ -1275,7 +1283,9 @@ class GeneratedFile(ContextDerived):
         suffixes = tuple(suffixes)
 
         self.required_before_compile = [
-            f for f in self.outputs if f.endswith(suffixes) or 'stl_wrappers/' in f]
+            f for f in self.outputs if f.endswith(suffixes)
+            or 'stl_wrappers/' in f or 'xpidl.stub' in f
+        ]
 
         self.required_during_compile = [
             f for f in self.outputs if f.endswith(('.asm', '.c', '.cpp'))]

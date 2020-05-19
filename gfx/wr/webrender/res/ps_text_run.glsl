@@ -2,19 +2,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#define WR_VERTEX_SHADER_MAIN_FUNCTION text_shader_main_vs
+#define WR_BRUSH_FS_FUNCTION text_brush_fs
+#define WR_BRUSH_VS_FUNCTION text_brush_vs
+// The text brush shader doesn't use this but the macro must be defined
+// to compile the brush infrastructure.
+#define VECS_PER_SPECIFIC_BRUSH 0
+
 #include shared,prim_shared
 
-// A few varying slots for the brushes to use.
-// Using these instead of adding dedicated varyings avoids using a high
-// number of varyings in the multi-brush shader.
-//
-// TODO: This is duplicated from the brush shader code and will be merged
-//       back once text runs use the brush infrastructure.
-flat varying vec4 flat_varying_vec4_0;
-flat varying vec4 flat_varying_vec4_1;
-flat varying vec4 flat_varying_vec4_2;
-varying vec4 varying_vec4_0;
-varying vec4 varying_vec4_1;
+#ifdef WR_VERTEX_SHADER
+// Forward-declare the text vertex shader's main entry-point before including
+// the brush shader.
+void text_shader_main_vs(
+    Instance instance,
+    PrimitiveHeader ph,
+    Transform transform,
+    PictureTask task,
+    ClipArea clip_area
+);
+#endif
+
+#include brush
 
 #define V_COLOR             flat_varying_vec4_0
 #define V_MASK_SWIZZLE      flat_varying_vec4_1.xy
@@ -112,20 +121,21 @@ vec2 get_snap_bias(int subpx_dir) {
     }
 }
 
-void main(void) {
-    Instance instance = decode_instance_attributes();
-
+void text_shader_main_vs(
+    Instance instance,
+    PrimitiveHeader ph,
+    Transform transform,
+    PictureTask task,
+    ClipArea clip_area
+) {
     int glyph_index = instance.segment_index;
     int subpx_dir = (instance.flags >> 8) & 0xff;
     int color_mode = instance.flags & 0xff;
 
-    PrimitiveHeader ph = fetch_prim_header(instance.prim_header_address);
-    Transform transform = fetch_transform(ph.transform_id);
-    ClipArea clip_area = fetch_clip_area(instance.clip_address);
-    PictureTask task = fetch_picture_task(instance.picture_task_address);
-
+    // Note that the reference frame relative offset is stored in the prim local
+    // rect size during batching, instead of the actual size of the primitive.
     TextRun text = fetch_text_run(ph.specific_prim_address);
-    vec2 text_offset = vec2(ph.user_data.xy) / 256.0;
+    vec2 text_offset = ph.local_rect.size;
 
     if (color_mode == COLOR_MODE_FROM_PASS) {
         color_mode = uMode;
@@ -183,7 +193,7 @@ void main(void) {
         local_pos = glyph_transform_inv * (glyph_rect.p0 + glyph_rect.size * aPosition.xy);
     }
 #else
-    float raster_scale = float(ph.user_data.z) / 65535.0;
+    float raster_scale = float(ph.user_data.x) / 65535.0;
 
     // Scale in which the glyph is snapped when rasterized.
     float glyph_raster_scale = raster_scale * task.device_pixel_scale;
@@ -270,27 +280,56 @@ void main(void) {
     V_LAYER = res.layer;
     V_UV_BOUNDS = (res.uv_rect + vec4(0.5, 0.5, -0.5, -0.5)) / texture_size.xyxy;
 }
-#endif
+
+void text_brush_vs(
+    VertexInfo vi,
+    int prim_address,
+    RectWithSize prim_rect,
+    RectWithSize segment_rect,
+    ivec4 prim_user_data,
+    int specific_resource_address,
+    mat4 transform,
+    PictureTask pic_task,
+    int brush_flags,
+    vec4 segment_data
+) {
+    // This function is empty and unused for now. It has to be defined to build the shader
+    // as a brush, but the brush shader currently branches into text_shader_main_vs earlier
+    // instead of using the regular brush vertex interface for text.
+    // In the future we should strive to further unify text and brushes, and actually make
+    // use of this function.
+}
+
+#endif // WR_VERTEX_SHADER
 
 #ifdef WR_FRAGMENT_SHADER
-void main(void) {
+
+Fragment text_brush_fs(void) {
+    Fragment frag;
+
     vec3 tc = vec3(clamp(V_UV, V_UV_BOUNDS.xy, V_UV_BOUNDS.zw), V_LAYER);
     vec4 mask = texture(sColor0, tc);
     mask.rgb = mask.rgb * V_MASK_SWIZZLE.x + mask.aaa * V_MASK_SWIZZLE.y;
 
-    float alpha = do_clip();
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
-    alpha *= float(all(greaterThanEqual(V_UV_CLIP, vec4(0.0))));
-#endif
+    #ifdef WR_FEATURE_GLYPH_TRANSFORM
+        mask *= float(all(greaterThanEqual(V_UV_CLIP, vec4(0.0))));
+    #endif
 
-#if defined(WR_FEATURE_DEBUG_OVERDRAW)
-    oFragColor = WR_DEBUG_OVERDRAW_COLOR;
-#elif defined(WR_FEATURE_DUAL_SOURCE_BLENDING)
-    vec4 alpha_mask = mask * alpha;
-    oFragColor = V_COLOR * alpha_mask;
-    oFragBlend = alpha_mask * V_COLOR.a;
-#else
-    write_output(V_COLOR * mask * alpha);
-#endif
+    frag.color = V_COLOR * mask;
+
+    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+        frag.blend = V_COLOR.a * mask;
+    #endif
+
+    return frag;
 }
-#endif
+
+#endif // WR_FRAGMENT_SHADER
+
+// Undef macro names that could be re-defined by other shaders.
+#undef V_COLOR
+#undef V_MASK_SWIZZLE
+#undef V_UV_BOUNDS
+#undef V_UV
+#undef V_LAYER
+#undef V_UV_CLIP

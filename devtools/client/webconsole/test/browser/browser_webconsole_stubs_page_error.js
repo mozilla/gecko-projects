@@ -11,6 +11,10 @@ const {
   writeStubsToFile,
 } = require("chrome://mochitests/content/browser/devtools/client/webconsole/test/browser/stub-generator-helpers");
 
+const {
+  ResourceWatcher,
+} = require("devtools/shared/resources/resource-watcher");
+
 const TEST_URI =
   "http://example.com/browser/devtools/client/webconsole/test/browser/test-console-api.html";
 const STUB_FILE = "pageError.js";
@@ -63,9 +67,24 @@ add_task(async function() {
 async function generatePageErrorStubs() {
   const stubs = new Map();
   const toolbox = await openNewTabAndToolbox(TEST_URI, "webconsole");
-  const webConsoleFront = await toolbox.target.getFront("console");
+  const resourceWatcher = new ResourceWatcher(toolbox.targetList);
+
+  // The resource-watcher only supports a single call to watch/unwatch per
+  // instance, so we attach a unique watch callback, which will forward the
+  // resource to `handleErrorMessage`, dynamically updated for each command.
+  let handleErrorMessage = function() {};
+
+  const onErrorMessageAvailable = ({ resource }) => {
+    handleErrorMessage(resource);
+  };
+  await resourceWatcher.watch([resourceWatcher.TYPES.ERROR_MESSAGES], {
+    onAvailable: onErrorMessageAvailable,
+  });
+
   for (const [key, code] of getCommands()) {
-    const onPageError = webConsoleFront.once("pageError");
+    const onPageError = new Promise(resolve => {
+      handleErrorMessage = packet => resolve(packet);
+    });
 
     // On e10s, the exception is triggered in child process
     // and is ignored by test harness
@@ -119,7 +138,60 @@ function getCommands() {
     `throw new Error("Long error ".repeat(10000))`
   );
 
+  const evilDomain = `https://evil.com/?`;
+  const badDomain = `https://not-so-evil.com/?`;
+  const paramLength = 200;
+  const longParam = "a".repeat(paramLength);
+
+  const evilURL = `${evilDomain}${longParam}`;
+  const badURL = `${badDomain}${longParam}`;
+
+  pageError.set(
+    `throw string with URL`,
+    `throw "“${evilURL}“ is evil and “${badURL}“ is not good either"`
+  );
+
   pageError.set(`throw ""`, `throw ""`);
   pageError.set(`throw "tomato"`, `throw "tomato"`);
+  pageError.set(`throw false`, `throw false`);
+  pageError.set(`throw 0`, `throw 0`);
+  pageError.set(`throw null`, `throw null`);
+  pageError.set(`throw undefined`, `throw undefined`);
+  pageError.set(`throw Symbol`, `throw Symbol("potato")`);
+  pageError.set(`throw Object`, `throw {vegetable: "cucumber"}`);
+  pageError.set(`throw Error Object`, `throw new Error("pumpkin")`);
+  pageError.set(
+    `throw Error Object with custom name`,
+    `
+    var err = new Error("pineapple");
+    err.name = "JuicyError";
+    err.flavor = "delicious";
+    throw err;
+  `
+  );
+  pageError.set(`Promise reject ""`, `Promise.reject("")`);
+  pageError.set(`Promise reject "tomato"`, `Promise.reject("tomato")`);
+  pageError.set(`Promise reject false`, `Promise.reject(false)`);
+  pageError.set(`Promise reject 0`, `Promise.reject(0)`);
+  pageError.set(`Promise reject null`, `Promise.reject(null)`);
+  pageError.set(`Promise reject undefined`, `Promise.reject(undefined)`);
+  pageError.set(`Promise reject Symbol`, `Promise.reject(Symbol("potato"))`);
+  pageError.set(
+    `Promise reject Object`,
+    `Promise.reject({vegetable: "cucumber"})`
+  );
+  pageError.set(
+    `Promise reject Error Object`,
+    `Promise.reject(new Error("pumpkin"))`
+  );
+  pageError.set(
+    `Promise reject Error Object with custom name`,
+    `
+    var err = new Error("pineapple");
+    err.name = "JuicyError";
+    err.flavor = "delicious";
+    Promise.reject(err);
+  `
+  );
   return pageError;
 }

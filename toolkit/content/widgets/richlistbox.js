@@ -595,13 +595,6 @@
       this.scrollTop += offset;
     }
 
-    scrollToIndex(aIndex) {
-      var item = this.getItemAtIndex(aIndex);
-      if (item) {
-        this.ensureElementIsVisible(item, true);
-      }
-    }
-
     getIndexOfFirstVisibleRow() {
       var children = this.itemChildren;
 
@@ -942,10 +935,10 @@
      * nsIDOMXULSelectControlItemElement
      */
     get label() {
-      const XULNS =
+      const XUL_NS =
         "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
       return Array.from(
-        this.getElementsByTagNameNS(XULNS, "label"),
+        this.getElementsByTagNameNS(XUL_NS, "label"),
         label => label.value
       ).join(" ");
     }

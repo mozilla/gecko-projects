@@ -16,9 +16,9 @@ jobs:
           by-project:
               # No default
               mozilla-beta:
-                  - {weekday: 'Monday', hour: 4, minute: 0}
-                  - {weekday: 'Wednesday', hour: 4, minute: 0}
-                  - {weekday: 'Friday', hour: 4, minute: 0}
+                  - {weekday: 'Monday', hour: 2, minute: 0}
+                  - {weekday: 'Wednesday', hour: 2, minute: 0}
+                  - {weekday: 'Friday', hour: 2, minute: 0}
 
     - name: nightly-desktop
       job:
@@ -197,11 +197,11 @@ jobs:
           - {weekday: 'Monday', hour: 10, minute: 0}
           - {weekday: 'Thursday', hour: 10, minute: 0}
 
-    - name: pipfile-update
+    - name: python-dependency-update
       job:
           type: decision-task
           treeherder-symbol: Nfile
-          target-tasks-method: pipfile_update
+          target-tasks-method: python_dependency_update
       run-on-projects:
           - mozilla-central
       when:
@@ -232,6 +232,8 @@ jobs:
           type: decision-task
           treeherder-symbol: condprof
           target-tasks-method: condprof
+          include-push-tasks: true
+          optimize-target-tasks: false
       run-on-projects:
           - mozilla-central
       when:
@@ -258,3 +260,13 @@ jobs:
           - mozilla-central
       when:
           - {hour: 0, minute: 0}
+
+    - name: perftest
+      job:
+          type: decision-task
+          treeherder-symbol: perftest
+          target-tasks-method: perftest
+      run-on-projects:
+          - mozilla-central
+      when:
+          - {hour: 12, minute: 00}

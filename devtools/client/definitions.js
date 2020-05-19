@@ -303,9 +303,21 @@ function switchPerformancePanel() {
 }
 switchPerformancePanel();
 
-Services.prefs.addObserver("devtools.performance.new-panel-enabled", {
-  observe: switchPerformancePanel,
-});
+const prefObserver = { observe: switchPerformancePanel };
+Services.prefs.addObserver(
+  "devtools.performance.new-panel-enabled",
+  prefObserver
+);
+const unloadObserver = function(subject) {
+  if (subject.wrappedJSObject == require("@loader/unload")) {
+    Services.prefs.removeObserver(
+      "devtools.performance.new-panel-enabled",
+      prefObserver
+    );
+    Services.obs.removeObserver(unloadObserver, "devtools:loader:destroy");
+  }
+};
+Services.obs.addObserver(unloadObserver, "devtools:loader:destroy");
 
 Tools.memory = {
   id: "memory",
@@ -406,7 +418,7 @@ Tools.dom = {
   inMenu: true,
 
   isTargetSupported: function(target) {
-    return target.getTrait("webConsoleCommands");
+    return true;
   },
 
   build: function(iframeWindow, toolbox) {
@@ -455,8 +467,10 @@ Tools.application = {
   label: l10n("application.label"),
   panelLabel: l10n("application.panellabel"),
   tooltip: l10n("application.tooltip"),
-  inMenu: AppConstants.NIGHTLY_BUILD,
-  hiddenInOptions: !AppConstants.NIGHTLY_BUILD,
+  inMenu: AppConstants.NIGHTLY_BUILD || AppConstants.MOZ_DEV_EDITION,
+  hiddenInOptions: !(
+    AppConstants.NIGHTLY_BUILD || AppConstants.MOZ_DEV_EDITION
+  ),
 
   isTargetSupported: function(target) {
     return target.hasActor("manifest");

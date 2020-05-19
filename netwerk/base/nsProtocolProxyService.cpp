@@ -141,23 +141,23 @@ class nsAsyncResolveRequest final : public nsIRunnable,
       // callbacks called normally they will all be null and this is a nop
 
       if (mChannel) {
-        NS_ReleaseOnMainThreadSystemGroup("nsAsyncResolveRequest::mChannel",
-                                          mChannel.forget());
+        NS_ReleaseOnMainThread("nsAsyncResolveRequest::mChannel",
+                               mChannel.forget());
       }
 
       if (mCallback) {
-        NS_ReleaseOnMainThreadSystemGroup("nsAsyncResolveRequest::mCallback",
-                                          mCallback.forget());
+        NS_ReleaseOnMainThread("nsAsyncResolveRequest::mCallback",
+                               mCallback.forget());
       }
 
       if (mProxyInfo) {
-        NS_ReleaseOnMainThreadSystemGroup("nsAsyncResolveRequest::mProxyInfo",
-                                          mProxyInfo.forget());
+        NS_ReleaseOnMainThread("nsAsyncResolveRequest::mProxyInfo",
+                               mProxyInfo.forget());
       }
 
       if (mXPComPPS) {
-        NS_ReleaseOnMainThreadSystemGroup("nsAsyncResolveRequest::mXPComPPS",
-                                          mXPComPPS.forget());
+        NS_ReleaseOnMainThread("nsAsyncResolveRequest::mXPComPPS",
+                               mXPComPPS.forget());
       }
     }
   }
@@ -387,7 +387,8 @@ class nsAsyncResolveRequest final : public nsIRunnable,
         // now that the load is triggered, we can resubmit the query
         RefPtr<nsAsyncResolveRequest> newRequest =
             new nsAsyncResolveRequest(mPPS, mChannel, mResolveFlags, mCallback);
-        rv = mPPS->mPACMan->AsyncGetProxyForURI(proxyURI, newRequest, true);
+        rv = mPPS->mPACMan->AsyncGetProxyForURI(proxyURI, newRequest,
+                                                mResolveFlags, true);
       }
 
       if (NS_FAILED(rv))
@@ -654,8 +655,8 @@ class AsyncGetPACURIRequest final : public nsIRunnable {
 
  private:
   ~AsyncGetPACURIRequest() {
-    NS_ReleaseOnMainThreadSystemGroup("AsyncGetPACURIRequest::mServiceHolder",
-                                      mServiceHolder.forget());
+    NS_ReleaseOnMainThread("AsyncGetPACURIRequest::mServiceHolder",
+                           mServiceHolder.forget());
   }
 
   bool mIsMainThreadOnly;
@@ -1193,7 +1194,7 @@ const char* nsProtocolProxyService::ExtractProxyInfo(const char* start,
   const char* type = nullptr;
   switch (len) {
     case 4:
-      if (PL_strncasecmp(start, kProxyType_HTTP, 5) == 0) {
+      if (PL_strncasecmp(start, kProxyType_HTTP, 4) == 0) {
         type = kProxyType_HTTP;
       }
       break;
@@ -1239,7 +1240,7 @@ const char* nsProtocolProxyService::ExtractProxyInfo(const char* start,
       port = 1080;
     }
 
-    nsProxyInfo* pi = new nsProxyInfo();
+    RefPtr<nsProxyInfo> pi = new nsProxyInfo();
     pi->mType = type;
     pi->mFlags = flags;
     pi->mResolveFlags = aResolveFlags;
@@ -1271,7 +1272,7 @@ const char* nsProtocolProxyService::ExtractProxyInfo(const char* start,
       pi->mPort = port;
     }
 
-    NS_ADDREF(*result = pi);
+    pi.forget(result);
   }
 
   while (*end == ';' || *end == ' ' || *end == '\t') ++end;
@@ -1556,8 +1557,7 @@ nsresult nsProtocolProxyService::AsyncResolveInternal(
   }
 
   // else kick off a PAC thread query
-
-  rv = mPACMan->AsyncGetProxyForURI(uri, ctx, true);
+  rv = mPACMan->AsyncGetProxyForURI(uri, ctx, flags, true);
   if (NS_SUCCEEDED(rv)) ctx.forget(result);
   return rv;
 }
@@ -1676,7 +1676,7 @@ nsProtocolProxyService::GetFailoverForProxy(nsIProxyInfo* aProxy, nsIURI* aURI,
   LOG(("PAC failover from %s %s:%d to %s %s:%d\n", pi->mType, pi->mHost.get(),
        pi->mPort, pi->mNext->mType, pi->mNext->mHost.get(), pi->mNext->mPort));
 
-  NS_ADDREF(*aResult = pi->mNext);
+  *aResult = do_AddRef(pi->mNext).take();
   return NS_OK;
 }
 
@@ -1832,12 +1832,16 @@ void nsProtocolProxyService::LoadHostFilters(const nsACString& aFilters) {
         t.Record();
         parsingPort = true;
         continue;
-      } else if (token.Equals(mozilla::Tokenizer::Token::Char('/'))) {
+      }
+
+      if (token.Equals(mozilla::Tokenizer::Token::Char('/'))) {
         t.Claim(hostStr);
         t.Record();
         parsingMask = true;
         continue;
-      } else if (token.Equals(mozilla::Tokenizer::Token::Char(']'))) {
+      }
+
+      if (token.Equals(mozilla::Tokenizer::Token::Char(']'))) {
         parsingIPv6 = false;
         continue;
       }
@@ -1931,7 +1935,7 @@ void nsProtocolProxyService::LoadHostFilters(const nsACString& aFilters) {
       hinfo->name.host_len = host.Length();
 
       hinfo->is_ipaddr = false;
-      hinfo->name.host = ToNewCString(host);
+      hinfo->name.host = ToNewCString(host, mozilla::fallible);
 
       if (!hinfo->name.host) goto loser;
     }
@@ -2005,8 +2009,7 @@ nsresult nsProtocolProxyService::NewProxyInfo_Internal(
     NS_ENSURE_ARG(failover);
   }
 
-  nsProxyInfo* proxyInfo = new nsProxyInfo();
-  if (!proxyInfo) return NS_ERROR_OUT_OF_MEMORY;
+  RefPtr<nsProxyInfo> proxyInfo = new nsProxyInfo();
 
   proxyInfo->mType = aType;
   proxyInfo->mHost = aHost;
@@ -2021,7 +2024,7 @@ nsresult nsProtocolProxyService::NewProxyInfo_Internal(
   proxyInfo->mConnectionIsolationKey = aConnectionIsolationKey;
   failover.swap(proxyInfo->mNext);
 
-  NS_ADDREF(*aResult = proxyInfo);
+  proxyInfo.forget(aResult);
   return NS_OK;
 }
 
@@ -2252,12 +2255,12 @@ bool nsProtocolProxyService::ApplyFilter(
       return false;
     }
 
-    rv = filterLink->filter->ApplyFilter(this, uri, list, callback);
+    rv = filterLink->filter->ApplyFilter(uri, list, callback);
     return NS_SUCCEEDED(rv);
   }
 
   if (filterLink->channelFilter) {
-    rv = filterLink->channelFilter->ApplyFilter(this, channel, list, callback);
+    rv = filterLink->channelFilter->ApplyFilter(channel, list, callback);
     return NS_SUCCEEDED(rv);
   }
 

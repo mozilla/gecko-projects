@@ -302,8 +302,14 @@
        * Weak reference to an optional frame loader that can be used to influence
        * process selection for this browser.
        * See nsIBrowser.sameProcessAsFrameLoader.
+       *
+       * tabbrowser sets "sameProcessAsFrameLoader" on some browsers before
+       * they are connected. This avoids clearing that out while we're doing
+       * the initial construct(), which is what would read it.
        */
-      this._sameProcessAsFrameLoader = null;
+      if (this.mInitialized) {
+        this._sameProcessAsFrameLoader = null;
+      }
 
       this._loadContext = null;
 
@@ -321,8 +327,6 @@
 
       this._lastSearchString = null;
 
-      this._controller = null;
-
       this._remoteWebNavigation = null;
 
       this._remoteWebProgress = null;
@@ -339,17 +343,13 @@
 
       this._contentStoragePrincipal = null;
 
-      this._contentBlockingAllowListPrincipal = null;
-
       this._csp = null;
 
       this._referrerInfo = null;
 
       this._contentRequestContextID = null;
 
-      this._fullZoom = 1;
-
-      this._textZoom = 1;
+      this._rdmFullZoom = 1.0;
 
       this._isSyntheticDocument = false;
 
@@ -360,12 +360,6 @@
       this._audioMuted = false;
 
       this._hasAnyPlayingMediaBeenBlocked = false;
-
-      /**
-       * Only send the message "Browser:UnselectedTabHover" when someone requests
-       * for the message, which can reduce non-necessary communication.
-       */
-      this._shouldSendUnselectedTabHover = false;
 
       this._unselectedTabHoverMessageListenerCount = 0;
 
@@ -521,6 +515,28 @@
       popupAnchor.hidden = true;
       stack.appendChild(popupAnchor);
       return popupAnchor;
+    }
+
+    set suspendMediaWhenInactive(val) {
+      if (this.isRemoteBrowser) {
+        let { frameLoader } = this;
+        if (frameLoader && frameLoader.remoteTab) {
+          frameLoader.remoteTab.suspendMediaWhenInactive = val;
+        }
+      } else if (this.docShell) {
+        this.docShell.suspendMediaWhenInactive = val;
+      }
+    }
+
+    get suspendMediaWhenInactive() {
+      if (this.isRemoteBrowser) {
+        let { frameLoader } = this;
+        if (frameLoader && frameLoader.remoteTab) {
+          return frameLoader.remoteTab.suspendMediaWhenInactive;
+        }
+        return false;
+      }
+      return this.docShell && this.docShell.suspendMediaWhenInactive;
     }
 
     set docShellIsActive(val) {
@@ -712,10 +728,6 @@
       return this.webNavigation.sessionHistory;
     }
 
-    get markupDocumentViewer() {
-      return this.docShell.contentViewer;
-    }
-
     get contentTitle() {
       return this.isRemoteBrowser
         ? this._contentTitle
@@ -777,9 +789,12 @@
     }
 
     get contentBlockingAllowListPrincipal() {
-      return this.isRemoteBrowser
-        ? this._contentBlockingAllowListPrincipal
-        : this.contentDocument.contentBlockingAllowListPrincipal;
+      if (!this.isRemoteBrowser) {
+        return this.contentDocument.contentBlockingAllowListPrincipal;
+      }
+
+      return this.browsingContext.currentWindowGlobal
+        .contentBlockingAllowListPrincipal;
     }
 
     get csp() {
@@ -797,56 +812,53 @@
       }
     }
 
-    set fullZoom(val) {
-      if (this.isRemoteBrowser) {
-        let changed = val.toFixed(2) != this._fullZoom.toFixed(2);
-
-        if (changed) {
-          this._fullZoom = val;
-          this.sendMessageToActor("FullZoom", { value: val }, "Zoom", "roots");
-
-          let event = new Event("FullZoomChange", { bubbles: true });
-          this.dispatchEvent(event);
-        }
-      } else {
-        this.markupDocumentViewer.fullZoom = val;
-      }
-    }
-
     get referrerInfo() {
       return this.isRemoteBrowser
         ? this._referrerInfo
         : this.contentDocument.referrerInfo;
     }
 
-    get fullZoom() {
-      if (this.isRemoteBrowser) {
-        return this._fullZoom;
+    set fullZoom(val) {
+      if (val.toFixed(2) == this.fullZoom.toFixed(2)) {
+        return;
       }
-      return this.markupDocumentViewer.fullZoom;
+      if (this.browsingContext.inRDMPane) {
+        this._rdmFullZoom = val;
+        let event = document.createEvent("Events");
+        event.initEvent("FullZoomChange", true, false);
+        this.dispatchEvent(event);
+      } else {
+        this.browsingContext.fullZoom = val;
+      }
+    }
+
+    get fullZoom() {
+      if (this.browsingContext.inRDMPane) {
+        return this._rdmFullZoom;
+      }
+      return this.browsingContext.fullZoom;
     }
 
     set textZoom(val) {
-      if (this.isRemoteBrowser) {
-        let changed = val.toFixed(2) != this._textZoom.toFixed(2);
-
-        if (changed) {
-          this._textZoom = val;
-          this.sendMessageToActor("TextZoom", { value: val }, "Zoom", "roots");
-
-          let event = new Event("TextZoomChange", { bubbles: true });
-          this.dispatchEvent(event);
-        }
-      } else {
-        this.markupDocumentViewer.textZoom = val;
+      if (val.toFixed(2) == this.textZoom.toFixed(2)) {
+        return;
       }
+      this.browsingContext.textZoom = val;
     }
 
     get textZoom() {
-      if (this.isRemoteBrowser) {
-        return this._textZoom;
-      }
-      return this.markupDocumentViewer.textZoom;
+      return this.browsingContext.textZoom;
+    }
+
+    enterResponsiveMode() {
+      this.browsingContext.inRDMPane = true;
+      this._rdmFullZoom = this.browsingContext.fullZoom;
+      this.browsingContext.fullZoom = 1.0;
+    }
+
+    leaveResponsiveMode() {
+      this.browsingContext.inRDMPane = false;
+      this.browsingContext.fullZoom = this._rdmFullZoom;
     }
 
     get isSyntheticDocument() {
@@ -876,7 +888,11 @@
     }
 
     get shouldHandleUnselectedTabHover() {
-      return this._shouldSendUnselectedTabHover;
+      return this._unselectedTabHoverMessageListenerCount > 0;
+    }
+
+    set shouldHandleUnselectedTabHover(value) {
+      this._unselectedTabHoverMessageListenerCount += value ? 1 : -1;
     }
 
     get securityUI() {
@@ -1149,31 +1165,6 @@
       context.notifyMediaMutedChanged(false);
     }
 
-    pauseMedia(disposable) {
-      let suspendedReason;
-      if (disposable) {
-        suspendedReason = "mediaControlPaused";
-      } else {
-        suspendedReason = "lostAudioFocusTransiently";
-      }
-
-      this.sendMessageToActor(
-        "AudioPlayback",
-        { type: suspendedReason },
-        "AudioPlayback",
-        "roots"
-      );
-    }
-
-    stopMedia() {
-      this.sendMessageToActor(
-        "AudioPlayback",
-        { type: "mediaControlStopped" },
-        "AudioPlayback",
-        "roots"
-      );
-    }
-
     resumeMedia() {
       this.frameLoader.browsingContext.notifyStartDelayedAutoplayMedia();
       if (this._hasAnyPlayingMediaBeenBlocked) {
@@ -1185,12 +1176,17 @@
     }
 
     unselectedTabHover(hovered) {
-      if (!this._shouldSendUnselectedTabHover) {
+      if (!this.shouldHandleUnselectedTabHover) {
         return;
       }
-      this.messageManager.sendAsyncMessage("Browser:UnselectedTabHover", {
-        hovered,
-      });
+      this.sendMessageToActor(
+        "Browser:UnselectedTabHover",
+        {
+          hovered,
+        },
+        "UnselectedTabHover",
+        "roots"
+      );
     }
 
     didStartLoadSinceLastUserTyping() {
@@ -1259,12 +1255,6 @@
             true
           );
         }
-
-        const { RemoteController } = ChromeUtils.import(
-          "resource://gre/modules/RemoteController.jsm"
-        );
-        this._controller = new RemoteController(this);
-        this.controllers.appendController(this._controller);
       }
 
       try {
@@ -1284,7 +1274,7 @@
             !this.isRemoteBrowser
           ) {
             try {
-              this.docShell.useGlobalHistory = true;
+              this.docShell.browsingContext.useGlobalHistory = true;
             } catch (ex) {
               // This can occur if the Places database is locked
               Cu.reportError("Error enabling browser global history: " + ex);
@@ -1299,16 +1289,6 @@
         var securityUI = this.securityUI; // eslint-disable-line no-unused-vars
       } catch (e) {}
 
-      // tabbrowser.xml sets "sameProcessAsFrameLoader" as a direct property
-      // on some browsers before they are put into a DOM (and get a
-      // binding).  This hack makes sure that we hold a weak reference to
-      // the other browser (and go through the proper getter and setter).
-      if (this.hasOwnProperty("sameProcessAsFrameLoader")) {
-        var sameProcessAsFrameLoader = this.sameProcessAsFrameLoader;
-        delete this.sameProcessAsFrameLoader;
-        this.sameProcessAsFrameLoader = sameProcessAsFrameLoader;
-      }
-
       if (!this.isRemoteBrowser) {
         // If we've transitioned from remote to non-remote, we no longer need
         // our RemoteWebProgress or its associated manager, but we'll need to
@@ -1318,13 +1298,6 @@
         this.restoreProgressListeners();
 
         this.addEventListener("pagehide", this.onPageHide, true);
-      }
-
-      if (this.messageManager) {
-        this.messageManager.addMessageListener(
-          "UnselectedTabHover:Toggle",
-          this
-        );
       }
     }
 
@@ -1347,17 +1320,6 @@
         }
       }
 
-      // All controllers are released upon browser element removal, but not
-      // when destruction is triggered before element removal in tabbrowser.
-      // Release the controller in the latter case.
-      if (this._controller && this.controllers.getControllerCount()) {
-        try {
-          this.controllers.removeController(this._controller);
-        } catch (ex) {
-          Cu.reportError(ex);
-        }
-      }
-
       this.resetFields();
 
       if (!this.mInitialized) {
@@ -1377,52 +1339,19 @@
       }
     }
 
-    /**
-     * We call this _receiveMessage (and alias receiveMessage to it) so that
-     * bindings that inherit from this one can delegate to it.
-     */
-    _receiveMessage(aMessage) {
-      let data = aMessage.data;
-      switch (aMessage.name) {
-        case "UnselectedTabHover:Toggle":
-          this._shouldSendUnselectedTabHover = data.enable
-            ? ++this._unselectedTabHoverMessageListenerCount > 0
-            : --this._unselectedTabHoverMessageListenerCount == 0;
-          break;
-      }
-      return undefined;
-    }
-
     receiveMessage(aMessage) {
-      if (!this.isRemoteBrowser) {
-        return this._receiveMessage(aMessage);
-      }
-
-      let data = aMessage.data;
-      switch (aMessage.name) {
-        case "Browser:Init":
-          this._outerWindowID = data.outerWindowID;
-          break;
-        case "DOMTitleChanged":
-          this._contentTitle = data.title;
-          break;
-        default:
-          return this._receiveMessage(aMessage);
-      }
-      return undefined;
-    }
-
-    enableDisableCommandsRemoteOnly(
-      aAction,
-      aEnabledCommands,
-      aDisabledCommands
-    ) {
-      if (this._controller) {
-        this._controller.enableDisableCommands(
-          aAction,
-          aEnabledCommands,
-          aDisabledCommands
-        );
+      if (this.isRemoteBrowser) {
+        const data = aMessage.data;
+        switch (aMessage.name) {
+          case "Browser:Init":
+            this._outerWindowID = data.outerWindowID;
+            break;
+          case "DOMTitleChanged":
+            this._contentTitle = data.title;
+            break;
+          default:
+            break;
+        }
       }
     }
 
@@ -1472,7 +1401,6 @@
       aTitle,
       aContentPrincipal,
       aContentStoragePrincipal,
-      aContentBlockingAllowListPrincipal,
       aCSP,
       aReferrerInfo,
       aIsSynthetic,
@@ -1497,7 +1425,6 @@
         this._contentTitle = aTitle;
         this._contentPrincipal = aContentPrincipal;
         this._contentStoragePrincipal = aContentStoragePrincipal;
-        this._contentBlockingAllowListPrincipal = aContentBlockingAllowListPrincipal;
         this._csp = aCSP;
         this._referrerInfo = aReferrerInfo;
         this._isSyntheticDocument = aIsSynthetic;
@@ -1757,7 +1684,8 @@
             if (
               x > this._AUTOSCROLL_SNAP ||
               x < -this._AUTOSCROLL_SNAP ||
-              (y > this._AUTOSCROLL_SNAP || y < -this._AUTOSCROLL_SNAP)
+              y > this._AUTOSCROLL_SNAP ||
+              y < -this._AUTOSCROLL_SNAP
             ) {
               this._ignoreMouseEvents = false;
             }
@@ -1877,7 +1805,7 @@
       // DOMLinkAdded/Removed, onStateChange) should not be swapped here,
       // because these notifications are dispatched again once the docshells
       // are swapped.
-      var fieldsToSwap = ["_webBrowserFind"];
+      var fieldsToSwap = ["_webBrowserFind", "_rdmFullZoom"];
 
       if (this.isRemoteBrowser) {
         fieldsToSwap.push(
@@ -1895,9 +1823,6 @@
             "_charsetAutodetected",
             "_contentPrincipal",
             "_contentStoragePrincipal",
-            "_contentBlockingAllowListPrincipal",
-            "_fullZoom",
-            "_textZoom",
             "_isSyntheticDocument",
             "_innerWindowID",
           ]
@@ -2084,8 +2009,7 @@
         // Iterate as long as scope in assigned. Note that we use the original
         // passed in scope, not childScope here.
         if (scope) {
-          let contexts = browsingContext.getChildren();
-          for (let context of contexts) {
+          for (let context of browsingContext.children) {
             sendToChildren(context, scope);
           }
         }
@@ -2100,7 +2024,25 @@
     }
 
     leaveModalState() {
-      this.sendMessageToActor("LeaveModalState", {}, "BrowserElement", "roots");
+      this.sendMessageToActor(
+        "LeaveModalState",
+        { forceLeave: true },
+        "BrowserElement",
+        "roots"
+      );
+    }
+
+    /**
+     * Can be called for a window with or without modal state.
+     * If the window is not in modal state, this is a no-op.
+     */
+    maybeLeaveModalState() {
+      this.sendMessageToActor(
+        "LeaveModalState",
+        { forceLeave: false },
+        "BrowserElement",
+        "roots"
+      );
     }
 
     getDevicePermissionOrigins(key) {
@@ -2116,6 +2058,23 @@
         this._devicePermissionOrigins.set(key, origins);
       }
       return origins;
+    }
+
+    get canPerformProcessSwitch() {
+      return this.getTabBrowser() != null;
+    }
+
+    performProcessSwitch(
+      remoteType,
+      redirectLoadSwitchId,
+      replaceBrowsingContext
+    ) {
+      return this.getTabBrowser().performProcessSwitch(
+        this,
+        remoteType,
+        redirectLoadSwitchId,
+        replaceBrowsingContext
+      );
     }
   }
 

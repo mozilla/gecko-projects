@@ -33,18 +33,23 @@ class DocShellLoadStateInit;
  * call.
  */
 class nsDocShellLoadState final {
+  using BrowsingContext = mozilla::dom::BrowsingContext;
+  template <typename T>
+  using MaybeDiscarded = mozilla::dom::MaybeDiscarded<T>;
+
  public:
   NS_INLINE_DECL_REFCOUNTING(nsDocShellLoadState);
 
   explicit nsDocShellLoadState(nsIURI* aURI);
   explicit nsDocShellLoadState(
       const mozilla::dom::DocShellLoadStateInit& aLoadState);
+  explicit nsDocShellLoadState(const nsDocShellLoadState& aOther);
 
   static nsresult CreateFromPendingChannel(nsIChannel* aPendingChannel,
                                            nsDocShellLoadState** aResult);
 
   static nsresult CreateFromLoadURIOptions(
-      nsISupports* aConsumer, nsIURIFixup* aURIFixup, const nsAString& aURI,
+      BrowsingContext* aBrowsingContext, const nsAString& aURI,
       const mozilla::dom::LoadURIOptions& aLoadURIOptions,
       nsDocShellLoadState** aResult);
 
@@ -140,9 +145,11 @@ class nsDocShellLoadState final {
 
   void SetSrcdocData(const nsAString& aSrcdocData);
 
-  nsIDocShell* SourceDocShell() const;
+  const MaybeDiscarded<BrowsingContext>& SourceBrowsingContext() const {
+    return mSourceBrowsingContext;
+  }
 
-  void SetSourceDocShell(nsIDocShell* aSourceDocShell);
+  void SetSourceBrowsingContext(BrowsingContext* aSourceBrowsingContext);
 
   nsIURI* BaseURI() const;
 
@@ -170,6 +177,10 @@ class nsDocShellLoadState final {
   bool FirstParty() const;
 
   void SetFirstParty(bool aFirstParty);
+
+  bool HasValidUserGestureActivation() const;
+
+  void SetHasValidUserGestureActivation(bool HasValidUserGestureActivation);
 
   const nsCString& TypeHint() const;
 
@@ -218,11 +229,20 @@ class nsDocShellLoadState final {
     return mCancelContentJSEpoch;
   }
 
+  void SetLoadIdentifier(uint32_t aIdent) { mLoadIdentifier = aIdent; }
+  uint32_t GetLoadIdentifier() const { return mLoadIdentifier; }
+
   // When loading a document through nsDocShell::LoadURI(), a special set of
   // flags needs to be set based on other values in nsDocShellLoadState. This
   // function calculates those flags, before the LoadState is passed to
   // nsDocShell::InternalLoad.
   void CalculateLoadURIFlags();
+
+  // Compute the load flags to be used by creating channel.  aUriModified and
+  // aIsXFOError are expected to be Nothing when called from Parent process.
+  nsLoadFlags CalculateChannelLoadFlags(
+      mozilla::dom::BrowsingContext* aBrowsingContext, Maybe<bool> aUriModified,
+      Maybe<bool> aIsXFOError);
 
   mozilla::dom::DocShellLoadStateInit Serialize();
 
@@ -337,7 +357,7 @@ class nsDocShellLoadState final {
   nsString mSrcdocData;
 
   // When set, this is the Source Browsing Context for the navigation.
-  nsCOMPtr<nsIDocShell> mSourceDocShell;
+  MaybeDiscarded<BrowsingContext> mSourceBrowsingContext;
 
   // Used for srcdoc loads to give view-source knowledge of the load's base URI
   // as this information isn't embedded in the load's URI.
@@ -348,6 +368,9 @@ class nsDocShellLoadState final {
 
   // Is this a First Party Load?
   bool mFirstParty;
+
+  // Is this load triggered by a user gesture?
+  bool mHasValidUserGestureActivation;
 
   // A hint as to the content-type of the resulting data. If no hint, IsVoid()
   // should return true.
@@ -375,6 +398,12 @@ class nsDocShellLoadState final {
   // An optional value to pass to nsIDocShell::setCancelJSEpoch
   // when initiating the load.
   mozilla::Maybe<int32_t> mCancelContentJSEpoch;
+
+  // An optional identifier that refers to a DocumentLoadListener
+  // created in the parent process for this loads. DocumentChannels
+  // created in the content process can use this to find and attach
+  // to the in progress load.
+  uint32_t mLoadIdentifier;
 };
 
 #endif /* nsDocShellLoadState_h__ */

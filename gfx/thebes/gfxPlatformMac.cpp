@@ -13,6 +13,7 @@
 #include "gfxCoreTextShaper.h"
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
+#include "gfxConfig.h"
 
 #include "nsTArray.h"
 #include "mozilla/Preferences.h"
@@ -126,14 +127,6 @@ already_AddRefed<gfxASurface> gfxPlatformMac::CreateOffscreenSurface(
   return newSurface.forget();
 }
 
-gfxFontGroup* gfxPlatformMac::CreateFontGroup(
-    const FontFamilyList& aFontFamilyList, const gfxFontStyle* aStyle,
-    gfxTextPerfMetrics* aTextPerf, gfxUserFontSet* aUserFontSet,
-    gfxFloat aDevToCssSize) {
-  return new gfxFontGroup(aFontFamilyList, aStyle, aTextPerf, aUserFontSet,
-                          aDevToCssSize);
-}
-
 bool gfxPlatformMac::IsFontFormatSupported(uint32_t aFormatFlags) {
   if (gfxPlatform::IsFontFormatSupported(aFormatFlags)) {
     return true;
@@ -158,6 +151,7 @@ static const char kFontGeneva[] = "Geneva";
 static const char kFontGeezaPro[] = "Geeza Pro";
 static const char kFontGujaratiSangamMN[] = "Gujarati Sangam MN";
 static const char kFontGurmukhiMN[] = "Gurmukhi MN";
+static const char kFontHelvetica[] = "Helvetica";
 static const char kFontHiraginoKakuGothic[] = "Hiragino Kaku Gothic ProN";
 static const char kFontHiraginoSansGB[] = "Hiragino Sans GB";
 static const char kFontKefa[] = "Kefa";
@@ -231,6 +225,7 @@ void gfxPlatformMac::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
         aFontList.AppendElement(kFontSongtiSC);
         break;
       case 0x10:
+        aFontList.AppendElement(kFontHelvetica);
         aFontList.AppendElement(kFontMenlo);
         aFontList.AppendElement(kFontMyanmarMN);
         break;
@@ -366,9 +361,9 @@ static CVReturn VsyncCallback(CVDisplayLinkRef aDisplayLink,
 
 class OSXVsyncSource final : public VsyncSource {
  public:
-  OSXVsyncSource() {}
+  OSXVsyncSource() : mGlobalDisplay(new OSXDisplay()) {}
 
-  Display& GetGlobalDisplay() override { return mGlobalDisplay; }
+  Display& GetGlobalDisplay() override { return *mGlobalDisplay; }
 
   class OSXDisplay final : public VsyncSource::Display {
    public:
@@ -512,7 +507,7 @@ class OSXVsyncSource final : public VsyncSource {
  private:
   virtual ~OSXVsyncSource() = default;
 
-  OSXDisplay mGlobalDisplay;
+  RefPtr<OSXDisplay> mGlobalDisplay;
 };  // OSXVsyncSource
 
 static CVReturn VsyncCallback(CVDisplayLinkRef aDisplayLink,
@@ -564,16 +559,18 @@ gfxPlatformMac::CreateHardwareVsyncSource() {
   return osxVsyncSource.forget();
 }
 
-void gfxPlatformMac::GetPlatformCMSOutputProfile(void*& mem, size_t& size) {
-  mem = nullptr;
-  size = 0;
+nsTArray<uint8_t> gfxPlatformMac::GetPlatformCMSOutputProfileData() {
+  nsTArray<uint8_t> prefProfileData = GetPrefCMSOutputProfileData();
+  if (!prefProfileData.IsEmpty()) {
+    return prefProfileData;
+  }
 
   CGColorSpaceRef cspace = ::CGDisplayCopyColorSpace(::CGMainDisplayID());
   if (!cspace) {
     cspace = ::CGColorSpaceCreateDeviceRGB();
   }
   if (!cspace) {
-    return;
+    return nsTArray<uint8_t>();
   }
 
   CFDataRef iccp = ::CGColorSpaceCopyICCProfile(cspace);
@@ -581,22 +578,21 @@ void gfxPlatformMac::GetPlatformCMSOutputProfile(void*& mem, size_t& size) {
   ::CFRelease(cspace);
 
   if (!iccp) {
-    return;
+    return nsTArray<uint8_t>();
   }
 
   // copy to external buffer
-  size = static_cast<size_t>(::CFDataGetLength(iccp));
+  size_t size = static_cast<size_t>(::CFDataGetLength(iccp));
+
+  nsTArray<uint8_t> result;
+
   if (size > 0) {
-    void* data = malloc(size);
-    if (data) {
-      memcpy(data, ::CFDataGetBytePtr(iccp), size);
-      mem = data;
-    } else {
-      size = 0;
-    }
+    result.AppendElements(::CFDataGetBytePtr(iccp), size);
   }
 
   ::CFRelease(iccp);
+
+  return result;
 }
 
 bool gfxPlatformMac::CheckVariationFontSupport() {
@@ -605,4 +601,11 @@ bool gfxPlatformMac::CheckVariationFontSupport() {
   // fairly buggy.
   // (Note that Safari also requires 10.13 for variation-font support.)
   return nsCocoaFeatures::OnHighSierraOrLater();
+}
+
+void gfxPlatformMac::InitPlatformGPUProcessPrefs() {
+  FeatureState& gpuProc = gfxConfig::GetFeature(Feature::GPU_PROCESS);
+  gpuProc.ForceDisable(FeatureStatus::Blocked,
+                       "GPU process does not work on Mac",
+                       NS_LITERAL_CSTRING("FEATURE_FAILURE_MAC_GPU_PROC"));
 }

@@ -29,6 +29,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(AudioNode, DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParams)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOutputNodes)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOutputParams)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(AudioNode,
                                                   DOMEventTargetHelper)
@@ -610,7 +611,7 @@ void AudioNode::SetPassThrough(bool aPassThrough) {
 }
 
 void AudioNode::CreateAudioParam(RefPtr<AudioParam>& aParam, uint32_t aIndex,
-                                 const char* aName, float aDefaultValue,
+                                 const char16_t* aName, float aDefaultValue,
                                  float aMinValue, float aMaxValue) {
   aParam =
       new AudioParam(this, aIndex, aName, aDefaultValue, aMinValue, aMaxValue);

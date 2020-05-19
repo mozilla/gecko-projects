@@ -79,7 +79,7 @@ void XPathResult::RemoveObserver() {
 
 nsINode* XPathResult::IterateNext(ErrorResult& aRv) {
   if (!isIterator()) {
-    aRv.ThrowTypeError(u"Result is not an iterator");
+    aRv.ThrowTypeError("Result is not an iterator");
     return nullptr;
   }
 
@@ -88,7 +88,8 @@ nsINode* XPathResult::IterateNext(ErrorResult& aRv) {
   }
 
   if (mInvalidIteratorState) {
-    aRv.ThrowInvalidStateError("The document has been mutated since the result was returned");
+    aRv.ThrowInvalidStateError(
+        "The document has been mutated since the result was returned");
     return nullptr;
   }
 
@@ -137,7 +138,7 @@ void XPathResult::SetExprResult(txAExprResult* aExprResult,
     // The DOM spec doesn't really say what should happen when reusing an
     // XPathResult and an error is thrown. Let's not touch the XPathResult
     // in that case.
-    aRv.ThrowTypeError(u"Result type mismatch");
+    aRv.ThrowTypeError("Result type mismatch");
     return;
   }
 
@@ -241,7 +242,7 @@ nsresult XPathResult::GetExprResult(txAExprResult** aExprResult) {
 
   uint32_t i, count = mResultNodes.Count();
   for (i = 0; i < count; ++i) {
-    nsAutoPtr<txXPathNode> node(
+    UniquePtr<txXPathNode> node(
         txXPathNativeNode::createXPathNode(mResultNodes[i]));
     if (!node) {
       return NS_ERROR_OUT_OF_MEMORY;

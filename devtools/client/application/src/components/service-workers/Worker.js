@@ -4,6 +4,8 @@
 
 "use strict";
 
+const { Ci } = require("chrome");
+
 const {
   createFactory,
   PureComponent,
@@ -12,24 +14,18 @@ const {
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const {
-  br,
   dd,
   dl,
   dt,
-  header,
-  li,
   section,
   span,
-  time,
 } = require("devtools/client/shared/vendor/react-dom-factories");
 
-const {
-  getUnicodeUrl,
-  getUnicodeUrlPath,
-} = require("devtools/client/shared/unicode-url");
+const { getUnicodeUrlPath } = require("devtools/client/shared/unicode-url");
 
 const FluentReact = require("devtools/client/shared/vendor/fluent-react");
 const Localized = createFactory(FluentReact.Localized);
+const { l10n } = require("devtools/client/application/src/modules/l10n");
 
 const {
   services,
@@ -59,7 +55,6 @@ class Worker extends PureComponent {
 
     this.debug = this.debug.bind(this);
     this.start = this.start.bind(this);
-    this.unregister = this.unregister.bind(this);
   }
 
   debug() {
@@ -86,35 +81,41 @@ class Worker extends PureComponent {
     registrationFront.start();
   }
 
-  unregister() {
-    const { registrationFront } = this.props.worker;
-    registrationFront.unregister();
-  }
-
   isRunning() {
     // We know the worker is running if it has a worker actor.
     return !!this.props.worker.workerTargetFront;
   }
 
   isActive() {
-    return this.props.worker.active;
+    return this.props.worker.state === Ci.nsIServiceWorkerInfo.STATE_ACTIVATED;
   }
 
-  getServiceWorkerStatus() {
+  getLocalizedStatus() {
     if (this.isActive() && this.isRunning()) {
-      return "running";
+      return l10n.getString("serviceworker-worker-status-running");
     } else if (this.isActive()) {
-      return "stopped";
+      return l10n.getString("serviceworker-worker-status-stopped");
     }
-    // We cannot get service worker registrations unless the registration is in
-    // ACTIVE state. Unable to know the actual state ("installing", "waiting"), we
-    // display a custom state "registering" for now. See Bug 1153292.
-    return "registering";
+    // NOTE: this is already localized by the service worker front
+    // (strings are in debugger.properties)
+    return this.props.worker.stateText;
   }
 
-  formatScope(scope) {
-    const [, remainder] = getUnicodeUrl(scope).split("://");
-    return remainder || scope;
+  getClassNameForStatus(baseClass) {
+    const { state } = this.props.worker;
+
+    switch (state) {
+      case Ci.nsIServiceWorkerInfo.STATE_PARSED:
+      case Ci.nsIServiceWorkerInfo.STATE_INSTALLING:
+        return "worker__status--installing";
+      case Ci.nsIServiceWorkerInfo.STATE_INSTALLED:
+      case Ci.nsIServiceWorkerInfo.STATE_ACTIVATING:
+        return "worker__status--waiting";
+      case Ci.nsIServiceWorkerInfo.STATE_ACTIVATED:
+        return "worker__status--active";
+    }
+
+    return "worker__status--default";
   }
 
   formatSource(source) {
@@ -150,8 +151,14 @@ class Worker extends PureComponent {
 
   renderStartButton() {
     const { isDebugEnabled } = this.props;
-    const isDisabled = !isDebugEnabled;
 
+    // avoid rendering the button at all for workers that are either running,
+    // or in a state that prevents them from starting (like waiting)
+    if (this.isRunning() || !this.isActive()) {
+      return null;
+    }
+
+    const isDisabled = !isDebugEnabled;
     return Localized(
       {
         id: "serviceworker-worker-start2",
@@ -171,44 +178,11 @@ class Worker extends PureComponent {
 
   render() {
     const { worker } = this.props;
-    const status = this.getServiceWorkerStatus();
+    const statusText = this.getLocalizedStatus();
+    const statusClassName = this.getClassNameForStatus();
 
-    const unregisterButton = this.isActive()
-      ? Localized(
-          { id: "serviceworker-worker-unregister" },
-          UIButton({
-            onClick: this.unregister,
-            className: "worker__unregister-button js-unregister-button",
-          })
-        )
-      : null;
-
-    const lastUpdated = worker.lastUpdateTime
-      ? Localized(
-          {
-            id: "serviceworker-worker-updated",
-            // XXX: $date should normally be a Date object, but we pass the timestamp as a
-            // workaround. See Bug 1465718. worker.lastUpdateTime is in microseconds,
-            // convert to a valid timestamp in milliseconds by dividing by 1000.
-            $date: worker.lastUpdateTime / 1000,
-            time: time({ className: "js-sw-updated" }),
-          },
-          span({ className: "worker__data__updated" })
-        )
-      : null;
-
-    const scope = span(
-      { title: worker.scope, className: "worker__scope js-sw-scope" },
-      this.formatScope(worker.scope)
-    );
-
-    return li(
-      { className: "worker js-sw-container" },
-      header(
-        { className: "worker__header" },
-        scope,
-        section({ className: "worker__controls" }, unregisterButton)
-      ),
+    return section(
+      { className: "worker js-sw-worker" },
       dl(
         { className: "worker__data" },
         Localized(
@@ -219,15 +193,13 @@ class Worker extends PureComponent {
           {},
           span(
             {
-              title: worker.scope,
+              title: worker.url,
               className: "worker__source-url js-source-url",
             },
             this.formatSource(worker.url)
           ),
           " ",
-          this.renderDebugButton(),
-          lastUpdated ? br({}) : null,
-          lastUpdated ? lastUpdated : null
+          this.renderDebugButton()
         ),
         Localized(
           { id: "serviceworker-worker-status" },
@@ -235,12 +207,12 @@ class Worker extends PureComponent {
         ),
         dd(
           {},
-          Localized(
-            { id: "serviceworker-worker-status-" + status },
-            span({ className: "js-worker-status" })
+          span(
+            { className: `js-worker-status worker__status ${statusClassName}` },
+            statusText
           ),
           " ",
-          !this.isRunning() ? this.renderStartButton() : null
+          this.renderStartButton()
         )
       )
     );

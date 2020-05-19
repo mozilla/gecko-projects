@@ -49,6 +49,7 @@
 #include "mozilla/dom/Text.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PatternHelpers.h"
+#include "mozilla/StaticPrefs_svg.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -2559,7 +2560,7 @@ void SVGTextDrawPathCallbacks::HandleTextGeometry() {
   if (IsClipPathChild()) {
     RefPtr<Path> path = mContext.GetPath();
     ColorPattern white(
-        Color(1.f, 1.f, 1.f, 1.f));  // for masking, so no ToDeviceColor
+        DeviceColor(1.f, 1.f, 1.f, 1.f));  // for masking, so no ToDeviceColor
     mContext.GetDrawTarget()->Fill(path, white);
   } else {
     // Normal painting.
@@ -2782,6 +2783,12 @@ void SVGTextFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_SVG_TEXT);
 
   mMutationObserver = new MutationObserver(this);
+
+  if (mState & NS_FRAME_IS_NONDISPLAY) {
+    // We're inserting a new <text> element into a non-display context.
+    // Ensure that we get reflowed.
+    ScheduleReflowSVGNonDisplayText(IntrinsicDirty::StyleChange);
+  }
 }
 
 void SVGTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
@@ -4967,15 +4974,21 @@ bool SVGTextFrame::ShouldRenderAsPath(nsTextFrame* aFrame,
   // Fill is a non-solid paint, has a non-default fill-rule or has
   // non-1 opacity.
   if (!(style->mFill.kind.IsNone() ||
-        (style->mFill.kind.IsColor() && style->mFillOpacity == 1))) {
+        (style->mFill.kind.IsColor() && style->mFillOpacity.IsOpacity() &&
+         style->mFillOpacity.AsOpacity() == 1))) {
     return true;
   }
 
   // Text has a stroke.
-  if (style->HasStroke() &&
-      SVGContentUtils::CoordToFloat(static_cast<SVGElement*>(GetContent()),
-                                    style->mStrokeWidth) > 0) {
-    return true;
+  if (style->HasStroke()) {
+    if (style->mStrokeWidth.IsContextValue()) {
+      return true;
+    }
+    if (SVGContentUtils::CoordToFloat(
+            static_cast<SVGElement*>(GetContent()),
+            style->mStrokeWidth.AsLengthPercentage()) > 0) {
+      return true;
+    }
   }
 
   return false;
@@ -5227,8 +5240,8 @@ double SVGTextFrame::GetFontSizeScaleFactor() const {
  * it to the appropriate frame user space of aChildFrame according to
  * which rendered run the point hits.
  */
-Point SVGTextFrame::TransformFramePointToTextChild(const Point& aPoint,
-                                                   nsIFrame* aChildFrame) {
+Point SVGTextFrame::TransformFramePointToTextChild(
+    const Point& aPoint, const nsIFrame* aChildFrame) {
   NS_ASSERTION(aChildFrame && nsLayoutUtils::GetClosestFrameOfType(
                                   aChildFrame->GetParent(),
                                   LayoutFrameType::SVGText) == this,

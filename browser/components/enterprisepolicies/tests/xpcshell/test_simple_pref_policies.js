@@ -125,6 +125,7 @@ const POLICIES_TESTS = [
           SPNEGO: false,
           NTLM: false,
         },
+        PrivateBrowsing: true,
       },
     },
     lockedPrefs: {
@@ -135,6 +136,7 @@ const POLICIES_TESTS = [
       "network.negotiate-auth.allow-non-fqdn": true,
       "network.automatic-ntlm-auth.allow-proxies": false,
       "network.negotiate-auth.allow-proxies": false,
+      "network.auth.private-browsing-sso": true,
     },
   },
 
@@ -153,6 +155,7 @@ const POLICIES_TESTS = [
           SPNEGO: false,
           NTLM: false,
         },
+        PrivateBrowsing: true,
         Locked: false,
       },
     },
@@ -164,6 +167,7 @@ const POLICIES_TESTS = [
       "network.negotiate-auth.allow-non-fqdn": true,
       "network.automatic-ntlm-auth.allow-proxies": false,
       "network.negotiate-auth.allow-proxies": false,
+      "network.auth.private-browsing-sso": true,
     },
   },
 
@@ -563,6 +567,137 @@ const POLICIES_TESTS = [
     },
     unlockedPrefs: {
       "signon.rememberSignons": false,
+    },
+  },
+
+  // POLICY: UserMessaging
+  {
+    policies: {
+      UserMessaging: {
+        WhatsNew: false,
+        Locked: true,
+      },
+    },
+    lockedPrefs: {
+      "browser.messaging-system.whatsNewPanel.enabled": false,
+    },
+  },
+
+  {
+    policies: {
+      UserMessaging: {
+        ExtensionRecommendations: false,
+      },
+    },
+    unlockedPrefs: {
+      "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons": false,
+    },
+  },
+
+  {
+    policies: {
+      UserMessaging: {
+        FeatureRecommendations: false,
+      },
+    },
+    unlockedPrefs: {
+      "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features": false,
+    },
+  },
+
+  // POLICY: Permissions->Autoplay
+  {
+    policies: {
+      Permissions: {
+        Autoplay: {
+          Default: "allow-audio-video",
+          Locked: true,
+        },
+      },
+    },
+    lockedPrefs: {
+      "media.autoplay.default": 0,
+    },
+  },
+
+  {
+    policies: {
+      Permissions: {
+        Autoplay: {
+          Default: "block-audio",
+        },
+      },
+    },
+    unlockedPrefs: {
+      "media.autoplay.default": 1,
+    },
+  },
+
+  {
+    policies: {
+      Permissions: {
+        Autoplay: {
+          Default: "block-audio-video",
+        },
+      },
+    },
+    unlockedPrefs: {
+      "media.autoplay.default": 5,
+    },
+  },
+
+  // POLICY: LegacySameSiteCookieBehaviorEnabled
+
+  {
+    policies: {
+      LegacySameSiteCookieBehaviorEnabled: true,
+    },
+    unlockedPrefs: {
+      "network.cookie.sameSite.laxByDefault": false,
+    },
+  },
+
+  // POLICY: LegacySameSiteCookieBehaviorEnabledForDomainList
+
+  {
+    policies: {
+      LegacySameSiteCookieBehaviorEnabledForDomainList: [
+        "example.com",
+        "example.org",
+      ],
+    },
+    unlockedPrefs: {
+      "network.cookie.sameSite.laxByDefault.disabledHosts":
+        "example.com,example.org",
+    },
+  },
+
+  // POLICY: EncryptedMediaExtensions
+
+  {
+    policies: {
+      EncryptedMediaExtensions: {
+        Enabled: false,
+        Locked: true,
+      },
+    },
+    lockedPrefs: {
+      "media.eme.enabled": false,
+    },
+  },
+
+  // POLICY: PDFjs
+
+  {
+    policies: {
+      PDFjs: {
+        Enabled: false,
+        EnablePermissions: true,
+      },
+    },
+    lockedPrefs: {
+      "pdfjs.disabled": true,
+      "pdfjs.enablePermissions": true,
     },
   },
 ];

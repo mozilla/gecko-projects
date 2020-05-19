@@ -39,6 +39,7 @@ import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.SparseArray;
 import android.util.TypedValue;
+import android.view.DisplayCutout;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -178,6 +179,13 @@ public class GeckoView extends FrameLayout {
             if (GeckoView.this.mSurfaceWrapper != null) {
                 GeckoView.this.mSurfaceWrapper.getView().getLocationOnScreen(mOrigin);
                 mDisplay.screenOriginChanged(mOrigin[0], mOrigin[1]);
+                // cutout support
+                if (Build.VERSION.SDK_INT >= 28) {
+                    final DisplayCutout cutout = GeckoView.this.mSurfaceWrapper.getView().getRootWindowInsets().getDisplayCutout();
+                    if (cutout != null) {
+                        mDisplay.safeAreaInsetsChanged(cutout.getSafeInsetTop(), cutout.getSafeInsetRight(), cutout.getSafeInsetBottom(), cutout.getSafeInsetLeft());
+                    }
+                }
             }
         }
 
@@ -496,11 +504,6 @@ public class GeckoView extends FrameLayout {
         return mSession.getPanZoomController();
     }
 
-    public @NonNull DynamicToolbarAnimator getDynamicToolbarAnimator() {
-        ThreadUtils.assertOnUiThread();
-        return mSession.getDynamicToolbarAnimator();
-    }
-
     @Override
     public void onAttachedToWindow() {
         if (mSession != null) {
@@ -732,7 +735,8 @@ public class GeckoView extends FrameLayout {
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(final MotionEvent event) {
-        return onTouchEventForResult(event) != PanZoomController.INPUT_RESULT_UNHANDLED;
+        onTouchEventForResult(event);
+        return true;
     }
 
     /**
@@ -759,7 +763,8 @@ public class GeckoView extends FrameLayout {
 
     @Override
     public boolean onGenericMotionEvent(final MotionEvent event) {
-        return onGenericMotionEventForResult(event) != PanZoomController.INPUT_RESULT_HANDLED;
+        onGenericMotionEventForResult(event);
+        return true;
     }
 
     /**

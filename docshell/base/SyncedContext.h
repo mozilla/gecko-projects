@@ -7,10 +7,18 @@
 #ifndef mozilla_dom_SyncedContext_h
 #define mozilla_dom_SyncedContext_h
 
+#include "mozilla/dom/MaybeDiscarded.h"
+#include "mozilla/EnumSet.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Tuple.h"
 #include <utility>
+
+class PickleIterator;
+
+namespace IPC {
+class Message;
+}  // namespace IPC
 
 namespace mozilla {
 namespace ipc {
@@ -29,6 +37,8 @@ namespace syncedcontext {
 template <size_t I>
 using Index = typename std::integral_constant<size_t, I>;
 
+using IndexSet = EnumSet<size_t, uint64_t>;
+
 template <typename Context>
 class Transaction {
  public:
@@ -42,7 +52,7 @@ class Transaction {
   }
 
   // Apply the changes from this transaction to the specified Context in all
-  // processes. This method will call the correct `MaySet` and `DidSet` methods,
+  // processes. This method will call the correct `CanSet` and `DidSet` methods,
   // as well as move the value.
   //
   // If the target has been discarded, changes will be ignored.
@@ -51,12 +61,12 @@ class Transaction {
   nsresult Commit(Context* aOwner);
 
   // Called from `ContentParent` in response to a transaction from content.
-  mozilla::ipc::IPCResult CommitFromIPC(Context* aOwner,
+  mozilla::ipc::IPCResult CommitFromIPC(const MaybeDiscarded<Context>& aOwner,
                                         ContentParent* aSource);
 
   // Called from `ContentChild` in response to a transaction from the parent.
-  mozilla::ipc::IPCResult CommitFromIPC(Context* aOwner, uint64_t aEpoch,
-                                        ContentChild* aSource);
+  mozilla::ipc::IPCResult CommitFromIPC(const MaybeDiscarded<Context>& aOwner,
+                                        uint64_t aEpoch, ContentChild* aSource);
 
   void Write(IPC::Message* aMsg, mozilla::ipc::IProtocol* aActor) const;
   bool Read(const IPC::Message* aMsg, PickleIterator* aIter,
@@ -70,7 +80,10 @@ class Transaction {
   //
   // `Validate` must be called before calling this method.
   void Apply(Context* aOwner);
-  bool Validate(Context* aOwner, ContentParent* aSource);
+
+  // Returns the set of fields which failed to validate, or an empty set if
+  // there were no validation errors.
+  IndexSet Validate(Context* aOwner, ContentParent* aSource);
 
   using FieldStorage = typename Context::FieldStorage;
   static FieldStorage& GetFieldStorage(Context* aContext) {
@@ -107,16 +120,15 @@ class Transaction {
 
 // Storage related to synchronized context fields. Contains both a tuple of
 // individual field values, and epoch information for field synchronization.
-//
-// The dummy type in the initializer list is required to avoid issues with an
-// extra `,` character in the generated template parameter list created by the
-// decl macros.
 template <typename, typename... Ts>
 class FieldStorage {
  public:
   using FieldTuple = mozilla::Tuple<Ts...>;
 
   static constexpr size_t fieldCount = sizeof...(Ts);
+  static_assert(fieldCount < 64,
+                "At most 64 synced fields are supported. Please file a bug if "
+                "you need to additional fields.");
 
   const FieldTuple& Fields() const { return mFields; }
 
@@ -178,6 +190,9 @@ class FieldStorage {
   void Set##name(U&& aValue) {                               \
     this->template Set<IDX_##name>(std::forward<U>(aValue)); \
   }
+#define MOZ_DECL_SYNCED_CONTEXT_INDEX_TO_NAME(name, type) \
+  case IDX_##name:                                        \
+    return #name;
 
 // Declare a type as a synced context type.
 //
@@ -207,6 +222,12 @@ class FieldStorage {
    public:                                                                   \
     eachfield(MOZ_DECL_SYNCED_CONTEXT_TRANSACTION_SET)                       \
   };                                                                         \
+                                                                             \
+  /* Field name getter by field index */                                     \
+  static const char* FieldIndexToName(size_t aIndex) {                       \
+    switch (aIndex) { eachfield(MOZ_DECL_SYNCED_CONTEXT_INDEX_TO_NAME) }     \
+    return "<unknown>";                                                      \
+  }                                                                          \
   eachfield(MOZ_DECL_SYNCED_CONTEXT_FIELD_GETSET)
 
 }  // namespace syncedcontext

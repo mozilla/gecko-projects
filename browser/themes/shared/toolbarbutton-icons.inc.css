@@ -28,6 +28,7 @@ toolbar[brighttext] {
   position: absolute;
   overflow: hidden;
   z-index: 2;
+  pointer-events: none;
 }
 
 .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
@@ -205,7 +206,7 @@ toolbar[brighttext] {
 }
 
 #add-ons-button {
-  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric-16.svg");
+  list-style-image: url("chrome://mozapps/skin/extensions/extension.svg");
 }
 
 #open-file-button {
@@ -264,7 +265,7 @@ toolbar[brighttext] {
 }
 
 #preferences-button {
-  list-style-image: url("chrome://browser/skin/settings.svg");
+  list-style-image: url("chrome://global/skin/icons/settings.svg");
 }
 
 #PanelUI-menu-button {

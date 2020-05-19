@@ -135,7 +135,7 @@ class U2FHIDTokenManager final : public U2FTokenTransport {
   void HandleSignResult(UniquePtr<U2FResult>&& aResult);
 
  private:
-  ~U2FHIDTokenManager() {}
+  ~U2FHIDTokenManager() = default;
 
   void ClearPromises() {
     mRegisterPromise.RejectIfExists(NS_ERROR_DOM_UNKNOWN_ERR, __func__);
@@ -148,7 +148,7 @@ class U2FHIDTokenManager final : public U2FTokenTransport {
                 const nsCString& aClientDataJSON,
                 bool aForceNoneAttestation = false)
         : mId(aId),
-          mRpIdHash(aRpIdHash),
+          mRpIdHash(aRpIdHash.Clone()),
           mClientDataJSON(aClientDataJSON),
           mForceNoneAttestation(aForceNoneAttestation) {}
 

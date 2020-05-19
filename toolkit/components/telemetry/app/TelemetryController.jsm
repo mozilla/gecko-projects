@@ -58,6 +58,12 @@ XPCOMUtils.defineLazyServiceGetter(
   "nsITelemetry"
 );
 
+ChromeUtils.defineModuleGetter(
+  this,
+  "jwcrypto",
+  "resource://services-crypto/jwcrypto.jsm"
+);
+
 XPCOMUtils.defineLazyModuleGetters(this, {
   ClientID: "resource://gre/modules/ClientID.jsm",
   CoveragePing: "resource://gre/modules/CoveragePing.jsm",
@@ -171,6 +177,17 @@ var TelemetryController = Object.freeze({
    */
   testPromiseJsProbeRegistration() {
     return Promise.resolve(Impl._probeRegistrationPromise);
+  },
+
+  /**
+   * Register 'dynamic builtin' probes from the JSON definition files.
+   * This is needed to support adding new probes in developer builds
+   * without rebuilding the whole codebase.
+   *
+   * This is not meant to be used outside of local developer builds.
+   */
+  testRegisterJsProbes() {
+    return Impl.registerJsProbes();
   },
 
   /**
@@ -318,6 +335,7 @@ var Impl = {
   _shutdownBarrier: new AsyncShutdown.Barrier(
     "TelemetryController: Waiting for clients."
   ),
+  _shutdownState: "Shutdown not started.",
   // This is a private barrier blocked by pending async ping activity (sending & saving).
   _connectionsBarrier: new AsyncShutdown.Barrier(
     "TelemetryController: Waiting for pending ping activity"
@@ -394,6 +412,14 @@ var Impl = {
    * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
    * @param {String} [aOptions.overrideClientId=undefined] if set, override the
    *                 client id to the provided value. Implies aOptions.addClientId=true.
+   * @param {Boolean} [aOptions.useEncryption=false] if true, encrypt data client-side before sending.
+   * @param {Object}  [aOptions.publicKey=null] the public key to use if encryption is enabled (JSON Web Key).
+   * @param {String}  [aOptions.encryptionKeyId=null] the public key ID to use if encryption is enabled.
+   * @param {String}  [aOptions.studyName=null] the study name to use.
+   * @param {String}  [aOptions.schemaName=null] the schema name to use if encryption is enabled.
+   * @param {String}  [aOptions.schemaNamespace=null] the schema namespace to use if encryption is enabled.
+   * @param {String}  [aOptions.schemaVersion=null] the schema version to use if encryption is enabled.
+   * @param {Boolean} [aOptions.addPioneerId=false] true if the ping should contain the Pioneer id, false otherwise.
    *
    * @returns {Object} An object that contains the assembled ping data.
    */
@@ -462,6 +488,14 @@ var Impl = {
    *                  environment data.
    * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
    * @param {Boolean} [aOptions.usePingSender=false] if true, send the ping using the PingSender.
+   * @param {Boolean} [aOptions.useEncryption=false] if true, encrypt data client-side before sending.
+   * @param {Object}  [aOptions.publicKey=null] the public key to use if encryption is enabled (JSON Web Key).
+   * @param {String}  [aOptions.encryptionKeyId=null] the public key ID to use if encryption is enabled.
+   * @param {String}  [aOptions.studyName=null] the study name to use.
+   * @param {String}  [aOptions.schemaName=null] the schema name to use if encryption is enabled.
+   * @param {String}  [aOptions.schemaNamespace=null] the schema namespace to use if encryption is enabled.
+   * @param {String}  [aOptions.schemaVersion=null] the schema version to use if encryption is enabled.
+   * @param {Boolean} [aOptions.addPioneerId=false] true if the ping should contain the Pioneer id, false otherwise.
    * @param {String} [aOptions.overrideClientId=undefined] if set, override the
    *                 client id to the provided value. Implies aOptions.addClientId=true.
    * @returns {Promise} Test-only - a promise that is resolved with the ping id once the ping is stored or sent.
@@ -480,17 +514,64 @@ var Impl = {
       this._clientID = await ClientID.getClientID();
     }
 
-    const pingData = this.assemblePing(aType, aPayload, aOptions);
+    let pingData = this.assemblePing(aType, aPayload, aOptions);
     this._log.trace("submitExternalPing - ping assembled, id: " + pingData.id);
+
+    if (aOptions.useEncryption === true) {
+      try {
+        if (!aOptions.publicKey) {
+          throw new Error("Public key is required when using encryption.");
+        }
+
+        if (
+          !(
+            aOptions.schemaName &&
+            aOptions.schemaNamespace &&
+            aOptions.schemaVersion
+          )
+        ) {
+          throw new Error(
+            "Schema name, namespace, and version are required when using encryption."
+          );
+        }
+
+        const payload = {};
+        payload.encryptedData = await jwcrypto.generateJWE(
+          aOptions.publicKey,
+          new TextEncoder("utf-8").encode(JSON.stringify(aPayload))
+        );
+
+        payload.schemaVersion = aOptions.schemaVersion;
+        payload.schemaName = aOptions.schemaName;
+        payload.schemaNamespace = aOptions.schemaNamespace;
+
+        payload.encryptionKeyId = aOptions.encryptionKeyId;
+
+        if (aOptions.addPioneerId === true) {
+          // This will throw if there is no pioneer ID set.
+          payload.pioneerId = Services.prefs.getStringPref(
+            "toolkit.telemetry.pioneerId"
+          );
+          payload.studyName = aOptions.studyName;
+        }
+
+        pingData.payload = payload;
+      } catch (e) {
+        this._log.error("_submitPingLogic - Unable to encrypt ping", e);
+        // Do not attempt to continue
+        throw e;
+      }
+    }
 
     // Always persist the pings if we are allowed to. We should not yield on any of the
     // following operations to keep this function synchronous for the majority of the calls.
-    let archivePromise = TelemetryArchive.promiseArchivePing(pingData).catch(
-      e =>
-        this._log.error(
-          "submitExternalPing - Failed to archive ping " + pingData.id,
-          e
-        )
+    let archivePromise = TelemetryArchive.promiseArchivePing(
+      pingData
+    ).catch(e =>
+      this._log.error(
+        "submitExternalPing - Failed to archive ping " + pingData.id,
+        e
+      )
     );
     let p = [archivePromise];
 
@@ -515,6 +596,14 @@ var Impl = {
    *                  environment data.
    * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
    * @param {Boolean} [aOptions.usePingSender=false] if true, send the ping using the PingSender.
+   * @param {Boolean} [aOptions.useEncryption=false] if true, encrypt data client-side before sending.
+   * @param {Object}  [aOptions.publicKey=null] the public key to use if encryption is enabled (JSON Web Key).
+   * @param {String}  [aOptions.encryptionKeyId=null] the public key ID to use if encryption is enabled.
+   * @param {String}  [aOptions.studyName=null] the study name to use.
+   * @param {String}  [aOptions.schemaName=null] the schema name to use if encryption is enabled.
+   * @param {String}  [aOptions.schemaNamespace=null] the schema namespace to use if encryption is enabled.
+   * @param {String}  [aOptions.schemaVersion=null] the schema version to use if encryption is enabled.
+   * @param {Boolean} [aOptions.addPioneerId=false] true if the ping should contain the Pioneer id, false otherwise.
    * @param {String} [aOptions.overrideClientId=undefined] if set, override the
    *                 client id to the provided value. Implies aOptions.addClientId=true.
    * @returns {Promise} Test-only - a promise that is resolved with the ping id once the ping is stored or sent.
@@ -840,10 +929,7 @@ var Impl = {
 
             // Start the untrusted modules ping, which reports events where
             // untrusted modules were loaded into the Firefox process.
-            if (
-              AppConstants.EARLY_BETA_OR_EARLIER &&
-              AppConstants.platform == "win"
-            ) {
+            if (AppConstants.platform == "win") {
               TelemetryUntrustedModulesPing.start();
             }
           }
@@ -907,6 +993,9 @@ var Impl = {
     if (!this._initialized) {
       return;
     }
+    let start = TelemetryUtils.monotonicNow();
+    let now = () => TelemetryUtils.monotonicNow() - start;
+    this._shutdownStep = "_cleanupOnShutdown begin " + now();
 
     Services.prefs.removeObserver(PREF_BRANCH_LOG, configureLogging);
     this._detachObservers();
@@ -914,40 +1003,55 @@ var Impl = {
     // Now do an orderly shutdown.
     try {
       if (this._delayedNewPingTask) {
+        this._shutdownStep = "awaiting delayed new ping task " + now();
         await this._delayedNewPingTask.finalize();
       }
 
+      this._shutdownStep = "UpdatePing.shutdown() " + now();
       UpdatePing.shutdown();
 
+      this._shutdownStep = "TelemetryEventPing.shutdown() " + now();
       TelemetryEventPing.shutdown();
+      this._shutdownStep = "EcosystemTelemetry.shutdown() " + now();
       EcosystemTelemetry.shutdown();
+      this._shutdownStep = "await TelemetryPrioPing.shutdown() " + now();
       await TelemetryPrioPing.shutdown();
 
       // Stop the datachoices infobar display.
+      this._shutdownStep = "TelemetryReportingPolicy.shutdown() " + now();
       TelemetryReportingPolicy.shutdown();
+      this._shutdownStep = "TelemetryEnvironment.shutdown() " + now();
       TelemetryEnvironment.shutdown();
 
       // Stop any ping sending.
+      this._shutdownStep = "await TelemetrySend.shutdown() " + now();
       await TelemetrySend.shutdown();
 
       // Send latest data.
+      this._shutdownStep = "await TelemetryHealthPing.shutdown() " + now();
       await TelemetryHealthPing.shutdown();
 
+      this._shutdownStep = "await TelemetrySession.shutdown() " + now();
       await TelemetrySession.shutdown();
+      this._shutdownStep = "await Services.telemetry.shutdown() " + now();
       await Services.telemetry.shutdown();
 
       // First wait for clients processing shutdown.
+      this._shutdownStep = "await this._shutdownBarrier.wait() " + now();
       await this._shutdownBarrier.wait();
 
       // ... and wait for any outstanding async ping activity.
+      this._shutdownStep = "await this._connectionsBarrier.wait() " + now();
       await this._connectionsBarrier.wait();
 
       if (AppConstants.platform !== "android") {
         // No PingSender on Android.
+        this._shutdownStep = "TelemetrySend.flushPingSenderBatch " + now();
         TelemetrySend.flushPingSenderBatch();
       }
 
       // Perform final shutdown operations.
+      this._shutdownStep = "await TelemetryStorage.shutdown() " + now();
       await TelemetryStorage.shutdown();
     } finally {
       // Reset state.
@@ -955,6 +1059,7 @@ var Impl = {
       this._initStarted = false;
       this._shutDown = true;
     }
+    this._shutdownStep = "_cleanupOnShutdown end " + now();
   },
 
   shutdown() {
@@ -1027,6 +1132,7 @@ var Impl = {
       connectionsBarrier: this._connectionsBarrier.state,
       sendModule: TelemetrySend.getShutdownState(),
       haveDelayedNewProfileTask: !!this._delayedNewPingTask,
+      shutdownStep: this._shutdownStep,
     };
   },
 

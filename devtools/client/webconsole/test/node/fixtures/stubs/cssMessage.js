@@ -29,17 +29,16 @@ rawPackets.set(`Unknown property ‘such-unknown-property’.  Declaration dropp
     "columnNumber": 27,
     "category": "CSS Parser",
     "innerWindowID": 8589934593,
-    "timeStamp": 1572867894874,
+    "timeStamp": 1572867483805,
     "warning": true,
     "error": false,
-    "exception": false,
-    "strict": false,
     "info": false,
     "private": false,
     "stacktrace": null,
     "notes": null,
     "chromeContext": false,
-    "cssSelectors": "p"
+    "cssSelectors": "p",
+    "isPromiseRejection": false
   },
   "type": "pageError"
 });
@@ -55,17 +54,16 @@ rawPackets.set(`Error in parsing value for ‘padding-top’.  Declaration dropp
     "columnNumber": 18,
     "category": "CSS Parser",
     "innerWindowID": 8589934593,
-    "timeStamp": 1572867895090,
+    "timeStamp": 1572867483805,
     "warning": true,
     "error": false,
-    "exception": false,
-    "strict": false,
     "info": false,
     "private": false,
     "stacktrace": null,
     "notes": null,
     "chromeContext": false,
-    "cssSelectors": "p"
+    "cssSelectors": "p",
+    "isPromiseRejection": false
   },
   "type": "pageError"
 });

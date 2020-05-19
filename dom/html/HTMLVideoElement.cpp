@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/HTMLVideoElement.h"
+
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLVideoElementBinding.h"
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
@@ -38,8 +40,10 @@
 nsGenericHTMLElement* NS_NewHTMLVideoElement(
     already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
     mozilla::dom::FromParser aFromParser) {
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo(aNodeInfo);
+  auto* nim = nodeInfo->NodeInfoManager();
   mozilla::dom::HTMLVideoElement* element =
-      new mozilla::dom::HTMLVideoElement(std::move(aNodeInfo));
+      new (nim) mozilla::dom::HTMLVideoElement(nodeInfo.forget());
   element->Init();
   return element;
 }
@@ -80,7 +84,8 @@ nsresult HTMLVideoElement::Clone(mozilla::dom::NodeInfo* aNodeInfo,
                                  nsINode** aResult) const {
   *aResult = nullptr;
   RefPtr<mozilla::dom::NodeInfo> ni(aNodeInfo);
-  HTMLVideoElement* it = new HTMLVideoElement(ni.forget());
+  auto* nim = ni->NodeInfoManager();
+  HTMLVideoElement* it = new (nim) HTMLVideoElement(ni.forget());
   it->Init();
   nsCOMPtr<nsINode> kungFuDeathGrip = it;
   nsresult rv = const_cast<HTMLVideoElement*>(this)->CopyInnerTo(it);
@@ -234,9 +239,9 @@ nsresult HTMLVideoElement::SetAcceptHeader(nsIHttpChannel* aChannel) {
   return aChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"), value, false);
 }
 
-bool HTMLVideoElement::IsInteractiveHTMLContent(bool aIgnoreTabindex) const {
+bool HTMLVideoElement::IsInteractiveHTMLContent() const {
   return HasAttr(kNameSpaceID_None, nsGkAtoms::controls) ||
-         HTMLMediaElement::IsInteractiveHTMLContent(aIgnoreTabindex);
+         HTMLMediaElement::IsInteractiveHTMLContent();
 }
 
 uint32_t HTMLVideoElement::MozParsedFrames() const {
@@ -385,10 +390,16 @@ void HTMLVideoElement::UpdateWakeLock() {
 }
 
 bool HTMLVideoElement::ShouldCreateVideoWakeLock() const {
-  // Make sure we only request wake lock for video with audio track, because
-  // video without audio track is often used as background image which seems no
-  // need to hold a wakelock.
-  return HasVideo() && HasAudio();
+  // Only request wake lock for video with audio or video from media stream,
+  // because non-stream video without audio is often used as a background image.
+  //
+  // Some web conferencing sites route audio outside the video element, and
+  // would not be detected unless we check for media stream, so do that below.
+  //
+  // Media streams generally aren't used as background images, though if they
+  // were we'd get false positives. If this is an issue, we could check for
+  // media stream AND document has audio playing (but that was tricky to do).
+  return HasVideo() && (mSrcStream || HasAudio());
 }
 
 void HTMLVideoElement::CreateVideoWakeLockIfNeeded() {
@@ -549,6 +560,7 @@ void HTMLVideoElement::MaybeBeginCloningVisually() {
     if (container) {
       mDecoder->SetSecondaryVideoContainer(container);
     }
+    UpdateMediaControlAfterPictureInPictureModeChanged();
   } else if (mSrcStream) {
     VideoFrameContainer* container =
         mVisualCloneTarget->GetVideoFrameContainer();
@@ -558,6 +570,7 @@ void HTMLVideoElement::MaybeBeginCloningVisually() {
           this, container, mAbstractMainThread);
       mSelectedVideoStreamTrack->AddVideoOutput(mSecondaryVideoOutput);
     }
+    UpdateMediaControlAfterPictureInPictureModeChanged();
   }
 }
 
@@ -578,6 +591,8 @@ void HTMLVideoElement::EndCloningVisually() {
 
   Unused << mVisualCloneTarget->SetVisualCloneSource(nullptr);
   Unused << SetVisualCloneTarget(nullptr);
+
+  UpdateMediaControlAfterPictureInPictureModeChanged();
 
   if (IsInComposedDoc() && !StaticPrefs::media_cloneElementVisually_testing()) {
     NotifyUAWidgetSetupOrChange();

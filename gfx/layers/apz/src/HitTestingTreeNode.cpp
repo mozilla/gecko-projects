@@ -14,6 +14,8 @@
 #include "nsPrintfCString.h"                  // for nsPrintfCString
 #include "UnitTransforms.h"                   // for ViewAs
 
+static mozilla::LazyLogModule sApzMgrLog("apz.manager");
+
 namespace mozilla {
 namespace layers {
 
@@ -48,8 +50,11 @@ void HitTestingTreeNode::RecycleWith(
   mApzc = aApzc;
   mLayersId = aLayersId;
   MOZ_ASSERT(!mApzc || mApzc->GetLayersId() == mLayersId);
-  // The caller is expected to call SetHitTestData to repopulate the hit-test
-  // fields.
+  // The caller is expected to call appropriate setters (SetHitTestData,
+  // SetScrollbarData, SetFixedPosData, SetStickyPosData, etc.) to repopulate
+  // all the data fields before using this node for "real work". Otherwise
+  // those data fields may contain stale information from the previous use
+  // of this node object.
 }
 
 HitTestingTreeNode::~HitTestingTreeNode() = default;
@@ -115,6 +120,11 @@ bool HitTestingTreeNode::IsScrollbarNode() const {
   return mScrollbarData.mScrollbarLayerType != layers::ScrollbarLayerType::None;
 }
 
+bool HitTestingTreeNode::IsScrollbarContainerNode() const {
+  return mScrollbarData.mScrollbarLayerType ==
+         layers::ScrollbarLayerType::Container;
+}
+
 ScrollDirection HitTestingTreeNode::GetScrollbarDirection() const {
   MOZ_ASSERT(IsScrollbarNode());
   MOZ_ASSERT(mScrollbarData.mDirection.isSome());
@@ -167,10 +177,12 @@ void HitTestingTreeNode::SetPrevSibling(HitTestingTreeNode* aSibling) {
 void HitTestingTreeNode::SetStickyPosData(
     ScrollableLayerGuid::ViewID aStickyPosTarget,
     const LayerRectAbsolute& aScrollRangeOuter,
-    const LayerRectAbsolute& aScrollRangeInner) {
+    const LayerRectAbsolute& aScrollRangeInner,
+    const Maybe<uint64_t>& aStickyPositionAnimationId) {
   mStickyPosTarget = aStickyPosTarget;
   mStickyScrollRangeOuter = aScrollRangeOuter;
   mStickyScrollRangeInner = aScrollRangeInner;
+  mStickyPositionAnimationId = aStickyPositionAnimationId;
 }
 
 ScrollableLayerGuid::ViewID HitTestingTreeNode::GetStickyPosTarget() const {
@@ -183,6 +195,10 @@ const LayerRectAbsolute& HitTestingTreeNode::GetStickyScrollRangeOuter() const {
 
 const LayerRectAbsolute& HitTestingTreeNode::GetStickyScrollRangeInner() const {
   return mStickyScrollRangeInner;
+}
+
+Maybe<uint64_t> HitTestingTreeNode::GetStickyPositionAnimationId() const {
+  return mStickyPositionAnimationId;
 }
 
 void HitTestingTreeNode::MakeRoot() {
@@ -412,26 +428,38 @@ bool HitTestingTreeNode::IsAsyncZoomContainer() const {
 }
 
 void HitTestingTreeNode::Dump(const char* aPrefix) const {
-  if (mPrevSibling) {
-    mPrevSibling->Dump(aPrefix);
+  MOZ_LOG(
+      sApzMgrLog, LogLevel::Debug,
+      ("%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%s%sr=(%s) t=(%s) "
+       "c=(%s)%s%s\n",
+       aPrefix, this, mApzc.get(),
+       mApzc ? Stringify(mApzc->GetGuid()).c_str()
+             : nsPrintfCString("l=0x%" PRIx64, uint64_t(mLayersId)).get(),
+       (mOverride & EventRegionsOverride::ForceDispatchToContent) ? "fdtc "
+                                                                  : "",
+       (mOverride & EventRegionsOverride::ForceEmptyHitRegion) ? "fehr " : "",
+       (mFixedPosTarget != ScrollableLayerGuid::NULL_SCROLL_ID)
+           ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get()
+           : "",
+       Stringify(mEventRegions).c_str(), Stringify(mTransform).c_str(),
+       mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none",
+       mScrollbarData.mDirection.isSome() ? " scrollbar" : "",
+       IsScrollThumbNode() ? " scrollthumb" : ""));
+
+  if (!mLastChild) {
+    return;
   }
-  printf_stderr(
-      "%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%s%sr=(%s) t=(%s) "
-      "c=(%s)%s%s\n",
-      aPrefix, this, mApzc.get(),
-      mApzc ? Stringify(mApzc->GetGuid()).c_str()
-            : nsPrintfCString("l=0x%" PRIx64, uint64_t(mLayersId)).get(),
-      (mOverride & EventRegionsOverride::ForceDispatchToContent) ? "fdtc " : "",
-      (mOverride & EventRegionsOverride::ForceEmptyHitRegion) ? "fehr " : "",
-      (mFixedPosTarget != ScrollableLayerGuid::NULL_SCROLL_ID)
-          ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get()
-          : "",
-      Stringify(mEventRegions).c_str(), Stringify(mTransform).c_str(),
-      mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none",
-      mScrollbarData.mDirection.isSome() ? " scrollbar" : "",
-      IsScrollThumbNode() ? " scrollthumb" : "");
-  if (mLastChild) {
-    mLastChild->Dump(nsPrintfCString("%s  ", aPrefix).get());
+
+  // Dump the children in order from first child to last child
+  std::stack<HitTestingTreeNode*> children;
+  for (HitTestingTreeNode* child = mLastChild.get(); child;
+       child = child->mPrevSibling) {
+    children.push(child);
+  }
+  nsPrintfCString childPrefix("%s  ", aPrefix);
+  while (!children.empty()) {
+    children.top()->Dump(childPrefix.get());
+    children.pop();
   }
 }
 

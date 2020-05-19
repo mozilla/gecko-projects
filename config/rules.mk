@@ -28,7 +28,7 @@ USE_AUTOTARGETS_MK = 1
 include $(MOZILLA_DIR)/config/makefiles/makeutils.mk
 
 ifdef REBUILD_CHECK
-REPORT_BUILD = $(info $(shell $(PYTHON) $(MOZILLA_DIR)/config/rebuild_check.py $@ $^))
+REPORT_BUILD = $(info $(shell $(PYTHON3) $(MOZILLA_DIR)/config/rebuild_check.py $@ $^))
 REPORT_BUILD_VERBOSE = $(REPORT_BUILD)
 else
 REPORT_BUILD = $(info $(relativesrcdir)/$(notdir $@))
@@ -66,10 +66,10 @@ INSTALL_TARGETS += CPP_UNIT_TESTS
 endif
 
 run-cppunittests::
-	@$(PYTHON) $(MOZILLA_DIR)/testing/runcppunittests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(CPP_UNIT_TESTS)
+	@$(PYTHON3) $(MOZILLA_DIR)/testing/runcppunittests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(CPP_UNIT_TESTS)
 
 cppunittests-remote:
-	$(PYTHON) -u $(MOZILLA_DIR)/testing/remotecppunittests.py \
+	$(PYTHON3) -u $(MOZILLA_DIR)/testing/remotecppunittests.py \
 		--xre-path=$(DEPTH)/dist/bin \
 		--localLib=$(DEPTH)/dist/$(MOZ_APP_NAME) \
 		--deviceIP=${TEST_DEVICE} \
@@ -307,11 +307,7 @@ endif
 
 ifeq ($(OS_ARCH),Darwin)
 ifdef SHARED_LIBRARY
-ifdef MOZ_IOS
-_LOADER_PATH := @rpath
-else
 _LOADER_PATH := @executable_path
-endif
 EXTRA_DSO_LDOPTS	+= -dynamiclib -install_name $(_LOADER_PATH)/$(SHARED_LIBRARY) -compatibility_version 1 -current_version 1 -single_module
 endif
 endif
@@ -469,7 +465,7 @@ ifdef MSMANIFEST_TOOL
 		exit 1; \
 	elif test -f '$(srcdir)/$(notdir $@).manifest'; then \
 		echo 'Embedding manifest from $(srcdir_rel)/$(notdir $@).manifest'; \
-		$(MT) -NOLOGO -MANIFEST '$(srcdir_rel)/$(notdir $@).manifest' -OUTPUTRESOURCE:$@\;1; \
+		$(call WINEWRAP,$(MT)) -NOLOGO -MANIFEST '$(srcdir_rel)/$(notdir $@).manifest' -OUTPUTRESOURCE:$@\;1; \
 	fi
 endif	# MSVC with manifest tool
 else # !WINNT || GNU_CC
@@ -494,7 +490,7 @@ ifdef MSMANIFEST_TOOL
 		exit 1; \
 	elif test -f '$(srcdir)/$(notdir $@).manifest'; then \
 		echo 'Embedding manifest from $(srcdir_rel)/$(notdir $@).manifest'; \
-		$(MT) -NOLOGO -MANIFEST '$(srcdir_rel)/$(notdir $@).manifest' -OUTPUTRESOURCE:$@\;1; \
+		$(call WINEWRAP,$(MT)) -NOLOGO -MANIFEST '$(srcdir_rel)/$(notdir $@).manifest' -OUTPUTRESOURCE:$@\;1; \
 	fi
 endif	# MSVC with manifest tool
 else
@@ -522,10 +518,10 @@ ifeq (_WINNT,$(GNU_CC)_$(OS_ARCH))
 	$(LINKER) -out:$@ -pdb:$(LINK_PDBFILE) $($@_OBJS) $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(MOZ_PROGRAM_LDFLAGS) $(STATIC_LIBS) $(SHARED_LIBS) $(OS_LIBS)
 ifdef MSMANIFEST_TOOL
 	@if test -f $@.manifest; then \
-		$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
-		rm -f $@.manifest; \
+		echo "Manifest in objdir is not supported"; \
+		exit 1; \
 	elif test -f '$(srcdir)/$(notdir $@).manifest'; then \
-		$(MT) -NOLOGO -MANIFEST '$(srcdir_rel)/$(notdir $@).manifest' -OUTPUTRESOURCE:$@\;1; \
+		$(call WINEWRAP,$(MT)) -NOLOGO -MANIFEST '$(srcdir_rel)/$(notdir $@).manifest' -OUTPUTRESOURCE:$@\;1; \
 	fi
 endif	# MSVC with manifest tool
 else
@@ -620,7 +616,7 @@ ifdef EMBED_MANIFEST_AT
 		exit 1; \
 	elif test -f '$(srcdir)/$@.manifest'; then \
 		echo 'Embedding manifest from $(srcdir_rel)/$@.manifest'; \
-		$(MT) -NOLOGO -MANIFEST '$(srcdir_rel)/$@.manifest' -OUTPUTRESOURCE:$@\;$(EMBED_MANIFEST_AT); \
+		$(call WINEWRAP,$(MT)) -NOLOGO -MANIFEST '$(srcdir_rel)/$@.manifest' -OUTPUTRESOURCE:$@\;$(EMBED_MANIFEST_AT); \
 	fi
 endif   # EMBED_MANIFEST_AT
 endif	# MSVC with manifest tool
@@ -676,12 +672,26 @@ $(CWASMOBJS):
 	$(REPORT_BUILD_VERBOSE)
 	$(WASM_CC) $(OUTOPTION)$@ -c $(WASM_CFLAGS) $($(notdir $<)_FLAGS) $<
 
+WINEWRAP = $(if $(and $(filter %.exe,$1),$(WINE)),$(WINE) $1,$1)
+
+# Windows program run via Wine don't like Unix absolute paths (they look
+# like command line arguments). So when needed, create relative paths
+# from absolute paths. We start with $(DEPTH), which gets us to topobjdir,
+# then add "/.." for each component of topobjdir, which gets us to /.
+# then we can add the absolute path after that and we have a relative path,
+# albeit longer than it could be.
+ifdef WINE
+relativize = $(if $(filter /%,$1),$(DEPTH)$(subst $(space),,$(foreach d,$(subst /, ,$(topobjdir)),/..))$1,$1)
+else
+relativize = $1
+endif
+
 ifdef ASFILES
 # The AS_DASH_C_FLAG is needed cause not all assemblers (Solaris) accept
 # a '-c' flag.
 $(ASOBJS):
 	$(REPORT_BUILD_VERBOSE)
-	$(AS) $(ASOUTOPTION)$@ $(ASFLAGS) $($(notdir $<)_FLAGS) $(AS_DASH_C_FLAG) $<
+	$(call WINEWRAP,$(AS)) $(ASOUTOPTION)$@ $(ASFLAGS) $($(notdir $<)_FLAGS) $(AS_DASH_C_FLAG) $(call relativize,$<)
 endif
 
 define syms_template
@@ -689,6 +699,11 @@ syms:: $(2)
 $(2): $(1)
 ifdef MOZ_CRASHREPORTER
 	$$(call py_action,dumpsymbols,$$(abspath $$<) $$(abspath $$@) $$(DUMP_SYMBOLS_FLAGS))
+ifeq ($(OS_ARCH),WINNT)
+ifdef WINCHECKSEC
+	$$(PYTHON3) $$(topsrcdir)/build/win32/autowinchecksec.py $$<
+endif # WINCHECKSEC
+endif # WINNT
 endif
 endef
 
@@ -725,7 +740,7 @@ endif
 
 $(SOBJS):
 	$(REPORT_BUILD)
-	$(AS) $(ASOUTOPTION)$@ $(SFLAGS) $($(notdir $<)_FLAGS) -c $<
+	$(call WINEWRAP,$(AS)) $(ASOUTOPTION)$@ $(SFLAGS) $($(notdir $<)_FLAGS) -c $(call relativize,$<)
 
 $(CPPOBJS):
 	$(REPORT_BUILD_VERBOSE)
@@ -854,7 +869,7 @@ $(RESFILE): %.res: $(RCFILE)
 ifdef GNU_CC
 	$(RC) $(RCFLAGS) $(filter-out -U%,$(DEFINES)) $(INCLUDES:-I%=--include-dir %) $(OUTOPTION)$@ $<
 else
-	$(RC) $(RCFLAGS) -r $(DEFINES) $(INCLUDES) $(OUTOPTION)$@ $<
+	$(call WINEWRAP,$(RC)) $(RCFLAGS) -r $(DEFINES) $(INCLUDES:-I%=-I$(call relativize,%)) $(OUTOPTION)$@ $(call relativize,$<)
 endif
 
 # Cancel GNU make built-in implicit rules
@@ -1216,10 +1231,6 @@ ifndef INCLUDED_DEBUGMAKE_MK #{
     include $(MOZILLA_DIR)/config/makefiles/debugmake.mk
   endif #}
 endif #}
-
-documentation:
-	@cd $(DEPTH)
-	$(DOXYGEN) $(DEPTH)/config/doxygen.cfg
 
 FREEZE_VARIABLES = \
   CSRCS \

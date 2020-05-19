@@ -270,15 +270,9 @@ Beetmover, takes source specific artifact checksums and pushes it to a location 
 of Taskcluster's task artifacts (archive.mozilla.org as one place) and in the
 process determines the final location and "pretty" names it (version product name)
 
-push-apk
+perftest
 --------
-PushApk publishes Android packages onto Google Play Store. Jobs of this kind take
-all the signed multi-locales (aka "multi") APKs for a given release and upload them
-all at once.
-
-push-apk-checks
----------------
-Runs the checks done in push-apk to ensure APKs are sane before submitting them
+Runs performance tests using mozperftest.
 
 release-balrog-submit-toplevel
 ------------------------------
@@ -312,13 +306,26 @@ release-snap-repackage
 ----------------------
 Generate an installer using Ubuntu's Snap format.
 
+release-flatpak-repackage
+-------------------------
+Generate an installer using Flathub's Flatpak format.
+
 release-snap-push
 -----------------
 Pushes Snap repackage on Snap store.
 
+release-flatpak-push
+--------------------
+Pushes Flatpak repackage on Flathub
+
 release-secondary-snap-push
 ---------------------------
 Performs the same function as `release-snap-push`, except for the beta channel as part of RC
+Releases.
+
+release-secondary-flatpak-push
+------------------------------
+Performs the same function as `release-flatpak-push`, except for the beta channel as part of RC
 Releases.
 
 release-notify-av-announce
@@ -361,6 +368,10 @@ release-bouncer-aliases
 -----------------------
 Update Bouncer's (download.mozilla.org) "latest" aliases.
 
+release-bouncer-aliases-nazgul
+------------------------------
+Update Bouncer's (download.mozilla.org) "latest" aliases, using the new implementation of bouncer-admin (Nazgul).
+
 cron-bouncer-check
 ------------------
 Checks Bouncer (download.mozilla.org) uptake.
@@ -368,6 +379,10 @@ Checks Bouncer (download.mozilla.org) uptake.
 bouncer-locations
 -----------------
 Updates nightly bouncer locations for version bump
+
+bouncer-locations-nazgul
+------------------------
+Updates nightly bouncer locations for version bump, using new implementation of bouncer-admin (Nazgul).
 
 release-bouncer-check
 ---------------------
@@ -484,6 +499,9 @@ release-partner-repack-bouncer-sub
 ----------------------------------
 Sets up bouncer products for partners.
 
+release-partner-repack-bouncer-sub-nazgul
+-----------------------------------------
+Sets up bouncer products for partners, using new implementation of bouncer-admin (Nazgul).
 
 release-early-tagging
 ---------------------
@@ -570,10 +588,10 @@ repo-update
 Repo-Update tasks are tasks that perform some action on the project repo itself,
 in order to update its state in some way.
 
-pipfile-update
---------------
-Pipfile-update tasks generate update Pipfile.lock for in-tree Pipfiles, and attach
-patches with the updates to Phabricator.
+python-dependency-update
+------------------------
+Python-dependency-update runs `pip-compile --generate-hashes` against the specified `requirements.in` and
+submits patches to Phabricator.
 
 partials
 --------
@@ -656,11 +674,6 @@ Tasks that take a build configured for PGO and run the binary against a sample
 set to generate profile data. This is the 2nd stage of the full 3-step PGO
 process.
 
-geckodriver-repack
-------------------
-Tasks to repackage the geckodriver binary from a build tasks's common
-test archive into it's own archive.
-
 geckodriver-signing
 -------------------
 Signing for geckodriver binary.
@@ -691,6 +704,10 @@ A shipitscript task that does the following:
 l10n-bump
 ---------
 Cron-driven tasks that bump l10n-changesets files in-tree, using data from the l10n dashboard.
+
+merge-automation
+----------------
+Hook-driven tasks that automate "Merge Day" tasks during the release cycle.
 
 system-symbols
 --------------

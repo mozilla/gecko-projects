@@ -9,6 +9,7 @@
 #ifndef mozilla_css_Loader_h
 #define mozilla_css_Loader_h
 
+#include <tuple>
 #include <utility>
 
 #include "mozilla/Attributes.h"
@@ -53,7 +54,7 @@ class ImportRule;
 
 class MOZ_RAII LoaderReusableStyleSheets {
  public:
-  LoaderReusableStyleSheets() {}
+  LoaderReusableStyleSheets() = default;
 
   /**
    * Look for a reusable sheet (see AddReusableSheet) matching the
@@ -206,7 +207,7 @@ class Loader final {
       nsIURI*, SheetParsingMode = eAuthorSheetFeatures,
       UseSystemPrincipal = UseSystemPrincipal::No);
 
-  enum class IsPreload {
+  enum class IsPreload : uint8_t {
     No,
     // This is a speculative load initiated by a <link rel=stylesheet> tag
     // scanned by the parser, or @import rules found in a <style> tag.
@@ -342,7 +343,7 @@ class Loader final {
     Complete
   };
 
-  Tuple<RefPtr<StyleSheet>, SheetState> CreateSheet(
+  std::tuple<RefPtr<StyleSheet>, SheetState> CreateSheet(
       const SheetInfo& aInfo, nsIPrincipal* aLoaderPrincipal,
       css::SheetParsingMode aParsingMode, bool aSyncLoad) {
     return CreateSheet(aInfo.mURI, aInfo.mContent, aLoaderPrincipal,
@@ -353,7 +354,7 @@ class Loader final {
   // For inline style, the aURI param is null, but the aLinkingContent
   // must be non-null then.  The loader principal must never be null
   // if aURI is not null.
-  Tuple<RefPtr<StyleSheet>, SheetState> CreateSheet(
+  std::tuple<RefPtr<StyleSheet>, SheetState> CreateSheet(
       nsIURI* aURI, nsIContent* aLinkingContent, nsIPrincipal* aLoaderPrincipal,
       css::SheetParsingMode, CORSMode, nsIReferrerInfo* aLoadingReferrerInfo,
       const nsAString& aIntegrity, bool aSyncLoad);
@@ -398,7 +399,7 @@ class Loader final {
 
   // Note: LoadSheet is responsible for setting the sheet to complete on
   // failure.
-  nsresult LoadSheet(SheetLoadData&, SheetState, IsPreload);
+  nsresult LoadSheet(SheetLoadData&, SheetState);
 
   enum class AllowAsyncParse {
     Yes,

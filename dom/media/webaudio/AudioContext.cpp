@@ -143,7 +143,7 @@ static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate) {
     return aSampleRate;
   } else {
     float rate = static_cast<float>(CubebUtils::PreferredSampleRate());
-    if (nsRFPService::IsResistFingerprintingEnabled()) {
+    if (StaticPrefs::privacy_resistFingerprinting()) {
       return 44100.f;
     }
     return rate;
@@ -253,13 +253,6 @@ JSObject* AudioContext::WrapObject(JSContext* aCx,
 already_AddRefed<AudioContext> AudioContext::Constructor(
     const GlobalObject& aGlobal, const AudioContextOptions& aOptions,
     ErrorResult& aRv) {
-  // Audio playback is not yet supported when recording or replaying. See bug
-  // 1304147.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-    return nullptr;
-  }
-
   nsCOMPtr<nsPIDOMWindowInner> window =
       do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
@@ -302,13 +295,6 @@ already_AddRefed<AudioContext> AudioContext::Constructor(
 already_AddRefed<AudioContext> AudioContext::Constructor(
     const GlobalObject& aGlobal, uint32_t aNumberOfChannels, uint32_t aLength,
     float aSampleRate, ErrorResult& aRv) {
-  // Audio playback is not yet supported when recording or replaying. See bug
-  // 1304147.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-    return nullptr;
-  }
-
   nsCOMPtr<nsPIDOMWindowInner> window =
       do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
@@ -563,7 +549,7 @@ double AudioContext::OutputLatency() {
   // When reduceFingerprinting is enabled, return a latency figure that is
   // fixed, but plausible for the platform.
   double latency_s = 0.0;
-  if (nsRFPService::IsResistFingerprintingEnabled()) {
+  if (StaticPrefs::privacy_resistFingerprinting()) {
 #ifdef XP_MACOSX
     latency_s = 512. / mSampleRate;
 #elif MOZ_WIDGET_ANDROID
@@ -641,7 +627,7 @@ already_AddRefed<Promise> AudioContext::DecodeAudioData(
 
   if (!aBuffer.Data()) {
     // Throw if the buffer is detached
-    aRv.ThrowTypeError(u"Buffer argument can't be a detached buffer");
+    aRv.ThrowTypeError("Buffer argument can't be a detached buffer");
     return nullptr;
   }
 
@@ -694,7 +680,7 @@ void AudioContext::UnregisterActiveNode(AudioNode* aNode) {
 }
 
 uint32_t AudioContext::MaxChannelCount() const {
-  if (nsRFPService::IsResistFingerprintingEnabled()) {
+  if (StaticPrefs::privacy_resistFingerprinting()) {
     return 2;
   }
   return std::min<uint32_t>(
@@ -735,11 +721,14 @@ double AudioContext::CurrentTime() {
     return rawTime;
   }
 
+  MOZ_ASSERT(GetParentObject()->AsGlobal());
   // The value of a MediaTrack's CurrentTime will always advance forward; it
   // will never reset (even if one rewinds a video.) Therefore we can use a
   // single Random Seed initialized at the same time as the object.
-  return nsRFPService::ReduceTimePrecisionAsSecs(rawTime,
-                                                 GetRandomTimelineSeed());
+  return nsRFPService::ReduceTimePrecisionAsSecs(
+      rawTime, GetRandomTimelineSeed(),
+      /* aIsSystemPrincipal */ false,
+      GetParentObject()->AsGlobal()->CrossOriginIsolated());
 }
 
 nsISerialEventTarget* AudioContext::GetMainThread() const {
@@ -754,20 +743,6 @@ void AudioContext::DisconnectFromOwner() {
   mIsDisconnecting = true;
   Shutdown();
   DOMEventTargetHelper::DisconnectFromOwner();
-}
-
-void AudioContext::BindToOwner(nsIGlobalObject* aNew) {
-  auto scopeExit =
-      MakeScopeExit([&] { DOMEventTargetHelper::BindToOwner(aNew); });
-
-  if (GetOwner()) {
-    GetOwner()->RemoveAudioContext(this);
-  }
-
-  nsCOMPtr<nsPIDOMWindowInner> newWindow = do_QueryInterface(aNew);
-  if (newWindow) {
-    newWindow->AddAudioContext(this);
-  }
 }
 
 void AudioContext::Shutdown() {
@@ -1174,6 +1149,10 @@ already_AddRefed<Promise> AudioContext::Close(ErrorResult& aRv) {
   return promise.forget();
 }
 
+void AudioContext::OfflineClose() {
+  CloseInternal(nullptr, AudioContextOperationFlags::None);
+}
+
 void AudioContext::CloseInternal(void* aPromise,
                                  AudioContextOperationFlags aFlags) {
   // This can be called when freeing a document, and the tracks are dead at
@@ -1326,7 +1305,7 @@ BasicWaveFormCache::BasicWaveFormCache(uint32_t aSampleRate)
     : mSampleRate(aSampleRate) {
   MOZ_ASSERT(NS_IsMainThread());
 }
-BasicWaveFormCache::~BasicWaveFormCache() {}
+BasicWaveFormCache::~BasicWaveFormCache() = default;
 
 WebCore::PeriodicWave* BasicWaveFormCache::GetBasicWaveForm(
     OscillatorType aType) {
@@ -1336,20 +1315,21 @@ WebCore::PeriodicWave* BasicWaveFormCache::GetBasicWaveForm(
       mSawtooth = WebCore::PeriodicWave::createSawtooth(mSampleRate);
     }
     return mSawtooth;
-  } else if (aType == OscillatorType::Square) {
+  }
+  if (aType == OscillatorType::Square) {
     if (!mSquare) {
       mSquare = WebCore::PeriodicWave::createSquare(mSampleRate);
     }
     return mSquare;
-  } else if (aType == OscillatorType::Triangle) {
+  }
+  if (aType == OscillatorType::Triangle) {
     if (!mTriangle) {
       mTriangle = WebCore::PeriodicWave::createTriangle(mSampleRate);
     }
     return mTriangle;
-  } else {
-    MOZ_ASSERT(false, "Not reached");
-    return nullptr;
   }
+  MOZ_ASSERT(false, "Not reached");
+  return nullptr;
 }
 
 }  // namespace dom

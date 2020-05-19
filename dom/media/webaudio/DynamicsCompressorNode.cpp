@@ -6,7 +6,6 @@
 
 #include "DynamicsCompressorNode.h"
 #include "mozilla/dom/DynamicsCompressorNodeBinding.h"
-#include "nsAutoPtr.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeTrack.h"
 #include "AudioDestinationNode.h"
@@ -82,8 +81,8 @@ class DynamicsCompressorNodeEngine final : public AudioNodeEngine {
     const uint32_t channelCount = aInput.ChannelCount();
     if (mCompressor->numberOfChannels() != channelCount) {
       // Create a new compressor object with a new channel count
-      mCompressor = new WebCore::DynamicsCompressor(aTrack->mSampleRate,
-                                                    aInput.ChannelCount());
+      mCompressor = MakeUnique<WebCore::DynamicsCompressor>(
+          aTrack->mSampleRate, aInput.ChannelCount());
     }
 
     TrackTime pos = mDestination->GraphTimeToTrackTime(aFrom);
@@ -157,7 +156,7 @@ class DynamicsCompressorNodeEngine final : public AudioNodeEngine {
   AudioParamTimeline mRatio;
   AudioParamTimeline mAttack;
   AudioParamTimeline mRelease;
-  nsAutoPtr<DynamicsCompressor> mCompressor;
+  UniquePtr<DynamicsCompressor> mCompressor;
 };
 
 DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
@@ -165,14 +164,14 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
                 ChannelInterpretation::Speakers),
       mReduction(0) {
   CreateAudioParam(mThreshold, DynamicsCompressorNodeEngine::THRESHOLD,
-                   "threshold", -24.f, -100.f, 0.f);
-  CreateAudioParam(mKnee, DynamicsCompressorNodeEngine::KNEE, "knee", 30.f, 0.f,
-                   40.f);
-  CreateAudioParam(mRatio, DynamicsCompressorNodeEngine::RATIO, "ratio", 12.f,
+                   u"threshold", -24.f, -100.f, 0.f);
+  CreateAudioParam(mKnee, DynamicsCompressorNodeEngine::KNEE, u"knee", 30.f,
+                   0.f, 40.f);
+  CreateAudioParam(mRatio, DynamicsCompressorNodeEngine::RATIO, u"ratio", 12.f,
                    1.f, 20.f);
-  CreateAudioParam(mAttack, DynamicsCompressorNodeEngine::ATTACK, "attack",
+  CreateAudioParam(mAttack, DynamicsCompressorNodeEngine::ATTACK, u"attack",
                    0.003f, 0.f, 1.f);
-  CreateAudioParam(mRelease, DynamicsCompressorNodeEngine::RELEASE, "release",
+  CreateAudioParam(mRelease, DynamicsCompressorNodeEngine::RELEASE, u"release",
                    0.25f, 0.f, 1.f);
   DynamicsCompressorNodeEngine* engine =
       new DynamicsCompressorNodeEngine(this, aContext->Destination());

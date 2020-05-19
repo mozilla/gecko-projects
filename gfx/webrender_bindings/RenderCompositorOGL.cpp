@@ -28,6 +28,7 @@ UniquePtr<RenderCompositor> RenderCompositorOGL::Create(
   if (!gl) {
     gl = gl::GLContextProvider::CreateForCompositorWidget(
         aWidget, /* aWebRender */ true, /* aForceAccelerated */ true);
+    RenderThread::MaybeEnableGLDebugMessage(gl);
   }
   if (!gl || !gl->MakeCurrent()) {
     gfxCriticalNote << "Failed GL context creation for WebRender: "
@@ -281,6 +282,7 @@ void RenderCompositorOGL::Unbind() {
 }
 
 void RenderCompositorOGL::CreateSurface(wr::NativeSurfaceId aId,
+                                        wr::DeviceIntPoint aVirtualOffset,
                                         wr::DeviceIntSize aTileSize,
                                         bool aIsOpaque) {
   MOZ_RELEASE_ASSERT(mSurfaces.find(aId) == mSurfaces.end());
@@ -360,6 +362,15 @@ void RenderCompositorOGL::AddSurface(wr::NativeSurfaceId aId,
     mAddedPixelCount += layerRect.Area();
     mAddedClippedPixelCount += realClip.Intersect(layerRect).Area();
   }
+}
+
+CompositorCapabilities RenderCompositorOGL::GetCompositorCapabilities() {
+  CompositorCapabilities caps;
+
+  // CoreAnimation doesn't use virtual surfaces
+  caps.virtual_surface_size = 0;
+
+  return caps;
 }
 
 }  // namespace wr

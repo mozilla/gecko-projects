@@ -1,6 +1,7 @@
 /* eslint-disable no-undef */
-const PAGE_AUTOPLAY =
-  "https://example.com/browser/dom/media/mediacontrol/tests/file_autoplay.html";
+const PAGE =
+  "https://example.com/browser/dom/media/mediacontrol/tests/file_non_autoplay.html";
+const testVideoId = "video";
 
 /**
  * This test is used to generate platform-independent media control keys event
@@ -14,39 +15,48 @@ add_task(async function setupTestingPref() {
 });
 
 add_task(async function testPlayPauseAndStop() {
-  info(`open autoplay media`);
-  const tab = await createTabAndLoad(PAGE_AUTOPLAY);
-  await checkOrWaitUntilMediaStartedPlaying(tab);
+  info(`open page and start media`);
+  const tab = await createTabAndLoad(PAGE);
+  await playMedia(tab, testVideoId);
 
   info(`pressing 'pause' key`);
-  ChromeUtils.generateMediaControlKeysTestEvent("pause");
-  await checkOrWaitUntilMediaStoppedPlaying(tab);
+  await generateMediaControlKeyEvent("pause");
+  await checkOrWaitUntilMediaStoppedPlaying(tab, testVideoId);
 
   info(`pressing 'play' key`);
-  ChromeUtils.generateMediaControlKeysTestEvent("play");
-  await checkOrWaitUntilMediaStartedPlaying(tab);
+  await generateMediaControlKeyEvent("play");
+  await checkOrWaitUntilMediaStartedPlaying(tab, testVideoId);
 
   info(`pressing 'stop' key`);
-  ChromeUtils.generateMediaControlKeysTestEvent("stop");
-  await checkOrWaitUntilMediaStoppedPlaying(tab);
+  await generateMediaControlKeyEvent("stop");
+  await checkOrWaitUntilMediaStoppedPlaying(tab, testVideoId);
 
   info(`remove tab`);
   await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function testPlayPause() {
-  info(`open autoplay media`);
-  const tab = await createTabAndLoad(PAGE_AUTOPLAY);
-  await checkOrWaitUntilMediaStartedPlaying(tab);
+  info(`open page and start media`);
+  const tab = await createTabAndLoad(PAGE);
+  await playMedia(tab, testVideoId);
 
-  info(`pressing 'playPause' key`);
-  ChromeUtils.generateMediaControlKeysTestEvent("playPause");
-  await checkOrWaitUntilMediaStoppedPlaying(tab);
+  info(`pressing 'playPause' key, media should stop`);
+  await generateMediaControlKeyEvent("playPause");
+  await checkOrWaitUntilMediaStoppedPlaying(tab, testVideoId);
 
-  info(`pressing 'playPause' key`);
-  ChromeUtils.generateMediaControlKeysTestEvent("playPause");
-  await checkOrWaitUntilMediaStartedPlaying(tab);
+  info(`pressing 'playPause' key, media should start`);
+  await generateMediaControlKeyEvent("playPause");
+  await checkOrWaitUntilMediaStartedPlaying(tab, testVideoId);
 
   info(`remove tab`);
   await BrowserTestUtils.removeTab(tab);
 });
+
+/**
+ * The following are helper functions.
+ */
+function generateMediaControlKeyEvent(event) {
+  const playbackStateChanged = waitUntilDisplayedPlaybackChanged();
+  ChromeUtils.generateMediaControlKeysTestEvent(event);
+  return playbackStateChanged;
+}

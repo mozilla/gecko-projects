@@ -259,6 +259,13 @@ class Test(object):
         return 0
 
     @property
+    def lsan_disabled(self):
+        for meta in self.itermeta():
+            if meta.lsan_disabled is not None:
+                return meta.lsan_disabled
+        return False
+
+    @property
     def lsan_allowed(self):
         lsan_allowed = set()
         for meta in self.itermeta():
@@ -342,6 +349,16 @@ class Test(object):
         except KeyError:
             return default
 
+    def implementation_status(self):
+        implementation_status = None
+        for meta in self.itermeta():
+            implementation_status = meta.implementation_status
+            if implementation_status:
+                return implementation_status
+
+        # assuming no specific case, we are implementing it
+        return "implementing"
+
     def known_intermittent(self, subtest=None):
         metadata = self._get_metadata(subtest)
         if metadata is None:
@@ -391,7 +408,8 @@ class TestharnessTest(Test):
         testdriver = manifest_item.testdriver if hasattr(manifest_item, "testdriver") else False
         jsshell = manifest_item.jsshell if hasattr(manifest_item, "jsshell") else False
         script_metadata = manifest_item.script_metadata or []
-        scripts = [v for (k, v) in script_metadata if k == b"script"]
+        scripts = [v for (k, v) in script_metadata
+                   if k in (b"script", "script")]
         return cls(manifest_file.tests_root,
                    manifest_item.url,
                    inherit_metadata,

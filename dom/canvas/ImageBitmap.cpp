@@ -821,12 +821,14 @@ already_AddRefed<ImageBitmap> ImageBitmap::CreateInternal(
   RefPtr<SourceSurface> croppedSurface;
   IntRect cropRect = aCropRect.valueOr(IntRect());
 
-  // If the HTMLCanvasElement's rendering context is WebGL, then the snapshot
-  // we got from the HTMLCanvasElement is a DataSourceSurface which is a copy
-  // of the rendering context. We handle cropping in this case.
+  // If the HTMLCanvasElement's rendering context is WebGL/WebGPU,
+  // then the snapshot we got from the HTMLCanvasElement is
+  // a DataSourceSurface which is a copy of the rendering context.
+  // We handle cropping in this case.
   bool needToReportMemoryAllocation = false;
   if ((aCanvasEl.GetCurrentContextType() == CanvasContextType::WebGL1 ||
-       aCanvasEl.GetCurrentContextType() == CanvasContextType::WebGL2) &&
+       aCanvasEl.GetCurrentContextType() == CanvasContextType::WebGL2 ||
+       aCanvasEl.GetCurrentContextType() == CanvasContextType::WebGPU) &&
       aCropRect.isSome()) {
     RefPtr<DataSourceSurface> dataSurface = surface->GetDataSurface();
     croppedSurface = CropAndCopyDataSourceSurface(dataSurface, cropRect);
@@ -1205,13 +1207,13 @@ already_AddRefed<Promise> ImageBitmap::Create(
   if (aCropRect.isSome()) {
     if (aCropRect->Width() == 0) {
       aRv.ThrowRangeError(
-          u"The crop rect width passed to createImageBitmap must be nonzero");
+          "The crop rect width passed to createImageBitmap must be nonzero");
       return promise.forget();
     }
 
     if (aCropRect->Height() == 0) {
       aRv.ThrowRangeError(
-          u"The crop rect height passed to createImageBitmap must be nonzero");
+          "The crop rect height passed to createImageBitmap must be nonzero");
       return promise.forget();
     }
   }

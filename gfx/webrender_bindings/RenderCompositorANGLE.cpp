@@ -142,7 +142,7 @@ bool RenderCompositorANGLE::Initialize() {
   const auto& gle = gl::GLContextEGL::Cast(gl);
   const auto& egl = gle->mEgl;
   if (!gl::CreateConfig(egl, &mEGLConfig, /* bpp */ 32,
-                        /* enableDepthBuffer */ true)) {
+                        /* enableDepthBuffer */ true, gl->IsGLES())) {
     gfxCriticalNote << "Failed to create EGLConfig for WebRender";
   }
   MOZ_ASSERT(mEGLConfig);
@@ -162,7 +162,7 @@ bool RenderCompositorANGLE::Initialize() {
 
   // Create DCLayerTree when DirectComposition is used.
   if (gfx::gfxVars::UseWebRenderDCompWin()) {
-    HWND compositorHwnd = mWidget->AsWindows()->GetCompositorHwnd();
+    HWND compositorHwnd = GetCompositorHwnd();
     if (compositorHwnd) {
       mDCLayerTree =
           DCLayerTree::Create(gl, mEGLConfig, mDevice, compositorHwnd);
@@ -189,6 +189,26 @@ bool RenderCompositorANGLE::Initialize() {
   InitializeUsePartialPresent();
 
   return true;
+}
+
+HWND RenderCompositorANGLE::GetCompositorHwnd() {
+  HWND hwnd = 0;
+
+  if (XRE_IsGPUProcess()) {
+    hwnd = mWidget->AsWindows()->GetCompositorHwnd();
+  }
+#ifdef NIGHTLY_BUILD
+  else if (
+      StaticPrefs::
+          gfx_webrender_enabled_no_gpu_process_with_angle_win_AtStartup()) {
+    MOZ_ASSERT(XRE_IsParentProcess());
+
+    // When GPU process does not exist, we do not need to use compositor window.
+    hwnd = mWidget->AsWindows()->GetHwnd();
+  }
+#endif
+
+  return hwnd;
 }
 
 bool RenderCompositorANGLE::CreateSwapChain() {
@@ -302,7 +322,7 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     return;
   }
 
-  HWND hwnd = mWidget->AsWindows()->GetCompositorHwnd();
+  HWND hwnd = GetCompositorHwnd();
   if (!hwnd) {
     // When DirectComposition or DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL is used,
     // compositor window needs to exist.
@@ -312,8 +332,6 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     }
     return;
   }
-
-  MOZ_ASSERT(XRE_IsGPUProcess());
 
   // When compositor is enabled, CompositionSurface is used for rendering.
   // It does not support triple buffering.
@@ -812,9 +830,10 @@ void RenderCompositorANGLE::Bind(wr::NativeTileId aId,
 void RenderCompositorANGLE::Unbind() { mDCLayerTree->Unbind(); }
 
 void RenderCompositorANGLE::CreateSurface(wr::NativeSurfaceId aId,
+                                          wr::DeviceIntPoint aVirtualOffset,
                                           wr::DeviceIntSize aTileSize,
                                           bool aIsOpaque) {
-  mDCLayerTree->CreateSurface(aId, aTileSize, aIsOpaque);
+  mDCLayerTree->CreateSurface(aId, aVirtualOffset, aTileSize, aIsOpaque);
 }
 
 void RenderCompositorANGLE::DestroySurface(NativeSurfaceId aId) {
@@ -835,6 +854,14 @@ void RenderCompositorANGLE::AddSurface(wr::NativeSurfaceId aId,
                                        wr::DeviceIntPoint aPosition,
                                        wr::DeviceIntRect aClipRect) {
   mDCLayerTree->AddSurface(aId, aPosition, aClipRect);
+}
+
+CompositorCapabilities RenderCompositorANGLE::GetCompositorCapabilities() {
+  CompositorCapabilities caps;
+
+  caps.virtual_surface_size = VIRTUAL_SURFACE_SIZE;
+
+  return caps;
 }
 
 void RenderCompositorANGLE::EnableNativeCompositor(bool aEnable) {
@@ -874,8 +901,10 @@ void RenderCompositorANGLE::EnableNativeCompositor(bool aEnable) {
 }
 
 void RenderCompositorANGLE::InitializeUsePartialPresent() {
-  if (UseCompositor() || !mSwapChain1 ||
-      mWidget->AsWindows()->HasFxrOutputHandler() ||
+  // Even when mSwapChain1 is null, we could enable WR partial present, since
+  // when mSwapChain1 is null, SwapChain is blit model swap chain with one
+  // buffer.
+  if (UseCompositor() || mWidget->AsWindows()->HasFxrOutputHandler() ||
       gfx::gfxVars::WebRenderMaxPartialPresentRects() <= 0) {
     mUsePartialPresent = false;
   } else {

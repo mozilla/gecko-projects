@@ -9,6 +9,7 @@
     make_intl_data.py langtags [cldr_core.zip]
     make_intl_data.py tzdata
     make_intl_data.py currency
+    make_intl_data.py units
 
 
     Target "langtags":
@@ -26,15 +27,22 @@
 
     Target "currency":
     Generates the mapping from currency codes to decimal digits used for them.
+
+
+    Target "units":
+    Generate source and test files using the list of so-called "sanctioned unit
+    identifiers" and verifies that the ICU data filter includes these units.
 """
 
 from __future__ import print_function
 import os
 import re
 import io
+import json
 import sys
 import tarfile
 import tempfile
+import yaml
 from contextlib import closing
 from functools import partial, total_ordering
 from itertools import chain, groupby, tee
@@ -347,6 +355,96 @@ void js::intl::LanguageTag::performComplexRegionMappings() {
 """.strip("\n"))
 
 
+def writeVariantTagMappings(println, variant_mappings, description, source,
+                            url):
+    """ Writes a function definition that maps variant subtags. """
+    println(u"""
+static const char* ToCharPointer(const char* str) {
+  return str;
+}
+
+static const char* ToCharPointer(const js::UniqueChars& str) {
+  return str.get();
+}
+
+template <typename T, typename U = T>
+static bool IsLessThan(const T& a, const U& b) {
+  return strcmp(ToCharPointer(a), ToCharPointer(b)) < 0;
+}
+""")
+    writeMappingHeader(println, description, source, url)
+    println(u"""
+bool js::intl::LanguageTag::performVariantMappings(JSContext* cx) {
+  // The variant subtags need to be sorted for binary search.
+  MOZ_ASSERT(std::is_sorted(variants_.begin(), variants_.end(),
+                            IsLessThan<decltype(variants_)::ElementType>));
+
+  auto insertVariantSortedIfNotPresent = [&](const char* variant) {
+    auto* p = std::lower_bound(variants_.begin(), variants_.end(), variant,
+                               IsLessThan<decltype(variants_)::ElementType,
+                                          decltype(variant)>);
+
+    // Don't insert the replacement when already present.
+    if (p != variants_.end() && strcmp(p->get(), variant) == 0) {
+      return true;
+    }
+
+    // Insert the preferred variant in sort order.
+    auto preferred = DuplicateString(cx, variant);
+    if (!preferred) {
+      return false;
+    }
+    return !!variants_.insert(p, std::move(preferred));
+  };
+
+  for (size_t i = 0; i < variants_.length(); ) {
+    auto& variant = variants_[i];
+    MOZ_ASSERT(IsCanonicallyCasedVariantTag(mozilla::MakeStringSpan(variant.get())));
+""".lstrip())
+
+    first_variant = True
+
+    for (deprecated_variant, (type, replacement)) in (
+        sorted(variant_mappings.items(), key=itemgetter(0))
+    ):
+        if_kind = u"if" if first_variant else u"else if"
+        first_variant = False
+
+        println(u"""
+    {} (strcmp(variant.get(), "{}") == 0) {{
+      variants_.erase(variants_.begin() + i);
+""".format(if_kind, deprecated_variant).strip("\n"))
+
+        if type == "language":
+            println(u"""
+      setLanguage("{}");
+""".format(replacement).strip("\n"))
+        elif type == "region":
+            println(u"""
+      setRegion("{}");
+""".format(replacement).strip("\n"))
+        else:
+            assert type == "variant"
+            println(u"""
+      if (!insertVariantSortedIfNotPresent("{}")) {{
+        return false;
+      }}
+""".format(replacement).strip("\n"))
+
+        println(u"""
+    }
+""".strip("\n"))
+
+    println(u"""
+    else {
+      i++;
+    }
+  }
+  return true;
+}
+""".strip("\n"))
+
+
 def writeGrandfatheredMappingsFunction(println, grandfathered_mappings,
                                        description, source, url):
     """ Writes a function definition that maps grandfathered language tags. """
@@ -514,6 +612,7 @@ def readSupplementalData(core_file):
         - complexLanguageMappings: mappings from language subtags with complex rules
         - regionMappings: mappings from region subtags to preferred subtags
         - complexRegionMappings: mappings from region subtags with complex rules
+        - variantMappings: mappings from variant subtags to preferred subtags
         - likelySubtags: likely subtags used for generating test data only
         Returns these mappings as dictionaries.
     """
@@ -554,6 +653,14 @@ def readSupplementalData(core_file):
         ^
         # unicode_region_subtag = (alpha{2} | digit{3})
         ([a-z]{2}|[0-9]{3})
+        $
+        """, re.IGNORECASE | re.VERBOSE)
+
+    re_unicode_variant_subtag = re.compile(
+        r"""
+        ^
+        # unicode_variant_subtag = (alphanum{5,8} | digit alphanum{3})
+        ([a-z0-9]{5,8}|(?:[0-9][a-z0-9]{3}))
         $
         """, re.IGNORECASE | re.VERBOSE)
 
@@ -605,6 +712,11 @@ def readSupplementalData(core_file):
     # replacement, e.g. "SU" -> ("RU", ["AM", "AZ", "BY", ...]).
     complex_region_mappings = {}
 
+    # Dictionary of aliased variant subtags to a tuple of preferred replacement
+    # type and replacement, e.g. "arevela" -> ("language", "hy") or
+    # "aaland" -> ("region", "AX") or "heploc" -> ("variant", "alalc97").
+    variant_mappings = {}
+
     # Dictionary of grandfathered mappings to preferred values.
     grandfathered_mappings = {}
 
@@ -640,6 +752,8 @@ def readSupplementalData(core_file):
         if re_unicode_language_subtag.match(type) is None:
             continue
 
+        assert type.islower()
+
         if re_unicode_language_subtag.match(replacement) is not None:
             # Canonical case for language subtags is lower-case.
             language_mappings[type] = replacement.lower()
@@ -663,6 +777,8 @@ def readSupplementalData(core_file):
         if re_unicode_region_subtag.match(type) is None:
             continue
 
+        assert type.isupper() or type.isdigit()
+
         if re_unicode_region_subtag.match(replacement) is not None:
             # Canonical case for region subtags is upper-case.
             region_mappings[type] = replacement.upper()
@@ -673,6 +789,33 @@ def readSupplementalData(core_file):
                 re_unicode_region_subtag.match(loc) is not None for loc in replacements
             ), "{} invalid region subtags".format(replacement)
             complex_region_mappings[type] = replacements
+
+    for variant_alias in tree.iterfind(".//variantAlias"):
+        type = variant_alias.get("type")
+        replacement = variant_alias.get("replacement")
+
+        assert re_unicode_variant_subtag.match(type) is not None, (
+               "{} invalid variant subtag".format(type))
+
+        # Normalize the case, because some variants are in upper case.
+        type = type.lower()
+
+        # The replacement can be a language, a region, or a variant subtag.
+        # Language and region subtags are case normalized, variant subtags can
+        # be in any case.
+
+        if re_unicode_language_subtag.match(replacement) is not None and replacement.islower():
+            variant_mappings[type] = ("language", replacement)
+
+        elif re_unicode_region_subtag.match(replacement) is not None:
+            assert replacement.isupper() or replacement.isdigit(), (
+                   "{} invalid variant subtag replacement".format(replacement))
+            variant_mappings[type] = ("region", replacement)
+
+        else:
+            assert re_unicode_variant_subtag.match(replacement) is not None, (
+                   "{} invalid variant subtag replacement".format(replacement))
+            variant_mappings[type] = ("variant", replacement.lower())
 
     tree = ET.parse(core_file.open("common/supplemental/likelySubtags.xml"))
 
@@ -740,6 +883,7 @@ def readSupplementalData(core_file):
             "complexLanguageMappings": complex_language_mappings,
             "regionMappings": region_mappings,
             "complexRegionMappings": complex_region_mappings_final,
+            "variantMappings": variant_mappings,
             "likelySubtags": likely_subtags,
             }
 
@@ -757,14 +901,20 @@ def readUnicodeExtensions(core_file):
 
     # Mapping from Unicode extension types to dict of deprecated to
     # preferred values.
-    mapping = {}
+    mapping = {
+        # Unicode BCP 47 U Extension
+        "u": {},
+
+        # Unicode BCP 47 T Extension
+        "t": {},
+    }
 
     def readBCP47File(file):
         tree = ET.parse(file)
         for keyword in tree.iterfind(".//keyword/key"):
-            # Skip over keywords whose extension is not "u".
-            if keyword.get("extension", "u") != "u":
-                continue
+            extension = keyword.get("extension", "u")
+            assert extension == "u" or extension == "t", (
+                   "unknown extension type: {}".format(extension))
 
             extension_name = keyword.get("name")
 
@@ -823,7 +973,7 @@ def readUnicodeExtensions(core_file):
 
                 if preferred is not None:
                     assert typeRE.match(preferred), preferred
-                    mapping.setdefault(extension_name, {})[name] = preferred
+                    mapping[extension].setdefault(extension_name, {})[name] = preferred
 
                 if alias is not None:
                     for alias_name in alias.lower().split(" "):
@@ -833,7 +983,7 @@ def readUnicodeExtensions(core_file):
 
                         # See comment above when 'alias' and 'preferred' are both present.
                         if (preferred is not None and
-                            name in mapping[extension_name]):
+                            name in mapping[extension][extension_name]):
                             continue
 
                         # Skip over entries where 'name' and 'alias' are equal.
@@ -845,7 +995,7 @@ def readUnicodeExtensions(core_file):
                         if name == alias_name:
                             continue
 
-                        mapping.setdefault(extension_name, {})[alias_name] = name
+                        mapping[extension].setdefault(extension_name, {})[alias_name] = name
 
     def readSupplementalMetadata(file):
         # Find subdivision and region replacements.
@@ -874,8 +1024,8 @@ def readUnicodeExtensions(core_file):
                 continue
 
             # 'subdivisionAlias' applies to 'rg' and 'sd' keys.
-            mapping.setdefault("rg", {})[type] = replacement
-            mapping.setdefault("sd", {})[type] = replacement
+            mapping["u"].setdefault("rg", {})[type] = replacement
+            mapping["u"].setdefault("sd", {})[type] = replacement
 
     for name in core_file.namelist():
         if bcpFileRE.match(name):
@@ -883,7 +1033,10 @@ def readUnicodeExtensions(core_file):
 
     readSupplementalMetadata(core_file.open("common/supplemental/supplementalMetadata.xml"))
 
-    return mapping
+    return {
+        "unicodeMappings": mapping["u"],
+        "transformMappings": mapping["t"],
+    }
 
 
 def writeCLDRLanguageTagData(println, data, url):
@@ -902,6 +1055,7 @@ def writeCLDRLanguageTagData(println, data, url):
 #include <cstdint>
 #include <cstring>
 #include <iterator>
+#include <string>
 #include <type_traits>
 
 #include "builtin/intl/LanguageTag.h"
@@ -944,6 +1098,14 @@ static inline const char* SearchReplacement(
 }
 
 #ifdef DEBUG
+static bool IsAsciiLowercaseAlphanumeric(char c) {
+  return mozilla::IsAsciiLowercaseAlpha(c) || mozilla::IsAsciiDigit(c);
+}
+
+static bool IsAsciiLowercaseAlphanumericOrDash(char c) {
+  return IsAsciiLowercaseAlphanumeric(c) || c == '-';
+}
+
 static bool IsCanonicallyCasedLanguageTag(mozilla::Span<const char> span) {
   // Tell the analysis the |std::all_of| function can't GC.
   JS::AutoSuppressGCAnalysis nogc;
@@ -960,14 +1122,26 @@ static bool IsCanonicallyCasedRegionTag(mozilla::Span<const char> span) {
 }
 
 static bool IsCanonicallyCasedVariantTag(mozilla::Span<const char> span) {
-  auto isAsciiLowercaseAlphaOrDigit = [](char c) {
-    return mozilla::IsAsciiLowercaseAlpha(c) || mozilla::IsAsciiDigit(c);
-  };
-
   // Tell the analysis the |std::all_of| function can't GC.
   JS::AutoSuppressGCAnalysis nogc;
 
-  return std::all_of(span.begin(), span.end(), isAsciiLowercaseAlphaOrDigit);
+  return std::all_of(span.begin(), span.end(), IsAsciiLowercaseAlphanumeric);
+}
+
+static bool IsCanonicallyCasedUnicodeKey(mozilla::Span<const char> key) {
+  return std::all_of(key.begin(), key.end(), IsAsciiLowercaseAlphanumeric);
+}
+
+static bool IsCanonicallyCasedUnicodeType(mozilla::Span<const char> type) {
+  return std::all_of(type.begin(), type.end(), IsAsciiLowercaseAlphanumericOrDash);
+}
+
+static bool IsCanonicallyCasedTransformKey(mozilla::Span<const char> key) {
+  return std::all_of(key.begin(), key.end(), IsAsciiLowercaseAlphanumeric);
+}
+
+static bool IsCanonicallyCasedTransformType(mozilla::Span<const char> type) {
+  return std::all_of(type.begin(), type.end(), IsAsciiLowercaseAlphanumericOrDash);
 }
 #endif
 """.rstrip())
@@ -978,7 +1152,9 @@ static bool IsCanonicallyCasedVariantTag(mozilla::Span<const char> span) {
     complex_language_mappings = data["complexLanguageMappings"]
     region_mappings = data["regionMappings"]
     complex_region_mappings = data["complexRegionMappings"]
+    variant_mappings = data["variantMappings"]
     unicode_mappings = data["unicodeMappings"]
+    transform_mappings = data["transformMappings"]
 
     # unicode_language_subtag = alpha{2,3} | alpha{5,8} ;
     language_maxlength = 8
@@ -1016,11 +1192,15 @@ static bool IsCanonicallyCasedVariantTag(mozilla::Span<const char> span) {
     writeComplexRegionTagMappings(println, complex_region_mappings,
                                   "Region subtags with complex mappings.", source, url)
 
+    writeVariantTagMappings(println, variant_mappings,
+                            "Mappings from variant subtags to preferred values.", source, url)
+
     writeGrandfatheredMappingsFunction(println, grandfathered_mappings,
                                        "Canonicalize grandfathered locale identifiers.", source,
                                        url)
 
-    writeUnicodeExtensionsMappings(println, unicode_mappings)
+    writeUnicodeExtensionsMappings(println, unicode_mappings, "Unicode")
+    writeUnicodeExtensionsMappings(println, transform_mappings, "Transform")
 
 
 def writeCLDRLanguageTagLikelySubtagsTest(println, data, url):
@@ -1174,7 +1354,7 @@ def updateCLDRLangTags(args):
     def readFiles(cldr_file):
         with ZipFile(cldr_file) as zip_file:
             data.update(readSupplementalData(zip_file))
-            data["unicodeMappings"] = readUnicodeExtensions(zip_file)
+            data.update(readUnicodeExtensions(zip_file))
 
     print("Processing CLDR data...")
     if filename is not None:
@@ -1199,8 +1379,7 @@ def updateCLDRLangTags(args):
     with io.open(test_file, mode="w", encoding="utf-8", newline="") as f:
         println = partial(print, file=f)
 
-        println(u"// |reftest| skip-if(!this.hasOwnProperty('Intl')||"
-                u"(!this.Intl.Locale&&!this.hasOwnProperty('addIntlExtras')))")
+        println(u"// |reftest| skip-if(!this.hasOwnProperty('Intl'))")
         writeCLDRLanguageTagLikelySubtagsTest(println, data, url)
 
 
@@ -2053,91 +2232,84 @@ def updateCurrency(topsrcdir, args):
                 updateFrom(currencyTmpFile.name)
 
 
-def writeUnicodeExtensionsMappings(println, mapping):
+def writeUnicodeExtensionsMappings(println, mapping, extension):
     println(u"""
 template <size_t Length>
-static inline bool IsUnicodeKey(mozilla::Span<const char> key,
-                                const char (&str)[Length]) {
-  static_assert(Length == UnicodeKeyLength + 1,
-                "Unicode extension key is two characters long");
+static inline bool Is{0}Key(
+  mozilla::Span<const char> key, const char (&str)[Length]) {{
+  static_assert(Length == {0}KeyLength + 1,
+                "{0} extension key is two characters long");
   return memcmp(key.data(), str, Length - 1) == 0;
-}
+}}
 
 template <size_t Length>
-static inline bool IsUnicodeType(mozilla::Span<const char> type,
-                                 const char (&str)[Length]) {
-  static_assert(Length > UnicodeKeyLength + 1,
-                "Unicode extension type contains more than two characters");
+static inline bool Is{0}Type(
+  mozilla::Span<const char> type, const char (&str)[Length]) {{
+  static_assert(Length > {0}KeyLength + 1,
+                "{0} extension type contains more than two characters");
   return type.size() == (Length - 1) &&
          memcmp(type.data(), str, Length - 1) == 0;
-}
+}}
+""".format(extension).rstrip("\n"))
 
-static int32_t CompareUnicodeType(const char* a, mozilla::Span<const char> b) {
-#ifdef DEBUG
-  auto isNull = [](char c) {
-    return c == '\\0';
-  };
-#endif
+    linear_search_max_length = 4
 
-  MOZ_ASSERT(std::none_of(b.begin(), b.end(), isNull),
+    needs_binary_search = any(len(replacements.items()) > linear_search_max_length
+                              for replacements in mapping.values())
+
+    if needs_binary_search:
+        println(u"""
+static int32_t Compare{0}Type(const char* a, mozilla::Span<const char> b) {{
+  MOZ_ASSERT(!std::char_traits<char>::find(b.data(), b.size(), '\\0'),
              "unexpected null-character in string");
 
   using UnsignedChar = unsigned char;
-  for (size_t i = 0; i < b.size(); i++) {
+  for (size_t i = 0; i < b.size(); i++) {{
     // |a| is zero-terminated and |b| doesn't contain a null-terminator. So if
     // we've reached the end of |a|, the below if-statement will always be true.
     // That ensures we don't read past the end of |a|.
-    if (int32_t r = UnsignedChar(a[i]) - UnsignedChar(b[i])) {
+    if (int32_t r = UnsignedChar(a[i]) - UnsignedChar(b[i])) {{
       return r;
-    }
-  }
+    }}
+  }}
 
   // Return zero if both strings are equal or a negative number if |b| is a
   // prefix of |a|.
   return -int32_t(UnsignedChar(a[b.size()]));
-};
+}}
 
 template <size_t Length>
-static inline const char* SearchReplacement(const char* (&types)[Length],
-                                            const char* (&aliases)[Length],
-                                            mozilla::Span<const char> type) {
+static inline const char* Search{0}Replacement(
+  const char* (&types)[Length], const char* (&aliases)[Length],
+  mozilla::Span<const char> type) {{
 
   auto p = std::lower_bound(std::begin(types), std::end(types), type,
-                            [](const auto& a, const auto& b) {
-    return CompareUnicodeType(a, b) < 0;
-  });
-  if (p != std::end(types) && CompareUnicodeType(*p, type) == 0) {
+                            [](const auto& a, const auto& b) {{
+    return Compare{0}Type(a, b) < 0;
+  }});
+  if (p != std::end(types) && Compare{0}Type(*p, type) == 0) {{
     return aliases[std::distance(std::begin(types), p)];
-  }
+  }}
   return nullptr;
-}
+}}
+""".format(extension).rstrip("\n"))
 
+    println(u"""
 /**
- * Mapping from deprecated BCP 47 Unicode extension types to their preferred
+ * Mapping from deprecated BCP 47 {0} extension types to their preferred
  * values.
  *
  * Spec: https://www.unicode.org/reports/tr35/#Unicode_Locale_Extension_Data_Files
+ * Spec: https://www.unicode.org/reports/tr35/#t_Extension
  */
-const char* js::intl::LanguageTag::replaceUnicodeExtensionType(
-    mozilla::Span<const char> key, mozilla::Span<const char> type) {
-#ifdef DEBUG
-  static auto isAsciiLowercaseAlphanumeric = [](char c) {
-    return mozilla::IsAsciiLowercaseAlpha(c) || mozilla::IsAsciiDigit(c);
-  };
+const char* js::intl::LanguageTag::replace{0}ExtensionType(
+    mozilla::Span<const char> key, mozilla::Span<const char> type) {{
+  MOZ_ASSERT(key.size() == {0}KeyLength);
+  MOZ_ASSERT(IsCanonicallyCased{0}Key(key));
 
-  static auto isAsciiLowercaseAlphanumericOrDash = [](char c) {
-    return isAsciiLowercaseAlphanumeric(c) || c == '-';
-  };
-#endif
-
-  MOZ_ASSERT(key.size() == UnicodeKeyLength);
-  MOZ_ASSERT(std::all_of(key.begin(), key.end(),
-                         isAsciiLowercaseAlphanumeric));
-
-  MOZ_ASSERT(type.size() > UnicodeKeyLength);
-  MOZ_ASSERT(std::all_of(type.begin(), type.end(),
-                         isAsciiLowercaseAlphanumericOrDash));
-""")
+  MOZ_ASSERT(type.size() > {0}KeyLength);
+  MOZ_ASSERT(IsCanonicallyCased{0}Type(type));
+""".format(extension))
 
     def to_hash_key(replacements):
         return str(sorted(replacements.items()))
@@ -2169,7 +2341,8 @@ const char* js::intl::LanguageTag::replaceUnicodeExtensionType(
         if key in key_aliases[hash_key]:
             continue
 
-        cond = (u"IsUnicodeKey(key, \"{}\")".format(k) for k in [key] + key_aliases[hash_key])
+        cond = (u"Is{}Key(key, \"{}\")".format(extension, k)
+                for k in [key] + key_aliases[hash_key])
 
         if_kind = u"if" if first_key else u"else if"
         cond = (u" ||\n" + u" " * (2 + len(if_kind) + 2)).join(cond)
@@ -2179,7 +2352,7 @@ const char* js::intl::LanguageTag::replaceUnicodeExtensionType(
 
         replacements = sorted(replacements.items(), key=itemgetter(0))
 
-        if len(replacements) > 4:
+        if len(replacements) > linear_search_max_length:
             types = [t for (t, _) in replacements]
             preferred = [r for (_, r) in replacements]
             max_len = max(len(k) for k in types + preferred)
@@ -2187,14 +2360,14 @@ const char* js::intl::LanguageTag::replaceUnicodeExtensionType(
             write_array(types, "types", max_len)
             write_array(preferred, "aliases", max_len)
             println(u"""
-    return SearchReplacement(types, aliases, type);
-""".strip("\n"))
+    return Search{}Replacement(types, aliases, type);
+""".format(extension).strip("\n"))
         else:
             for (type, replacement) in replacements:
                 println(u"""
-    if (IsUnicodeType(type, "{}")) {{
+    if (Is{}Type(type, "{}")) {{
       return "{}";
-    }}""".format(type, replacement).strip("\n"))
+    }}""".format(extension, type, replacement).strip("\n"))
 
         println(u"""
   }""".lstrip("\n"))
@@ -2203,6 +2376,358 @@ const char* js::intl::LanguageTag::replaceUnicodeExtensionType(
   return nullptr;
 }
 """.strip("\n"))
+
+
+def readICUUnitResourceFile(filepath):
+    """ Return a set of unit descriptor pairs where the first entry denotes the unit type and the
+        second entry the unit name.
+
+        Example:
+
+        root{
+            units{
+                compound{
+                }
+                coordinate{
+                }
+                length{
+                    meter{
+                    }
+                }
+            }
+            unitsNarrow:alias{"/LOCALE/unitsShort"}
+            unitsShort{
+                duration{
+                    day{
+                    }
+                    day-person:alias{"/LOCALE/unitsShort/duration/day"}
+                }
+                length{
+                    meter{
+                    }
+                }
+            }
+        }
+
+        Returns {("length", "meter"), ("duration", "day"), ("duration", "day-person")}
+    """
+
+    start_table_re = re.compile(r"^([\w\-%:\"]+){$")
+    end_table_re = re.compile(r"^}$")
+    table_entry_re = re.compile(r"^([\w\-%:\"]+){\"(.*?)\"}$")
+
+    # The current resource table.
+    table = {}
+
+    # List of parent tables when parsing.
+    parents = []
+
+    # Track multi-line comments state.
+    in_multiline_comment = False
+
+    for line in flines(filepath, "utf-8-sig"):
+        # Remove leading and trailing whitespace.
+        line = line.strip()
+
+        # Skip over comments.
+        if in_multiline_comment:
+            if line.endswith("*/"):
+                in_multiline_comment = False
+            continue
+
+        if line.startswith("//"):
+            continue
+
+        if line.startswith("/*"):
+            in_multiline_comment = True
+            continue
+
+        # Try to match the start of a table, e.g. `length{` or `meter{`.
+        match = start_table_re.match(line)
+        if match:
+            parents.append(table)
+            table_name = match.group(1)
+            new_table = {}
+            table[table_name] = new_table
+            table = new_table
+            continue
+
+        # Try to match the end of a table.
+        match = end_table_re.match(line)
+        if match:
+            table = parents.pop()
+            continue
+
+        # Try to match a table entry, e.g. `dnam{"meter"}`.
+        match = table_entry_re.match(line)
+        if match:
+            entry_key = match.group(1)
+            entry_value = match.group(2)
+            table[entry_key] = entry_value
+            continue
+
+        raise Exception("unexpected line: '{}' in {}".format(line, file_name))
+
+    assert len(parents) == 0, "Not all tables closed"
+    assert len(table) == 1, "More than one root table"
+
+    # Remove the top-level language identifier table.
+    (_, unit_table) = table.popitem()
+
+    # Add all units for the three display formats "units", "unitsNarrow", and "unitsShort".
+    # But exclude the pseudo-units "compound" and "ccoordinate".
+    return {(unit_type, unit_name if not unit_name.endswith(":alias") else unit_name[:-6])
+            for unit_display in ("units", "unitsNarrow", "unitsShort")
+            if unit_display in unit_table
+            for (unit_type, unit_names) in unit_table[unit_display].items()
+            if unit_type != "compound" and unit_type != "coordinate"
+            for unit_name in unit_names.keys()}
+
+
+def computeSupportedUnits(all_units, sanctioned_units):
+    """ Given the set of all possible ICU unit identifiers and the set of sanctioned unit
+        identifiers, compute the set of effectively supported ICU unit identifiers.
+    """
+
+    def find_match(unit):
+        unit_match = [(unit_type, unit_name)
+                      for (unit_type, unit_name) in all_units
+                      if unit_name == unit]
+        if unit_match:
+            assert len(unit_match) == 1
+            return unit_match[0]
+        return None
+
+    def compound_unit_identifiers():
+        for numerator in sanctioned_units:
+            for denominator in sanctioned_units:
+                yield "{}-per-{}".format(numerator, denominator)
+
+    supported_simple_units = {find_match(unit) for unit in sanctioned_units}
+    assert None not in supported_simple_units
+
+    supported_compound_units = {unit_match
+                                for unit_match in (find_match(unit)
+                                                   for unit in compound_unit_identifiers())
+                                if unit_match}
+
+    return supported_simple_units | supported_compound_units
+
+
+def readICUDataFilterForUnits(data_filter_file):
+    with io.open(data_filter_file, mode="r", encoding="utf-8") as f:
+        data_filter = json.load(f)
+
+    # Find the rule set for the "unit_tree".
+    unit_tree_rules = [entry["rules"]
+                       for entry in data_filter["resourceFilters"]
+                       if entry["categories"] == ["unit_tree"]]
+    assert len(unit_tree_rules) == 1
+
+    # Compute the list of included units from that rule set. The regular expression must match
+    # "+/*/length/meter" and mustn't match either "-/*" or "+/*/compound".
+    included_unit_re = re.compile(r"^\+/\*/(.+?)/(.+)$")
+    filtered_units = (included_unit_re.match(unit) for unit in unit_tree_rules[0])
+
+    return {(unit.group(1), unit.group(2)) for unit in filtered_units if unit}
+
+
+def writeSanctionedSimpleUnitIdentifiersFiles(all_units, sanctioned_units):
+    intl_dir = os.path.dirname(os.path.abspath(__file__))
+
+    def find_unit_type(unit):
+        result = [unit_type for (unit_type, unit_name) in all_units if unit_name == unit]
+        assert result and len(result) == 1
+        return result[0]
+
+    sanctioned_js_file = os.path.join(intl_dir, "SanctionedSimpleUnitIdentifiersGenerated.js")
+    with io.open(sanctioned_js_file, mode="w", encoding="utf-8", newline="") as f:
+        println = partial(print, file=f)
+
+        sanctioned_units_object = json.dumps({unit: True for unit in sorted(sanctioned_units)},
+                                             sort_keys=True, indent=4, separators=(',', ': '))
+
+        println(generatedFileWarning)
+
+        println(u"""
+/**
+ * The list of currently supported simple unit identifiers.
+ *
+ * Intl.NumberFormat Unified API Proposal
+ */""")
+
+        println(u"var sanctionedSimpleUnitIdentifiers = {};".format(sanctioned_units_object))
+
+    sanctioned_cpp_file = os.path.join(intl_dir, "MeasureUnitGenerated.h")
+    with io.open(sanctioned_cpp_file, mode="w", encoding="utf-8", newline="") as f:
+        println = partial(print, file=f)
+
+        println(generatedFileWarning)
+
+        println(u"""
+struct MeasureUnit {
+  const char* const type;
+  const char* const name;
+};
+
+/**
+ * The list of currently supported simple unit identifiers.
+ *
+ * The list must be kept in alphabetical order of |name|.
+ */
+inline constexpr MeasureUnit simpleMeasureUnits[] = {
+    // clang-format off""")
+
+        for unit_name in sorted(sanctioned_units):
+            println(u'  {{"{}", "{}"}},'.format(find_unit_type(unit_name), unit_name))
+
+        println(u"""
+    // clang-format on
+};""".lstrip("\n"))
+
+    writeUnitTestFiles(all_units, sanctioned_units)
+
+
+def writeUnitTestFiles(all_units, sanctioned_units):
+    """ Generate test files for unit number formatters. """
+
+    test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "../../tests/non262/Intl/NumberFormat")
+
+    def write_test(file_name, test_content, indent=4):
+        file_path = os.path.join(test_dir, file_name)
+        with io.open(file_path, mode="w", encoding="utf-8", newline="") as f:
+            println = partial(print, file=f)
+
+            println(u'// |reftest| skip-if(!this.hasOwnProperty("Intl"))')
+            println(u"")
+            println(generatedFileWarning)
+            println(u"")
+
+            sanctioned_units_array = json.dumps([unit for unit in sorted(sanctioned_units)],
+                                                indent=indent, separators=(',', ': '))
+
+            println(u"const sanctionedSimpleUnitIdentifiers = {};".format(sanctioned_units_array))
+
+            println(test_content)
+
+            println(u"""
+if (typeof reportCompare === "function")
+{}reportCompare(true, true);""".format(" " * indent))
+
+    write_test("unit-compound-combinations.js", u"""
+// Test all simple unit identifier combinations are allowed.
+
+for (const numerator of sanctionedSimpleUnitIdentifiers) {
+    for (const denominator of sanctionedSimpleUnitIdentifiers) {
+        const unit = `${numerator}-per-${denominator}`;
+        const nf = new Intl.NumberFormat("en", {style: "unit", unit});
+
+        assertEq(nf.format(1), nf.formatToParts(1).map(p => p.value).join(""));
+    }
+}""")
+
+    all_units_array = json.dumps(["-".join(unit) for unit in sorted(all_units)],
+                                 indent=4, separators=(',', ': '))
+
+    write_test("unit-well-formed.js", u"""
+const allUnits = {};
+""".format(all_units_array) + u"""
+// Test only sanctioned unit identifiers are allowed.
+
+for (const typeAndUnit of allUnits) {
+    const [_, type, unit] = typeAndUnit.match(/(\w+)-(.+)/);
+
+    let allowed;
+    if (unit.includes("-per-")) {
+        const [numerator, denominator] = unit.split("-per-");
+        allowed = sanctionedSimpleUnitIdentifiers.includes(numerator) &&
+                  sanctionedSimpleUnitIdentifiers.includes(denominator);
+    } else {
+        allowed = sanctionedSimpleUnitIdentifiers.includes(unit);
+    }
+
+    if (allowed) {
+        const nf = new Intl.NumberFormat("en", {style: "unit", unit});
+        assertEq(nf.format(1), nf.formatToParts(1).map(p => p.value).join(""));
+    } else {
+        assertThrowsInstanceOf(() => new Intl.NumberFormat("en", {style: "unit", unit}),
+                               RangeError, `Missing error for "${typeAndUnit}"`);
+    }
+}""")
+
+    write_test("unit-formatToParts-has-unit-field.js", u"""
+// Test only English and Chinese to keep the overall runtime reasonable.
+//
+// Chinese is included because it contains more than one "unit" element for
+// certain unit combinations.
+const locales = ["en", "zh"];
+
+// Plural rules for English only differentiate between "one" and "other". Plural
+// rules for Chinese only use "other". That means we only need to test two values
+// per unit.
+const values = [0, 1];
+
+// Ensure unit formatters contain at least one "unit" element.
+
+for (const locale of locales) {
+  for (const unit of sanctionedSimpleUnitIdentifiers) {
+    const nf = new Intl.NumberFormat(locale, {style: "unit", unit});
+
+    for (const value of values) {
+      assertEq(nf.formatToParts(value).some(e => e.type === "unit"), true,
+               `locale=${locale}, unit=${unit}`);
+    }
+  }
+
+  for (const numerator of sanctionedSimpleUnitIdentifiers) {
+    for (const denominator of sanctionedSimpleUnitIdentifiers) {
+      const unit = `${numerator}-per-${denominator}`;
+      const nf = new Intl.NumberFormat(locale, {style: "unit", unit});
+
+      for (const value of values) {
+        assertEq(nf.formatToParts(value).some(e => e.type === "unit"), true,
+                 `locale=${locale}, unit=${unit}`);
+      }
+    }
+  }
+}""", indent=2)
+
+
+def updateUnits(topsrcdir, args):
+    icu_path = os.path.join(topsrcdir, "intl", "icu")
+    icu_unit_path = os.path.join(icu_path, "source", "data", "unit")
+
+    with io.open("SanctionedSimpleUnitIdentifiers.yaml", mode="r", encoding="utf-8") as f:
+        sanctioned_units = yaml.safe_load(f)
+
+    # Read all possible ICU unit identifiers from the "unit/root.txt" resource.
+    unit_root_file = os.path.join(icu_unit_path, "root.txt")
+    all_units = readICUUnitResourceFile(unit_root_file)
+
+    # Compute the set of effectively supported ICU unit identifiers.
+    supported_units = computeSupportedUnits(all_units, sanctioned_units)
+
+    # Read the list of units we're including into the ICU data file.
+    data_filter_file = os.path.join(icu_path, "data_filter.json")
+    filtered_units = readICUDataFilterForUnits(data_filter_file)
+
+    # Both sets must match to avoid resource loading errors at runtime.
+    if supported_units != filtered_units:
+        def units_to_string(units):
+            return ", ".join("/".join(u) for u in units)
+
+        missing = supported_units - filtered_units
+        if missing:
+            raise RuntimeError("Missing units: {}".format(units_to_string(missing)))
+
+        # Not exactly an error, but we currently don't have a use case where we need to support
+        # more units than required by ECMA-402.
+        extra = filtered_units - supported_units
+        if extra:
+            raise RuntimeError("Unnecessary units: {}".format(units_to_string(extra)))
+
+    writeSanctionedSimpleUnitIdentifiersFiles(all_units, sanctioned_units)
 
 
 if __name__ == "__main__":
@@ -2274,6 +2799,10 @@ if __name__ == "__main__":
                                  nargs="?",
                                  help="Local currency code list file, if omitted uses <URL>")
     parser_currency.set_defaults(func=partial(updateCurrency, topsrcdir))
+
+    parser_units = subparsers.add_parser("units",
+                                         help="Update sanctioned unit identifiers mapping")
+    parser_units.set_defaults(func=partial(updateUnits, topsrcdir))
 
     args = parser.parse_args()
     args.func(args)

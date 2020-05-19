@@ -7,7 +7,7 @@
 
 const { TargetList } = require("devtools/shared/resources/target-list");
 
-const FISSION_TEST_URL = URL_ROOT + "/fission_document.html";
+const FISSION_TEST_URL = URL_ROOT_SSL + "/fission_document.html";
 
 add_task(async function() {
   // Enabled fission's prefs as the TargetList is almost disabled without it
@@ -34,7 +34,8 @@ add_task(async function() {
 async function testBrowserFrames(mainRoot) {
   info("Test TargetList against frames via the parent process target");
 
-  const target = await mainRoot.getMainProcess();
+  const targetDescriptor = await mainRoot.getMainProcess();
+  const target = await targetDescriptor.getTarget();
   const targetList = new TargetList(mainRoot, target);
   await targetList.startListening();
 
@@ -60,15 +61,15 @@ async function testBrowserFrames(mainRoot) {
 
   // Assert that watchTargets will call the create callback for all existing frames
   const targets = [];
-  const onAvailable = ({ type, targetFront, isTopLevel }) => {
+  const onAvailable = ({ targetFront }) => {
     is(
-      type,
+      targetFront.targetType,
       TargetList.TYPES.FRAME,
       "We are only notified about frame targets"
     );
     ok(
-      targetFront == target ? isTopLevel : !isTopLevel,
-      "isTopLevel argument is correct"
+      targetFront == target ? targetFront.isTopLevel : !targetFront.isTopLevel,
+      "isTopLevel property is correct"
     );
     targets.push(targetFront);
   };
@@ -112,7 +113,8 @@ async function testTabFrames(mainRoot) {
   // Create a TargetList for a given test tab
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   const tab = await addTab(FISSION_TEST_URL);
-  const target = await mainRoot.getTab({ tab });
+  const descriptor = await mainRoot.getTab({ tab });
+  const target = await descriptor.getTarget();
   const targetList = new TargetList(mainRoot, target);
 
   await targetList.startListening();
@@ -123,15 +125,15 @@ async function testTabFrames(mainRoot) {
 
   // Assert that watchTargets will call the create callback for all existing frames
   const targets = [];
-  const onAvailable = ({ type, targetFront, isTopLevel }) => {
+  const onAvailable = ({ targetFront }) => {
     is(
-      type,
+      targetFront.targetType,
       TargetList.TYPES.FRAME,
       "We are only notified about frame targets"
     );
     ok(
-      targetFront == target ? isTopLevel : !isTopLevel,
-      "isTopLevel argument is correct"
+      targetFront == target ? targetFront.isTopLevel : !targetFront.isTopLevel,
+      "isTopLevel property is correct"
     );
     targets.push(targetFront);
   };

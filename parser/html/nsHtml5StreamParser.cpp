@@ -8,6 +8,7 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Encoding.h"
+#include "mozilla/SchedulerGroup.h"
 #include "nsContentUtils.h"
 #include "nsHtml5Tokenizer.h"
 #include "nsIHttpChannel.h"
@@ -19,7 +20,6 @@
 #include "nsIDocShell.h"
 #include "nsIScriptError.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/SystemGroup.h"
 #include "mozilla/StaticPrefs_intl.h"
 #include "mozilla/StaticPrefs_html5.h"
 #include "mozilla/UniquePtrExtensions.h"
@@ -160,7 +160,8 @@ nsHtml5StreamParser::nsHtml5StreamParser(nsHtml5TreeOpExecutor* aExecutor,
               ? nullptr
               : mExecutor->GetStage(),
           aMode == NORMAL ? mExecutor->GetStage() : nullptr)),
-      mTokenizer(new nsHtml5Tokenizer(mTreeBuilder, aMode == VIEW_SOURCE_XML)),
+      mTokenizer(
+          new nsHtml5Tokenizer(mTreeBuilder.get(), aMode == VIEW_SOURCE_XML)),
       mTokenizerMutex("nsHtml5StreamParser mTokenizerMutex"),
       mOwner(aOwner),
       mLastWasCR(false),
@@ -309,8 +310,9 @@ void nsHtml5StreamParser::FeedDetector(Span<const uint8_t> aBuffer,
 void nsHtml5StreamParser::SetViewSourceTitle(nsIURI* aURL) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsIDocShell* docshell = mExecutor->GetDocument()->GetDocShell();
-  if (docshell && docshell->GetWatchedByDevtools()) {
+  BrowsingContext* browsingContext =
+      mExecutor->GetDocument()->GetBrowsingContext();
+  if (browsingContext && browsingContext->WatchedByDevTools()) {
     mURIToSendToDevtools = aURL;
 
     nsID uuid;
@@ -710,7 +712,7 @@ nsresult nsHtml5StreamParser::SniffStreamBytes(
 
   if (!mMetaScanner &&
       (mMode == NORMAL || mMode == VIEW_SOURCE_HTML || mMode == LOAD_AS_DATA)) {
-    mMetaScanner = new nsHtml5MetaScanner(mTreeBuilder);
+    mMetaScanner = MakeUnique<nsHtml5MetaScanner>(mTreeBuilder.get());
   }
 
   if (mSniffingLength + aFromSegment.Length() >= SNIFFING_BUFFER_SIZE) {
@@ -1120,8 +1122,8 @@ nsresult nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest) {
       // the request.
       nsCOMPtr<nsIRunnable> runnable =
           new MaybeRunCollector(mExecutor->GetDocument()->GetDocShell());
-      mozilla::SystemGroup::Dispatch(mozilla::TaskCategory::GarbageCollection,
-                                     runnable.forget());
+      mozilla::SchedulerGroup::Dispatch(
+          mozilla::TaskCategory::GarbageCollection, runnable.forget());
     }
   }
 
@@ -1795,7 +1797,7 @@ void nsHtml5StreamParser::ContinueAfterScripts(nsHtml5Tokenizer* aTokenizer,
       return;
     }
 
-    nsHtml5Speculation* speculation = mSpeculations.ElementAt(0);
+    const auto& speculation = mSpeculations.ElementAt(0);
     if (aLastWasCR || !aTokenizer->isInDataState() ||
         !aTreeBuilder->snapshotMatches(speculation->GetSnapshot())) {
       speculationFailed = true;
@@ -1845,7 +1847,7 @@ void nsHtml5StreamParser::ContinueAfterScripts(nsHtml5Tokenizer* aTokenizer,
     if (speculationFailed) {
       // Rewind the stream
       mAtEOF = false;
-      nsHtml5Speculation* speculation = mSpeculations.ElementAt(0);
+      const auto& speculation = mSpeculations.ElementAt(0);
       mFirstBuffer = speculation->GetBuffer();
       mFirstBuffer->setStart(speculation->GetStart());
       mTokenizer->setLineNumber(speculation->GetStartLineNumber());

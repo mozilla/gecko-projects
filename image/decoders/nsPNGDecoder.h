@@ -49,6 +49,9 @@ class nsPNGDecoder : public Decoder {
   nsresult CreateFrame(const FrameInfo& aFrameInfo);
   void EndImageFrame();
 
+  uint32_t ReadColorProfile(png_structp png_ptr, png_infop info_ptr,
+                            int color_type, bool* sRGBTag);
+
   bool HasAlphaChannel() const { return mChannels == 2 || mChannels == 4; }
 
   enum class TransparencyType { eNone, eAlpha, eFrameRect };
@@ -93,9 +96,6 @@ class nsPNGDecoder : public Decoder {
   uint8_t* mCMSLine;
   uint8_t* interlacebuf;
   gfx::SurfaceFormat mFormat;
-
-  // whether CMS or premultiplied alpha are forced off
-  uint32_t mCMSMode;
 
   uint8_t mChannels;
   uint8_t mPass;

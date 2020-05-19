@@ -14,10 +14,14 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
+#include "mozilla/Mutex.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsLocalFile.h"
 #include "nsPrintfCString.h"
+#ifndef ANDROID
+#  include "nsTerminator.h"
+#endif
 #include "mozilla/StackWalk.h"
 #include "plstr.h"
 #include "prio.h"
@@ -37,6 +41,15 @@
 #include "LateWriteChecks.h"
 
 /*************************** Auxiliary Declarations ***************************/
+
+static MOZ_THREAD_LOCAL(int) tlsSuspendLateWriteChecks;
+
+bool SuspendingLateWriteChecksForCurrentThread() {
+  if (!tlsSuspendLateWriteChecks.init()) {
+    return true;
+  }
+  return tlsSuspendLateWriteChecks.get() > 0;
+}
 
 // This a wrapper over a file descriptor that provides a Printf method and
 // computes the sha1 of the data that passes through it.
@@ -103,6 +116,10 @@ class LateWriteObserver final : public mozilla::IOInterposeObserver {
 
 void LateWriteObserver::Observe(
     mozilla::IOInterposeObserver::Observation& aOb) {
+  if (SuspendingLateWriteChecksForCurrentThread()) {
+    return;
+  }
+
 #ifdef DEBUG
   MOZ_CRASH();
 #endif
@@ -182,6 +199,11 @@ void LateWriteObserver::Observe(
     sha1Stream.Printf("%d %x\n", frame.mModIndex, (unsigned)frame.mOffset);
   }
 
+#ifndef ANDROID
+  sha1Stream.Printf("%d\n", mozilla::nsTerminator::IsCheckingLateWrites());
+#else
+  sha1Stream.Printf("%d\n", false);
+#endif
   mozilla::SHA1Sum::Hash sha1;
   sha1Stream.Finish(sha1);
 
@@ -203,6 +225,7 @@ void LateWriteObserver::Observe(
 /******************************* Setup/Teardown *******************************/
 
 static mozilla::StaticAutoPtr<LateWriteObserver> sLateWriteObserver;
+mozilla::Mutex* mMutex = nullptr;
 
 namespace mozilla {
 
@@ -215,13 +238,20 @@ void InitLateWriteChecks() {
       sLateWriteObserver = new LateWriteObserver(nativePath.get());
     }
   }
+  mMutex = new Mutex("LateWriteCheck::mMutex");
 }
 
 void BeginLateWriteChecks() {
+  if (mMutex) {
+    MutexAutoLock lock(*mMutex);
+  }
+
   if (sLateWriteObserver) {
     IOInterposer::Register(IOInterposeObserver::OpWriteFSync,
                            sLateWriteObserver);
   }
+  delete mMutex;
+  mMutex = nullptr;
 }
 
 void StopLateWriteChecks() {
@@ -231,6 +261,22 @@ void StopLateWriteChecks() {
     // called at shutdown and only in special cases.
     // sLateWriteObserver = nullptr;
   }
+}
+
+void PushSuspendLateWriteChecks() {
+  if (!tlsSuspendLateWriteChecks.init()) {
+    return;
+  }
+  tlsSuspendLateWriteChecks.set(tlsSuspendLateWriteChecks.get() + 1);
+}
+
+void PopSuspendLateWriteChecks() {
+  if (!tlsSuspendLateWriteChecks.init()) {
+    return;
+  }
+  int current = tlsSuspendLateWriteChecks.get();
+  MOZ_ASSERT(current > 0);
+  tlsSuspendLateWriteChecks.set(current - 1);
 }
 
 }  // namespace mozilla

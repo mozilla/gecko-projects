@@ -9,33 +9,25 @@ const { XPCOMUtils } = ChromeUtils.import(
 );
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  LocationHelper: "resource://gre/modules/LocationHelper.jsm",
+});
+
 XPCOMUtils.defineLazyGlobalGetters(this, ["XMLHttpRequest"]);
 
 // GeolocationPositionError has no interface object, so we can't use that here.
 const POSITION_UNAVAILABLE = 2;
 
-var gLoggingEnabled = false;
-
-/*
-   The gLocationRequestTimeout controls how long we wait on receiving an update
-   from the Wifi subsystem.  If this timer fires, we believe the Wifi scan has
-   had a problem and we no longer can use Wifi to position the user this time
-   around (we will continue to be hopeful that Wifi will recover).
-
-   This timeout value is also used when Wifi scanning is disabled (see
-   gWifiScanningEnabled).  In this case, we use this timer to collect cell/ip
-   data and xhr it to the location server.
-*/
-
-var gLocationRequestTimeout = 5000;
-
-var gWifiScanningEnabled = true;
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gLoggingEnabled",
+  "geo.provider.network.logging.enabled",
+  false
+);
 
 function LOG(aMsg) {
   if (gLoggingEnabled) {
-    aMsg = "*** WIFI GEO: " + aMsg + "\n";
-    Services.console.logStringMessage(aMsg);
-    dump(aMsg);
+    dump("*** WIFI GEO: " + aMsg + "\n");
   }
 }
 
@@ -251,16 +243,34 @@ NetworkGeoPositionObject.prototype = {
 };
 
 function NetworkGeolocationProvider() {
-  gLoggingEnabled = Services.prefs.getBoolPref(
-    "geo.provider.network.logging.enabled",
-    false
-  );
-  gLocationRequestTimeout = Services.prefs.getIntPref(
+  /*
+    The _wifiMonitorTimeout controls how long we wait on receiving an update
+    from the Wifi subsystem.  If this timer fires, we believe the Wifi scan has
+    had a problem and we no longer can use Wifi to position the user this time
+    around (we will continue to be hopeful that Wifi will recover).
+
+    This timeout value is also used when Wifi scanning is disabled (see
+    isWifiScanningEnabled).  In this case, we use this timer to collect cell/ip
+    data and xhr it to the location server.
+  */
+  XPCOMUtils.defineLazyPreferenceGetter(
+    this,
+    "_wifiMonitorTimeout",
     "geo.provider.network.timeToWaitBeforeSending",
     5000
   );
-  gWifiScanningEnabled = Services.prefs.getBoolPref(
+
+  XPCOMUtils.defineLazyPreferenceGetter(
+    this,
+    "_wifiScanningEnabled",
     "geo.provider.network.scan",
+    true
+  );
+
+  XPCOMUtils.defineLazyPreferenceGetter(
+    this,
+    "_wifiScanningEnabledCountry",
+    "geo.provider-country.network.scan",
     true
   );
 
@@ -279,6 +289,10 @@ NetworkGeolocationProvider.prototype = {
   ]),
   listener: null,
 
+  get isWifiScanningEnabled() {
+    return Cc["@mozilla.org/wifi/monitor;1"] && this._wifiScanningEnabled;
+  },
+
   resetTimer() {
     if (this.timer) {
       this.timer.cancel();
@@ -289,7 +303,7 @@ NetworkGeolocationProvider.prototype = {
     this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     this.timer.initWithCallback(
       this,
-      gLocationRequestTimeout,
+      this._wifiMonitorTimeout,
       this.timer.TYPE_REPEATING_SLACK
     );
   },
@@ -301,7 +315,7 @@ NetworkGeolocationProvider.prototype = {
 
     this.started = true;
 
-    if (gWifiScanningEnabled && Cc["@mozilla.org/wifi/monitor;1"]) {
+    if (this.isWifiScanningEnabled) {
       if (this.wifiService) {
         this.wifiService.stopWatching(this);
       }
@@ -349,30 +363,9 @@ NetworkGeolocationProvider.prototype = {
     // we got some wifi data, rearm the timer.
     this.resetTimer();
 
-    function isPublic(ap) {
-      let mask = "_nomap";
-      let result = ap.ssid.indexOf(mask, ap.ssid.length - mask.length);
-      if (result != -1) {
-        LOG("Filtering out " + ap.ssid + " " + result);
-        return false;
-      }
-      return true;
-    }
-
-    function sort(a, b) {
-      return b.signal - a.signal;
-    }
-
-    function encode(ap) {
-      return { macAddress: ap.mac, signalStrength: ap.signal };
-    }
-
     let wifiData = null;
     if (accessPoints) {
-      wifiData = accessPoints
-        .filter(isPublic)
-        .sort(sort)
-        .map(encode);
+      wifiData = LocationHelper.formatWifiAccessPoints(accessPoints);
     }
     this.sendLocationRequest(wifiData);
   },
@@ -382,10 +375,49 @@ NetworkGeolocationProvider.prototype = {
     this.sendLocationRequest(null);
   },
 
+  onStatus(err, statusMessage) {
+    if (!this.listener) {
+      return;
+    }
+    LOG("onStatus called." + statusMessage);
+
+    if (statusMessage && this.listener.notifyStatus) {
+      this.listener.notifyStatus(statusMessage);
+    }
+
+    if (err && this.listener.notifyError) {
+      this.listener.notifyError(POSITION_UNAVAILABLE, statusMessage);
+    }
+  },
+
   notify(timer) {
+    this.onStatus(false, "wifi-timeout");
     this.sendLocationRequest(null);
   },
 
+  /**
+   * After wifi (and possible cell tower) data has been gathered, this method is
+   * invoked to perform the request to network geolocation provider.
+   * The result of each request is sent to all registered listener (@see watch)
+   * by invoking its respective `update`, `notifyError` or `notifyStatus`
+   * callbacks.
+   * `update` is called upon a successful request with its response data; this will be a `NetworkGeoPositionObject` instance.
+   * `notifyError` is called whenever the request gets an error from the local
+   * network subsystem, the server or simply times out.
+   * `notifyStatus` is called for each status change of the request that may be
+   * of interest to the consumer of this class. Currently the following status
+   * changes are reported: 'xhr-start', 'xhr-timeout', 'xhr-error' and
+   * 'xhr-empty'.
+   *
+   * @param  {Array} wifiData Optional set of publicly available wifi networks
+   *                          in the following structure:
+   *                          <code>
+   *                          [
+   *                            { macAddress: <mac1>, signalStrength: <signal1> },
+   *                            { macAddress: <mac2>, signalStrength: <signal2> }
+   *                          ]
+   *                          </code>
+   */
   sendLocationRequest(wifiData) {
     let data = { cellTowers: undefined, wifiAccessPoints: undefined };
     if (wifiData && wifiData.length >= 2) {
@@ -412,23 +444,26 @@ NetworkGeolocationProvider.prototype = {
     LOG("Sending request");
 
     let xhr = new XMLHttpRequest();
+    this.onStatus(false, "xhr-start");
     try {
       xhr.open("POST", url, true);
       xhr.channel.loadFlags = Ci.nsIChannel.LOAD_ANONYMOUS;
     } catch (e) {
-      notifyPositionUnavailable(this.listener);
+      this.onStatus(true, "xhr-error");
       return;
     }
     xhr.setRequestHeader("Content-Type", "application/json; charset=UTF-8");
     xhr.responseType = "json";
     xhr.mozBackgroundRequest = true;
+    // Allow deprecated HTTP request from SystemPrincipal
+    xhr.channel.loadInfo.allowDeprecatedSystemRequests = true;
     xhr.timeout = Services.prefs.getIntPref("geo.provider.network.timeout");
     xhr.ontimeout = () => {
       LOG("Location request XHR timed out.");
-      notifyPositionUnavailable(this.listener);
+      this.onStatus(true, "xhr-timeout");
     };
     xhr.onerror = () => {
-      notifyPositionUnavailable(this.listener);
+      this.onStatus(true, "xhr-error");
     };
     xhr.onload = () => {
       LOG(
@@ -439,10 +474,9 @@ NetworkGeolocationProvider.prototype = {
       );
       if (
         (xhr.channel instanceof Ci.nsIHttpChannel && xhr.status != 200) ||
-        !xhr.response ||
-        !xhr.response.location
+        !xhr.response
       ) {
-        notifyPositionUnavailable(this.listener);
+        this.onStatus(true, !xhr.response ? "xhr-empty" : "xhr-error");
         return;
       }
 
@@ -455,6 +489,7 @@ NetworkGeolocationProvider.prototype = {
       if (this.listener) {
         this.listener.update(newLocation);
       }
+
       gCachedRequest = new CachedRequest(
         newLocation,
         data.cellTowers,
@@ -465,12 +500,6 @@ NetworkGeolocationProvider.prototype = {
     var requestData = JSON.stringify(data);
     LOG("sending " + requestData);
     xhr.send(requestData);
-
-    function notifyPositionUnavailable(listener) {
-      if (listener) {
-        listener.notifyError(POSITION_UNAVAILABLE);
-      }
-    }
   },
 };
 

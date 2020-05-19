@@ -63,7 +63,10 @@ add_task(async function check_openArticleURL() {
   // Send a message from the content page (the TEST_URL) to the parent
   // This should trigger the `receiveMessage` cb in the articleTrigger
   await ContentTask.spawn(win.gBrowser.selectedBrowser, null, async () => {
-    sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: true });
+    let readerActor = content.windowGlobalChild.getActor("AboutReader");
+    readerActor.sendAsyncMessage("Reader:UpdateReaderButton", {
+      isArticle: true,
+    });
   });
 
   await listenerTriggered.then(data =>
@@ -162,12 +165,18 @@ add_task(async function check_openURL_listener() {
   await Promise.all(windows.map(win => BrowserTestUtils.closeWindow(win)));
 });
 
-add_task(async function check_newSavedLogin_listener() {
+add_task(async function check_newSavedLogin_save_listener() {
   const TEST_URL =
     "https://example.com/browser/browser/components/newtab/test/browser/red_page.html";
 
-  let loginsSaved = 0;
-  const triggerHandler = () => loginsSaved++;
+  let triggerTypesHandled = {
+    save: 0,
+    update: 0,
+  };
+  const triggerHandler = (sub, { id, context }) => {
+    is(id, "newSavedLogin", "Check trigger id");
+    triggerTypesHandled[context.type]++;
+  };
   const newSavedLoginListener = ASRouterTriggerListeners.get("newSavedLogin");
 
   // Previously initialized by the Router
@@ -181,12 +190,14 @@ add_task(async function check_newSavedLogin_listener() {
     async function triggerNewSavedPassword(browser) {
       Services.obs.notifyObservers(browser, "LoginStats:NewSavedPassword");
       await BrowserTestUtils.waitForCondition(
-        () => loginsSaved !== 0,
+        () => triggerTypesHandled.save !== 0,
         "Wait for the observer notification to run"
       );
-      is(loginsSaved, 1, "should receive observer notification");
+      is(triggerTypesHandled.save, 1, "should receive observer notification");
     }
   );
+
+  is(triggerTypesHandled.update, 0, "shouldn't have handled other trigger");
 
   // Uninitialise listener
   newSavedLoginListener.uninit();
@@ -196,7 +207,62 @@ add_task(async function check_newSavedLogin_listener() {
     async function triggerNewSavedPasswordAfterUninit(browser) {
       Services.obs.notifyObservers(browser, "LoginStats:NewSavedPassword");
       await new Promise(resolve => executeSoon(resolve));
-      is(loginsSaved, 1, "shouldn't receive obs. notification after uninit");
+      is(
+        triggerTypesHandled.save,
+        1,
+        "shouldn't receive obs. notification after uninit"
+      );
+    }
+  );
+});
+
+add_task(async function check_newSavedLogin_update_listener() {
+  const TEST_URL =
+    "https://example.com/browser/browser/components/newtab/test/browser/red_page.html";
+
+  let triggerTypesHandled = {
+    save: 0,
+    update: 0,
+  };
+  const triggerHandler = (sub, { id, context }) => {
+    is(id, "newSavedLogin", "Check trigger id");
+    triggerTypesHandled[context.type]++;
+  };
+  const newSavedLoginListener = ASRouterTriggerListeners.get("newSavedLogin");
+
+  // Previously initialized by the Router
+  newSavedLoginListener.uninit();
+
+  // Initialise listener
+  await newSavedLoginListener.init(triggerHandler);
+
+  await BrowserTestUtils.withNewTab(
+    TEST_URL,
+    async function triggerLoginUpdateSaved(browser) {
+      Services.obs.notifyObservers(browser, "LoginStats:LoginUpdateSaved");
+      await BrowserTestUtils.waitForCondition(
+        () => triggerTypesHandled.update !== 0,
+        "Wait for the observer notification to run"
+      );
+      is(triggerTypesHandled.update, 1, "should receive observer notification");
+    }
+  );
+
+  is(triggerTypesHandled.save, 0, "shouldn't have handled other trigger");
+
+  // Uninitialise listener
+  newSavedLoginListener.uninit();
+
+  await BrowserTestUtils.withNewTab(
+    TEST_URL,
+    async function triggerLoginUpdateSavedAfterUninit(browser) {
+      Services.obs.notifyObservers(browser, "LoginStats:LoginUpdateSaved");
+      await new Promise(resolve => executeSoon(resolve));
+      is(
+        triggerTypesHandled.update,
+        1,
+        "shouldn't receive obs. notification after uninit"
+      );
     }
   );
 });

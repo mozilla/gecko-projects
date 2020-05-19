@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -199,7 +200,7 @@ public class GeckoResult<T> {
 
         @Override
         public void dispatch(final Runnable r) {
-            mEventTarget.dispatch(r);
+            mEventTarget.execute(r);
         }
     }
 
@@ -215,6 +216,25 @@ public class GeckoResult<T> {
     public static final class UncaughtException extends RuntimeException {
         public UncaughtException(final Throwable cause) {
             super(cause);
+        }
+    }
+
+    /**
+     * Interface used to delegate cancellation operations for a {@link GeckoResult}.
+     */
+    @AnyThread
+    public interface CancellationDelegate {
+
+        /**
+         * This method should attempt to cancel the in-progress operation for the result
+         * to which this instance was attached. See {@link GeckoResult#cancel()} for more
+         * details.
+         *
+         * @return A {@link GeckoResult} resolving to "true" if cancellation was successful,
+         * "false" otherwise.
+         */
+        default @NonNull GeckoResult<Boolean> cancel() {
+            return GeckoResult.fromValue(false);
         }
     }
 
@@ -236,6 +256,9 @@ public class GeckoResult<T> {
     private Throwable mError;
     private boolean mIsUncaughtError;
     private SimpleArrayMap<Dispatcher, ArrayList<Runnable>> mListeners = new SimpleArrayMap<>();
+
+    private GeckoResult<?> mParent;
+    private CancellationDelegate mCancellationDelegate;
 
     /**
      * Construct an incomplete GeckoResult. Call {@link #complete(Object)} or
@@ -412,6 +435,25 @@ public class GeckoResult<T> {
         return then(valueListener, exceptionListener);
     }
 
+    /* package */ @NonNull GeckoResult<Void> getOrAccept(@Nullable final Consumer<T> valueConsumer) {
+        return getOrAccept(valueConsumer, null);
+    }
+
+    /* package */ @NonNull GeckoResult<Void> getOrAccept(@Nullable final Consumer<T> valueConsumer,
+                                                         @Nullable final Consumer<Throwable> exceptionConsumer) {
+        if (haveValue() && valueConsumer != null) {
+            valueConsumer.accept(mValue);
+            return GeckoResult.fromValue(null);
+        }
+
+        if (haveError() && exceptionConsumer != null) {
+            exceptionConsumer.accept(mError);
+            return GeckoResult.fromValue(null);
+        }
+
+        return accept(valueConsumer, exceptionConsumer);
+    }
+
     /**
      * Adds listeners to be called when the {@link GeckoResult} is completed either with
      * a value or {@link Throwable}. Listeners will be invoked on the {@link Looper} returned from
@@ -436,7 +478,6 @@ public class GeckoResult<T> {
         return thenInternal(mDispatcher, valueListener, exceptionListener);
     }
 
-
     private @NonNull <U> GeckoResult<U> thenInternal(@NonNull final Dispatcher dispatcher,
                                                      @Nullable final OnValueListener<T, U> valueListener,
                                                      @Nullable final OnExceptionListener<U> exceptionListener) {
@@ -445,6 +486,7 @@ public class GeckoResult<T> {
         }
 
         final GeckoResult<U> result = new GeckoResult<U>();
+        result.mParent = this;
         thenInternal(dispatcher, () -> {
             try {
                 if (haveValue()) {
@@ -668,6 +710,7 @@ public class GeckoResult<T> {
             return;
         }
 
+        this.mCancellationDelegate = other.mCancellationDelegate;
         other.thenInternal(DirectDispatcher.sInstance, () -> {
             if (other.haveValue()) {
                 complete(other.mValue);
@@ -836,5 +879,58 @@ public class GeckoResult<T> {
 
     private boolean haveError() {
         return mComplete && mError != null;
+    }
+
+    /**
+     * Attempts to cancel the operation associated with this result.
+     *
+     * If this result has a {@link CancellationDelegate} attached via
+     * {@link #setCancellationDelegate(CancellationDelegate)}, the return value
+     * will be the result of calling {@link CancellationDelegate#cancel()} on that instance.
+     * Otherwise, if this result is chained to another result
+     * (via return value from {@link OnValueListener}), we will walk up the chain until
+     * a CancellationDelegate is found and run it. If no CancellationDelegate is found,
+     * a result resolving to "false" will be returned.
+     *
+     * If this result is already complete, the returned result will always resolve to false.
+     *
+     * If the returned result resolves to true, this result will be completed
+     * with a {@link CancellationException}.
+     *
+     * @return A GeckoResult resolving to a boolean indicating success or failure of the cancellation attempt.
+     */
+    public synchronized @NonNull GeckoResult<Boolean> cancel() {
+        if (haveValue() || haveError()) {
+            return GeckoResult.fromValue(false);
+        }
+
+        if (mCancellationDelegate != null) {
+            return mCancellationDelegate.cancel().then(value -> {
+                if (value) {
+                    try {
+                        this.completeExceptionally(new CancellationException());
+                    } catch (IllegalStateException e) {
+                        // Can't really do anything about this.
+                    }
+                }
+                return GeckoResult.fromValue(value);
+            });
+        }
+
+        if (mParent != null) {
+            return mParent.cancel();
+        }
+
+        return GeckoResult.fromValue(false);
+    }
+
+    /**
+     * Sets the instance of {@link CancellationDelegate} that will be invoked by
+     * {@link #cancel()}.
+     *
+     * @param delegate an instance of CancellationDelegate.
+     */
+    public void setCancellationDelegate(final @Nullable CancellationDelegate delegate) {
+        mCancellationDelegate = delegate;
     }
 }

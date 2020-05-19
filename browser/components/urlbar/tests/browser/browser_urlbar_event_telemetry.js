@@ -34,7 +34,12 @@ const tests = [
     info("Type something, press Enter.");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("x", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "x",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
     return {
@@ -81,7 +86,12 @@ const tests = [
     info("Type something, click one-off.");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("moz", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "moz",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("KEY_ArrowDown", { altKey: true }, win);
     UrlbarTestUtils.getOneOffSearchButtons(win).selectedButton.click();
     await promise;
@@ -103,7 +113,12 @@ const tests = [
     info("Type something, select one-off, Enter.");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("moz", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "moz",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("KEY_ArrowDown", { altKey: true }, win);
     Assert.ok(UrlbarTestUtils.getOneOffSearchButtons(win).selectedButton);
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
@@ -149,7 +164,12 @@ const tests = [
     info("Type a keyword, Enter.");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("kw test", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "kw test",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
     return {
@@ -219,7 +239,12 @@ const tests = [
     info("Type something and canonize");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("example", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "example",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("VK_RETURN", { ctrlKey: true }, win);
     await promise;
     return {
@@ -245,7 +270,12 @@ const tests = [
       false,
       url
     );
-    await promiseAutocompleteResultPopup("exa", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "exa",
+      fireInputEvent: true,
+    });
     while (win.gURLBar.untrimmedValue != url) {
       EventUtils.synthesizeKey("KEY_ArrowDown", {}, win);
     }
@@ -270,7 +300,12 @@ const tests = [
     info("Type an autofilled string, Enter.");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("exa", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "exa",
+      fireInputEvent: true,
+    });
     // Check it's autofilled.
     Assert.equal(win.gURLBar.selectionStart, 3);
     Assert.equal(win.gURLBar.selectionEnd, 12);
@@ -294,7 +329,12 @@ const tests = [
     info("Type something, select bookmark entry, Enter.");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("exa", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "exa",
+      fireInputEvent: true,
+    });
     while (win.gURLBar.untrimmedValue != "http://example.com/?q=%s") {
       EventUtils.synthesizeKey("KEY_ArrowDown", {}, win);
     }
@@ -317,7 +357,12 @@ const tests = [
   async function(win) {
     info("Type @, Enter on a keywordoffer");
     win.gURLBar.select();
-    await promiseAutocompleteResultPopup("@", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "@",
+      fireInputEvent: true,
+    });
     while (win.gURLBar.untrimmedValue != "@test ") {
       EventUtils.synthesizeKey("KEY_ArrowDown", {}, win);
     }
@@ -458,32 +503,6 @@ const tests = [
     };
   },
 
-  async function(win) {
-    info("Open the panel with dropmarker, type something, Enter.");
-    Services.prefs.setBoolPref("browser.urlbar.openViewOnFocus", false);
-    win.gURLBar.select();
-    let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await UrlbarTestUtils.promisePopupOpen(win, () => {
-      EventUtils.synthesizeMouseAtCenter(win.gURLBar.dropmarker, {}, win);
-    });
-    await promiseAutocompleteResultPopup("x", win, true);
-    EventUtils.synthesizeKey("VK_RETURN", {}, win);
-    await promise;
-    Services.prefs.clearUserPref("browser.urlbar.openViewOnFocus");
-    return {
-      category: "urlbar",
-      method: "engagement",
-      object: "enter",
-      value: "topsites",
-      extra: {
-        elapsed: val => parseInt(val) > 0,
-        numChars: "1",
-        selType: "search",
-        selIndex: "0",
-      },
-    };
-  },
-
   // The URLs in the openViewOnFocus tests must vary from test to test, else
   // the first Top Site results will be a switch-to-tab result and a page load
   // will not occur.
@@ -558,12 +577,7 @@ const tests = [
   },
 
   async function(win) {
-    info(
-      "With pageproxystate=invalid, open the panel with openViewOnFocus, Enter."
-    );
-    await SpecialPowers.pushPrefEnv({
-      set: [["browser.urlbar.openViewOnFocus", true]],
-    });
+    info("With pageproxystate=invalid, open retained results, Enter.");
     await addTopSite("http://example.org/");
     win.gURLBar.value = "example.org";
     win.gURLBar.setPageProxyState("invalid");
@@ -571,7 +585,6 @@ const tests = [
     await UrlbarTestUtils.promisePopupOpen(win, () => {
       win.document.getElementById("Browser:OpenLocation").doCommand();
     });
-    await SpecialPowers.popPrefEnv();
     await UrlbarTestUtils.promiseSearchComplete(win);
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
@@ -590,12 +603,7 @@ const tests = [
   },
 
   async function(win) {
-    info(
-      "With pageproxystate=invalid, open the panel with openViewOnFocus, click on entry."
-    );
-    await SpecialPowers.pushPrefEnv({
-      set: [["browser.urlbar.openViewOnFocus", true]],
-    });
+    info("With pageproxystate=invalid, open retained results, click on entry.");
     // This value must be different from the previous test, to avoid reopening
     // the view.
     win.gURLBar.value = "example.com";
@@ -604,7 +612,6 @@ const tests = [
     await UrlbarTestUtils.promisePopupOpen(win, () => {
       win.document.getElementById("Browser:OpenLocation").doCommand();
     });
-    await SpecialPowers.popPrefEnv();
     await UrlbarTestUtils.promiseSearchComplete(win);
     let element = UrlbarTestUtils.getSelectedRow(win);
     EventUtils.synthesizeMouseAtCenter(element, {}, win);
@@ -625,10 +632,12 @@ const tests = [
 
   async function(win) {
     info("Reopen the view: type, blur, focus, confirm.");
-    await SpecialPowers.pushPrefEnv({
-      set: [["browser.urlbar.openViewOnFocus", true]],
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "search",
+      fireInputEvent: true,
     });
-    await promiseAutocompleteResultPopup("search", win, true);
     await UrlbarTestUtils.promisePopupClose(win, () => {
       win.gURLBar.blur();
     });
@@ -639,7 +648,6 @@ const tests = [
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
-    await SpecialPowers.popPrefEnv();
     return [
       {
         category: "urlbar",
@@ -670,7 +678,12 @@ const tests = [
     info("Sanity check we are not stuck on 'returned'");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("x", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "x",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
     return {
@@ -689,10 +702,12 @@ const tests = [
 
   async function(win) {
     info("Reopen the view: type, blur, focus, backspace, type, confirm.");
-    await SpecialPowers.pushPrefEnv({
-      set: [["browser.urlbar.openViewOnFocus", true]],
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "search",
+      fireInputEvent: true,
     });
-    await promiseAutocompleteResultPopup("search", win, true);
     await UrlbarTestUtils.promisePopupClose(win, () => {
       win.gURLBar.blur();
     });
@@ -706,7 +721,6 @@ const tests = [
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
-    await SpecialPowers.popPrefEnv();
     return [
       {
         category: "urlbar",
@@ -735,10 +749,12 @@ const tests = [
 
   async function(win) {
     info("Reopen the view: type, blur, focus, type (overwrite), confirm.");
-    await SpecialPowers.pushPrefEnv({
-      set: [["browser.urlbar.openViewOnFocus", true]],
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "search",
+      fireInputEvent: true,
     });
-    await promiseAutocompleteResultPopup("search", win, true);
     await UrlbarTestUtils.promisePopupClose(win, () => {
       win.gURLBar.blur();
     });
@@ -750,7 +766,6 @@ const tests = [
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
-    await SpecialPowers.popPrefEnv();
     return [
       {
         category: "urlbar",
@@ -781,7 +796,12 @@ const tests = [
     info("Sanity check we are not stuck on 'restarted'");
     win.gURLBar.select();
     let promise = BrowserTestUtils.browserLoaded(win.gBrowser.selectedBrowser);
-    await promiseAutocompleteResultPopup("x", win, true);
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window: win,
+      waitForFocus: SimpleTest.waitForFocus,
+      value: "x",
+      fireInputEvent: true,
+    });
     EventUtils.synthesizeKey("VK_RETURN", {}, win);
     await promise;
     return {
@@ -840,33 +860,6 @@ const tests = [
   },
 
   async function(win) {
-    info("Open the panel with dropmarker, type something, blur it.");
-    Services.prefs.setBoolPref("browser.urlbar.openViewOnFocus", false);
-    await BrowserTestUtils.withNewTab(
-      { gBrowser: win.gBrowser, url: "about:blank" },
-      async browser => {
-        win.gURLBar.select();
-        await UrlbarTestUtils.promisePopupOpen(win, () => {
-          EventUtils.synthesizeMouseAtCenter(gURLBar.dropmarker, {}, win);
-        });
-        EventUtils.synthesizeKey("x", {}, win);
-        win.gURLBar.blur();
-      }
-    );
-    Services.prefs.clearUserPref("browser.urlbar.openViewOnFocus");
-    return {
-      category: "urlbar",
-      method: "abandonment",
-      object: "blur",
-      value: "topsites",
-      extra: {
-        elapsed: val => parseInt(val) > 0,
-        numChars: "1",
-      },
-    };
-  },
-
-  async function(win) {
     info(
       "With pageproxystate=valid, open the panel with openViewOnFocus, don't type, blur it."
     );
@@ -891,15 +884,13 @@ const tests = [
 
   async function(win) {
     info(
-      "With pageproxystate=invalid, open the panel with openViewOnFocus, don't type, blur it."
+      "With pageproxystate=invalid, open retained results, don't type, blur it."
     );
     win.gURLBar.value = "mochi.test";
     win.gURLBar.setPageProxyState("invalid");
-    Services.prefs.setBoolPref("browser.urlbar.openViewOnFocus", true);
     await UrlbarTestUtils.promisePopupOpen(win, () => {
       win.document.getElementById("Browser:OpenLocation").doCommand();
     });
-    Services.prefs.clearUserPref("browser.urlbar.openViewOnFocus");
     win.gURLBar.blur();
     return {
       category: "urlbar",
@@ -922,7 +913,12 @@ const noEventTests = [
       async browser => {
         win.gURLBar.select();
         let promise = BrowserTestUtils.browserLoaded(browser);
-        await promiseAutocompleteResultPopup("x", win, true);
+        await UrlbarTestUtils.promiseAutocompleteResultPopup({
+          window: win,
+          waitForFocus: SimpleTest.waitForFocus,
+          value: "x",
+          fireInputEvent: true,
+        });
         UrlbarTestUtils.getOneOffSearchButtons(win).settingsButton.click();
         await promise;
       }
@@ -937,7 +933,12 @@ const noEventTests = [
       async browser => {
         win.gURLBar.select();
         let promise = BrowserTestUtils.browserLoaded(browser);
-        await promiseAutocompleteResultPopup("x", win, true);
+        await UrlbarTestUtils.promiseAutocompleteResultPopup({
+          window: win,
+          waitForFocus: SimpleTest.waitForFocus,
+          value: "x",
+          fireInputEvent: true,
+        });
         EventUtils.synthesizeKey("KEY_ArrowUp", {}, win);
         Assert.ok(
           UrlbarTestUtils.getOneOffSearchButtons(
@@ -1060,7 +1061,7 @@ let tipMatches = [
     {
       text: "This is a test intervention.",
       buttonText: "Done",
-      data: "test",
+      type: "test",
       helpUrl: "about:about",
     }
   ),

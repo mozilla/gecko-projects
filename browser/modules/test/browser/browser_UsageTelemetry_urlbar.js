@@ -15,7 +15,6 @@ const SUGGEST_URLBAR_PREF = "browser.urlbar.suggest.searches";
 // The name of the search engine used to generate suggestions.
 const SUGGESTION_ENGINE_NAME =
   "browser_UsageTelemetry usageTelemetrySearchSuggestions.xml";
-const ONEOFF_URLBAR_PREF = "browser.urlbar.oneOffSearches";
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   SearchTelemetry: "resource:///modules/SearchTelemetry.jsm",
@@ -109,9 +108,6 @@ add_task(async function setup() {
   let suggestionsEnabled = Services.prefs.getBoolPref(SUGGEST_URLBAR_PREF);
   Services.prefs.setBoolPref(SUGGEST_URLBAR_PREF, true);
 
-  // Enable the urlbar one-off buttons.
-  Services.prefs.setBoolPref(ONEOFF_URLBAR_PREF, true);
-
   // Enable local telemetry recording for the duration of the tests.
   let oldCanRecord = Services.telemetry.canRecordExtended;
   Services.telemetry.canRecordExtended = true;
@@ -140,7 +136,6 @@ add_task(async function setup() {
     await Services.search.setDefault(originalEngine);
     await Services.search.removeEngine(engine);
     Services.prefs.setBoolPref(SUGGEST_URLBAR_PREF, suggestionsEnabled);
-    Services.prefs.clearUserPref(ONEOFF_URLBAR_PREF);
     await PlacesUtils.history.clear();
     Services.telemetry.setEventRecordingEnabled("navigation", false);
   });
@@ -693,9 +688,6 @@ add_task(async function test_suggestion_arrowEnterSelection() {
 // Selects through tab and presses the Return (Enter) key on the first
 // suggestion offered by the test search engine.
 add_task(async function test_suggestion_tabEnterSelection() {
-  await SpecialPowers.pushPrefEnv({
-    set: [["browser.urlbar.update1.restrictTabAfterKeyboardFocus", false]],
-  });
   Services.telemetry.clearScalars();
   let resultMethodHist = TelemetryTestUtils.getAndClearHistogram(
     "FX_URLBAR_SELECTED_RESULT_METHOD"
@@ -723,7 +715,6 @@ add_task(async function test_suggestion_tabEnterSelection() {
 
     BrowserTestUtils.removeTab(tab);
   });
-  await SpecialPowers.popPrefEnv();
 });
 
 // Selects through code and presses the Return (Enter) key on the first

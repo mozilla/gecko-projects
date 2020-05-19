@@ -15,6 +15,7 @@
 
 #include <algorithm>
 
+#include "AltServiceChild.h"
 #include "Http2Session.h"
 #include "Http2Stream.h"
 #include "Http2Push.h"
@@ -41,6 +42,7 @@
 #include "CacheControlParser.h"
 #include "LoadContextInfo.h"
 #include "TCPFastOpenLayer.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 namespace net {
@@ -186,8 +188,7 @@ Http2Session::~Http2Session() {
     Telemetry::Accumulate(Telemetry::DNS_TRR_REQUEST_PER_CONN, mTrrStreams);
   }
   Telemetry::Accumulate(Telemetry::SPDY_PARALLEL_STREAMS, mConcurrentHighWater);
-  Telemetry::Accumulate(Telemetry::SPDY_REQUEST_PER_CONN,
-                        (mNextStreamID - 1) / 2);
+  Telemetry::Accumulate(Telemetry::SPDY_REQUEST_PER_CONN_2, mCntActivated);
   Telemetry::Accumulate(Telemetry::SPDY_SERVER_INITIATED_STREAMS,
                         mServerPushedResources);
   Telemetry::Accumulate(Telemetry::SPDY_GOAWAY_LOCAL, mClientGoAwayReason);
@@ -398,7 +399,8 @@ uint32_t Http2Session::RegisterStreamID(Http2Stream* stream, uint32_t aNewID) {
   // If TCP fast Open has been used and conection was idle for some time
   // we will be cautious and watch out for bug 1395494.
   if (!mCheckNetworkStallsWithTFO && mConnection) {
-    RefPtr<nsHttpConnection> conn = mConnection->HttpConnection();
+    RefPtr<HttpConnectionBase> connBase = mConnection->HttpConnection();
+    RefPtr<nsHttpConnection> conn = do_QueryObject(connBase);
     if (conn && (conn->GetFastOpenStatus() == TFO_DATA_SENT) &&
         gHttpHandler
             ->CheckIfConnectionIsStalledOnlyIfIdleForThisAmountOfSeconds() &&
@@ -764,6 +766,8 @@ bool Http2Session::TryToActivate(Http2Stream* aStream) {
 
   LOG3(("Http2Session::TryToActivate %p stream=%p\n", this, aStream));
   IncrementConcurrent(aStream);
+
+  mCntActivated++;
   return true;
 }
 
@@ -2529,10 +2533,18 @@ class UpdateAltSvcEvent : public Runnable {
     uri->GetHost(originHost);
     uri->GetPort(&originPort);
 
+    if (XRE_IsSocketProcess()) {
+      AltServiceChild::ProcessHeader(
+          mHeader, originScheme, originHost, originPort, mCI->GetUsername(),
+          mCI->GetTopWindowOrigin(), mCI->GetPrivate(), mCI->GetIsolated(),
+          mCallbacks, mCI->ProxyInfo(), 0, mCI->GetOriginAttributes());
+      return NS_OK;
+    }
+
     AltSvcMapping::ProcessHeader(
         mHeader, originScheme, originHost, originPort, mCI->GetUsername(),
         mCI->GetTopWindowOrigin(), mCI->GetPrivate(), mCI->GetIsolated(),
-        mCallbacks, mCI->ProxyInfo(), 0, mCI->GetOriginAttributes());
+        nullptr, mCI->ProxyInfo(), 0, mCI->GetOriginAttributes());
     return NS_OK;
   }
 
@@ -2805,7 +2817,7 @@ nsresult Http2Session::RecvOrigin(Http2Session* self) {
     key.AppendInt(port);
     if (!self->mOriginFrame.Get(key)) {
       self->mOriginFrame.Put(key, true);
-      RefPtr<nsHttpConnection> conn(self->HttpConnection());
+      RefPtr<HttpConnectionBase> conn(self->HttpConnection());
       MOZ_ASSERT(conn.get());
       gHttpHandler->ConnMgr()->RegisterOriginCoalescingKey(conn, host, port);
     } else {
@@ -2840,7 +2852,7 @@ void Http2Session::OnTransportStatus(nsITransport* aTransport, nsresult aStatus,
         // a HttpConnection.
         // If some error occur it can happen that we do not have a connection.
         if (mConnection) {
-          RefPtr<nsHttpConnection> conn = mConnection->HttpConnection();
+          RefPtr<HttpConnectionBase> conn = mConnection->HttpConnection();
           conn->SetEvent(aStatus);
         }
       } else {
@@ -4463,12 +4475,12 @@ nsresult Http2Session::TakeTransport(nsISocketTransport**,
   return NS_ERROR_UNEXPECTED;
 }
 
-already_AddRefed<nsHttpConnection> Http2Session::TakeHttpConnection() {
+already_AddRefed<HttpConnectionBase> Http2Session::TakeHttpConnection() {
   MOZ_ASSERT(false, "TakeHttpConnection of Http2Session");
   return nullptr;
 }
 
-already_AddRefed<nsHttpConnection> Http2Session::HttpConnection() {
+already_AddRefed<HttpConnectionBase> Http2Session::HttpConnection() {
   if (mConnection) {
     return mConnection->HttpConnection();
   }

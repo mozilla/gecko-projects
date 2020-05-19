@@ -162,8 +162,16 @@ ifdef NSS_DISABLE_DBM
 DEFINES += -DNSS_DISABLE_DBM
 endif
 
+ifdef NSS_DISABLE_AVX2
+DEFINES += -DNSS_DISABLE_AVX2
+endif
+
 ifdef NSS_DISABLE_CHACHAPOLY
 DEFINES += -DNSS_DISABLE_CHACHAPOLY
+endif
+
+ifdef NSS_DISABLE_DEPRECATED_SEED
+DEFINES += -DNSS_DISABLE_DEPRECATED_SEED
 endif
 
 ifdef NSS_PKIX_NO_LDAP
@@ -194,6 +202,11 @@ ifndef BUILD_OPT
 ifdef PKIX_OBJECT_LEAK_TEST
 DEFINES += -DPKIX_OBJECT_LEAK_TEST
 endif
+endif
+
+# Avoid building with Neon acceleration on Arm32
+ifdef NSS_DISABLE_ARM32_NEON
+DEFINES += -DNSS_DISABLE_ARM32_NEON
 endif
 
 # Avoid building with PowerPC's Altivec acceleration

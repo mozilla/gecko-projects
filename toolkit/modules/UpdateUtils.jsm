@@ -16,6 +16,11 @@ const { FileUtils } = ChromeUtils.import(
 );
 const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 const { ctypes } = ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "WindowsVersionInfo",
+  "resource://gre/modules/components-utils/WindowsVersionInfo.jsm"
+);
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]); /* globals fetch */
 
 ChromeUtils.defineModuleGetter(
@@ -163,12 +168,22 @@ var UpdateUtils = {
    * has selected "Automatically install updates" in about:preferences.
    *
    * On Windows, this setting is shared across all profiles for the installation
-   * and is read asynchrnously from the file. On other operating systems, this
+   * and is read asynchronously from the file. On other operating systems, this
    * setting is stored in a pref and is thus a per-profile setting.
    *
    * @return A Promise that resolves with a boolean.
    */
   getAppUpdateAutoEnabled() {
+    if (Services.policies) {
+      if (!Services.policies.isAllowed("app-auto-updates-off")) {
+        // We aren't allowed to turn off auto-update - it is forced on.
+        return Promise.resolve(true);
+      }
+      if (!Services.policies.isAllowed("app-auto-updates-on")) {
+        // We aren't allowed to turn on auto-update - it is forced off.
+        return Promise.resolve(false);
+      }
+    }
     if (AppConstants.platform != "win") {
       // On platforms other than Windows the setting is stored in a preference.
       let prefValue = Services.prefs.getBoolPref(
@@ -230,7 +245,7 @@ var UpdateUtils = {
         // Fallthrough for if the value could not be read or migrated.
         return DEFAULT_APP_UPDATE_AUTO;
       })
-      .then(maybeUpdateAutoConfigChanged.bind(this));
+      .then(maybeUpdateAutoConfigChanged);
     updateAutoIOPromise = readPromise;
     return readPromise;
   },
@@ -242,8 +257,12 @@ var UpdateUtils = {
    * in about:preferences.
    *
    * On Windows, this setting is shared across all profiles for the installation
-   * and is written asynchrnously to the file. On other operating systems, this
+   * and is written asynchronously to the file. On other operating systems, this
    * setting is stored in a pref and is thus a per-profile setting.
+   *
+   * If this method is called when the setting is locked, the returned promise
+   * will reject. The lock status can be determined with
+   * UpdateUtils.appUpdateAutoSettingIsLocked()
    *
    * @param  enabled If set to true, automatic download and installation of
    *                 updates will be enabled. If set to false, this will be
@@ -257,11 +276,20 @@ var UpdateUtils = {
    *         this operation simply sets a pref.
    */
   setAppUpdateAutoEnabled(enabledValue) {
+    if (this.appUpdateAutoSettingIsLocked()) {
+      return Promise.reject(
+        "setAppUpdateAutoEnabled: Unable to change value of setting because " +
+          "it is locked by policy"
+      );
+    }
     if (AppConstants.platform != "win") {
       // Only in Windows do we store the update config in the update directory
       let prefValue = !!enabledValue;
       Services.prefs.setBoolPref(PREF_APP_UPDATE_AUTO, prefValue);
-      maybeUpdateAutoConfigChanged(prefValue);
+      // Rather than call maybeUpdateAutoConfigChanged, a pref observer has
+      // been connected to PREF_APP_UPDATE_AUTO. This allows us to catch direct
+      // changes to the pref (which Firefox shouldn't be doing, but the user
+      // might do in about:config).
       return Promise.resolve(prefValue);
     }
     // Justification for the empty catch statement below:
@@ -289,9 +317,24 @@ var UpdateUtils = {
           throw e;
         }
       })
-      .then(maybeUpdateAutoConfigChanged.bind(this));
+      .then(maybeUpdateAutoConfigChanged);
     updateAutoIOPromise = writePromise;
     return writePromise;
+  },
+
+  /**
+   * This function should be used to determine if the automatic application
+   * update setting is locked by an enterprise policy
+   *
+   * @return true if the automatic update setting is currently locked.
+   *         Otherwise, false.
+   */
+  appUpdateAutoSettingIsLocked() {
+    return (
+      Services.policies &&
+      (!Services.policies.isAllowed("app-auto-updates-off") ||
+        !Services.policies.isAllowed("app-auto-updates-on"))
+    );
   },
 };
 
@@ -322,11 +365,7 @@ async function writeUpdateAutoConfig(enabledValue) {
 // Notifies observers if the value of app.update.auto has changed and returns
 // the value for app.update.auto.
 function maybeUpdateAutoConfigChanged(newValue) {
-  // Don't notify on the first read when updateAutoSettingCachedVal is null.
-  if (
-    updateAutoSettingCachedVal !== null &&
-    newValue != updateAutoSettingCachedVal
-  ) {
+  if (newValue !== updateAutoSettingCachedVal) {
     updateAutoSettingCachedVal = newValue;
     Services.obs.notifyObservers(
       null,
@@ -336,12 +375,28 @@ function maybeUpdateAutoConfigChanged(newValue) {
   }
   return newValue;
 }
+// On non-Windows platforms, the Update Auto Config is still stored as a pref.
+// On those platforms, the best way to notify observers of this setting is
+// just to propagate it from a pref observer
+if (AppConstants.platform != "win") {
+  Services.prefs.addObserver(
+    PREF_APP_UPDATE_AUTO,
+    async (subject, topic, data) => {
+      let value = await UpdateUtils.getAppUpdateAutoEnabled();
+      maybeUpdateAutoConfigChanged(value);
+    }
+  );
+}
 
 /* Get the distribution pref values, from defaults only */
 function getDistributionPrefValue(aPrefName) {
-  return Services.prefs
+  let value = Services.prefs
     .getDefaultBranch(null)
     .getCharPref(aPrefName, "default");
+  if (!value) {
+    value = "default";
+  }
+  return value;
 }
 
 function getSystemCapabilities() {
@@ -495,92 +550,42 @@ XPCOMUtils.defineLazyGetter(UpdateUtils, "OSVersion", function() {
 
   if (osVersion) {
     if (AppConstants.platform == "win") {
-      const BYTE = ctypes.uint8_t;
-      const WORD = ctypes.uint16_t;
-      const DWORD = ctypes.uint32_t;
-      const WCHAR = ctypes.char16_t;
-      const BOOL = ctypes.int;
-
-      // This structure is described at:
-      // http://msdn.microsoft.com/en-us/library/ms724833%28v=vs.85%29.aspx
-      const SZCSDVERSIONLENGTH = 128;
-      const OSVERSIONINFOEXW = new ctypes.StructType("OSVERSIONINFOEXW", [
-        { dwOSVersionInfoSize: DWORD },
-        { dwMajorVersion: DWORD },
-        { dwMinorVersion: DWORD },
-        { dwBuildNumber: DWORD },
-        { dwPlatformId: DWORD },
-        { szCSDVersion: ctypes.ArrayType(WCHAR, SZCSDVERSIONLENGTH) },
-        { wServicePackMajor: WORD },
-        { wServicePackMinor: WORD },
-        { wSuiteMask: WORD },
-        { wProductType: BYTE },
-        { wReserved: BYTE },
-      ]);
-
-      let kernel32 = false;
+      // Add service pack and build number
       try {
-        kernel32 = ctypes.open("Kernel32");
-      } catch (e) {
-        Cu.reportError("Unable to open kernel32! " + e);
-        osVersion += ".unknown (unknown)";
+        const {
+          servicePackMajor,
+          servicePackMinor,
+          buildNumber,
+        } = WindowsVersionInfo.get();
+        osVersion += `.${servicePackMajor}.${servicePackMinor}.${buildNumber}`;
+      } catch (err) {
+        Cu.reportError(
+          "Unable to retrieve windows version information: " + err
+        );
+        osVersion += ".unknown";
       }
 
-      if (kernel32) {
-        try {
-          // Get Service pack info
-          try {
-            let GetVersionEx = kernel32.declare(
-              "GetVersionExW",
-              ctypes.winapi_abi,
-              BOOL,
-              OSVERSIONINFOEXW.ptr
-            );
-            let winVer = OSVERSIONINFOEXW();
-            winVer.dwOSVersionInfoSize = OSVERSIONINFOEXW.size;
-
-            if (0 !== GetVersionEx(winVer.address())) {
-              osVersion +=
-                "." +
-                winVer.wServicePackMajor +
-                "." +
-                winVer.wServicePackMinor +
-                "." +
-                winVer.dwBuildNumber;
-            } else {
-              Cu.reportError("Unknown failure in GetVersionEX (returned 0)");
-              osVersion += ".unknown";
-            }
-          } catch (e) {
-            Cu.reportError(
-              "Error getting service pack information. Exception: " + e
-            );
-            osVersion += ".unknown";
-          }
-
-          if (
-            Services.vc.compare(
-              Services.sysinfo.getProperty("version"),
-              "10"
-            ) >= 0
-          ) {
-            const WINDOWS_UBR_KEY_PATH =
-              "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
-            let ubr = WindowsRegistry.readRegKey(
-              Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
-              WINDOWS_UBR_KEY_PATH,
-              "UBR",
-              Ci.nsIWindowsRegKey.WOW64_64
-            );
-            osVersion += ubr !== undefined ? "." + ubr : ".unknown";
-          }
-        } finally {
-          kernel32.close();
+      // add UBR if on Windows 10
+      if (
+        Services.vc.compare(Services.sysinfo.getProperty("version"), "10") >= 0
+      ) {
+        const WINDOWS_UBR_KEY_PATH =
+          "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+        let ubr = WindowsRegistry.readRegKey(
+          Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+          WINDOWS_UBR_KEY_PATH,
+          "UBR",
+          Ci.nsIWindowsRegKey.WOW64_64
+        );
+        if (ubr !== undefined) {
+          osVersion += `.${ubr}`;
+        } else {
+          osVersion += ".unknown";
         }
-
-        // Add processor architecture
-        osVersion += " (" + gWinCPUArch + ")";
       }
+
+      // Add processor architecture
+      osVersion += " (" + gWinCPUArch + ")";
     }
 
     try {

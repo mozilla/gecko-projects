@@ -10,6 +10,7 @@ const {
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 const ToolboxProvider = require("devtools/client/framework/store-provider");
+const Services = require("Services");
 
 const actions = require("devtools/client/webconsole/actions/index");
 const { configureStore } = require("devtools/client/webconsole/store");
@@ -70,8 +71,6 @@ class WebConsoleWrapper {
     this.document = document;
 
     this.init = this.init.bind(this);
-    this.dispatchPaused = this.dispatchPaused.bind(this);
-    this.dispatchProgress = this.dispatchProgress.bind(this);
 
     this.queuedMessageAdds = [];
     this.queuedMessageUpdates = [];
@@ -95,11 +94,11 @@ class WebConsoleWrapper {
     return new Promise(resolve => {
       store = configureStore(this.webConsoleUI, {
         // We may not have access to the toolbox (e.g. in the browser console).
-        sessionId: (this.toolbox && this.toolbox.sessionId) || -1,
         telemetry: this.telemetry,
         thunkArgs: {
           webConsoleUI,
           hud: this.hud,
+          toolbox: this.toolbox,
           client: this.webConsoleUI._commands,
         },
       });
@@ -111,11 +110,6 @@ class WebConsoleWrapper {
         webConsoleWrapper: this,
       });
 
-      if (this.toolbox) {
-        this.toolbox.threadFront.on("paused", this.dispatchPaused);
-        this.toolbox.threadFront.on("progress", this.dispatchProgress);
-      }
-
       const app = App({
         serviceContainer,
         webConsoleUI,
@@ -126,6 +120,9 @@ class WebConsoleWrapper {
         hideShowContentMessagesCheckbox:
           !webConsoleUI.isBrowserConsole &&
           !webConsoleUI.isBrowserToolboxConsole,
+        inputEnabled:
+          !webConsoleUI.isBrowserConsole ||
+          Services.prefs.getBoolPref("devtools.chrome.enabled"),
       });
 
       // Render the root Application component.
@@ -213,18 +210,6 @@ class WebConsoleWrapper {
     store.dispatch(actions.privateMessagesClear());
   }
 
-  dispatchPaused(packet) {
-    if (packet.executionPoint) {
-      store.dispatch(actions.setPauseExecutionPoint(packet.executionPoint));
-    }
-  }
-
-  dispatchProgress(packet) {
-    const { executionPoint, recording } = packet;
-    const point = recording ? null : executionPoint;
-    store.dispatch(actions.setPauseExecutionPoint(point));
-  }
-
   dispatchMessageUpdate(message, res) {
     // network-message-updated will emit when all the update message arrives.
     // Since we can't ensure the order of the network update, we check
@@ -269,6 +254,7 @@ class WebConsoleWrapper {
       // Add a type in order for this event packet to be identified by
       // utils/messages.js's `transformPacket`
       packet.type = "will-navigate";
+      packet.timeStamp = Date.now();
       this.dispatchMessageAdd(packet);
     } else {
       this.webConsoleUI.clearNetworkRequests();
@@ -341,7 +327,7 @@ class WebConsoleWrapper {
 
         store.dispatch(actions.messagesAdd(this.queuedMessageAdds));
 
-        const length = this.queuedMessageAdds.length;
+        const { length } = this.queuedMessageAdds;
 
         // This telemetry event is only useful when we have a toolbox so only
         // send it when we have one.

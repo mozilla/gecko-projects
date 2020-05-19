@@ -20,7 +20,7 @@
 #include "mozilla/LoadInfo.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/SystemGroup.h"
+#include "mozilla/SchedulerGroup.h"
 #include "nsClassHashtable.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
@@ -90,25 +90,14 @@ static DataInfo* GetDataInfo(const nsACString& aUri,
     return nullptr;
   }
 
+  // Let's remove any fragment from this URI.
+  int32_t fragmentPos = aUri.FindChar('#');
+
   DataInfo* res;
-
-  // Let's remove any fragment and query from this URI.
-  int32_t hasFragmentPos = aUri.FindChar('#');
-  int32_t hasQueryPos = aUri.FindChar('?');
-
-  int32_t pos = -1;
-  if (hasFragmentPos >= 0 && hasQueryPos >= 0) {
-    pos = std::min(hasFragmentPos, hasQueryPos);
-  } else if (hasFragmentPos >= 0) {
-    pos = hasFragmentPos;
+  if (fragmentPos < 0) {
+    res = gDataTable->Get(aUri);
   } else {
-    pos = hasQueryPos;
-  }
-
-  if (pos < 0) {
-    gDataTable->Get(aUri, &res);
-  } else {
-    gDataTable->Get(StringHead(aUri, pos), &res);
+    res = gDataTable->Get(StringHead(aUri, fragmentPos));
   }
 
   if (!aAlsoIfRevoked && res && res->mRevoked) {
@@ -347,7 +336,7 @@ class BlobURLsReporter final : public nsIMemoryReporter {
   }
 
  private:
-  ~BlobURLsReporter() {}
+  ~BlobURLsReporter() = default;
 
   static void BuildPath(nsAutoCString& path, nsCStringHashKey::KeyType aKey,
                         DataInfo* aInfo, bool anonymize) {
@@ -396,8 +385,14 @@ class ReleasingTimerHolder final : public Runnable,
 
     auto raii = MakeScopeExit([holder] { holder->CancelTimerAndRevokeURI(); });
 
-    nsresult rv = SystemGroup::EventTargetFor(TaskCategory::Other)
-                      ->Dispatch(holder.forget());
+    // ReleasingTimerHolder potentially dispatches after we've
+    // shutdown the main thread, so guard agains that.
+    if (NS_WARN_IF(gXPCOMThreadsShutDown)) {
+      return;
+    }
+
+    nsresult rv =
+        SchedulerGroup::Dispatch(TaskCategory::Other, holder.forget());
     NS_ENSURE_SUCCESS_VOID(rv);
 
     raii.release();
@@ -411,8 +406,7 @@ class ReleasingTimerHolder final : public Runnable,
     auto raii = MakeScopeExit([self] { self->CancelTimerAndRevokeURI(); });
 
     nsresult rv = NS_NewTimerWithCallback(
-        getter_AddRefs(mTimer), this, RELEASING_TIMER, nsITimer::TYPE_ONE_SHOT,
-        SystemGroup::EventTargetFor(TaskCategory::Other));
+        getter_AddRefs(mTimer), this, RELEASING_TIMER, nsITimer::TYPE_ONE_SHOT);
     NS_ENSURE_SUCCESS(rv, NS_OK);
 
     nsCOMPtr<nsIAsyncShutdownClient> phase = GetShutdownPhase();
@@ -460,7 +454,7 @@ class ReleasingTimerHolder final : public Runnable,
   explicit ReleasingTimerHolder(const nsACString& aURI)
       : Runnable("ReleasingTimerHolder"), mURI(aURI) {}
 
-  ~ReleasingTimerHolder() {}
+  ~ReleasingTimerHolder() = default;
 
   void RevokeURI() {
     // Remove the shutting down blocker
@@ -680,9 +674,9 @@ nsresult BlobURLProtocolHandler::GenerateURIString(nsIPrincipal* aPrincipal,
 
   if (aPrincipal) {
     nsAutoCString origin;
-    rv = nsContentUtils::GetASCIIOrigin(aPrincipal, origin);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+    rv = aPrincipal->GetAsciiOrigin(origin);
+    if (NS_FAILED(rv)) {
+      origin.AssignLiteral("null");
     }
 
     aUri.Append(origin);
@@ -822,8 +816,8 @@ BlobURLProtocolHandler::NewChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo,
   // principal and which is never mutated to have a non-zero mPrivateBrowsingId
   // or container.
   if (aLoadInfo &&
-      (!aLoadInfo->LoadingPrincipal() ||
-       !aLoadInfo->LoadingPrincipal()->IsSystemPrincipal()) &&
+      (!aLoadInfo->GetLoadingPrincipal() ||
+       !aLoadInfo->GetLoadingPrincipal()->IsSystemPrincipal()) &&
       !ChromeUtils::IsOriginAttributesEqualIgnoringFPD(
           aLoadInfo->GetOriginAttributes(),
           BasePrincipal::Cast(info->mPrincipal)->OriginAttributesRef())) {

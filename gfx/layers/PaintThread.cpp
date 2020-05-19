@@ -42,7 +42,7 @@ StaticAutoPtr<PaintThread> PaintThread::sSingleton;
 StaticRefPtr<nsIThread> PaintThread::sThread;
 PlatformThreadId PaintThread::sThreadId;
 
-PaintThread::PaintThread() {}
+PaintThread::PaintThread() = default;
 
 void PaintThread::Release() {}
 
@@ -234,8 +234,8 @@ void PaintThread::AsyncPaintTask(CompositorBridgeChild* aBridge,
     // UnscaledFont objects, gets destroyed on the main thread (See bug
     // 1404742). This assumes (unflushed) target DrawTargets do not themselves
     // hold on to UnscaledFonts.
-    NS_ReleaseOnMainThreadSystemGroup("PaintTask::DrawTargetCapture",
-                                      aTask->mCapture.forget());
+    NS_ReleaseOnMainThread("PaintTask::DrawTargetCapture",
+                           aTask->mCapture.forget());
   }
 
   if (aBridge->NotifyFinishedAsyncWorkerPaint(aTask)) {

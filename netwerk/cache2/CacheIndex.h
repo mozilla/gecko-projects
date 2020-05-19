@@ -228,7 +228,17 @@ class CacheIndexEntry : public PLDHashEntryHdr {
   uint16_t GetOnStopTime() const { return mRec->mOnStopTime; }
 
   void SetContentType(uint8_t aType) { mRec->mContentType = aType; }
-  uint8_t GetContentType() const { return mRec->mContentType; }
+  uint8_t GetContentType() const { return GetContentType(mRec.get()); }
+  static uint8_t GetContentType(CacheIndexRecord* aRec) {
+    if (aRec->mContentType >= nsICacheEntry::CONTENT_TYPE_LAST) {
+      LOG(
+          ("CacheIndexEntry::GetContentType() - Found invalid content type "
+           "[hash=%08x%08x%08x%08x%08x, contentType=%u]",
+           LOGSHA1(aRec->mHash), aRec->mContentType));
+      return nsICacheEntry::CONTENT_TYPE_UNKNOWN;
+    }
+    return aRec->mContentType;
+  }
 
   // Sets filesize in kilobytes.
   void SetFileSize(uint32_t aFileSize) {
@@ -473,9 +483,20 @@ class CacheIndexStats {
         mDisableLogging(false)
 #endif
   {
+    for (uint32_t i = 0; i < nsICacheEntry::CONTENT_TYPE_LAST; ++i) {
+      mCountByType[i] = 0;
+      mSizeByType[i] = 0;
+    }
   }
 
   bool operator==(const CacheIndexStats& aOther) const {
+    for (uint32_t i = 0; i < nsICacheEntry::CONTENT_TYPE_LAST; ++i) {
+      if (mCountByType[i] != aOther.mCountByType[i] ||
+          mSizeByType[i] != aOther.mSizeByType[i]) {
+        return false;
+      }
+    }
+
     return
 #ifdef DEBUG
         aOther.mStateLogged == mStateLogged &&
@@ -507,6 +528,10 @@ class CacheIndexStats {
     mFresh = 0;
     mEmpty = 0;
     mSize = 0;
+    for (uint32_t i = 0; i < nsICacheEntry::CONTENT_TYPE_LAST; ++i) {
+      mCountByType[i] = 0;
+      mSizeByType[i] = 0;
+    }
   }
 
 #ifdef DEBUG
@@ -516,6 +541,12 @@ class CacheIndexStats {
   uint32_t Count() {
     MOZ_ASSERT(!mStateLogged, "CacheIndexStats::Count() - state logged!");
     return mCount;
+  }
+
+  uint32_t CountByType(uint8_t aContentType) {
+    MOZ_ASSERT(!mStateLogged, "CacheIndexStats::CountByType() - state logged!");
+    MOZ_RELEASE_ASSERT(aContentType < nsICacheEntry::CONTENT_TYPE_LAST);
+    return mCountByType[aContentType];
   }
 
   uint32_t Dirty() {
@@ -540,6 +571,12 @@ class CacheIndexStats {
     return mSize;
   }
 
+  uint32_t SizeByType(uint8_t aContentType) {
+    MOZ_ASSERT(!mStateLogged, "CacheIndexStats::SizeByType() - state logged!");
+    MOZ_RELEASE_ASSERT(aContentType < nsICacheEntry::CONTENT_TYPE_LAST);
+    return mSizeByType[aContentType];
+  }
+
   void BeforeChange(const CacheIndexEntry* aEntry) {
 #ifdef DEBUG_STATS
     if (!mDisableLogging) {
@@ -556,7 +593,9 @@ class CacheIndexStats {
 #endif
     if (aEntry) {
       MOZ_ASSERT(mCount);
+      uint8_t contentType = aEntry->GetContentType();
       mCount--;
+      mCountByType[contentType]--;
       if (aEntry->IsDirty()) {
         MOZ_ASSERT(mDirty);
         mDirty--;
@@ -579,6 +618,7 @@ class CacheIndexStats {
           } else {
             MOZ_ASSERT(mSize >= aEntry->GetFileSize());
             mSize -= aEntry->GetFileSize();
+            mSizeByType[contentType] -= aEntry->GetFileSize();
           }
         }
       }
@@ -593,7 +633,9 @@ class CacheIndexStats {
     mStateLogged = false;
 #endif
     if (aEntry) {
+      uint8_t contentType = aEntry->GetContentType();
       ++mCount;
+      ++mCountByType[contentType];
       if (aEntry->IsDirty()) {
         mDirty++;
       }
@@ -610,6 +652,7 @@ class CacheIndexStats {
             mEmpty++;
           } else {
             mSize += aEntry->GetFileSize();
+            mSizeByType[contentType] += aEntry->GetFileSize();
           }
         }
       }
@@ -625,12 +668,14 @@ class CacheIndexStats {
 
  private:
   uint32_t mCount;
+  uint32_t mCountByType[nsICacheEntry::CONTENT_TYPE_LAST];
   uint32_t mNotInitialized;
   uint32_t mRemoved;
   uint32_t mDirty;
   uint32_t mFresh;
   uint32_t mEmpty;
   uint32_t mSize;
+  uint32_t mSizeByType[nsICacheEntry::CONTENT_TYPE_LAST];
 #ifdef DEBUG
   // We completely remove the data about an entry from the stats in
   // BeforeChange() and set this flag to true. The entry is then modified,
@@ -830,7 +875,7 @@ class CacheIndex final : public CacheFileIOListener, public nsIRunnable {
   // When the log is written successfully, the dirty flag in index file is
   // cleared.
   nsresult GetFile(const nsACString& aName, nsIFile** _retval);
-  nsresult RemoveFile(const nsACString& aName);
+  void RemoveFile(const nsACString& aName);
   void RemoveAllIndexFiles();
   void RemoveJournalAndTempFile();
   // Writes journal to the disk and clears dirty flag in index header.
@@ -1186,8 +1231,8 @@ class CacheIndex final : public CacheFileIOListener, public nsIRunnable {
           mSize(0) {}
     virtual ~DiskConsumptionObserver() {
       if (mObserver && !NS_IsMainThread()) {
-        NS_ReleaseOnMainThreadSystemGroup("DiskConsumptionObserver::mObserver",
-                                          mObserver.forget());
+        NS_ReleaseOnMainThread("DiskConsumptionObserver::mObserver",
+                               mObserver.forget());
       }
     }
 

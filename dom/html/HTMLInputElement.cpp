@@ -12,9 +12,10 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
-#include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/FileSystemUtils.h"
 #include "mozilla/dom/GetFilesHelper.h"
+#include "mozilla/dom/HTMLFormSubmission.h"
+#include "mozilla/dom/InputType.h"
 #include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/WheelEventBinding.h"
 #include "mozilla/PresShell.h"
@@ -25,7 +26,6 @@
 #include "nsQueryObject.h"
 
 #include "nsIRadioVisitor.h"
-#include "InputType.h"
 
 #include "HTMLFormSubmissionConstants.h"
 #include "mozilla/Telemetry.h"
@@ -168,28 +168,6 @@ static const nsAttrValue::EnumTable kInputTypeTable[] = {
 // Default type is 'text'.
 static const nsAttrValue::EnumTable* kInputDefaultType =
     &kInputTypeTable[ArrayLength(kInputTypeTable) - 2];
-
-static const uint8_t NS_INPUT_INPUTMODE_AUTO = 0;
-static const uint8_t NS_INPUT_INPUTMODE_NUMERIC = 1;
-static const uint8_t NS_INPUT_INPUTMODE_DIGIT = 2;
-static const uint8_t NS_INPUT_INPUTMODE_UPPERCASE = 3;
-static const uint8_t NS_INPUT_INPUTMODE_LOWERCASE = 4;
-static const uint8_t NS_INPUT_INPUTMODE_TITLECASE = 5;
-static const uint8_t NS_INPUT_INPUTMODE_AUTOCAPITALIZED = 6;
-
-static const nsAttrValue::EnumTable kInputInputmodeTable[] = {
-    {"auto", NS_INPUT_INPUTMODE_AUTO},
-    {"numeric", NS_INPUT_INPUTMODE_NUMERIC},
-    {"digit", NS_INPUT_INPUTMODE_DIGIT},
-    {"uppercase", NS_INPUT_INPUTMODE_UPPERCASE},
-    {"lowercase", NS_INPUT_INPUTMODE_LOWERCASE},
-    {"titlecase", NS_INPUT_INPUTMODE_TITLECASE},
-    {"autocapitalized", NS_INPUT_INPUTMODE_AUTOCAPITALIZED},
-    {nullptr, 0}};
-
-// Default inputmode value is "auto".
-static const nsAttrValue::EnumTable* kInputDefaultInputmode =
-    &kInputInputmodeTable[0];
 
 static const nsAttrValue::EnumTable kCaptureTable[] = {
     {"user", static_cast<int16_t>(nsIFilePicker::captureUser)},
@@ -561,7 +539,7 @@ NS_IMPL_ISUPPORTS(HTMLInputElement::nsFilePickerShownCallback,
                   nsIFilePickerShownCallback)
 
 class nsColorPickerShownCallback final : public nsIColorPickerShownCallback {
-  ~nsColorPickerShownCallback() {}
+  ~nsColorPickerShownCallback() = default;
 
  public:
   nsColorPickerShownCallback(HTMLInputElement* aInput,
@@ -1068,8 +1046,8 @@ nsresult HTMLInputElement::Clone(dom::NodeInfo* aNodeInfo,
                                  nsINode** aResult) const {
   *aResult = nullptr;
 
-  RefPtr<HTMLInputElement> it = new HTMLInputElement(
-      do_AddRef(aNodeInfo), NOT_FROM_PARSER, FromClone::yes);
+  RefPtr<HTMLInputElement> it = new (aNodeInfo->NodeInfoManager())
+      HTMLInputElement(do_AddRef(aNodeInfo), NOT_FROM_PARSER, FromClone::yes);
 
   nsresult rv = const_cast<HTMLInputElement*>(this)->CopyInnerTo(it);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1195,9 +1173,13 @@ nsresult HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
     // of the element so, if the value of the element is different than @value,
     // we have to re-set it. This is only the case when GetValueMode() returns
     // VALUE_MODE_VALUE.
-    if (aName == nsGkAtoms::value && !mValueChanged &&
-        GetValueMode() == VALUE_MODE_VALUE) {
-      SetDefaultValueAsValue();
+    if (aName == nsGkAtoms::value) {
+      if (!mValueChanged && GetValueMode() == VALUE_MODE_VALUE) {
+        SetDefaultValueAsValue();
+      }
+      // GetStepBase() depends on the `value` attribute if `min` is not present,
+      // even if the value doesn't change.
+      UpdateStepMismatchValidityState();
     }
 
     //
@@ -1350,6 +1332,26 @@ void HTMLInputElement::AfterClearForm(bool aUnbindOrDelete) {
   }
 }
 
+void HTMLInputElement::ResultForDialogSubmit(nsAString& aResult) {
+  if (mType == NS_FORM_INPUT_IMAGE) {
+    // Get a property set by the frame to find out where it was clicked.
+    nsIntPoint* lastClickedPoint =
+        static_cast<nsIntPoint*>(GetProperty(nsGkAtoms::imageClickedPoint));
+    int32_t x, y;
+    if (lastClickedPoint) {
+      x = lastClickedPoint->x;
+      y = lastClickedPoint->y;
+    } else {
+      x = y = 0;
+    }
+    aResult.AppendInt(x);
+    aResult.AppendLiteral(",");
+    aResult.AppendInt(y);
+  } else {
+    GetAttr(kNameSpaceID_None, nsGkAtoms::value, aResult);
+  }
+}
+
 void HTMLInputElement::GetAutocomplete(nsAString& aValue) {
   if (!DoesAutocompleteApply()) {
     return;
@@ -1383,10 +1385,6 @@ void HTMLInputElement::GetFormEnctype(nsAString& aValue) {
 
 void HTMLInputElement::GetFormMethod(nsAString& aValue) {
   GetEnumAttr(nsGkAtoms::formmethod, "", kFormDefaultMethod->tag, aValue);
-}
-
-void HTMLInputElement::GetInputMode(nsAString& aValue) {
-  GetEnumAttr(nsGkAtoms::inputmode, kInputDefaultInputmode->tag, aValue);
 }
 
 void HTMLInputElement::GetType(nsAString& aValue) {
@@ -1439,7 +1437,7 @@ void HTMLInputElement::GetValue(nsAString& aValue, CallerType aCallerType) {
   GetValueInternal(aValue, aCallerType);
 
   if (SanitizesOnValueGetter()) {
-    SanitizeValue(aValue);
+    SanitizeValue(aValue, ForValueGetter::Yes);
   }
 }
 
@@ -1563,9 +1561,8 @@ void HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
 
       MozSetFileNameArray(list, aRv);
       return;
-    } else {
-      ClearFiles(true);
     }
+    ClearFiles(true);
   } else {
     if (MayFireChangeOnBlur()) {
       // If the value has been set by a script, we basically want to keep the
@@ -1743,9 +1740,7 @@ void HTMLInputElement::SetValueAsDate(JSContext* aCx,
       return;
     }
     if (!isDate) {
-      aRv.ThrowTypeError(
-          u"Value being assigned to HTMLInputElement.valueAsDate is not a "
-          u"date.");
+      aRv.ThrowTypeError("Value being assigned is not a date.");
       return;
     }
   }
@@ -2137,7 +2132,7 @@ void HTMLInputElement::OpenDateTimePicker(const DateTimeValue& aInitialValue) {
     return;
   }
 
-  mDateTimeInputBoxValue = new DateTimeValue(aInitialValue);
+  mDateTimeInputBoxValue = MakeUnique<DateTimeValue>(aInitialValue);
   nsContentUtils::DispatchChromeEvent(
       OwnerDoc(), static_cast<Element*>(this),
       NS_LITERAL_STRING("MozOpenDateTimePicker"), CanBubble::eYes,
@@ -2149,7 +2144,7 @@ void HTMLInputElement::UpdateDateTimePicker(const DateTimeValue& aValue) {
     return;
   }
 
-  mDateTimeInputBoxValue = new DateTimeValue(aValue);
+  mDateTimeInputBoxValue = MakeUnique<DateTimeValue>(aValue);
   nsContentUtils::DispatchChromeEvent(
       OwnerDoc(), static_cast<Element*>(this),
       NS_LITERAL_STRING("MozUpdateDateTimePicker"), CanBubble::eYes,
@@ -2172,7 +2167,8 @@ void HTMLInputElement::SetFocusState(bool aIsFocused) {
     return;
   }
 
-  EventStates focusStates = NS_EVENT_STATE_FOCUS | NS_EVENT_STATE_FOCUSRING;
+  EventStates focusStates = NS_EVENT_STATE_FOCUS | NS_EVENT_STATE_FOCUSRING |
+                            NS_EVENT_STATE_FOCUS_VISIBLE;
   if (aIsFocused) {
     AddStates(focusStates);
   } else {
@@ -2244,7 +2240,13 @@ void HTMLInputElement::SetUserInput(const nsAString& aValue,
   }
 }
 
-nsIEditor* HTMLInputElement::GetEditor() { return GetTextEditorFromState(); }
+nsIEditor* HTMLInputElement::GetEditorForBindings() {
+  if (!GetPrimaryFrame()) {
+    // Ensure we construct frames (and thus an editor) if needed.
+    GetPrimaryFrame(FlushType::Frames);
+  }
+  return GetTextEditorFromState();
+}
 
 bool HTMLInputElement::HasEditor() { return !!GetTextEditorWithoutCreation(); }
 
@@ -2687,7 +2689,7 @@ nsresult HTMLInputElement::SetValueInternal(const nsAString& aValue,
           }
         }
         if (mDoneCreating) {
-          OnValueChanged(/* aNotify = */ true, ValueChangeKind::Internal);
+          OnValueChanged(ValueChangeKind::Internal);
         }
         // else DoneCreatingElement calls us again once mDoneCreating is true
       }
@@ -2705,8 +2707,7 @@ nsresult HTMLInputElement::SetValueInternal(const nsAString& aValue,
       // a single line text control, TextControlState::SetValue will call
       // nsHTMLInputElement::OnValueChanged which is going to call UpdateState()
       // if the element is focused. This bug 665547.
-      if (PlaceholderApplies() &&
-          HasAttr(kNameSpaceID_None, nsGkAtoms::placeholder)) {
+      if (PlaceholderApplies() && HasAttr(nsGkAtoms::placeholder)) {
         UpdateState(true);
       }
 
@@ -2987,10 +2988,9 @@ bool HTMLInputElement::IsNodeApzAwareInternal() const {
 }
 #endif
 
-bool HTMLInputElement::IsInteractiveHTMLContent(bool aIgnoreTabindex) const {
+bool HTMLInputElement::IsInteractiveHTMLContent() const {
   return mType != NS_FORM_INPUT_HIDDEN ||
-         nsGenericHTMLFormElementWithState::IsInteractiveHTMLContent(
-             aIgnoreTabindex);
+         nsGenericHTMLFormElementWithState::IsInteractiveHTMLContent();
 }
 
 void HTMLInputElement::AsyncEventRunning(AsyncEventDispatcher* aEvent) {
@@ -3579,10 +3579,36 @@ nsresult HTMLInputElement::MaybeInitPickers(EventChainPostVisitor& aVisitor) {
  * Control is treated specially, since sometimes we ignore it, and sometimes
  * we don't (for webcompat reasons).
  */
-static bool IgnoreInputEventWithModifier(WidgetInputEvent* aEvent,
+static bool IgnoreInputEventWithModifier(const WidgetInputEvent& aEvent,
                                          bool ignoreControl) {
-  return (ignoreControl && aEvent->IsControl()) || aEvent->IsAltGraph() ||
-         aEvent->IsFn() || aEvent->IsOS();
+  return (ignoreControl && aEvent.IsControl()) || aEvent.IsAltGraph() ||
+         aEvent.IsFn() || aEvent.IsOS();
+}
+
+bool HTMLInputElement::StepsInputValue(
+    const WidgetKeyboardEvent& aEvent) const {
+  if (mType != NS_FORM_INPUT_NUMBER) {
+    return false;
+  }
+  if (aEvent.mMessage != eKeyPress) {
+    return false;
+  }
+  if (!aEvent.IsTrusted()) {
+    return false;
+  }
+  if (aEvent.mKeyCode != NS_VK_UP && aEvent.mKeyCode != NS_VK_DOWN) {
+    return false;
+  }
+  if (IgnoreInputEventWithModifier(aEvent, false)) {
+    return false;
+  }
+  if (aEvent.DefaultPrevented()) {
+    return false;
+  }
+  if (!IsMutable()) {
+    return false;
+  }
+  return true;
 }
 
 nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
@@ -3709,26 +3735,10 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
 
   if (NS_SUCCEEDED(rv)) {
     WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
-    if (mType == NS_FORM_INPUT_NUMBER && keyEvent &&
-        keyEvent->mMessage == eKeyPress && aVisitor.mEvent->IsTrusted() &&
-        (keyEvent->mKeyCode == NS_VK_UP || keyEvent->mKeyCode == NS_VK_DOWN) &&
-        !IgnoreInputEventWithModifier(keyEvent, false)) {
-      // We handle the up/down arrow keys specially for <input type=number>.
-      // On some platforms the editor for the nested text control will
-      // process these keys to send the cursor to the start/end of the text
-      // control and as a result aVisitor.mEventStatus will already have been
-      // set to nsEventStatus_eConsumeNoDefault. However, we know that
-      // whenever the up/down arrow keys cause the value of the number
-      // control to change the string in the text control will change, and
-      // the cursor will be moved to the end of the text control, overwriting
-      // the editor's handling of up/down keypress events. For that reason we
-      // just ignore aVisitor.mEventStatus here and go ahead and handle the
-      // event to increase/decrease the value of the number control.
-      if (!aVisitor.mEvent->DefaultPreventedByContent() && IsMutable()) {
-        StepNumberControlForUserEvent(keyEvent->mKeyCode == NS_VK_UP ? 1 : -1);
-        FireChangeEventIfNeeded();
-        aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
-      }
+    if (keyEvent && StepsInputValue(*keyEvent)) {
+      StepNumberControlForUserEvent(keyEvent->mKeyCode == NS_VK_UP ? 1 : -1);
+      FireChangeEventIfNeeded();
+      aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
     } else if (nsEventStatus_eIgnore == aVisitor.mEventStatus) {
       switch (aVisitor.mEvent->mMessage) {
         case eFocus: {
@@ -3941,7 +3951,7 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
           }
           if (mType == NS_FORM_INPUT_NUMBER && aVisitor.mEvent->IsTrusted()) {
             if (mouseEvent->mButton == MouseButton::eLeft &&
-                !IgnoreInputEventWithModifier(mouseEvent, false)) {
+                !IgnoreInputEventWithModifier(*mouseEvent, false)) {
               nsNumberControlFrame* numberControlFrame =
                   do_QueryFrame(GetPrimaryFrame());
               if (numberControlFrame) {
@@ -4088,7 +4098,7 @@ void HTMLInputElement::PostHandleEventForRangeThumb(
         break;  // don't start drag if someone else is already capturing
       }
       WidgetInputEvent* inputEvent = aVisitor.mEvent->AsInputEvent();
-      if (IgnoreInputEventWithModifier(inputEvent, true)) {
+      if (IgnoreInputEventWithModifier(*inputEvent, true)) {
         break;  // ignore
       }
       if (aVisitor.mEvent->mMessage == eMouseDown) {
@@ -4486,7 +4496,8 @@ void HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify) {
   }
 }
 
-void HTMLInputElement::SanitizeValue(nsAString& aValue) {
+void HTMLInputElement::SanitizeValue(nsAString& aValue,
+                                     ForValueGetter aForGetter) {
   NS_ASSERTION(mDoneCreating, "The element creation should be finished!");
 
   switch (mType) {
@@ -4508,7 +4519,40 @@ void HTMLInputElement::SanitizeValue(nsAString& aValue) {
       bool ok = mInputType->ConvertStringToNumber(aValue, value);
       if (!ok) {
         aValue.Truncate();
+        return;
       }
+
+      nsAutoString sanitizedValue;
+      if (aForGetter == ForValueGetter::Yes) {
+        // If the default non-localized algorithm parses the value, then we're
+        // done, don't un-localize it, to avoid precision loss, and to preserve
+        // scientific notation as well for example.
+        //
+        // FIXME(emilio, bug 1622808): Localization should ideally be more
+        // input-preserving.
+        if (StringToDecimal(aValue).isFinite()) {
+          return;
+        }
+        // For the <input type=number> value getter, we return the unlocalized
+        // value if it doesn't parse as StringToDecimal, for compat with other
+        // browsers.
+        char buf[32];
+        DebugOnly<bool> ok = value.toString(buf, ArrayLength(buf));
+        sanitizedValue.AssignASCII(buf);
+        MOZ_ASSERT(ok, "buf not big enough");
+      } else {
+        mInputType->ConvertNumberToString(value, sanitizedValue);
+        // Otherwise we localize as needed, but if both the localized and
+        // unlocalized version parse, we just use the unlocalized one, to
+        // preserve the input as much as possible.
+        //
+        // FIXME(emilio, bug 1622808): Localization should ideally be more
+        // input-preserving.
+        if (StringToDecimal(sanitizedValue).isFinite()) {
+          return;
+        }
+      }
+      aValue.Assign(sanitizedValue);
     } break;
     case NS_FORM_INPUT_RANGE: {
       Decimal minimum = GetMinimum();
@@ -5097,6 +5141,10 @@ bool HTMLInputElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
       return ParseAlignValue(aValue, aResult);
     }
     if (aAttribute == nsGkAtoms::formmethod) {
+      if (StaticPrefs::dom_dialog_element_enabled()) {
+        return aResult.ParseEnumValue(aValue, kFormMethodTableDialogEnabled,
+                                      false);
+      }
       return aResult.ParseEnumValue(aValue, kFormMethodTable, false);
     }
     if (aAttribute == nsGkAtoms::formenctype) {
@@ -5105,9 +5153,6 @@ bool HTMLInputElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
     if (aAttribute == nsGkAtoms::autocomplete) {
       aResult.ParseAtomArray(aValue);
       return true;
-    }
-    if (aAttribute == nsGkAtoms::inputmode) {
-      return aResult.ParseEnumValue(aValue, kInputInputmodeTable, false);
     }
     if (aAttribute == nsGkAtoms::capture) {
       return aResult.ParseEnumValue(aValue, kCaptureTable, false,
@@ -5762,7 +5807,8 @@ HTMLInputElement::SaveState() {
         }
       }
 
-      state->contentData() = std::move(value);
+      state->contentData() =
+          TextContentData(value, mLastValueChangeWasInteractive);
       break;
   }
 
@@ -5979,12 +6025,16 @@ bool HTMLInputElement::RestoreState(PresState* aState) {
         break;
       }
 
-      if (inputState.type() == PresContentData::TnsString) {
+      if (inputState.type() == PresContentData::TTextContentData) {
         // TODO: What should we do if SetValueInternal fails?  (The allocation
         // may potentially be big, but most likely we've failed to allocate
         // before the type change.)
-        SetValueInternal(inputState.get_nsString(),
+        SetValueInternal(inputState.get_TextContentData().value(),
                          TextControlState::eSetValue_Notify);
+        if (inputState.get_TextContentData().lastValueChangeWasInteractive()) {
+          mLastValueChangeWasInteractive = true;
+          UpdateState(true);
+        }
       }
       break;
   }
@@ -6611,38 +6661,32 @@ void HTMLInputElement::InitializeKeyboardEventListeners() {
   }
 }
 
-void HTMLInputElement::OnValueChanged(bool aNotify, ValueChangeKind aKind) {
+void HTMLInputElement::OnValueChanged(ValueChangeKind aKind) {
   if (aKind != ValueChangeKind::Internal) {
     mLastValueChangeWasInteractive = aKind == ValueChangeKind::UserInteraction;
   }
 
-  UpdateAllValidityStates(aNotify);
+  UpdateAllValidityStates(true);
 
   if (HasDirAuto()) {
-    SetDirectionFromValue(aNotify);
+    SetDirectionFromValue(true);
   }
 
   // :placeholder-shown pseudo-class may change when the value changes.
   // However, we don't want to waste cycles if the state doesn't apply.
-  if (PlaceholderApplies() &&
-      HasAttr(kNameSpaceID_None, nsGkAtoms::placeholder)) {
-    UpdateState(aNotify);
+  if (PlaceholderApplies() && HasAttr(nsGkAtoms::placeholder)) {
+    UpdateState(true);
   }
 }
 
 bool HTMLInputElement::HasCachedSelection() {
-  bool isCached = false;
   TextControlState* state = GetEditorState();
-  if (state) {
-    isCached = state->IsSelectionCached() &&
-               state->HasNeverInitializedBefore() &&
-               state->GetSelectionProperties().GetStart() !=
-                   state->GetSelectionProperties().GetEnd();
-    if (isCached) {
-      state->WillInitEagerly();
-    }
+  if (!state) {
+    return false;
   }
-  return isCached;
+  return state->IsSelectionCached() && state->HasNeverInitializedBefore() &&
+         state->GetSelectionProperties().GetStart() !=
+             state->GetSelectionProperties().GetEnd();
 }
 
 void HTMLInputElement::FieldSetDisabledChanged(bool aNotify) {
@@ -6794,8 +6838,7 @@ void HTMLInputElement::SetFilePickerFiltersFromAccept(
 
   // Remove similar filters
   // Iterate over a copy, as we might modify the original filters list
-  nsTArray<nsFilePickerFilter> filtersCopy;
-  filtersCopy = filters;
+  const nsTArray<nsFilePickerFilter> filtersCopy = filters.Clone();
   for (uint32_t i = 0; i < filtersCopy.Length(); ++i) {
     const nsFilePickerFilter& filterToCheck = filtersCopy[i];
     if (filterToCheck.mFilterMask) {

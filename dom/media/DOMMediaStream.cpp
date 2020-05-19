@@ -89,7 +89,7 @@ class DOMMediaStream::PlaybackTrackListener : public MediaStreamTrackConsumer {
   }
 
  protected:
-  virtual ~PlaybackTrackListener() {}
+  virtual ~PlaybackTrackListener() = default;
 
   RefPtr<DOMMediaStream> mStream;
 };
@@ -109,6 +109,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(DOMMediaStream,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTracks)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mConsumersToKeepAlive)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPlaybackTrackListener)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(DOMMediaStream,
@@ -232,7 +233,8 @@ already_AddRefed<Promise> DOMMediaStream::CountUnderlyingStreams(
   }
 
   MediaTrackGraph* graph = MediaTrackGraph::GetInstanceIfExists(
-      window, MediaTrackGraph::REQUEST_DEFAULT_SAMPLE_RATE);
+      window, MediaTrackGraph::REQUEST_DEFAULT_SAMPLE_RATE,
+      MediaTrackGraph::DEFAULT_OUTPUT_DEVICE);
   if (!graph) {
     p->MaybeResolve(0);
     return p.forget();
@@ -265,7 +267,7 @@ already_AddRefed<Promise> DOMMediaStream::CountUnderlyingStreams(
     // In case of shutdown, Run() does not run, so we dispatch mPromise to be
     // released on main thread here.
     void RunDuringShutdown() override {
-      NS_ReleaseOnMainThreadSystemGroup(
+      NS_ReleaseOnMainThread(
           "DOMMediaStream::CountUnderlyingStreams::Counter::RunDuringShutdown",
           mPromise.forget());
     }

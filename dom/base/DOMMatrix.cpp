@@ -60,8 +60,7 @@ static bool ValidateAndFixupMatrix2DInit(DOMMatrix2DInit& aMatrixInit,
     }                                                     \
   }
 #define ValidateAndSet(field, alias, fieldName, aliasName, defaultValue) \
-  ValidateAliases((field), (alias), NS_LITERAL_STRING(fieldName),        \
-                  NS_LITERAL_STRING(aliasName));                         \
+  ValidateAliases((field), (alias), fieldName, aliasName);               \
   SetFromAliasOrDefault((field), (alias), (defaultValue));
 
   ValidateAndSet(aMatrixInit.mM11, aMatrixInit.mA, "m11", "a", 1);
@@ -81,17 +80,16 @@ static bool ValidateAndFixupMatrix2DInit(DOMMatrix2DInit& aMatrixInit,
 // https://drafts.fxtf.org/geometry/#matrix-validate-and-fixup
 static bool ValidateAndFixupMatrixInit(DOMMatrixInit& aMatrixInit,
                                        ErrorResult& aRv) {
-#define Check3DField(field, fieldName, defaultValue)  \
-  if ((field) != (defaultValue)) {                    \
-    if (!aMatrixInit.mIs2D.WasPassed()) {             \
-      aMatrixInit.mIs2D.Construct(false);             \
-      return true;                                    \
-    }                                                 \
-    if (aMatrixInit.mIs2D.Value()) {                  \
-      aRv.ThrowTypeError<MSG_MATRIX_INIT_EXCEEDS_2D>( \
-          NS_LITERAL_STRING(fieldName));              \
-      return false;                                   \
-    }                                                 \
+#define Check3DField(field, fieldName, defaultValue)             \
+  if ((field) != (defaultValue)) {                               \
+    if (!aMatrixInit.mIs2D.WasPassed()) {                        \
+      aMatrixInit.mIs2D.Construct(false);                        \
+      return true;                                               \
+    }                                                            \
+    if (aMatrixInit.mIs2D.Value()) {                             \
+      aRv.ThrowTypeError<MSG_MATRIX_INIT_EXCEEDS_2D>(fieldName); \
+      return false;                                              \
+    }                                                            \
   }
 
   if (!ValidateAndFixupMatrix2DInit(aMatrixInit, aRv)) {
@@ -361,11 +359,12 @@ already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipX() const {
   if (mMatrix3D) {
     gfx::Matrix4x4Double m;
     m._11 = -1;
-    retval->mMatrix3D = new gfx::Matrix4x4Double(m * *mMatrix3D);
+    retval->mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(m * *mMatrix3D);
   } else {
     gfx::MatrixDouble m;
     m._11 = -1;
-    retval->mMatrix2D = new gfx::MatrixDouble(mMatrix2D ? m * *mMatrix2D : m);
+    retval->mMatrix2D =
+        MakeUnique<gfx::MatrixDouble>(mMatrix2D ? m * *mMatrix2D : m);
   }
 
   return retval.forget();
@@ -376,11 +375,12 @@ already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipY() const {
   if (mMatrix3D) {
     gfx::Matrix4x4Double m;
     m._22 = -1;
-    retval->mMatrix3D = new gfx::Matrix4x4Double(m * *mMatrix3D);
+    retval->mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(m * *mMatrix3D);
   } else {
     gfx::MatrixDouble m;
     m._22 = -1;
-    retval->mMatrix2D = new gfx::MatrixDouble(mMatrix2D ? m * *mMatrix2D : m);
+    retval->mMatrix2D =
+        MakeUnique<gfx::MatrixDouble>(mMatrix2D ? m * *mMatrix2D : m);
   }
 
   return retval.forget();
@@ -726,7 +726,7 @@ static void SetDataInMatrix(DOMMatrixReadOnly* aMatrix, const T* aData,
     aMatrix->SetE(aData[4]);
     aMatrix->SetF(aData[5]);
   } else {
-    nsAutoString lengthStr;
+    nsAutoCString lengthStr;
     lengthStr.AppendInt(aLength);
     aRv.ThrowTypeError<MSG_MATRIX_INIT_LENGTH_WRONG>(lengthStr);
   }
@@ -752,8 +752,8 @@ already_AddRefed<DOMMatrix> DOMMatrix::ReadStructuredClone(
 
 void DOMMatrixReadOnly::Ensure3DMatrix() {
   if (!mMatrix3D) {
-    mMatrix3D =
-        new gfx::Matrix4x4Double(gfx::Matrix4x4Double::From2D(*mMatrix2D));
+    mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(
+        gfx::Matrix4x4Double::From2D(*mMatrix2D));
     mMatrix2D = nullptr;
   }
 }
@@ -761,6 +761,10 @@ void DOMMatrixReadOnly::Ensure3DMatrix() {
 DOMMatrix* DOMMatrix::MultiplySelf(const DOMMatrixInit& aOtherInit,
                                    ErrorResult& aRv) {
   RefPtr<DOMMatrix> other = FromMatrix(mParent, aOtherInit, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+  MOZ_ASSERT(other);
   if (other->IsIdentity()) {
     return this;
   }
@@ -782,6 +786,10 @@ DOMMatrix* DOMMatrix::MultiplySelf(const DOMMatrixInit& aOtherInit,
 DOMMatrix* DOMMatrix::PreMultiplySelf(const DOMMatrixInit& aOtherInit,
                                       ErrorResult& aRv) {
   RefPtr<DOMMatrix> other = FromMatrix(mParent, aOtherInit, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+  MOZ_ASSERT(other);
   if (other->IsIdentity()) {
     return this;
   }
@@ -960,7 +968,7 @@ DOMMatrix* DOMMatrix::InvertSelf() {
   } else if (!mMatrix2D->Invert()) {
     mMatrix2D = nullptr;
 
-    mMatrix3D = new gfx::Matrix4x4Double();
+    mMatrix3D = MakeUnique<gfx::Matrix4x4Double>();
     mMatrix3D->SetNAN();
   }
 
@@ -985,7 +993,7 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::SetMatrixValue(
   if (!contains3dTransform) {
     mMatrix3D = nullptr;
     if (!mMatrix2D) {
-      mMatrix2D = new gfx::MatrixDouble();
+      mMatrix2D = MakeUnique<gfx::MatrixDouble>();
     }
 
     SetA(transform._11);
@@ -995,7 +1003,7 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::SetMatrixValue(
     SetE(transform._41);
     SetF(transform._42);
   } else {
-    mMatrix3D = new gfx::Matrix4x4Double(transform);
+    mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(transform);
     mMatrix2D = nullptr;
   }
 

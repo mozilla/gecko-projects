@@ -8,8 +8,9 @@
 #include <stdlib.h>
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Services.h"
 
-#include "mozcontainer.h"
+#include "MozContainer.h"
 #include "nsIPrintSettings.h"
 #include "nsIWidget.h"
 #include "nsPrintDialogGTK.h"
@@ -485,9 +486,9 @@ GtkWidget* nsPrintDialogWidgetGTK::ConstructHeaderFooterDropdown(
 
 NS_IMPL_ISUPPORTS(nsPrintDialogServiceGTK, nsIPrintDialogService)
 
-nsPrintDialogServiceGTK::nsPrintDialogServiceGTK() {}
+nsPrintDialogServiceGTK::nsPrintDialogServiceGTK() = default;
 
-nsPrintDialogServiceGTK::~nsPrintDialogServiceGTK() {}
+nsPrintDialogServiceGTK::~nsPrintDialogServiceGTK() = default;
 
 NS_IMETHODIMP
 nsPrintDialogServiceGTK::Init() { return NS_OK; }
@@ -1034,6 +1035,10 @@ nsPrintDialogServiceGTK::ShowPageSetup(nsPIDOMWindowOuter* aParent,
   g_object_unref(newPageSetup);
 
   if (psService)
+    // XXX We should probably only be saving the values for the settings that
+    // we showed to the user in the page settings dialog.  Does using
+    // kInitSaveAll cause us to incorrectly overwrite settings that we should
+    // leave alone?
     psService->SavePrintSettingsToPrefs(aNSSettings, true,
                                         nsIPrintSettings::kInitSaveAll);
 

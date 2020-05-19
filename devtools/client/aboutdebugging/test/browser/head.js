@@ -29,12 +29,16 @@ registerCleanupFunction(async function() {
   Services.prefs.clearUserPref("devtools.toolbox.selectedTool");
 
   try {
-    const { adbAddon } = require("devtools/shared/adb/adb-addon");
+    const {
+      adbAddon,
+    } = require("devtools/client/shared/remote-debugging/adb/adb-addon");
     await adbAddon.uninstall();
   } catch (e) {
     // Will throw if the addon is already uninstalled, ignore exceptions here.
   }
-  const { adbProcess } = require("devtools/shared/adb/adb-process");
+  const {
+    adbProcess,
+  } = require("devtools/client/shared/remote-debugging/adb/adb-process");
   await adbProcess.kill();
 
   const {
@@ -228,12 +232,19 @@ function waitForDispatch(store, type) {
  */
 async function selectThisFirefoxPage(doc, store) {
   info("Select This Firefox page");
+
   const onRequestSuccess = waitForRequestsSuccess(store);
   doc.location.hash = "#/runtime/this-firefox";
   info("Wait for requests to be complete");
   await onRequestSuccess;
+
   info("Wait for runtime page to be rendered");
   await waitUntil(() => doc.querySelector(".qa-runtime-page"));
+
+  // Navigating to this-firefox will trigger a title change for the
+  // about:debugging tab. This title change _might_ trigger a tablist update.
+  // If it does, we should make sure to wait for pending tab requests.
+  await waitForRequestsToSettle(store);
 }
 
 /**
@@ -311,12 +322,18 @@ async function connectToRuntime(deviceName, document) {
 
 async function selectRuntime(deviceName, name, document) {
   const sidebarItem = findSidebarItemByText(deviceName, document);
+  const store = document.defaultView.AboutDebugging.store;
+  const onSelectPageSuccess = waitForDispatch(store, "SELECT_PAGE_SUCCESS");
+
   sidebarItem.querySelector(".qa-sidebar-link").click();
 
   await waitUntil(() => {
     const runtimeInfo = document.querySelector(".qa-runtime-name");
     return runtimeInfo && runtimeInfo.textContent.includes(name);
   });
+
+  info("Wait for SELECT_PAGE_SUCCESS to be dispatched");
+  await onSelectPageSuccess;
 }
 
 function getToolbox(win) {
@@ -363,4 +380,39 @@ function waitUntilUsbDeviceIsUnplugged(deviceName, aboutDebuggingDocument) {
     );
     return !!sidebarItem.querySelector(".qa-runtime-item-unplugged");
   });
+}
+
+/**
+ * Changing the selected tab in the current browser will trigger a tablist
+ * update.
+ * If the currently selected page is "this-firefox", we should wait for the
+ * the corresponding REQUEST_TABS_SUCCESS that will be triggered by the change.
+ *
+ * @param {Browser} browser
+ *        The browser instance to update.
+ * @param {XULTab} tab
+ *        The tab to select.
+ * @param {Object} store
+ *        The about:debugging redux store.
+ */
+async function updateSelectedTab(browser, tab, store) {
+  info("Update the selected tab");
+
+  const { runtimes, ui } = store.getState();
+  const isOnThisFirefox =
+    runtimes.selectedRuntimeId === "this-firefox" &&
+    ui.selectedPage === "runtime";
+
+  // A tabs request will only be issued if we are on this-firefox.
+  const onTabsSuccess = isOnThisFirefox
+    ? waitForDispatch(store, "REQUEST_TABS_SUCCESS")
+    : null;
+
+  // Update the selected tab.
+  browser.selectedTab = tab;
+
+  if (onTabsSuccess) {
+    info("Wait for the tablist update after updating the selected tab");
+    await onTabsSuccess;
+  }
 }

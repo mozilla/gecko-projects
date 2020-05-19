@@ -130,17 +130,15 @@ var Fingerprinting = {
       return null;
     }
 
-    let uri = Services.io.newURI(origin);
-
     let listItem = document.createXULElement("hbox");
     listItem.className = "protections-popup-list-item";
     listItem.classList.toggle("allowed", isAllowed);
     // Repeat the host in the tooltip in case it's too long
     // and overflows in our panel.
-    listItem.tooltipText = uri.host;
+    listItem.tooltipText = origin;
 
     let label = document.createXULElement("label");
-    label.value = uri.host;
+    label.value = origin;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
@@ -260,17 +258,15 @@ var Cryptomining = {
       return null;
     }
 
-    let uri = Services.io.newURI(origin);
-
     let listItem = document.createXULElement("hbox");
     listItem.className = "protections-popup-list-item";
     listItem.classList.toggle("allowed", isAllowed);
     // Repeat the host in the tooltip in case it's too long
     // and overflows in our panel.
-    listItem.tooltipText = uri.host;
+    listItem.tooltipText = origin;
 
     let label = document.createXULElement("label");
-    label.value = uri.host;
+    label.value = origin;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
@@ -490,8 +486,6 @@ var TrackingProtection = {
       return null;
     }
 
-    let uri = Services.io.newURI(origin);
-
     // Because we might use different lists for annotation vs. blocking, we
     // need to make sure that this is a tracker that we would actually have blocked
     // before showing it to the user.
@@ -513,10 +507,10 @@ var TrackingProtection = {
     listItem.classList.toggle("allowed", isAllowed);
     // Repeat the host in the tooltip in case it's too long
     // and overflows in our panel.
-    listItem.tooltipText = uri.host;
+    listItem.tooltipText = origin;
 
     let label = document.createXULElement("label");
-    label.value = uri.host;
+    label.value = origin;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
@@ -746,19 +740,23 @@ var ThirdPartyCookies = {
     }
 
     this.subViewHeading.hidden = false;
-    if (!this.enabled || gProtectionsHandler.hasException) {
+    if (!this.enabled) {
       this.subView.setAttribute("title", this.strings.subViewTitleNotBlocking);
       return;
     }
 
     let title;
+    let siteException = gProtectionsHandler.hasException;
+    let titleStringPrefix = `protections.${
+      siteException ? "notBlocking" : "blocking"
+    }.cookies.`;
     switch (this.behaviorPref) {
       case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
-        title = "protections.blocking.cookies.3rdParty.title";
+        title = titleStringPrefix + "3rdParty.title";
         this.subViewHeading.hidden = true;
         break;
       case Ci.nsICookieService.BEHAVIOR_REJECT:
-        title = "protections.blocking.cookies.all.title";
+        title = titleStringPrefix + "all.title";
         this.subViewHeading.hidden = true;
         break;
       case Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN:
@@ -767,13 +765,13 @@ var ThirdPartyCookies = {
         break;
       case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
       case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN:
-        title = "protections.blocking.cookies.trackers.title";
+        title = siteException
+          ? "protections.notBlocking.crossSiteTrackingCookies.title"
+          : "protections.blocking.cookies.trackers.title";
         break;
       default:
         Cu.reportError(
-          `Error: Unknown cookieBehavior pref when updating subview: ${
-            this.behaviorPref
-          }`
+          `Error: Unknown cookieBehavior pref when updating subview: ${this.behaviorPref}`
         );
         break;
     }
@@ -1117,17 +1115,15 @@ var SocialTracking = {
       return null;
     }
 
-    let uri = Services.io.newURI(origin);
-
     let listItem = document.createXULElement("hbox");
     listItem.className = "protections-popup-list-item";
     listItem.classList.toggle("allowed", isAllowed);
     // Repeat the host in the tooltip in case it's too long
     // and overflows in our panel.
-    listItem.tooltipText = uri.host;
+    listItem.tooltipText = origin;
 
     let label = document.createXULElement("label");
-    label.value = uri.host;
+    label.value = origin;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
@@ -1140,7 +1136,6 @@ var SocialTracking = {
  * Utility object to handle manipulations of the protections indicators in the UI
  */
 var gProtectionsHandler = {
-  PREF_ANIMATIONS_ENABLED: "toolkit.cosmeticAnimations.enabled",
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
   PREF_CB_CATEGORY: "browser.contentblocking.category",
 
@@ -1253,6 +1248,12 @@ var gProtectionsHandler = {
       "protections-popup-trackers-blocked-counter-description"
     ));
   },
+  get _protectionsPopupFooterProtectionTypeLabel() {
+    delete this._protectionsPopupFooterProtectionTypeLabel;
+    return (this._protectionsPopupFooterProtectionTypeLabel = document.getElementById(
+      "protections-popup-footer-protection-type-label"
+    ));
+  },
   get _protectionsPopupSiteNotWorkingTPSwitch() {
     delete this._protectionsPopupSiteNotWorkingTPSwitch;
     return (this._protectionsPopupSiteNotWorkingTPSwitch = document.getElementById(
@@ -1263,12 +1264,6 @@ var gProtectionsHandler = {
     delete this._protectionsPopupSiteNotWorkingReportError;
     return (this._protectionsPopupSiteNotWorkingReportError = document.getElementById(
       "protections-popup-sendReportView-report-error"
-    ));
-  },
-  get _protectionsPopupSendReportLearnMore() {
-    delete this._protectionsPopupSendReportLearnMore;
-    return (this._protectionsPopupSendReportLearnMore = document.getElementById(
-      "protections-popup-sendReportView-learn-more"
     ));
   },
   get _protectionsPopupSendReportURL() {
@@ -1287,6 +1282,12 @@ var gProtectionsHandler = {
     delete this._trackingProtectionIconTooltipLabel;
     return (this._trackingProtectionIconTooltipLabel = document.getElementById(
       "tracking-protection-icon-tooltip-label"
+    ));
+  },
+  get _trackingProtectionIconContainer() {
+    delete this._trackingProtectionIconContainer;
+    return (this._trackingProtectionIconContainer = document.getElementById(
+      "tracking-protection-icon-container"
     ));
   },
 
@@ -1363,13 +1364,6 @@ var gProtectionsHandler = {
       this.iconBox.removeAttribute("animate")
     );
 
-    this.updateAnimationsEnabled = () => {
-      this.iconBox.toggleAttribute(
-        "animationsenabled",
-        Services.prefs.getBoolPref(this.PREF_ANIMATIONS_ENABLED, false)
-      );
-    };
-
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
       "_protectionsPopupToastTimeout",
@@ -1419,16 +1413,10 @@ var gProtectionsHandler = {
       }
     }
 
-    this.updateAnimationsEnabled();
-
-    Services.prefs.addObserver(
-      this.PREF_ANIMATIONS_ENABLED,
-      this.updateAnimationsEnabled
-    );
-
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
-    gProtectionsHandler._protectionsPopupSendReportLearnMore.href =
-      baseURL + "blocking-breakage";
+    document.getElementById(
+      "protections-popup-sendReportView-learn-more"
+    ).href = baseURL + "blocking-breakage";
 
     // Add an observer to observe that the history has been cleared.
     Services.obs.addObserver(this, "browser:purge-session-history");
@@ -1441,12 +1429,22 @@ var gProtectionsHandler = {
       }
     }
 
-    Services.prefs.removeObserver(
-      this.PREF_ANIMATIONS_ENABLED,
-      this.updateAnimationsEnabled
-    );
-
     Services.obs.removeObserver(this, "browser:purge-session-history");
+  },
+
+  getTrackingProtectionLabel() {
+    const value = Services.prefs.getStringPref(this.PREF_CB_CATEGORY);
+
+    switch (value) {
+      case "strict":
+        return "protections-popup-footer-protection-label-strict";
+      case "custom":
+        return "protections-popup-footer-protection-label-custom";
+      case "standard":
+      /* fall through */
+      default:
+        return "protections-popup-footer-protection-label-standard";
+    }
   },
 
   openPreferences(origin) {
@@ -1551,10 +1549,7 @@ var gProtectionsHandler = {
 
       // Add the "open" attribute to the tracking protection icon container
       // for styling.
-      gIdentityHandler._trackingProtectionIconContainer.setAttribute(
-        "open",
-        "true"
-      );
+      this._trackingProtectionIconContainer.setAttribute("open", "true");
 
       // Insert the info message if needed. This will be shown once and then
       // remain collapsed.
@@ -1573,7 +1568,7 @@ var gProtectionsHandler = {
   onPopupHidden(event) {
     if (event.target == this._protectionsPopup) {
       window.removeEventListener("focus", this, true);
-      gIdentityHandler._trackingProtectionIconContainer.removeAttribute("open");
+      this._trackingProtectionIconContainer.removeAttribute("open");
     }
   },
 
@@ -1599,6 +1594,11 @@ var gProtectionsHandler = {
     // Get the tracker count and set it to the counter in the footer.
     const trackerCount = await TrackingDBService.sumAllEvents();
     this.setTrackersBlockedCounter(trackerCount);
+
+    // Set tracking protection label
+    const l10nId = this.getTrackingProtectionLabel();
+    const elem = this._protectionsPopupFooterProtectionTypeLabel;
+    document.l10n.setAttributes(elem, l10nId);
 
     // Try to get the earliest recorded date in case that there was no record
     // during the initiation but new records come after that.
@@ -1631,10 +1631,10 @@ var gProtectionsHandler = {
       // We hide the icon and thus avoid showing the doorhanger, since
       // the information contained there would mostly be broken and/or
       // irrelevant anyway.
-      gIdentityHandler._trackingProtectionIconContainer.hidden = true;
+      this._trackingProtectionIconContainer.hidden = true;
       return;
     }
-    gIdentityHandler._trackingProtectionIconContainer.hidden = false;
+    this._trackingProtectionIconContainer.hidden = false;
 
     // Check whether the user has added an exception for this site.
     let hasException = ContentBlockingAllowList.includes(
@@ -2114,7 +2114,7 @@ var gProtectionsHandler = {
 
   showDisabledTooltipForTPIcon() {
     this._trackingProtectionIconTooltipLabel.textContent = this.strings.disabledTooltipText;
-    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+    this._trackingProtectionIconContainer.setAttribute(
       "aria-label",
       this.strings.disabledTooltipText
     );
@@ -2122,7 +2122,7 @@ var gProtectionsHandler = {
 
   showActiveTooltipForTPIcon() {
     this._trackingProtectionIconTooltipLabel.textContent = this.strings.activeTooltipText;
-    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+    this._trackingProtectionIconContainer.setAttribute(
       "aria-label",
       this.strings.activeTooltipText
     );
@@ -2130,7 +2130,7 @@ var gProtectionsHandler = {
 
   showNoTrackerTooltipForTPIcon() {
     this._trackingProtectionIconTooltipLabel.textContent = this.strings.noTrackerTooltipText;
-    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+    this._trackingProtectionIconContainer.setAttribute(
       "aria-label",
       this.strings.noTrackerTooltipText
     );
@@ -2183,10 +2183,7 @@ var gProtectionsHandler = {
 
     // Add the "open" attribute to the tracking protection icon container
     // for styling.
-    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
-      "open",
-      "true"
-    );
+    this._trackingProtectionIconContainer.setAttribute("open", "true");
 
     // Check the panel state of the identity panel. Hide it if needed.
     if (gIdentityHandler._identityPopup.state != "closed") {
@@ -2196,7 +2193,7 @@ var gProtectionsHandler = {
     // Now open the popup, anchored off the primary chrome element
     PanelMultiView.openPopup(
       this._protectionsPopup,
-      gIdentityHandler._trackingProtectionIconContainer,
+      this._trackingProtectionIconContainer,
       {
         position: "bottomcenter topleft",
         triggerEvent: event,
@@ -2333,9 +2330,7 @@ var gProtectionsHandler = {
         this._protectionsPopupSendReportButton.disabled = false;
         if (!response.ok) {
           Cu.reportError(
-            `Content Blocking report to ${reportEndpoint} failed with status ${
-              response.status
-            }`
+            `Content Blocking report to ${reportEndpoint} failed with status ${response.status}`
           );
           this._protectionsPopupSiteNotWorkingReportError.hidden = false;
         } else {

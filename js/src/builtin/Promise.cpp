@@ -25,9 +25,11 @@
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/PlainObject.h"    // js::PlainObject
 #include "vm/PromiseLookup.h"  // js::PromiseLookup
 #include "vm/PromiseObject.h"  // js::PromiseObject, js::PromiseSlot_*
 #include "vm/SelfHosting.h"
+#include "vm/Warnings.h"  // js::WarnNumberASCII
 
 #include "debugger/DebugAPI-inl.h"
 #include "vm/Compartment-inl.h"
@@ -38,9 +40,8 @@
 
 using namespace js;
 
-static double MillisecondsSinceStartup(
-    const mozilla::Maybe<mozilla::TimeStamp>& maybeNow) {
-  auto now = maybeNow.isSome() ? maybeNow.ref() : mozilla::TimeStamp::Now();
+static double MillisecondsSinceStartup() {
+  auto now = mozilla::TimeStamp::Now();
   return (now - mozilla::TimeStamp::ProcessCreation()).ToMilliseconds();
 }
 
@@ -389,16 +390,6 @@ static MOZ_ALWAYS_INLINE bool ShouldCaptureDebugInfo(JSContext* cx) {
   return cx->options().asyncStack() || cx->realm()->isDebuggee();
 }
 
-static mozilla::Maybe<mozilla::TimeStamp> MaybeNow() {
-  // ShouldCaptureDebugInfo() may return inconsistent values when recording
-  // or replaying, so in places where we might need the current time for
-  // promise debug info we always capture the current time.
-  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-    return mozilla::Some(mozilla::TimeStamp::Now());
-  }
-  return mozilla::Nothing();
-}
-
 class PromiseDebugInfo : public NativeObject {
  private:
   enum Slots {
@@ -412,9 +403,8 @@ class PromiseDebugInfo : public NativeObject {
 
  public:
   static const JSClass class_;
-  static PromiseDebugInfo* create(
-      JSContext* cx, Handle<PromiseObject*> promise,
-      const mozilla::Maybe<mozilla::TimeStamp>& maybeNow) {
+  static PromiseDebugInfo* create(JSContext* cx,
+                                  Handle<PromiseObject*> promise) {
     Rooted<PromiseDebugInfo*> debugInfo(
         cx, NewBuiltinClassInstance<PromiseDebugInfo>(cx));
     if (!debugInfo) {
@@ -429,7 +419,7 @@ class PromiseDebugInfo : public NativeObject {
     debugInfo->setFixedSlot(Slot_AllocationSite, ObjectOrNullValue(stack));
     debugInfo->setFixedSlot(Slot_ResolutionSite, NullValue());
     debugInfo->setFixedSlot(Slot_AllocationTime,
-                            DoubleValue(MillisecondsSinceStartup(maybeNow)));
+                            DoubleValue(MillisecondsSinceStartup()));
     debugInfo->setFixedSlot(Slot_ResolutionTime, NumberValue(0));
     promise->setFixedSlot(PromiseSlot_DebugInfo, ObjectValue(*debugInfo));
 
@@ -480,12 +470,9 @@ class PromiseDebugInfo : public NativeObject {
   }
 
   static void setResolutionInfo(JSContext* cx, Handle<PromiseObject*> promise) {
-    mozilla::Maybe<mozilla::TimeStamp> maybeNow = MaybeNow();
-
     if (!ShouldCaptureDebugInfo(cx)) {
       return;
     }
-    mozilla::recordreplay::AutoDisallowThreadEvents disallow;
 
     // If async stacks weren't enabled and the Promise's global wasn't a
     // debuggee when the Promise was created, we won't have a debugInfo
@@ -494,7 +481,7 @@ class PromiseDebugInfo : public NativeObject {
     Rooted<PromiseDebugInfo*> debugInfo(cx, FromPromise(promise));
     if (!debugInfo) {
       RootedValue idVal(cx, promise->getFixedSlot(PromiseSlot_DebugInfo));
-      debugInfo = create(cx, promise, maybeNow);
+      debugInfo = create(cx, promise);
       if (!debugInfo) {
         cx->clearPendingException();
         return;
@@ -530,7 +517,7 @@ class PromiseDebugInfo : public NativeObject {
 
     debugInfo->setFixedSlot(Slot_ResolutionSite, ObjectOrNullValue(stack));
     debugInfo->setFixedSlot(Slot_ResolutionTime,
-                            DoubleValue(MillisecondsSinceStartup(maybeNow)));
+                            DoubleValue(MillisecondsSinceStartup()));
   }
 };
 
@@ -1688,14 +1675,12 @@ static MOZ_MUST_USE bool AsyncGeneratorPromiseReactionJob(
     JSContext* cx, Handle<PromiseReactionRecord*> reaction) {
   MOZ_ASSERT(reaction->isAsyncGenerator());
 
-  int32_t handler = reaction->handler().toInt32();
   RootedValue argument(cx, reaction->handlerArg());
   Rooted<AsyncGeneratorObject*> asyncGenObj(cx, reaction->asyncGenerator());
 
   // Await's handlers don't return a value, nor throw any exceptions.
   // They fail only on OOM.
-
-  switch (handler) {
+  switch (int32_t handler = reaction->handler().toInt32(); handler) {
     // ES2020 draft rev a09fc232c137800dbf51b6204f37fdede4ba1646
     // 6.2.3.1.1 Await Fulfilled Functions
     case PromiseHandlerAsyncGeneratorAwaitedFulfilled: {
@@ -1871,7 +1856,7 @@ static bool PromiseReactionJob(JSContext* cx, unsigned argc, Value* vp) {
       bool done =
           handlerNum == PromiseHandlerAsyncFromSyncIteratorValueUnwrapDone;
       // 25.1.4.2.5 Async-from-Sync Iterator Value Unwrap Functions, steps 1-2.
-      JSObject* resultObj = CreateIterResultObject(cx, argument, done);
+      PlainObject* resultObj = CreateIterResultObject(cx, argument, done);
       if (!resultObj) {
         return false;
       }
@@ -2229,12 +2214,9 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
   // Step 7.
   // Implicit, the handled flag is unset by default.
 
-  mozilla::Maybe<mozilla::TimeStamp> maybeNow = MaybeNow();
-
   if (MOZ_LIKELY(!ShouldCaptureDebugInfo(cx))) {
     return promise;
   }
-  mozilla::recordreplay::AutoDisallowThreadEvents disallow;
 
   // Store an allocation stack so we can later figure out what the
   // control flow was for some unexpected results. Frightfully expensive,
@@ -2242,8 +2224,7 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
 
   Rooted<PromiseObject*> promiseRoot(cx, promise);
 
-  PromiseDebugInfo* debugInfo =
-      PromiseDebugInfo::create(cx, promiseRoot, maybeNow);
+  PromiseDebugInfo* debugInfo = PromiseDebugInfo::create(cx, promiseRoot);
   if (!debugInfo) {
     return nullptr;
   }
@@ -4431,9 +4412,7 @@ MOZ_MUST_USE bool js::AsyncFunctionThrown(JSContext* cx,
   if (resultPromise->state() != JS::PromiseState::Pending) {
     // OOM after resolving promise.
     // Report a warning and ignore the result.
-    if (!JS_ReportErrorFlagsAndNumberASCII(
-            cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
-            JSMSG_UNHANDLABLE_PROMISE_REJECTION_WARNING)) {
+    if (!WarnNumberASCII(cx, JSMSG_UNHANDLABLE_PROMISE_REJECTION_WARNING)) {
       if (cx->isExceptionPending()) {
         cx->clearPendingException();
       }
@@ -4460,33 +4439,19 @@ static MOZ_MUST_USE bool InternalAwait(JSContext* cx, HandleValue value,
                                        HandleObject resultPromise,
                                        PromiseHandler onFulfilled,
                                        PromiseHandler onRejected, T extraStep) {
-  Rooted<PromiseObject*> unwrappedPromise(cx);
-  if (cx->realm()->creationOptions().getAwaitFixEnabled()) {
-    // Step 2: Let promise be ? PromiseResolve(%Promise%, « value »).
-    RootedObject promise(cx, PromiseObject::unforgeableResolve(cx, value));
-    if (!promise) {
-      return false;
-    }
+  // Step 2: Let promise be ? PromiseResolve(%Promise%, « value »).
+  RootedObject promise(cx, PromiseObject::unforgeableResolve(cx, value));
+  if (!promise) {
+    return false;
+  }
 
-    // This downcast is safe because unforgeableResolve either returns `value`
-    // (only if it is already a possibly-wrapped promise) or creates a new
-    // promise using the Promise constructor.
-    unwrappedPromise = UnwrapAndDowncastObject<PromiseObject>(cx, promise);
-    if (!unwrappedPromise) {
-      return false;
-    }
-  } else {
-    // Old step 2: Let promiseCapability be ! NewPromiseCapability(%Promise%).
-    unwrappedPromise = CreatePromiseObjectWithoutResolutionFunctions(cx);
-    if (!unwrappedPromise) {
-      return false;
-    }
-
-    // Old step 3: Perform ! Call(promiseCapability.[[Resolve]], undefined,
-    //                            « promise »).
-    if (!ResolvePromiseInternal(cx, unwrappedPromise, value)) {
-      return false;
-    }
+  // This downcast is safe because unforgeableResolve either returns `value`
+  // (only if it is already a possibly-wrapped promise) or creates a new
+  // promise using the Promise constructor.
+  Rooted<PromiseObject*> unwrappedPromise(
+      cx, UnwrapAndDowncastObject<PromiseObject>(cx, promise));
+  if (!unwrappedPromise) {
+    return false;
   }
 
   // Steps 3-8 of the spec create onFulfilled and onRejected functions.
@@ -4602,7 +4567,7 @@ bool js::AsyncFromSyncIteratorMethod(JSContext* cx, CallArgs& args,
     // we omit that step above, and check for `null` here instead.)
     if (func.isNullOrUndefined()) {
       // Step 7.a: Let iterResult be ! CreateIterResultObject(value, true).
-      JSObject* resultObj = CreateIterResultObject(cx, args.get(0), true);
+      PlainObject* resultObj = CreateIterResultObject(cx, args.get(0), true);
       if (!resultObj) {
         return AbruptRejectPromise(cx, args, resultPromise, nullptr);
       }
@@ -4651,9 +4616,17 @@ bool js::AsyncFromSyncIteratorMethod(JSContext* cx, CallArgs& args,
   // return/throw() steps 8-9.
   //     Step 8: Let result be Call(throw, syncIterator, « value »).
   //     Step 9: IfAbruptRejectPromise(result, promiseCapability).
+  //
+  // Including the changes from: https://github.com/tc39/ecma262/pull/1776
   RootedValue iterVal(cx, ObjectValue(*iter));
   RootedValue resultVal(cx);
-  if (!Call(cx, func, iterVal, args.get(0), &resultVal)) {
+  bool ok;
+  if (args.length() == 0) {
+    ok = Call(cx, func, iterVal, &resultVal);
+  } else {
+    ok = Call(cx, func, iterVal, args[0], &resultVal);
+  }
+  if (!ok) {
     return AbruptRejectPromise(cx, args, resultPromise, nullptr);
   }
 
@@ -5438,8 +5411,7 @@ static MOZ_MUST_USE bool AddDummyPromiseReactionForDebugger(
 uint64_t PromiseObject::getID() { return PromiseDebugInfo::id(this); }
 
 double PromiseObject::lifetime() {
-  return MillisecondsSinceStartup(mozilla::Some(mozilla::TimeStamp::Now())) -
-         allocationTime();
+  return MillisecondsSinceStartup() - allocationTime();
 }
 
 /**
@@ -5768,15 +5740,6 @@ JS::AutoDebuggerJobQueueInterruption::~AutoDebuggerJobQueueInterruption() {
 }
 
 bool JS::AutoDebuggerJobQueueInterruption::init(JSContext* cx) {
-  // When recording or replaying this class doesn't do anything. Callbacks on
-  // the job queue can interact with the recording, and this class can be used
-  // at different places between recording and replay. Because nested event
-  // loops aren't pushed in debugger callbacks when recording/replaying, the
-  // job queue does not need to be saved during debugger callbacks.
-  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-    return true;
-  }
-
   MOZ_ASSERT(cx->jobQueue);
   this->cx = cx;
   saved = cx->jobQueue->saveJobQueue(cx);
@@ -5784,10 +5747,8 @@ bool JS::AutoDebuggerJobQueueInterruption::init(JSContext* cx) {
 }
 
 void JS::AutoDebuggerJobQueueInterruption::runJobs() {
-  if (!mozilla::recordreplay::IsRecordingOrReplaying()) {
-    JS::AutoSaveExceptionState ases(cx);
-    cx->jobQueue->runJobs(cx);
-  }
+  JS::AutoSaveExceptionState ases(cx);
+  cx->jobQueue->runJobs(cx);
 }
 
 const JSJitInfo promise_then_info = {

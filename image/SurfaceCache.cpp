@@ -24,7 +24,6 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Pair.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs_image.h"
@@ -104,8 +103,7 @@ class CostEntry {
 
   bool operator<(const CostEntry& aOther) const {
     return mCost < aOther.mCost ||
-           (mCost == aOther.mCost &&
-            recordreplay::RecordReplayValue(mSurface < aOther.mSurface));
+           (mCost == aOther.mCost && mSurface < aOther.mSurface);
   }
 
  private:
@@ -272,10 +270,11 @@ class ImageSurfaceCache {
     return bytes;
   }
 
-  MOZ_MUST_USE bool Insert(NotNull<CachedSurface*> aSurface) {
+  [[nodiscard]] bool Insert(NotNull<CachedSurface*> aSurface) {
     MOZ_ASSERT(!mLocked || aSurface->IsPlaceholder() || aSurface->IsLocked(),
                "Inserting an unlocked surface for a locked image");
-    return mSurfaces.Put(aSurface->GetSurfaceKey(), aSurface, fallible);
+    return mSurfaces.Put(aSurface->GetSurfaceKey(),
+                         RefPtr<CachedSurface>{aSurface}, fallible);
   }
 
   already_AddRefed<CachedSurface> Remove(NotNull<CachedSurface*> aSurface) {
@@ -563,6 +562,10 @@ class ImageSurfaceCache {
       MOZ_ASSERT_UNREACHABLE("Expected valid native size!");
       return aSize;
     }
+    if (image->GetOrientation().SwapsWidthAndHeight() &&
+        image->HandledOrientation()) {
+      std::swap(factorSize.width, factorSize.height);
+    }
 
     if (mIsVectorImage) {
       // Ensure the aspect ratio matches the native size before forcing the
@@ -806,7 +809,8 @@ class SurfaceCacheImpl final : public nsIMemoryReporter {
     RefPtr<ImageSurfaceCache> cache = GetImageCache(imageKey);
     if (!cache) {
       cache = new ImageSurfaceCache(imageKey);
-      if (!mImageCaches.Put(aProvider->GetImageKey(), cache, fallible)) {
+      if (!mImageCaches.Put(aProvider->GetImageKey(), RefPtr{cache},
+                            fallible)) {
         mTableFailureCount++;
         return InsertOutcome::FAILURE;
       }
@@ -1055,7 +1059,7 @@ class SurfaceCacheImpl final : public nsIMemoryReporter {
     RefPtr<ImageSurfaceCache> cache = GetImageCache(aImageKey);
     if (!cache) {
       cache = new ImageSurfaceCache(aImageKey);
-      mImageCaches.Put(aImageKey, cache);
+      mImageCaches.Put(aImageKey, RefPtr{cache});
     }
 
     cache->SetLocked(true);
@@ -1416,8 +1420,7 @@ class SurfaceCacheImpl final : public nsIMemoryReporter {
     explicit SurfaceTracker(uint32_t aSurfaceCacheExpirationTimeMS)
         : ExpirationTrackerImpl<CachedSurface, 2, StaticMutex,
                                 StaticMutexAutoLock>(
-              aSurfaceCacheExpirationTimeMS, "SurfaceTracker",
-              SystemGroup::EventTargetFor(TaskCategory::Other)) {}
+              aSurfaceCacheExpirationTimeMS, "SurfaceTracker") {}
 
    protected:
     void NotifyExpiredLocked(CachedSurface* aSurface,

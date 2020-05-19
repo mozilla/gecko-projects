@@ -11,7 +11,7 @@
             <menu id="file-menu" data-l10n-id="menu-file">
               <menupopup id="menu_FilePopup"
                          onpopupshowing="updateFileMenuUserContextUIVisibility('menu_newUserContext');
-                                         updateFileMenuImportUIVisibility('cmd_importFromAnotherBrowser');">
+                                         updateImportCommandEnabledState();">
                 <menuitem id="menu_newNavigatorTab"
                           command="cmd_newNavigatorTab"
                           key="key_newNavigatorTab" data-l10n-id="menu-file-new-tab"/>
@@ -69,7 +69,7 @@
                           command="cmd_print" data-l10n-id="menu-file-print"/>
                 <menuseparator/>
                 <menuitem id="menu_importFromAnotherBrowser"
-                          command="cmd_importFromAnotherBrowser" data-l10n-id="menu-file-import-from-another-browser"/>
+                          command="cmd_file_importFromAnotherBrowser" data-l10n-id="menu-file-import-from-another-browser"/>
                 <menuseparator/>
                 <menuitem id="goOfflineMenuitem"
                           type="checkbox"
@@ -266,7 +266,7 @@
                 <menuitem id="historyRestoreLastSession"
                           command="Browser:RestoreLastSession" data-l10n-id="menu-history-restore-last-session"/>
                 <menuitem id="hiddenTabsMenu"
-                          oncommand="gTabsPanel.showHiddenTabsPanel();"
+                          oncommand="gTabsPanel.showHiddenTabsPanel(event);"
                           hidden="true" data-l10n-id="menu-history-hidden-tabs"/>
                 <menu id="historyUndoMenu"
                       disabled="true" data-l10n-id="menu-history-undo-menu">
@@ -294,7 +294,8 @@
   <menu id="bookmarksMenu"
         ondragenter="PlacesMenuDNDHandler.onDragEnter(event);"
         ondragover="PlacesMenuDNDHandler.onDragOver(event);"
-        ondrop="PlacesMenuDNDHandler.onDrop(event);" data-l10n-id="menu-bookmarks-menu">
+        ondrop="PlacesMenuDNDHandler.onDrop(event);"
+        data-l10n-id="menu-bookmarks-menu">
     <menupopup id="bookmarksMenuPopup"
 #ifndef XP_MACOSX
                placespopup="true"
@@ -311,19 +312,23 @@
                tooltip="bhTooltip" popupsinherittooltip="true">
       <menuitem id="bookmarksShowAll"
                 command="Browser:ShowAllBookmarks"
-                key="manBookmarkKb" data-l10n-id="menu-bookmarks-show-all"/>
+                key="manBookmarkKb"
+                data-l10n-id="menu-bookmarks-show-all"/>
       <menuseparator id="organizeBookmarksSeparator"/>
       <menuitem id="menu_bookmarkThisPage"
                 command="Browser:AddBookmarkAs"
-                key="addBookmarkAsKb"/>
+                key="addBookmarkAsKb"
+                data-l10n-id="menu-bookmark-this-page"/>
       <menuitem id="menu_bookmarkAllTabs"
                 class="show-only-for-keyboard"
                 command="Browser:BookmarkAllTabs"
-                key="bookmarkAllTabsKb" data-l10n-id="menu-bookmarks-all-tabs"/>
+                key="bookmarkAllTabsKb"
+                data-l10n-id="menu-bookmarks-all-tabs"/>
       <menuseparator id="bookmarksToolbarSeparator"/>
       <menu id="bookmarksToolbarFolderMenu"
             class="menu-iconic bookmark-item"
-            container="true" data-l10n-id="menu-bookmarks-toolbar">
+            container="true"
+            data-l10n-id="menu-bookmarks-toolbar">
         <menupopup id="bookmarksToolbarFolderPopup"
 #ifndef XP_MACOSX
                    placespopup="true"
@@ -335,7 +340,8 @@
       </menu>
       <menu id="menu_unsortedBookmarks"
             class="menu-iconic bookmark-item"
-            container="true" data-l10n-id="menu-bookmarks-other">
+            container="true"
+            data-l10n-id="menu-bookmarks-other">
         <menupopup id="otherBookmarksFolderPopup"
 #ifndef XP_MACOSX
                    placespopup="true"
@@ -348,7 +354,8 @@
       <menu id="menu_mobileBookmarks"
             class="menu-iconic bookmark-item"
             hidden="true"
-            container="true" data-l10n-id="menu-bookmarks-mobile">
+            container="true"
+            data-l10n-id="menu-bookmarks-mobile">
         <menupopup id="mobileBookmarksFolderPopup"
 #ifndef XP_MACOSX
                    placespopup="true"
@@ -459,6 +466,8 @@
 #endif
                 <menuitem id="menu_openTour"
                           oncommand="openTourPage();" data-l10n-id="menu-help-show-tour"/>
+                <menuitem id="help_importFromAnotherBrowser"
+                          command="cmd_help_importFromAnotherBrowser" data-l10n-id="menu-help-import-from-another-browser"/>
                 <menuitem id="menu_keyboardShortcuts"
                           oncommand="openHelpLink('keyboard-shortcuts')"
                           onclick="checkForMiddleClick(this, event);" data-l10n-id="menu-help-keyboard-shortcuts"/>

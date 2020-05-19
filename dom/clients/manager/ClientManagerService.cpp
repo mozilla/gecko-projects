@@ -8,7 +8,6 @@
 
 #include "ClientManagerParent.h"
 #include "ClientNavigateOpParent.h"
-#include "ClientOpenWindowOpParent.h"
 #include "ClientOpenWindowUtils.h"
 #include "ClientPrincipalUtils.h"
 #include "ClientSourceParent.h"
@@ -19,7 +18,7 @@
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/MozPromise.h"
-#include "mozilla/SystemGroup.h"
+#include "mozilla/SchedulerGroup.h"
 #include "jsfriendapi.h"
 #include "nsIAsyncShutdown.h"
 #include "nsIXULRuntime.h"
@@ -101,7 +100,8 @@ RefPtr<GenericPromise> OnShutdown() {
         }
       });
 
-  MOZ_ALWAYS_SUCCEEDS(SystemGroup::Dispatch(TaskCategory::Other, r.forget()));
+  MOZ_ALWAYS_SUCCEEDS(
+      SchedulerGroup::Dispatch(TaskCategory::Other, r.forget()));
 
   return ref;
 }
@@ -157,8 +157,8 @@ void ClientManagerService::Shutdown() {
 
   // Begin destroying our various manager actors which will in turn destroy
   // all source, handle, and operation actors.
-  AutoTArray<ClientManagerParent*, 16> list(mManagerList);
-  for (auto actor : list) {
+  for (auto actor :
+       CopyableAutoTArray<ClientManagerParent*, 16>(mManagerList)) {
     Unused << PClientManagerParent::Send__delete__(actor);
   }
 }
@@ -285,6 +285,19 @@ RefPtr<ClientOpPromise> ClientManagerService::Navigate(
     return ClientOpPromise::CreateAndReject(rv, __func__);
   }
 
+  const IPCServiceWorkerDescriptor& serviceWorker = aArgs.serviceWorker();
+
+  // Per https://w3c.github.io/ServiceWorker/#dom-windowclient-navigate step 4,
+  // if the service worker does not control the client, reject with a TypeError.
+  const Maybe<ServiceWorkerDescriptor>& controller = source->GetController();
+  if (controller.isNothing() ||
+      controller.ref().Scope() != serviceWorker.scope() ||
+      controller.ref().Id() != serviceWorker.id()) {
+    CopyableErrorResult rv;
+    rv.ThrowTypeError("Client is not controlled by this Service Worker");
+    return ClientOpPromise::CreateAndReject(rv, __func__);
+  }
+
   PClientManagerParent* manager = source->Manager();
   MOZ_DIAGNOSTIC_ASSERT(manager);
 
@@ -373,7 +386,7 @@ class PromiseListHolder final {
 
   void MaybeFinish() {
     if (!mOutstandingPromiseCount) {
-      mResultPromise->Resolve(mResultList, __func__);
+      mResultPromise->Resolve(CopyableTArray(mResultList.Clone()), __func__);
     }
   }
 
@@ -459,7 +472,7 @@ RefPtr<ClientOpPromise> ClaimOnMainThread(
         RefPtr<GenericErrorResultPromise> inner =
             swm->MaybeClaimClient(clientInfo, desc);
         inner->Then(
-            SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+            GetMainThreadSerialEventTarget(), __func__,
             [promise](bool aResult) {
               promise->Resolve(CopyableErrorResult(), __func__);
             },
@@ -470,7 +483,8 @@ RefPtr<ClientOpPromise> ClaimOnMainThread(
         scopeExit.release();
       });
 
-  MOZ_ALWAYS_SUCCEEDS(SystemGroup::Dispatch(TaskCategory::Other, r.forget()));
+  MOZ_ALWAYS_SUCCEEDS(
+      SchedulerGroup::Dispatch(TaskCategory::Other, r.forget()));
 
   return promise;
 }
@@ -563,101 +577,10 @@ RefPtr<ClientOpPromise> ClientManagerService::GetInfoAndState(
   return source->StartOp(aArgs);
 }
 
-namespace {
-
-class OpenWindowRunnable final : public Runnable {
-  RefPtr<ClientOpPromise::Private> mPromise;
-  const ClientOpenWindowArgs mArgs;
-  RefPtr<ContentParent> mSourceProcess;
-
-  ~OpenWindowRunnable() {
-    NS_ReleaseOnMainThreadSystemGroup(mSourceProcess.forget());
-  }
-
- public:
-  OpenWindowRunnable(ClientOpPromise::Private* aPromise,
-                     const ClientOpenWindowArgs& aArgs,
-                     already_AddRefed<ContentParent> aSourceProcess)
-      : Runnable("ClientManagerService::OpenWindowRunnable"),
-        mPromise(aPromise),
-        mArgs(aArgs),
-        mSourceProcess(aSourceProcess) {
-    MOZ_DIAGNOSTIC_ASSERT(mPromise);
-  }
-
-  NS_IMETHOD
-  Run() override {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    if (!BrowserTabsRemoteAutostart()) {
-      RefPtr<ClientOpPromise> p = ClientOpenWindowInCurrentProcess(mArgs);
-      p->ChainTo(mPromise.forget(), __func__);
-      return NS_OK;
-    }
-
-    RefPtr<ContentParent> targetProcess;
-
-    // Possibly try to open the window in the same process that called
-    // openWindow().  This is a temporary compat setting until the
-    // multi-e10s service worker refactor is complete.
-    if (Preferences::GetBool("dom.clients.openwindow_favors_same_process",
-                             false)) {
-      targetProcess = mSourceProcess;
-    }
-
-    // Otherwise, use our normal remote process selection mechanism for
-    // opening the window.  This will start a process if one is not
-    // present.
-    if (!targetProcess) {
-      targetProcess = ContentParent::GetNewOrUsedBrowserProcess(
-          nullptr, NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
-          ContentParent::GetInitialProcessPriority(nullptr), nullptr);
-    }
-
-    // But starting a process can failure for any number of reasons. Reject the
-    // promise if we could not.
-    if (!targetProcess) {
-      CopyableErrorResult rv;
-      rv.ThrowAbortError("Opening window aborted");
-      mPromise->Reject(rv, __func__);
-      mPromise = nullptr;
-      return NS_OK;
-    }
-
-    ClientOpenWindowOpParent* actor =
-        new ClientOpenWindowOpParent(mArgs, mPromise);
-
-    // Normally, we call TransmitPermissionsForPrincipal for the first http
-    // load, but in this case, ClientOpenWindowOpChild will cause the initial
-    // about:blank load in the child to have this principal. That causes us to
-    // assert because the child process doesn't know that it's loading this
-    // principal.
-    nsCOMPtr<nsIPrincipal> principal =
-        PrincipalInfoToPrincipal(mArgs.principalInfo());
-    nsresult rv = targetProcess->TransmitPermissionsForPrincipal(principal);
-    Unused << NS_WARN_IF(NS_FAILED(rv));
-
-    // If this fails the actor will be automatically destroyed which will
-    // reject the promise.
-    Unused << targetProcess->SendPClientOpenWindowOpConstructor(actor, mArgs);
-
-    return NS_OK;
-  }
-};
-
-}  // anonymous namespace
-
 RefPtr<ClientOpPromise> ClientManagerService::OpenWindow(
-    const ClientOpenWindowArgs& aArgs,
-    already_AddRefed<ContentParent> aSourceProcess) {
-  RefPtr<ClientOpPromise::Private> promise =
-      new ClientOpPromise::Private(__func__);
-
-  nsCOMPtr<nsIRunnable> r =
-      new OpenWindowRunnable(promise, aArgs, std::move(aSourceProcess));
-  MOZ_ALWAYS_SUCCEEDS(SystemGroup::Dispatch(TaskCategory::Other, r.forget()));
-
-  return promise;
+    const ClientOpenWindowArgs& aArgs) {
+  return InvokeAsync(GetMainThreadSerialEventTarget(), __func__,
+                     [aArgs]() { return ClientOpenWindow(aArgs); });
 }
 
 bool ClientManagerService::HasWindow(

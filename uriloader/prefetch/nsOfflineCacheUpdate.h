@@ -8,7 +8,6 @@
 
 #include "nsIOfflineCacheUpdate.h"
 
-#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsIChannelEventSink.h"
@@ -33,7 +32,7 @@
 namespace mozilla {
 
 namespace net {
-class CookieSettingsArgs;
+class CookieJarSettingsArgs;
 }
 
 }  // namespace mozilla
@@ -221,10 +220,10 @@ class nsOfflineCacheUpdate final : public nsIOfflineCacheUpdate,
 
   virtual nsresult UpdateFinished(nsOfflineCacheUpdate* aUpdate) override;
 
-  nsICookieSettings* CookieSettings() const { return mCookieSettings; }
-  void SetCookieSettings(nsICookieSettings* aCookieSettings);
-  void SetCookieSettingsArgs(
-      const mozilla::net::CookieSettingsArgs& aCookieSettingsArgs);
+  nsICookieJarSettings* CookieJarSettings() const { return mCookieJarSettings; }
+  void SetCookieJarSettings(nsICookieJarSettings* aCookieJarSettings);
+  void SetCookieJarSettingsArgs(
+      const mozilla::net::CookieJarSettingsArgs& aCookieJarSettingsArgs);
 
  protected:
   ~nsOfflineCacheUpdate();
@@ -282,7 +281,7 @@ class nsOfflineCacheUpdate final : public nsIOfflineCacheUpdate,
   nsCOMPtr<nsIURI> mDocumentURI;
   nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
   nsCOMPtr<nsIFile> mCustomProfileDir;
-  nsCOMPtr<nsICookieSettings> mCookieSettings;
+  nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
 
   nsCOMPtr<nsIObserver> mUpdateAvailableObserver;
 

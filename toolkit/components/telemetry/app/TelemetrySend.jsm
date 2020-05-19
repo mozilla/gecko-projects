@@ -564,7 +564,10 @@ var SendScheduler = {
       this._sendsFailed = false;
       const sendStartTime = Policy.now();
       this._sendTaskState = "wait on ping sends";
-      await TelemetrySendImpl.sendPings(current, sending.map(p => p.id));
+      await TelemetrySendImpl.sendPings(
+        current,
+        sending.map(p => p.id)
+      );
       if (this._shutdown || TelemetrySend.pendingPingCount == 0) {
         this._log.trace(
           "_doSendTask - bailing out after sending, shutdown: " +
@@ -1576,7 +1579,7 @@ var TelemetrySendImpl = {
 
   runPingSender(pings, observer) {
     if (AppConstants.platform === "android") {
-      throw Cr.NS_ERROR_NOT_IMPLEMENTED;
+      throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
     }
 
     const exeName =

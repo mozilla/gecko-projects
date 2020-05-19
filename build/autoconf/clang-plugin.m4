@@ -76,13 +76,13 @@ if test -n "$ENABLE_CLANG_PLUGIN"; then
             dnl The following expression replaces a leading slash with a dash.
             dnl Also replace any backslashes with forward slash.
             arg=`echo "$arg"|sed -e 's/^\//-/' -e 's/\\\\/\//g'`
-            dnl We'll also want to replace `-std:` with `-Xclang -std=` so that
-            dnl LLVM_CXXFLAGS can correctly override the `-Xclang -std=` set by
-            dnl toolchain.configure.
-            arg=`echo "$arg"|sed -e 's/^-std:/-Xclang -std=/'`
             LLVM_REPLACE_CXXFLAGS="$LLVM_REPLACE_CXXFLAGS $arg"
         done
         LLVM_CXXFLAGS="$LLVM_REPLACE_CXXFLAGS"
+        dnl We'll also want to replace `-std:` with `-Xclang -std=` so that
+        dnl LLVM_CXXFLAGS can correctly override the `-Xclang -std=` set by
+        dnl toolchain.configure.
+        LLVM_CXXFLAGS=`echo "$LLVM_CXXFLAGS"|sed -e 's/ \(-Xclang \|\)-std[[:=]]/ -Xclang -std=/'`
 
         LLVM_REPLACE_LDFLAGS=''
         for arg in $LLVM_LDFLAGS; do
@@ -133,6 +133,7 @@ AC_SUBST_LIST(LLVM_LDFLAGS)
 AC_SUBST_LIST(CLANG_LDFLAGS)
 
 AC_SUBST(ENABLE_CLANG_PLUGIN)
+AC_SUBST(ENABLE_CLANG_PLUGIN_ALPHA)
 AC_SUBST(ENABLE_MOZSEARCH_PLUGIN)
 
 ])

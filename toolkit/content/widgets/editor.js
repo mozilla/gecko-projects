@@ -16,9 +16,6 @@
           "nsIURIContentListener",
           "nsISupportsWeakReference",
         ]),
-        onStartURIOpen(uri) {
-          return false;
-        },
         doContent(contentType, isContentPreferred, request, contentHandler) {
           return false;
         },
@@ -111,19 +108,19 @@
     }
 
     set fullZoom(val) {
-      this.markupDocumentViewer.fullZoom = val;
+      this.browsingContext.fullZoom = val;
     }
 
     get fullZoom() {
-      return this.markupDocumentViewer.fullZoom;
+      return this.browsingContext.fullZoom;
     }
 
     set textZoom(val) {
-      this.markupDocumentViewer.textZoom = val;
+      this.browsingContext.textZoom = val;
     }
 
     get textZoom() {
-      return this.markupDocumentViewer.textZoom;
+      return this.browsingContext.textZoom;
     }
 
     get isSyntheticDocument() {
@@ -164,8 +161,7 @@
         // Iterate as long as scope in assigned. Note that we use the original
         // passed in scope, not childScope here.
         if (scope) {
-          let contexts = browsingContext.getChildren();
-          for (let context of contexts) {
+          for (let context of browsingContext.children) {
             sendToChildren(context, scope);
           }
         }
@@ -180,12 +176,18 @@
     }
 
     makeEditable(editortype, waitForUrlLoad) {
+      let win = this.contentWindow;
+      let winUtils = win.windowUtils;
       this.editingSession.makeWindowEditable(
-        this.contentWindow,
+        win,
         editortype,
         waitForUrlLoad,
         true,
         false
+      );
+      winUtils.loadSheetUsingURIString(
+        "resource://gre/res/EditorOverride.css",
+        winUtils.AGENT_SHEET
       );
       this.setAttribute("editortype", editortype);
 

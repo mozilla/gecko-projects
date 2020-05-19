@@ -4,6 +4,7 @@
 
 use crate::display_item::*;
 use crate::display_list::*;
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CachedDisplayItem {
@@ -12,12 +13,18 @@ pub struct CachedDisplayItem {
 }
 
 impl CachedDisplayItem {
-    pub fn item(&self) -> &DisplayItem {
+    pub fn display_item(&self) -> &DisplayItem {
         &self.item
     }
 
     pub fn data_as_item_range<T>(&self) -> ItemRange<T> {
         ItemRange::new(&self.data)
+    }
+}
+
+impl MallocSizeOf for CachedDisplayItem {
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        self.data.size_of(ops)
     }
 }
 
@@ -30,77 +37,79 @@ impl From<DisplayItemRef<'_, '_>> for CachedDisplayItem {
                 item: *item,
                 data: item_ref.glyphs().bytes().to_vec(),
             },
-            DisplayItem::Rectangle(..) |
-            DisplayItem::Image(..) => CachedDisplayItem {
+            _ => CachedDisplayItem {
                 item: *item,
                 data: Vec::new(),
             },
-            _ => { unimplemented!("Unsupported display item type"); }
         }
     }
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, MallocSizeOf, Serialize)]
+struct CacheEntry {
+    items: Vec<CachedDisplayItem>,
+    occupied: bool,
+}
+
+#[derive(Clone, Deserialize, MallocSizeOf, Serialize)]
 pub struct DisplayItemCache {
-    items: Vec<Option<CachedDisplayItem>>
+    entries: Vec<CacheEntry>,
 }
 
 impl DisplayItemCache {
-    fn grow_if_needed(
-        &mut self,
-        capacity: usize
-    ) {
-        if capacity > self.items.len() {
-            self.items.resize_with(capacity, || None::<CachedDisplayItem>);
-            // println!("Current cache size: {:?}",
-            //     mem::size_of::<CachedDisplayItem>() * capacity);
+    fn add_item(&mut self, key: ItemKey, item: CachedDisplayItem) {
+        let mut entry = &mut self.entries[key as usize];
+        entry.items.push(item);
+        entry.occupied = true;
+    }
+
+    fn clear_entry(&mut self, key: ItemKey) {
+        let mut entry = &mut self.entries[key as usize];
+        entry.items.clear();
+        entry.occupied = false;
+    }
+
+    fn grow_if_needed(&mut self, capacity: usize) {
+        if capacity > self.entries.len() {
+            self.entries.resize_with(capacity, || CacheEntry {
+                items: Vec::new(),
+                occupied: false,
+            });
         }
     }
 
-    pub fn add_item(
-        &mut self,
-        key: Option<ItemKey>,
-        item: DisplayItemRef
-    ) {
-        let index = usize::from(key.expect("Cached item without key"));
-        self.items[index] = Some(CachedDisplayItem::from(item));
+    pub fn get_items(&self, key: ItemKey) -> &[CachedDisplayItem] {
+        let entry = &self.entries[key as usize];
+        debug_assert!(entry.occupied);
+        entry.items.as_slice()
     }
 
-    pub fn get_item(
-        &self,
-        key: ItemKey
-    ) -> Option<&CachedDisplayItem> {
-        self.items[key as usize].as_ref()
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
     }
 
-    pub fn update(
-        &mut self,
-        display_list: &BuiltDisplayList
-    ) {
+    pub fn update(&mut self, display_list: &BuiltDisplayList) {
         self.grow_if_needed(display_list.cache_size());
 
         let mut iter = display_list.extra_data_iter();
-
+        let mut current_key: Option<ItemKey> = None;
         loop {
             let item = match iter.next() {
                 Some(item) => item,
                 None => break,
             };
 
-            match item.item() {
-                DisplayItem::Rectangle(ref info) => {
-                    self.add_item(info.common.item_key, item);
-                }
-                DisplayItem::Text(ref info) => {
-                    self.add_item(info.common.item_key, item);
-                }
-                DisplayItem::Image(ref info) => {
-                    self.add_item(info.common.item_key, item);
-                }
-                item @ _ => {
-                    unimplemented!("Unexpected item in extra data: {:?}", item);
-                }
+            if let DisplayItem::RetainedItems(key) = item.item() {
+                current_key = Some(*key);
+                self.clear_entry(*key);
+                continue;
             }
+
+            let key = current_key.expect("Missing RetainedItems marker");
+            let cached_item = CachedDisplayItem::from(item);
+            self.add_item(key, cached_item);
         }
     }
 }

@@ -9,6 +9,7 @@
 #include "mozilla/dom/SessionStoreUtilsBinding.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/BrowserChild.h"
+#include "mozilla/StaticPrefs_fission.h"
 #include "nsGenericHTMLElement.h"
 #include "nsDocShell.h"
 #include "nsIAppWindow.h"
@@ -44,7 +45,10 @@ ContentSessionStore::ContentSessionStore(nsIDocShell* aDocShell)
       mScrollChanged(NO_CHANGE),
       mFormDataChanged(NO_CHANGE),
       mStorageStatus(NO_STORAGE),
-      mDocCapChanged(false) {
+      mDocCapChanged(false),
+      mSHistoryInParent(StaticPrefs::fission_sessionHistoryInParent()),
+      mSHistoryChanged(false),
+      mSHistoryChangedFromParent(false) {
   MOZ_ASSERT(mDocShell);
   // Check that value at startup as it might have
   // been set before the frame script was loaded.
@@ -123,11 +127,19 @@ void ContentSessionStore::OnDocumentStart() {
   }
 
   SetFullStorageNeeded();
+
+  if (mSHistoryInParent) {
+    mSHistoryChanged = true;
+  }
 }
 
 void ContentSessionStore::OnDocumentEnd() {
   mScrollChanged = WITH_CHANGE;
   SetFullStorageNeeded();
+
+  if (mSHistoryInParent) {
+    mSHistoryChanged = true;
+  }
 }
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabListener)
@@ -139,7 +151,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabListener)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMEventListener)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(TabListener, mDocShell, mSessionStore, mOwnerContent)
+NS_IMPL_CYCLE_COLLECTION_WEAK(TabListener, mDocShell, mSessionStore,
+                              mOwnerContent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TabListener)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(TabListener)
 
@@ -155,7 +168,8 @@ TabListener::TabListener(nsIDocShell* aDocShell, Element* aElement)
       mUpdatedTimer(nullptr),
       mTimeoutDisabled(false),
       mUpdateInterval(15000),
-      mEpoch(0) {
+      mEpoch(0),
+      mSHistoryInParent(StaticPrefs::fission_sessionHistoryInParent()) {
   MOZ_ASSERT(mDocShell);
 }
 
@@ -205,6 +219,12 @@ nsresult TabListener::Init() {
   eventTarget->AddSystemEventListener(NS_LITERAL_STRING("mozvisualscroll"),
                                       this, false);
   eventTarget->AddSystemEventListener(NS_LITERAL_STRING("input"), this, false);
+
+  if (mSHistoryInParent) {
+    eventTarget->AddSystemEventListener(NS_LITERAL_STRING("DOMTitleChanged"),
+                                        this, false);
+  }
+
   mEventListenerRegistered = true;
   eventTarget->AddSystemEventListener(
       NS_LITERAL_STRING("MozSessionStorageChanged"), this, false);
@@ -346,6 +366,9 @@ TabListener::HandleEvent(Event* aEvent) {
     if (mSessionStore->AppendSessionStorageChange(event)) {
       AddTimerForUpdate();
     }
+  } else if (eventType.EqualsLiteral("DOMTitleChanged")) {
+    mSessionStore->SetSHistoryChanged();
+    AddTimerForUpdate();
   }
 
   return NS_OK;
@@ -464,7 +487,7 @@ int CollectPositions(BrowsingContext* aBrowsingContext,
 
   /* Collect data from all child frame */
   // This is not going to work for fission. Bug 1572084 for tracking it.
-  for (auto& child : aBrowsingContext->GetChildren()) {
+  for (auto& child : aBrowsingContext->Children()) {
     aPositionDescendants[currentIdx] +=
         CollectPositions(child, aPositions, aPositionDescendants);
   }
@@ -553,7 +576,7 @@ int CollectInputs(BrowsingContext* aBrowsingContext,
 
   /* Collect data from all child frame */
   // This is not going to work for fission. Bug 1572084 for tracking it.
-  for (auto& child : aBrowsingContext->GetChildren()) {
+  for (auto& child : aBrowsingContext->Children()) {
     aInputs[currentIdx].descendants +=
         CollectInputs(child, aInputs, aIdVals, aXPathVals);
   }
@@ -589,16 +612,23 @@ bool ContentSessionStore::AppendSessionStorageChange(StorageEvent* aEvent) {
     return false;
   }
 
-  nsAutoString origin;
-  aEvent->GetUrl(origin);
-  nsCOMPtr<nsIURI> newUri;
-  nsresult rv =
-      NS_NewURI(getter_AddRefs(newUri), NS_ConvertUTF16toUTF8(origin));
+  RefPtr<Storage> changingStorage = aEvent->GetStorageArea();
+  if (!changingStorage) {
+    return false;
+  }
+
+  nsCOMPtr<nsIPrincipal> storagePrincipal = changingStorage->StoragePrincipal();
+  if (!storagePrincipal) {
+    return false;
+  }
+
+  nsAutoCString origin;
+  nsresult rv = storagePrincipal->GetOrigin(origin);
   if (NS_FAILED(rv)) {
     return false;
   }
 
-  newUri->GetPrePath(*mOrigins.AppendElement());
+  mOrigins.AppendElement(origin);
   aEvent->GetKey(*mKeys.AppendElement());
   aEvent->GetNewValue(*mValues.AppendElement());
   mStorageStatus = STORAGECHANGE;
@@ -638,6 +668,15 @@ bool TabListener::ForceFlushFromParent(uint32_t aFlushId, bool aIsFinal) {
     return false;
   }
   return UpdateSessionStore(aFlushId, aIsFinal);
+}
+
+void TabListener::UpdateSHistoryChanges(bool aImmediately) {
+  mSessionStore->SetSHistoryFromParentChanged();
+  if (aImmediately) {
+    UpdateSessionStore();
+  } else {
+    AddTimerForUpdate();
+  }
 }
 
 bool TabListener::UpdateSessionStore(uint32_t aFlushId, bool aIsFinal) {
@@ -739,8 +778,9 @@ bool TabListener::UpdateSessionStore(uint32_t aFlushId, bool aIsFinal) {
   bool ok = ToJSValue(jsapi.cx(), data, &dataVal);
   NS_ENSURE_TRUE(ok, false);
 
-  nsresult rv = funcs->UpdateSessionStore(mOwnerContent, aFlushId, aIsFinal,
-                                          mEpoch, dataVal);
+  nsresult rv = funcs->UpdateSessionStore(
+      mOwnerContent, aFlushId, aIsFinal, mEpoch, dataVal,
+      mSessionStore->GetAndClearSHistoryChanged());
   NS_ENSURE_SUCCESS(rv, false);
   StopTimerForUpdate();
   return true;
@@ -790,6 +830,10 @@ void TabListener::RemoveListeners() {
             NS_LITERAL_STRING("mozvisualscroll"), this, false);
         eventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("input"), this,
                                                false);
+        if (mSHistoryInParent) {
+          eventTarget->RemoveSystemEventListener(
+              NS_LITERAL_STRING("DOMTitleChanged"), this, false);
+        }
         mEventListenerRegistered = false;
       }
       if (mStorageChangeListenerRegistered) {

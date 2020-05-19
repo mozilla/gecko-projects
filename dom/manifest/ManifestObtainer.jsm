@@ -25,6 +25,8 @@
  */
 "use strict";
 
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
 const { PromiseMessage } = ChromeUtils.import(
   "resource://gre/modules/PromiseMessage.jsm"
 );
@@ -72,6 +74,11 @@ var ManifestObtainer = {
     aContent,
     aOptions = { checkConformance: false }
   ) {
+    if (!Services.prefs.getBoolPref("dom.manifest.enabled")) {
+      throw new Error(
+        "Obtaining manifest is disabled by pref: dom.manifest.enabled"
+      );
+    }
     if (!aContent || isXULBrowser(aContent)) {
       const err = new TypeError("Invalid input. Expected a DOM Window.");
       return Promise.reject(err);
@@ -102,8 +109,9 @@ function isXULBrowser(aBrowser) {
   if (!aBrowser || !aBrowser.namespaceURI || !aBrowser.localName) {
     return false;
   }
-  const XUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-  return aBrowser.namespaceURI === XUL && aBrowser.localName === "browser";
+  const XUL_NS =
+    "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+  return aBrowser.namespaceURI === XUL_NS && aBrowser.localName === "browser";
 }
 
 /**
@@ -116,9 +124,7 @@ function isXULBrowser(aBrowser) {
 async function processResponse(aResp, aContentWindow, aOptions) {
   const badStatus = aResp.status < 200 || aResp.status >= 300;
   if (aResp.type === "error" || badStatus) {
-    const msg = `Fetch error: ${aResp.status} - ${aResp.statusText} at ${
-      aResp.url
-    }`;
+    const msg = `Fetch error: ${aResp.status} - ${aResp.statusText} at ${aResp.url}`;
     throw new Error(msg);
   }
   const text = await aResp.text();

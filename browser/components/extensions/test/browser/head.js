@@ -499,7 +499,7 @@ async function openContextMenuInFrame(selector = "body", frameIndex = 0) {
   await BrowserTestUtils.synthesizeMouseAtCenter(
     selector,
     { type: "contextmenu" },
-    gBrowser.selectedBrowser.browsingContext.getChildren()[frameIndex]
+    gBrowser.selectedBrowser.browsingContext.children[frameIndex]
   );
   await popupShownPromise;
   return contentAreaContextMenu;
@@ -642,7 +642,7 @@ function closeChromeContextMenu(menuId, itemToSelect, win = window) {
 
 async function openActionContextMenu(extension, kind, win = window) {
   // See comment from getPageActionButton below.
-  SetPageProxyState("valid");
+  win.gURLBar.setPageProxyState("valid");
   await promiseAnimationFrame(win);
   let buttonID;
   let menuID;
@@ -693,11 +693,11 @@ async function getPageActionButton(extension, win = window) {
   //
   // Unfortunately, that doesn't happen automatically in browser chrome
   // tests.
-  SetPageProxyState("valid");
+  win.gURLBar.setPageProxyState("valid");
 
   // If the current tab is blank and the previously selected tab was an internal
   // page, the urlbar will now be showing the internal identity box due to the
-  // SetPageProxyState call above.  The page action button is hidden in that
+  // setPageProxyState call above.  The page action button is hidden in that
   // case, so make sure we're not showing the internal identity box.
   gIdentityHandler._identityBox.classList.remove("chromeUI");
 
@@ -720,7 +720,7 @@ async function clickPageAction(extension, win = window, modifiers = {}) {
 // all available page actions
 async function showPageActionsPanel(win = window) {
   // See the comment at getPageActionButton
-  SetPageProxyState("valid");
+  win.gURLBar.setPageProxyState("valid");
   await promiseAnimationFrame(win);
 
   let pageActionsPopup = win.document.getElementById("pageActionPanel");
@@ -894,9 +894,7 @@ async function startIncognitoMonitorExtension() {
       }
       browser.test.assertFalse(
         tab.incognito,
-        `tabs.${eventName} ${
-          tab.id
-        }: monitor extension got expected incognito value`
+        `tabs.${eventName} ${tab.id}: monitor extension got expected incognito value`
       );
       seenTabs.set(tab.id, tab);
     }
@@ -964,9 +962,7 @@ async function startIncognitoMonitorExtension() {
       }
       browser.test.assertFalse(
         window.incognito,
-        `windows.onRemoved ${
-          window.id
-        }: monitor extension got expected incognito value`
+        `windows.onRemoved ${window.id}: monitor extension got expected incognito value`
       );
     });
     browser.windows.onFocusChanged.addListener(async windowId => {
@@ -985,9 +981,7 @@ async function startIncognitoMonitorExtension() {
       }
       browser.test.assertFalse(
         window.incognito,
-        `windows.onFocusChanged ${
-          window.id
-        }: monitor extesion got expected incognito value`
+        `windows.onFocusChanged ${window.id}: monitor extesion got expected incognito value`
       );
       seenWindows.set(window.id, window);
     });

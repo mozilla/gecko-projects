@@ -26,6 +26,7 @@
 #include "mozilla/AbstractThread.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Logging.h"
+#include "mozilla/SchedulerGroup.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/Telemetry.h"
@@ -102,8 +103,8 @@ static bool IsWin7H264Decoder4KCapable() {
 template <class T>
 class DeleteObjectTask : public Runnable {
  public:
-  explicit DeleteObjectTask(nsAutoPtr<T>& aObject)
-      : Runnable("VideoUtils::DeleteObjectTask"), mObject(aObject) {}
+  explicit DeleteObjectTask(UniquePtr<T>&& aObject)
+      : Runnable("VideoUtils::DeleteObjectTask"), mObject(std::move(aObject)) {}
   NS_IMETHOD Run() override {
     NS_ASSERTION(NS_IsMainThread(), "Must be on main thread.");
     mObject = nullptr;
@@ -111,13 +112,13 @@ class DeleteObjectTask : public Runnable {
   }
 
  private:
-  nsAutoPtr<T> mObject;
+  UniquePtr<T> mObject;
 };
 
 template <class T>
-void DeleteOnMainThread(nsAutoPtr<T>& aObject) {
-  nsCOMPtr<nsIRunnable> r = new DeleteObjectTask<T>(aObject);
-  SystemGroup::Dispatch(TaskCategory::Other, r.forget());
+void DeleteOnMainThread(UniquePtr<T>&& aObject) {
+  nsCOMPtr<nsIRunnable> r = new DeleteObjectTask<T>(std::move(aObject));
+  SchedulerGroup::Dispatch(TaskCategory::Other, r.forget());
 }
 
 LayersBackend GetCompositorBackendType(
@@ -175,7 +176,7 @@ WMFVideoMFTManager::~WMFVideoMFTManager() {
   MOZ_COUNT_DTOR(WMFVideoMFTManager);
   // Ensure DXVA/D3D9 related objects are released on the main thread.
   if (mDXVA2Manager) {
-    DeleteOnMainThread(mDXVA2Manager);
+    DeleteOnMainThread(std::move(mDXVA2Manager));
   }
 }
 
@@ -432,8 +433,8 @@ class CreateDXVAManagerEvent : public Runnable {
         failureReason->AppendPrintf("D3D11 blacklisted with DLL %s",
                                     blacklistedDLL.get());
       } else {
-        mDXVA2Manager =
-            DXVA2Manager::CreateD3D11DXVA(mKnowsCompositor, *failureReason);
+        mDXVA2Manager.reset(
+            DXVA2Manager::CreateD3D11DXVA(mKnowsCompositor, *failureReason));
         if (mDXVA2Manager) {
           return NS_OK;
         }
@@ -449,14 +450,14 @@ class CreateDXVAManagerEvent : public Runnable {
       mFailureReason.AppendPrintf("D3D9 blacklisted with DLL %s",
                                   blacklistedDLL.get());
     } else {
-      mDXVA2Manager =
-          DXVA2Manager::CreateD3D9DXVA(mKnowsCompositor, *failureReason);
+      mDXVA2Manager.reset(
+          DXVA2Manager::CreateD3D9DXVA(mKnowsCompositor, *failureReason));
       // Make sure we include the messages from both attempts (if applicable).
       mFailureReason.Append(secondFailureReason);
     }
     return NS_OK;
   }
-  nsAutoPtr<DXVA2Manager> mDXVA2Manager;
+  UniquePtr<DXVA2Manager> mDXVA2Manager;
   layers::LayersBackend mBackend;
   layers::KnowsCompositor* mKnowsCompositor;
   nsACString& mFailureReason;
@@ -485,10 +486,10 @@ bool WMFVideoMFTManager::InitializeDXVA() {
     event->Run();
   } else {
     // This logic needs to run on the main thread
-    mozilla::SyncRunnable::DispatchToThread(
-        SystemGroup::EventTargetFor(mozilla::TaskCategory::Other), event);
+    mozilla::SyncRunnable::DispatchToThread(GetMainThreadSerialEventTarget(),
+                                            event);
   }
-  mDXVA2Manager = event->mDXVA2Manager;
+  mDXVA2Manager = std::move(event->mDXVA2Manager);
 
   return mDXVA2Manager != nullptr;
 }
@@ -603,7 +604,7 @@ MediaResult WMFVideoMFTManager::InitInternal() {
       // Either mDXVAEnabled was set to false prior the second call to
       // InitInternal() due to CanUseDXVA() returning false, or
       // MFT_MESSAGE_SET_D3D_MANAGER failed
-      DeleteOnMainThread(mDXVA2Manager);
+      DeleteOnMainThread(std::move(mDXVA2Manager));
     }
     if (mStreamType == VP9 || mStreamType == VP8) {
       return MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
@@ -798,14 +799,14 @@ bool WMFVideoMFTManager::CanUseDXVA(IMFMediaType* aType, float aFramerate) {
   // The supports config check must be done on the main thread since we have
   // a crash guard protecting it.
   RefPtr<SupportsConfigEvent> event =
-      new SupportsConfigEvent(mDXVA2Manager, aType, aFramerate);
+      new SupportsConfigEvent(mDXVA2Manager.get(), aType, aFramerate);
 
   if (NS_IsMainThread()) {
     event->Run();
   } else {
     // This logic needs to run on the main thread
-    mozilla::SyncRunnable::DispatchToThread(
-        SystemGroup::EventTargetFor(mozilla::TaskCategory::Other), event);
+    mozilla::SyncRunnable::DispatchToThread(GetMainThreadSerialEventTarget(),
+                                            event);
   }
 
   return event->mSupportsConfig;
@@ -1125,7 +1126,7 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset, RefPtr<MediaData>& aOutData) {
 
 void WMFVideoMFTManager::Shutdown() {
   mDecoder = nullptr;
-  DeleteOnMainThread(mDXVA2Manager);
+  DeleteOnMainThread(std::move(mDXVA2Manager));
 }
 
 bool WMFVideoMFTManager::IsHardwareAccelerated(

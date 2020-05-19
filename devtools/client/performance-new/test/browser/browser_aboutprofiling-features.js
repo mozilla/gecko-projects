@@ -12,7 +12,7 @@ add_task(async function test() {
     "This test assumes that the JavaScript feature is available on every platform."
   );
 
-  await openAboutProfiling(async document => {
+  await withAboutProfiling(async document => {
     const jsInput = await getNearestInputFromText(document, "JavaScript");
 
     ok(
@@ -29,10 +29,4 @@ add_task(async function test() {
     );
     ok(!jsInput.checked, "The JS feature's input element is also toggled off.");
   });
-
-  const { revertRecordingPreferences } = ChromeUtils.import(
-    "resource://devtools/client/performance-new/popup/background.jsm.js"
-  );
-
-  revertRecordingPreferences();
 });

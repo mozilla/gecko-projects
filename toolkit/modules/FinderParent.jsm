@@ -6,7 +6,6 @@
 
 var EXPORTED_SYMBOLS = ["FinderParent"];
 
-const kFissionEnabledPref = "fission.autostart";
 const kModalHighlightPref = "findbar.modalHighlight";
 const kSoundEnabledPref = "accessibility.typeaheadfind.enablesound";
 const kNotFoundSoundPref = "accessibility.typeaheadfind.soundURL";
@@ -73,6 +72,10 @@ FinderParent.prototype = {
 
   get browsingContext() {
     return this._browser.browsingContext;
+  },
+
+  get useRemoteSubframes() {
+    return this._browser.ownerGlobal.docShell.nsILoadContext.useRemoteSubframes;
   },
 
   swapBrowser(aBrowser) {
@@ -147,9 +150,10 @@ FinderParent.prototype = {
     let windowGlobal = aBrowsingContext.currentWindowGlobal;
     if (windowGlobal) {
       let actor = windowGlobal.getActor("Finder");
-      return actor
-        .sendQuery(aMessageName, aArgs)
-        .then(result => result, r => {});
+      return actor.sendQuery(aMessageName, aArgs).then(
+        result => result,
+        r => {}
+      );
     }
 
     return Promise.resolve({});
@@ -169,8 +173,7 @@ FinderParent.prototype = {
   gatherBrowsingContexts(aBrowsingContext) {
     let list = [aBrowsingContext];
 
-    let children = aBrowsingContext.getChildren();
-    for (let child of children) {
+    for (let child of aBrowsingContext.children) {
       list.push(...this.gatherBrowsingContexts(child));
     }
 
@@ -187,7 +190,7 @@ FinderParent.prototype = {
     let useModalHighlighter = Services.prefs.getBoolPref(kModalHighlightPref);
     let hasOutOfProcessChild = false;
     if (useModalHighlighter) {
-      if (Services.prefs.getBoolPref(kFissionEnabledPref)) {
+      if (this.useRemoteSubframes) {
         return false;
       }
 

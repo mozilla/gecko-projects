@@ -38,20 +38,16 @@ const StructuredSpewer::NameArray StructuredSpewer::names_ = {
 
 bool StructuredSpewer::ensureInitializationAttempted() {
   if (!outputInitializationAttempted_) {
-    // We cannot call getenv during record replay, so disable
-    // the spewer.
-    if (!mozilla::recordreplay::IsRecordingOrReplaying()) {
-      char filename[2048] = {0};
-      // For ease of use with Treeherder
-      if (getenv("SPEW_UPLOAD") && getenv("MOZ_UPLOAD_DIR")) {
-        SprintfLiteral(filename, "%s/spew_output", getenv("MOZ_UPLOAD_DIR"));
-      } else if (getenv("SPEW_FILE")) {
-        SprintfLiteral(filename, "%s", getenv("SPEW_FILE"));
-      } else {
-        SprintfLiteral(filename, "%s/spew_output", DEFAULT_SPEW_DIRECTORY);
-      }
-      tryToInitializeOutput(filename);
+    char filename[2048] = {0};
+    // For ease of use with Treeherder
+    if (getenv("SPEW_UPLOAD") && getenv("MOZ_UPLOAD_DIR")) {
+      SprintfLiteral(filename, "%s/spew_output", getenv("MOZ_UPLOAD_DIR"));
+    } else if (getenv("SPEW_FILE")) {
+      SprintfLiteral(filename, "%s", getenv("SPEW_FILE"));
+    } else {
+      SprintfLiteral(filename, "%s/spew_output", DEFAULT_SPEW_DIRECTORY);
     }
+    tryToInitializeOutput(filename);
     // We can't use the intialization state of the Fprinter, as it is not
     // marked as initialized in a case where we cannot open the output, so
     // we track the attempt separately.
@@ -62,12 +58,10 @@ bool StructuredSpewer::ensureInitializationAttempted() {
 }
 
 void StructuredSpewer::tryToInitializeOutput(const char* path) {
-  static mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
-                         mozilla::recordreplay::Behavior::DontPreserve>
-      threadCounter;
+  static mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> threadCounter;
 
   char suffix_path[2048] = {0};
-  SprintfLiteral(suffix_path, "%s.%d.%d", path, getpid(), threadCounter++);
+  SprintfLiteral(suffix_path, "%s.%d.%u", path, getpid(), threadCounter++);
 
   if (!output_.init(suffix_path)) {
     // Returning here before we've emplaced the JSONPrinter
@@ -92,7 +86,7 @@ static bool MatchJSScript(JSScript* script, const char* pattern) {
   }
 
   char signature[2048] = {0};
-  SprintfLiteral(signature, "%s:%d:%d", script->filename(), script->lineno(),
+  SprintfLiteral(signature, "%s:%u:%u", script->filename(), script->lineno(),
                  script->column());
 
   // Trivial containment match.
@@ -106,10 +100,6 @@ bool StructuredSpewer::enabled(JSScript* script) {
     return false;
   }
 
-  // We cannot call getenv under record/replay.
-  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-    return false;
-  }
   static const char* pattern = getenv("SPEW_FILTER");
   if (!pattern || MatchJSScript(script, pattern)) {
     return true;

@@ -172,6 +172,7 @@ class RegExpObject : public NativeObject {
   bool global() const { return getFlags().global(); }
   bool ignoreCase() const { return getFlags().ignoreCase(); }
   bool multiline() const { return getFlags().multiline(); }
+  bool dotAll() const { return getFlags().dotAll(); }
   bool unicode() const { return getFlags().unicode(); }
   bool sticky() const { return getFlags().sticky(); }
 
@@ -205,7 +206,6 @@ class RegExpObject : public NativeObject {
 #ifdef DEBUG
   static MOZ_MUST_USE bool dumpBytecode(JSContext* cx,
                                         Handle<RegExpObject*> regexp,
-                                        bool match_only,
                                         HandleLinearString input);
 #endif
 

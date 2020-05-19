@@ -66,6 +66,9 @@ with Files('DeferredTask.jsm'):
 with Files("E10SUtils.jsm"):
     BUG_COMPONENT = ("Core", "Security: Process Sandboxing")
 
+with Files("nsIE10SUtils.idl"):
+    BUG_COMPONENT = ("Core", "Security: Process Sandboxing")
+
 with Files('Finder*.jsm'):
     BUG_COMPONENT = ('Toolkit', 'Find Toolbar')
 
@@ -114,9 +117,6 @@ with Files('PrivateBrowsingUtils.jsm'):
 with Files('Promise*.jsm'):
     BUG_COMPONENT = ('Toolkit', 'Async Tooling')
 
-with Files('RemoteController.jsm'):
-    BUG_COMPONENT = ('Core', 'Widget')
-
 with Files('RemoteSecurityUI.jsm'):
     BUG_COMPONENT = ('Firefox', 'Tabbed Browser')
 
@@ -145,6 +145,7 @@ MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
 
 TESTING_JS_MODULES += [
     'tests/modules/MockDocument.jsm',
+    'tests/modules/OSKeyStoreTestUtils.jsm',
     'tests/modules/PromiseTestUtils.jsm',
     'tests/modules/Task.jsm',
     'tests/xpcshell/TestIntegration.jsm',
@@ -185,9 +186,6 @@ EXTRA_JS_MODULES += [
     'FirstStartup.jsm',
     'FormLikeFactory.jsm',
     'Geometry.jsm',
-    'GMPExtractorWorker.js',
-    'GMPInstallManager.jsm',
-    'GMPUtils.jsm',
     'HiddenFrame.jsm',
     'Http.jsm',
     'IgnoreLists.jsm',
@@ -201,6 +199,7 @@ EXTRA_JS_MODULES += [
     'NLP.jsm',
     'ObjectUtils.jsm',
     'offlineAppCache.jsm',
+    'OSKeyStore.jsm',
     'PageMenu.jsm',
     'PermissionsUtils.jsm',
     'PopupNotifications.jsm',
@@ -211,7 +210,8 @@ EXTRA_JS_MODULES += [
     'Promise.jsm',
     'PromiseMessage.jsm',
     'PromiseUtils.jsm',
-    'RemoteController.jsm',
+    'Region.jsm',
+    'RemotePageAccessManager.jsm',
     'RemoteSecurityUI.jsm',
     'RemoteWebProgress.jsm',
     'ResetProfile.jsm',
@@ -239,6 +239,8 @@ EXTRA_JS_MODULES.sessionstore += [
     'sessionstore/Utils.jsm',
 ]
 
+EXTRA_JS_MODULES.third_party.fathom += ['third_party/fathom/fathom.jsm']
+
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('windows', 'gtk'):
     DEFINES['MENUBAR_CAN_AUTOHIDE'] = 1
 
@@ -251,6 +253,9 @@ EXTRA_PP_JS_MODULES += [
 
 if 'Android' != CONFIG['OS_TARGET']:
     EXTRA_JS_MODULES += [
+        'GMPExtractorWorker.js',
+        'GMPInstallManager.jsm',
+        'GMPUtils.jsm',
         'LightweightThemeConsumer.jsm',
     ]
 
@@ -298,3 +303,9 @@ for var in ('MOZ_ALLOW_ADDON_SIDELOAD',
 JAR_MANIFESTS += ['jar.mn']
 
 DEFINES['TOPOBJDIR'] = TOPOBJDIR
+
+XPIDL_SOURCES += [
+    'nsIE10SUtils.idl',
+]
+
+XPIDL_MODULE = 'toolkit_modules'

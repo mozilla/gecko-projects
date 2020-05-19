@@ -69,7 +69,7 @@ def main(output, *filenames):
     seen_group_types = {"UseCounter": False, "UseCounterWorker": False}
     for (group_type, histograms) in groups:
         if group_type is not None:
-            assert isinstance(group_type, basestring)
+            assert isinstance(group_type, str)
             assert group_type in seen_group_types.keys()
             assert not seen_group_types[group_type]
             seen_group_types[group_type] = True
@@ -84,13 +84,13 @@ def main(output, *filenames):
                 print("  %s," % histogram.name(), file=output)
 
         if group_type is not None:
-            assert isinstance(group_type, basestring)
+            assert isinstance(group_type, str)
             print("  Histogram%sDUMMY2," % group_type, file=output)
             print("  HistogramLast{0} = Histogram{0}DUMMY2 - 1,".format(group_type), file=output)
 
     print("  HistogramCount,", file=output)
 
-    for (key, value) in seen_group_types.items():
+    for (key, value) in sorted(seen_group_types.items()):
         if value:
             print("  Histogram{0}Count = HistogramLast{0} - HistogramFirst{0} + 1,"
                   .format(key), file=output)
@@ -110,14 +110,15 @@ def main(output, *filenames):
         print("  %s" % ",\n  ".join(labels), file=output)
         print("};", file=output)
 
-    print("\ntemplate<class T> struct IsCategoricalLabelEnum : FalseType {};", file=output)
+    print("\ntemplate<class T> struct IsCategoricalLabelEnum : std::false_type {};", file=output)
     for name, _, _ in enums:
-        print("template<> struct IsCategoricalLabelEnum<%s> : TrueType {};" % name, file=output)
+        print("template<> struct IsCategoricalLabelEnum<%s> : std::true_type {};" % name,
+              file=output)
 
     print("\ntemplate<class T> struct CategoricalLabelId {};", file=output)
     for name, _, id in enums:
         print("template<> struct CategoricalLabelId<%s> : "
-              "IntegralConstant<uint32_t, %s> {};" % (name, id), file=output)
+              "std::integral_constant<uint32_t, %s> {};" % (name, id), file=output)
 
     # Footer.
     print(footer, file=output)

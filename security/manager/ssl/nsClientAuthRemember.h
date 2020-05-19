@@ -12,6 +12,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/ReentrantMonitor.h"
+#include "nsIClientAuthRemember.h"
 #include "nsIObserver.h"
 #include "nsNSSCertificate.h"
 #include "nsString.h"
@@ -26,19 +27,6 @@ using mozilla::OriginAttributes;
 
 class nsClientAuthRemember {
  public:
-  nsClientAuthRemember() {}
-
-  nsClientAuthRemember(const nsClientAuthRemember& aOther) {
-    this->operator=(aOther);
-  }
-
-  nsClientAuthRemember& operator=(const nsClientAuthRemember& aOther) {
-    mAsciiHost = aOther.mAsciiHost;
-    mFingerprint = aOther.mFingerprint;
-    mDBKey = aOther.mDBKey;
-    return *this;
-  }
-
   nsCString mAsciiHost;
   nsCString mFingerprint;
   nsCString mDBKey;
@@ -59,7 +47,7 @@ class nsClientAuthRememberEntry final : public PLDHashEntryHdr {
         mSettings(std::move(aToMove.mSettings)),
         mEntryKey(std::move(aToMove.mEntryKey)) {}
 
-  ~nsClientAuthRememberEntry() {}
+  ~nsClientAuthRememberEntry() = default;
 
   KeyType GetKey() const { return EntryKeyPtr(); }
 
@@ -87,10 +75,11 @@ class nsClientAuthRememberEntry final : public PLDHashEntryHdr {
 };
 
 class nsClientAuthRememberService final : public nsIObserver,
-                                          public nsSupportsWeakReference {
+                                          public nsIClientAuthRemember {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
+  NS_DECL_NSICLIENTAUTHREMEMBER
 
   nsClientAuthRememberService();
 
@@ -101,19 +90,6 @@ class nsClientAuthRememberService final : public nsIObserver,
                           const nsACString& aFingerprint,
                           /*out*/ nsACString& aEntryKey);
 
-  nsresult RememberDecision(const nsACString& aHostName,
-                            const OriginAttributes& aOriginAttributes,
-                            CERTCertificate* aServerCert,
-                            CERTCertificate* aClientCert);
-
-  nsresult HasRememberedDecision(const nsACString& aHostName,
-                                 const OriginAttributes& aOriginAttributes,
-                                 CERTCertificate* aServerCert,
-                                 nsACString& aCertDBKey, bool* aRetVal);
-
-  void ClearRememberedDecisions();
-  static void ClearAllRememberedDecisions();
-
  protected:
   ~nsClientAuthRememberService();
 
@@ -121,10 +97,20 @@ class nsClientAuthRememberService final : public nsIObserver,
   nsTHashtable<nsClientAuthRememberEntry> mSettingsTable;
 
   void RemoveAllFromMemory();
+
+  nsresult ClearPrivateDecisions();
+
   nsresult AddEntryToList(const nsACString& aHost,
                           const OriginAttributes& aOriginAttributes,
                           const nsACString& aServerFingerprint,
                           const nsACString& aDBKey);
 };
+
+#define NS_CLIENTAUTHREMEMBER_CID                    \
+  { /* 1dbc6eb6-0972-4bdb-9dc4-acd0abf72369 */       \
+    0x1dbc6eb6, 0x0972, 0x4bdb, {                    \
+      0x9d, 0xc4, 0xac, 0xd0, 0xab, 0xf7, 0x23, 0x69 \
+    }                                                \
+  }
 
 #endif

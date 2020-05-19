@@ -11,6 +11,7 @@ const { XPCOMUtils } = ChromeUtils.import(
 XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   EveryWindow: "resource:///modules/EveryWindow.jsm",
+  AboutReaderParent: "resource:///actors/AboutReaderParent.jsm",
 });
 
 const FEW_MINUTES = 15 * 60 * 1000; // 15 mins
@@ -99,7 +100,7 @@ this.ASRouterTriggerListeners = new Map([
       init(triggerHandler, hosts, patterns) {
         if (!this._initialized) {
           this.receiveMessage = this.receiveMessage.bind(this);
-          Services.mm.addMessageListener(this.readerModeEvent, this);
+          AboutReaderParent.addMessageListener(this.readerModeEvent, this);
           this._triggerHandler = triggerHandler;
           this._initialized = true;
         }
@@ -128,7 +129,7 @@ this.ASRouterTriggerListeners = new Map([
 
       uninit() {
         if (this._initialized) {
-          Services.mm.removeMessageListener(this.readerModeEvent, this);
+          AboutReaderParent.removeMessageListener(this.readerModeEvent, this);
           this._initialized = false;
           this._triggerHandler = null;
           this._hosts = new Set();
@@ -370,6 +371,7 @@ this.ASRouterTriggerListeners = new Map([
           this._initialized = false;
           this._triggerHandler = null;
           this._hosts = null;
+          this._matchPatternSet = null;
         }
       },
 
@@ -395,8 +397,8 @@ this.ASRouterTriggerListeners = new Map([
   ],
 
   /**
-   * Add an observer notification to notify the trigger handler whenever the user saves a new login
-   * via the login capture doorhanger.
+   * Add an observer notification to notify the trigger handler whenever the user
+   * saves or updates a login via the login capture doorhanger.
    */
   [
     "newSavedLogin",
@@ -411,6 +413,7 @@ this.ASRouterTriggerListeners = new Map([
       init(triggerHandler) {
         if (!this._initialized) {
           Services.obs.addObserver(this, "LoginStats:NewSavedPassword");
+          Services.obs.addObserver(this, "LoginStats:LoginUpdateSaved");
           this._initialized = true;
         }
         this._triggerHandler = triggerHandler;
@@ -419,6 +422,7 @@ this.ASRouterTriggerListeners = new Map([
       uninit() {
         if (this._initialized) {
           Services.obs.removeObserver(this, "LoginStats:NewSavedPassword");
+          Services.obs.removeObserver(this, "LoginStats:LoginUpdateSaved");
 
           this._initialized = false;
           this._triggerHandler = null;
@@ -432,7 +436,26 @@ this.ASRouterTriggerListeners = new Map([
           // to enable Sync during the sign up process is a bad UX.
           return;
         }
-        this._triggerHandler(aSubject, { id: "newSavedLogin" });
+
+        switch (aTopic) {
+          case "LoginStats:NewSavedPassword": {
+            this._triggerHandler(aSubject, {
+              id: "newSavedLogin",
+              context: { type: "save" },
+            });
+            break;
+          }
+          case "LoginStats:LoginUpdateSaved": {
+            this._triggerHandler(aSubject, {
+              id: "newSavedLogin",
+              context: { type: "update" },
+            });
+            break;
+          }
+          default: {
+            throw new Error(`Unexpected observer notification: ${aTopic}`);
+          }
+        }
       },
     },
   ],

@@ -125,6 +125,63 @@ add_task(async function() {
   );
 
   info(
+    "Throw an Error object in a direct evaluation to check that the console scrolls to the bottom"
+  );
+  message = await executeAndWaitForMessage(
+    hud,
+    `
+      x = new Error("myEvaluatedThrownErrorObject");
+      x.stack = "a@b/c.js:1:2\\nd@e/f.js:3:4";
+      throw x;
+    `,
+    "Uncaught Error: myEvaluatedThrownErrorObject",
+    ".error"
+  );
+  ok(
+    isScrolledToBottom(outputContainer),
+    "The console is scrolled to the bottom"
+  );
+
+  info(
+    "Wait until the stacktrace is rendered and check the console is scrolled"
+  );
+  await waitFor(() =>
+    message.node.querySelector(".objectBox-stackTrace .frame")
+  );
+  ok(
+    isScrolledToBottom(outputContainer),
+    "The console is scrolled to the bottom"
+  );
+
+  info("Throw an Error object to check that the console scrolls to the bottom");
+  message = await executeAndWaitForMessage(
+    hud,
+    `
+    setTimeout(() => {
+      x = new Error("myThrownErrorObject");
+      x.stack = "a@b/c.js:1:2\\nd@e/f.js:3:4";
+      throw x
+    }, 10)`,
+    "Uncaught Error: myThrownErrorObject",
+    ".error"
+  );
+  ok(
+    isScrolledToBottom(outputContainer),
+    "The console is scrolled to the bottom"
+  );
+
+  info(
+    "Wait until the stacktrace is rendered and check the console is scrolled"
+  );
+  await waitFor(() =>
+    message.node.querySelector(".objectBox-stackTrace .frame")
+  );
+  ok(
+    isScrolledToBottom(outputContainer),
+    "The console is scrolled to the bottom"
+  );
+
+  info(
     "Add a console.trace message to check that the console stays scrolled to bottom"
   );
   onMessage = waitForMessage(hud, "trace in C");
@@ -176,6 +233,52 @@ add_task(async function() {
   ok(
     isScrolledToBottom(outputContainer),
     "The console is scrolled to the bottom after a repeated message"
+  );
+
+  info(
+    "Check that typing a multiline expression in the input keep the output scrolled to bottom"
+  );
+  await setInputValue(hud, "hello\nworld\n!\n");
+  // Wait until the output is scrolled to the bottom.
+  await waitFor(
+    () => isScrolledToBottom(outputContainer),
+    "Output does not scroll to the bottom after typing a multiline expression"
+  );
+  ok(
+    true,
+    "The console is scrolled to the bottom after typing a multiline expression in the input"
+  );
+
+  await setInputValue(hud, "");
+  ok(
+    isScrolledToBottom(outputContainer),
+    "The console is scrolled to the bottom after clearing the input"
+  );
+
+  info(
+    "Check that switching between editor and inline mode keep the output scrolled to bottom"
+  );
+  await toggleLayout(hud);
+  // Wait until the output is scrolled to the bottom.
+  await waitFor(
+    () => isScrolledToBottom(outputContainer),
+    "Output does not scroll to the bottom after switching to editor mode"
+  );
+  ok(
+    true,
+    "The console is scrolled to the bottom after switching to editor mode"
+  );
+
+  // Switching back to inline mode
+  await toggleLayout(hud);
+  // Wait until the output is scrolled to the bottom.
+  await waitFor(
+    () => isScrolledToBottom(outputContainer),
+    "Output does not scroll to the bottom after switching back to inline mode"
+  );
+  ok(
+    true,
+    "The console is scrolled to the bottom after switching back to inline mode"
   );
 });
 

@@ -32,7 +32,7 @@ void ConvertMethodData(JSContext* aCx, const PaymentMethodData& aMethodData,
     if (NS_WARN_IF(
             NS_FAILED(SerializeFromJSObject(aCx, object, serializedData)))) {
       aRv.ThrowTypeError(
-          u"The PaymentMethodData.data must be a serializable object");
+          "The PaymentMethodData.data must be a serializable object");
       return;
     }
   }
@@ -62,7 +62,7 @@ void ConvertModifier(JSContext* aCx, const PaymentDetailsModifier& aModifier,
     JS::RootedObject object(aCx, aModifier.mData.Value());
     if (NS_WARN_IF(
             NS_FAILED(SerializeFromJSObject(aCx, object, serializedData)))) {
-      aRv.ThrowTypeError(u"The Modifier.data must be a serializable object");
+      aRv.ThrowTypeError("The Modifier.data must be a serializable object");
       return;
     }
   }
@@ -188,7 +188,7 @@ void ConvertDetailsUpdate(JSContext* aCx, const PaymentDetailsUpdate& aDetails,
   if (aDetails.mShippingAddressErrors.WasPassed()) {
     if (!aDetails.mShippingAddressErrors.Value().ToJSON(
             shippingAddressErrors)) {
-      aRv.ThrowTypeError(u"The ShippingAddressErrors can not be serailized");
+      aRv.ThrowTypeError("The ShippingAddressErrors can not be serailized");
       return;
     }
   }
@@ -196,7 +196,7 @@ void ConvertDetailsUpdate(JSContext* aCx, const PaymentDetailsUpdate& aDetails,
   nsAutoString payerErrors;
   if (aDetails.mPayerErrors.WasPassed()) {
     if (!aDetails.mPayerErrors.Value().ToJSON(payerErrors)) {
-      aRv.ThrowTypeError(u"The PayerErrors can not be serialized");
+      aRv.ThrowTypeError("The PayerErrors can not be serialized");
       return;
     }
   }
@@ -206,7 +206,7 @@ void ConvertDetailsUpdate(JSContext* aCx, const PaymentDetailsUpdate& aDetails,
     JS::RootedObject object(aCx, aDetails.mPaymentMethodErrors.Value());
     if (NS_WARN_IF(NS_FAILED(
             SerializeFromJSObject(aCx, object, paymentMethodErrors)))) {
-      aRv.ThrowTypeError(u"The PaymentMethodErrors can not be serialized");
+      aRv.ThrowTypeError("The PaymentMethodErrors can not be serialized");
       return;
     }
   }
@@ -246,7 +246,8 @@ void ConvertResponseData(const IPCPaymentResponseData& aIPCData,
       bData.expiryYear = data.expiryYear();
       bData.cardSecurityCode = data.cardSecurityCode();
       bData.billingAddress.country = data.billingAddress().country();
-      bData.billingAddress.addressLine = data.billingAddress().addressLine();
+      bData.billingAddress.addressLine =
+          data.billingAddress().addressLine().Clone();
       bData.billingAddress.region = data.billingAddress().region();
       bData.billingAddress.regionCode = data.billingAddress().regionCode();
       bData.billingAddress.city = data.billingAddress().city();
@@ -622,7 +623,7 @@ void PaymentRequestManager::RetryPayment(JSContext* aCx,
   nsAutoString shippingAddressErrors;
   if (aErrors.mShippingAddress.WasPassed()) {
     if (!aErrors.mShippingAddress.Value().ToJSON(shippingAddressErrors)) {
-      aRv.ThrowTypeError(u"The ShippingAddressErrors can not be serialized");
+      aRv.ThrowTypeError("The ShippingAddressErrors can not be serialized");
       return;
     }
   }
@@ -630,7 +631,7 @@ void PaymentRequestManager::RetryPayment(JSContext* aCx,
   nsAutoString payerErrors;
   if (aErrors.mPayer.WasPassed()) {
     if (!aErrors.mPayer.Value().ToJSON(payerErrors)) {
-      aRv.ThrowTypeError(u"The PayerErrors can not be serialized");
+      aRv.ThrowTypeError("The PayerErrors can not be serialized");
       return;
     }
   }
@@ -640,7 +641,7 @@ void PaymentRequestManager::RetryPayment(JSContext* aCx,
     JS::RootedObject object(aCx, aErrors.mPaymentMethod.Value());
     if (NS_WARN_IF(NS_FAILED(
             SerializeFromJSObject(aCx, object, paymentMethodErrors)))) {
-      aRv.ThrowTypeError(u"The PaymentMethodErrors can not be serialized");
+      aRv.ThrowTypeError("The PaymentMethodErrors can not be serialized");
       return;
     }
   }
@@ -683,13 +684,16 @@ nsresult PaymentRequestManager::RespondPayment(
           break;
         }
       }
+      // If PaymentActionResponse is not PAYMENT_ACCEPTED, no need to keep the
+      // PaymentRequestChild instance. Otherwise, keep PaymentRequestChild for
+      // merchants call PaymentResponse.complete()
+      if (rejectedReason.Failed()) {
+        NotifyRequestDone(aRequest);
+      }
       aRequest->RespondShowPayment(response.methodName(), responseData,
                                    response.payerName(), response.payerEmail(),
                                    response.payerPhone(),
                                    std::move(rejectedReason));
-      if (rejectedReason.Failed()) {
-        NotifyRequestDone(aRequest);
-      }
       break;
     }
     case IPCPaymentActionResponse::TIPCPaymentAbortActionResponse: {

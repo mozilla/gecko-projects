@@ -190,9 +190,9 @@ nsSize nsTreeBodyFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) {
 
   min.height = mRowHeight * desiredRows;
 
-  AddBorderAndPadding(min);
+  AddXULBorderAndPadding(min);
   bool widthSet, heightSet;
-  nsIFrame::AddXULMinSize(aBoxLayoutState, this, min, widthSet, heightSet);
+  nsIFrame::AddXULMinSize(this, min, widthSet, heightSet);
 
   return min;
 }
@@ -1263,12 +1263,14 @@ void nsTreeBodyFrame::AdjustForCellText(nsAutoString& aText, int32_t aRowIndex,
                                                   aRenderingContext);
 
   switch (aColumn->GetTextAlignment()) {
-    case NS_STYLE_TEXT_ALIGN_RIGHT: {
+    case mozilla::StyleTextAlign::Right:
       aTextRect.x += aTextRect.width - width;
-    } break;
-    case NS_STYLE_TEXT_ALIGN_CENTER: {
+      break;
+    case mozilla::StyleTextAlign::Center:
       aTextRect.x += (aTextRect.width - width) / 2;
-    } break;
+      break;
+    default:
+      break;
   }
 
   aTextRect.width = width;
@@ -1807,9 +1809,9 @@ nsITheme* nsTreeBodyFrame::GetTwistyRect(int32_t aRowIndex,
   nsITheme* theme = nullptr;
   const nsStyleDisplay* twistyDisplayData = aTwistyContext->StyleDisplay();
   if (twistyDisplayData->mAppearance != StyleAppearance::None) {
-    theme = aPresContext->GetTheme();
-    if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr,
-                                            twistyDisplayData->mAppearance))
+    theme = aPresContext->Theme();
+    if (theme->ThemeSupportsWidget(aPresContext, nullptr,
+                                   twistyDisplayData->mAppearance))
       useTheme = true;
   }
 
@@ -1916,8 +1918,7 @@ nsresult nsTreeBodyFrame::GetImage(int32_t aRowIndex, nsTreeColumn* aCol,
           getter_AddRefs(srcURI), imageSrc, doc, mContent->GetBaseURI());
       if (!srcURI) return NS_ERROR_FAILURE;
 
-      nsCOMPtr<nsIReferrerInfo> referrerInfo = new mozilla::dom::ReferrerInfo();
-      referrerInfo->InitWithDocument(doc);
+      auto referrerInfo = MakeRefPtr<mozilla::dom::ReferrerInfo>(*doc);
 
       // XXXbz what's the origin principal for this stuff that comes from our
       // view?  I guess we should assume that it's the node's principal...
@@ -2244,7 +2245,7 @@ Maybe<nsIFrame::Cursor> nsTreeBodyFrame::GetCursor(const nsPoint& aPoint) {
     if (child) {
       // Our scratch array is already prefilled.
       RefPtr<ComputedStyle> childContext = GetPseudoComputedStyle(child);
-      StyleCursorKind kind = childContext->StyleUI()->mCursor;
+      StyleCursorKind kind = childContext->StyleUI()->mCursor.keyword;
       if (kind == StyleCursorKind::Auto) {
         kind = StyleCursorKind::Default;
       }
@@ -2271,7 +2272,8 @@ nsresult nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
                                       WidgetGUIEvent* aEvent,
                                       nsEventStatus* aEventStatus) {
   if (aEvent->mMessage == eMouseOver || aEvent->mMessage == eMouseMove) {
-    nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this);
+    nsPoint pt =
+        nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, RelativeTo{this});
     int32_t xTwips = pt.x - mInnerBox.x;
     int32_t yTwips = pt.y - mInnerBox.y;
     int32_t newrow = GetRowAtInternal(xTwips, yTwips);
@@ -2548,7 +2550,7 @@ void nsTreeBodyFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   nsIFrame* treeFrame = tree ? tree->GetPrimaryFrame() : nullptr;
   nsCOMPtr<nsITreeSelection> selection;
   mView->GetSelection(getter_AddRefs(selection));
-  nsITheme* theme = PresContext()->GetTheme();
+  nsITheme* theme = PresContext()->Theme();
   // On Mac, we support native theming of selected rows. On 10.10 and higher,
   // this means applying vibrancy which require us to register the theme
   // geometrics for the row. In order to make the vibrancy effect to work
@@ -2752,7 +2754,7 @@ ImgDrawResult nsTreeBodyFrame::PaintRow(int32_t aRowIndex,
   nsITheme* theme = nullptr;
   auto appearance = rowContext->StyleDisplay()->mAppearance;
   if (appearance != StyleAppearance::None) {
-    theme = aPresContext->GetTheme();
+    theme = aPresContext->Theme();
   }
 
   if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, appearance)) {
@@ -2880,9 +2882,9 @@ ImgDrawResult nsTreeBodyFrame::PaintSeparator(int32_t aRowIndex,
   nsITheme* theme = nullptr;
   const nsStyleDisplay* displayData = separatorContext->StyleDisplay();
   if (displayData->HasAppearance()) {
-    theme = aPresContext->GetTheme();
-    if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr,
-                                            displayData->mAppearance))
+    theme = aPresContext->Theme();
+    if (theme->ThemeSupportsWidget(aPresContext, nullptr,
+                                   displayData->mAppearance))
       useTheme = true;
   }
 
@@ -3489,7 +3491,7 @@ ImgDrawResult nsTreeBodyFrame::PaintText(
   }
 
   aRenderingContext.SetColor(
-      Color::FromABGR(textContext->StyleText()->mColor.ToColor()));
+      sRGBColor::FromABGR(textContext->StyleText()->mColor.ToColor()));
   nsLayoutUtils::DrawString(
       this, *fontMet, &aRenderingContext, text.get(), text.Length(),
       textRect.TopLeft() + nsPoint(0, baseline), cellContext);
@@ -4033,7 +4035,8 @@ void nsTreeBodyFrame::ComputeDropPosition(WidgetGUIEvent* aEvent, int32_t* aRow,
 
   // Convert the event's point to our coordinates.  We want it in
   // the coordinates of our inner box's coordinates.
-  nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this);
+  nsPoint pt =
+      nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, RelativeTo{this});
   int32_t xTwips = pt.x - mInnerBox.x;
   int32_t yTwips = pt.y - mInnerBox.y;
 
@@ -4338,8 +4341,6 @@ bool nsTreeBodyFrame::FullScrollbarsUpdate(bool aNeedsFullInvalidation) {
   return weakFrame.IsAlive();
 }
 
-nsresult nsTreeBodyFrame::OnImageIsAnimated(imgIRequest* aRequest) {
+void nsTreeBodyFrame::OnImageIsAnimated(imgIRequest* aRequest) {
   nsLayoutUtils::RegisterImageRequest(PresContext(), aRequest, nullptr);
-
-  return NS_OK;
 }

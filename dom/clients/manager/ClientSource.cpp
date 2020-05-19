@@ -16,6 +16,7 @@
 #include "mozilla/dom/ClientIPCTypes.h"
 #include "mozilla/dom/DOMMozPromiseRequestHolder.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/dom/JSExecutionManager.h"
 #include "mozilla/dom/MessageEvent.h"
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/Navigator.h"
@@ -25,6 +26,7 @@
 #include "mozilla/dom/ServiceWorker.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
+#include "mozilla/SchedulerGroup.h"
 #include "mozilla/StorageAccess.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsContentUtils.h"
@@ -230,8 +232,8 @@ void ClientSource::WorkerExecutionReady(WorkerPrivate* aWorkerPrivate) {
 nsresult ClientSource::WindowExecutionReady(nsPIDOMWindowInner* aInnerWindow) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(aInnerWindow);
-  MOZ_DIAGNOSTIC_ASSERT(aInnerWindow->IsCurrentInnerWindow());
-  MOZ_DIAGNOSTIC_ASSERT(aInnerWindow->HasActiveDocument());
+  MOZ_ASSERT(aInnerWindow->IsCurrentInnerWindow());
+  MOZ_ASSERT(aInnerWindow->HasActiveDocument());
 
   if (IsShutdown()) {
     return NS_OK;
@@ -260,10 +262,9 @@ nsresult ClientSource::WindowExecutionReady(nsPIDOMWindowInner* aInnerWindow) {
   // continue to inherit the SW as well.  We need to avoid triggering the
   // assertion in this corner case.
   if (mController.isSome()) {
-    MOZ_DIAGNOSTIC_ASSERT(spec.LowerCaseEqualsLiteral("about:blank") ||
-                          StringBeginsWith(spec, NS_LITERAL_CSTRING("blob:")) ||
-                          StorageAllowedForWindow(aInnerWindow) ==
-                              StorageAccess::eAllow);
+    MOZ_ASSERT(spec.LowerCaseEqualsLiteral("about:blank") ||
+               StringBeginsWith(spec, NS_LITERAL_CSTRING("blob:")) ||
+               StorageAllowedForWindow(aInnerWindow) == StorageAccess::eAllow);
   }
 
   nsPIDOMWindowOuter* outer = aInnerWindow->GetOuterWindow();
@@ -348,6 +349,9 @@ void ClientSource::WorkerSyncPing(WorkerPrivate* aWorkerPrivate) {
   if (IsShutdown()) {
     return;
   }
+
+  // We need to make sure the mainthread is unblocked.
+  AutoYieldJSThreadExecution yield;
 
   MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate == mManager->GetWorkerPrivate());
   aWorkerPrivate->AssertIsOnWorkerThread();
@@ -628,7 +632,8 @@ RefPtr<ClientOpPromise> ClientSource::Claim(const ClientClaimArgs& aArgs) {
   if (NS_IsMainThread()) {
     r->Run();
   } else {
-    MOZ_ALWAYS_SUCCEEDS(SystemGroup::Dispatch(TaskCategory::Other, r.forget()));
+    MOZ_ALWAYS_SUCCEEDS(
+        SchedulerGroup::Dispatch(TaskCategory::Other, r.forget()));
   }
 
   RefPtr<ClientOpPromise::Private> outerPromise =

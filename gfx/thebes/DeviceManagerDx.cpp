@@ -170,6 +170,71 @@ nsTArray<DXGI_OUTPUT_DESC1> DeviceManagerDx::EnumerateOutputs() {
   return outputs;
 }
 
+bool DeviceManagerDx::GetOutputFromMonitor(HMONITOR monitor,
+                                           RefPtr<IDXGIOutput>* aOutOutput) {
+  RefPtr<IDXGIAdapter> adapter = GetDXGIAdapter();
+
+  if (!adapter) {
+    NS_WARNING("Failed to acquire a DXGI adapter for GetOutputFromMonitor.");
+    return false;
+  }
+
+  for (UINT i = 0;; ++i) {
+    RefPtr<IDXGIOutput> output = nullptr;
+    if (FAILED(adapter->EnumOutputs(i, getter_AddRefs(output)))) {
+      break;
+    }
+
+    DXGI_OUTPUT_DESC desc;
+    if (FAILED(output->GetDesc(&desc))) {
+      continue;
+    }
+
+    if (desc.Monitor == monitor) {
+      *aOutOutput = output;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool DeviceManagerDx::CheckHardwareStretchingSupport() {
+  RefPtr<IDXGIAdapter> adapter = GetDXGIAdapter();
+
+  if (!adapter) {
+    NS_WARNING(
+        "Failed to acquire a DXGI adapter for checking hardware stretching "
+        "support.");
+    return false;
+  }
+
+  nsTArray<DXGI_OUTPUT_DESC1> outputs;
+  for (UINT i = 0;; ++i) {
+    RefPtr<IDXGIOutput> output = nullptr;
+    if (FAILED(adapter->EnumOutputs(i, getter_AddRefs(output)))) {
+      break;
+    }
+
+    RefPtr<IDXGIOutput6> output6 = nullptr;
+    if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput6),
+                                      getter_AddRefs(output6)))) {
+      break;
+    }
+
+    UINT flags = 0;
+    if (FAILED(output6->CheckHardwareCompositionSupport(&flags))) {
+      break;
+    }
+
+    // XXX Do we need add a check about which flags are supported?
+    if (flags) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 #ifdef DEBUG
 static inline bool ProcessOwnsCompositor() {
   return XRE_GetProcessType() == GeckoProcessType_GPU ||
@@ -1137,9 +1202,6 @@ RefPtr<ID3D11Device> DeviceManagerDx::GetVRDevice() {
 
 RefPtr<ID3D11Device> DeviceManagerDx::GetCanvasDevice() {
   MutexAutoLock lock(mDeviceLock);
-  if (!mCanvasDevice) {
-    CreateCanvasDevice();
-  }
   return mCanvasDevice;
 }
 
@@ -1322,8 +1384,7 @@ void DeviceManagerDx::GetCompositorDevices(
 
 /* static */
 void DeviceManagerDx::PreloadAttachmentsOnCompositorThread() {
-  MessageLoop* loop = layers::CompositorThreadHolder::Loop();
-  if (!loop) {
+  if (!CompositorThread()) {
     return;
   }
 
@@ -1342,7 +1403,7 @@ void DeviceManagerDx::PreloadAttachmentsOnCompositorThread() {
           }
         }
       });
-  loop->PostTask(task.forget());
+  CompositorThread()->Dispatch(task.forget());
 }
 
 }  // namespace gfx

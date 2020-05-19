@@ -22,6 +22,7 @@
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/StringType.h"
 
 #include "vm/Interpreter-inl.h"
@@ -284,7 +285,7 @@ bool RUrsh::recover(JSContext* cx, SnapshotIterator& iter) const {
   MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
   RootedValue result(cx);
-  if (!js::UrshOperation(cx, &lhs, &rhs, &result)) {
+  if (!js::UrshValues(cx, &lhs, &rhs, &result)) {
     return false;
   }
 
@@ -307,17 +308,18 @@ RSignExtendInt32::RSignExtendInt32(CompactBufferReader& reader) {
 bool RSignExtendInt32::recover(JSContext* cx, SnapshotIterator& iter) const {
   RootedValue operand(cx, iter.read());
 
+  int32_t i;
+  if (!ToInt32(cx, operand, &i)) {
+    return false;
+  }
+
   int32_t result;
   switch (MSignExtendInt32::Mode(mode_)) {
     case MSignExtendInt32::Byte:
-      if (!js::SignExtendOperation<int8_t>(cx, operand, &result)) {
-        return false;
-      }
+      result = static_cast<int8_t>(i);
       break;
     case MSignExtendInt32::Half:
-      if (!js::SignExtendOperation<int16_t>(cx, operand, &result)) {
-        return false;
-      }
+      result = static_cast<int16_t>(i);
       break;
   }
 
@@ -329,7 +331,7 @@ bool RSignExtendInt32::recover(JSContext* cx, SnapshotIterator& iter) const {
 bool MAdd::writeRecoverData(CompactBufferWriter& writer) const {
   MOZ_ASSERT(canRecoverOnBailout());
   writer.writeUnsigned(uint32_t(RInstruction::Recover_Add));
-  writer.writeByte(specialization_ == MIRType::Float32);
+  writer.writeByte(type() == MIRType::Float32);
   return true;
 }
 
@@ -360,7 +362,7 @@ bool RAdd::recover(JSContext* cx, SnapshotIterator& iter) const {
 bool MSub::writeRecoverData(CompactBufferWriter& writer) const {
   MOZ_ASSERT(canRecoverOnBailout());
   writer.writeUnsigned(uint32_t(RInstruction::Recover_Sub));
-  writer.writeByte(specialization_ == MIRType::Float32);
+  writer.writeByte(type() == MIRType::Float32);
   return true;
 }
 
@@ -391,7 +393,7 @@ bool RSub::recover(JSContext* cx, SnapshotIterator& iter) const {
 bool MMul::writeRecoverData(CompactBufferWriter& writer) const {
   MOZ_ASSERT(canRecoverOnBailout());
   writer.writeUnsigned(uint32_t(RInstruction::Recover_Mul));
-  writer.writeByte(specialization_ == MIRType::Float32);
+  writer.writeByte(type() == MIRType::Float32);
   MOZ_ASSERT(Mode(uint8_t(mode_)) == mode_);
   writer.writeByte(uint8_t(mode_));
   return true;
@@ -431,7 +433,7 @@ bool RMul::recover(JSContext* cx, SnapshotIterator& iter) const {
 bool MDiv::writeRecoverData(CompactBufferWriter& writer) const {
   MOZ_ASSERT(canRecoverOnBailout());
   writer.writeUnsigned(uint32_t(RInstruction::Recover_Div));
-  writer.writeByte(specialization_ == MIRType::Float32);
+  writer.writeByte(type() == MIRType::Float32);
   return true;
 }
 
@@ -1295,13 +1297,13 @@ bool RNewIterator::recover(JSContext* cx, SnapshotIterator& iter) const {
   JSObject* resultObject = nullptr;
   switch (MNewIterator::Type(type_)) {
     case MNewIterator::ArrayIterator:
-      resultObject = NewArrayIteratorObject(cx);
+      resultObject = NewArrayIterator(cx);
       break;
     case MNewIterator::StringIterator:
-      resultObject = NewStringIteratorObject(cx);
+      resultObject = NewStringIterator(cx);
       break;
     case MNewIterator::RegExpStringIterator:
-      resultObject = NewRegExpStringIteratorObject(cx);
+      resultObject = NewRegExpStringIterator(cx);
       break;
   }
 

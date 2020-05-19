@@ -16,34 +16,17 @@
 #ifndef BaseProfiler_h
 #define BaseProfiler_h
 
-// Everything in here is also safe to include unconditionally, and only defines
-// empty macros if MOZ_GECKO_PROFILER or MOZ_BASE_PROFILER is unset.
-
-// MOZ_BASE_PROFILER is #defined (or not) in this header, so it should be
-// #included wherever Base Profiler may be used.
-
-#ifdef MOZ_GECKO_PROFILER
-// Enable Base Profiler on Windows, Mac and Non-Android Linux, which are
-// supported.
-// (Android not implemented yet, mingw not supported.)
-#  if defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(ANDROID)) || \
-      (defined(XP_WIN) && !defined(__MINGW32__))
-#    define MOZ_BASE_PROFILER
-#  else
-// Other platforms are currently not supported. But you may uncomment the
-// following line to enable Base Profiler in your build.
-//#    define MOZ_BASE_PROFILER
-#  endif
-#endif  // MOZ_GECKO_PROFILER
+// This file is safe to include unconditionally, and only defines
+// empty macros if MOZ_GECKO_PROFILER is not set.
 
 // BaseProfilerCounts.h is also safe to include unconditionally, with empty
-// macros if MOZ_BASE_PROFILER is unset.
+// macros if MOZ_GECKO_PROFILER is not set.
 #include "mozilla/BaseProfilerCounts.h"
 
-#ifndef MOZ_BASE_PROFILER
+#ifndef MOZ_GECKO_PROFILER
 
 // This file can be #included unconditionally. However, everything within this
-// file must be guarded by a #ifdef MOZ_BASE_PROFILER, *except* for the
+// file must be guarded by a #ifdef MOZ_GECKO_PROFILER, *except* for the
 // following macros, which encapsulate the most common operations and thus
 // avoid the need for many #ifdefs.
 
@@ -77,7 +60,7 @@
 
 #  define AUTO_PROFILER_STATS(name)
 
-#else  // !MOZ_BASE_PROFILER
+#else  // !MOZ_GECKO_PROFILER
 
 #  include "BaseProfilingStack.h"
 
@@ -92,6 +75,7 @@
 #  include "mozilla/TimeStamp.h"
 #  include "mozilla/UniquePtr.h"
 
+#  include <functional>
 #  include <stdint.h>
 #  include <string>
 
@@ -155,9 +139,22 @@ class SpliceableJSONWriter;
                                                                                \
     MACRO(11, "jstracer", JSTracer, "Enable tracing of the JavaScript engine") \
                                                                                \
+    MACRO(12, "jsallocations", JSAllocations,                                  \
+          "Have the JavaScript engine track allocations")                      \
+                                                                               \
     MACRO(14, "nostacksampling", NoStackSampling,                              \
           "Disable all stack sampling: Cancels \"js\", \"leaf\", "             \
-          "\"stackwalk\" and labels")
+          "\"stackwalk\" and labels")                                          \
+                                                                               \
+    MACRO(15, "preferencereads", PreferenceReads,                              \
+          "Track when preferences are read")                                   \
+                                                                               \
+    MACRO(16, "nativeallocations", NativeAllocations,                          \
+          "Collect the stacks from a smaller subset of all native "            \
+          "allocations, biasing towards collecting larger allocations")        \
+                                                                               \
+    MACRO(17, "ipcmessages", IPCMessages,                                      \
+          "Have the IPC layer track cross-process messages")
 
 struct ProfilerFeature {
 #  define DECLARE(n_, str_, Name_, desc_)                     \
@@ -219,12 +216,9 @@ class RacyFeatures {
 #  undef NO_OVERLAP
 
   // We combine the active bit with the feature bits so they can be read or
-  // written in a single atomic operation. Accesses to this atomic are not
-  // recorded by web replay as they may occur at non-deterministic points.
+  // written in a single atomic operation.
   // TODO: Could this be MFBT_DATA for better inlining optimization?
-  static Atomic<uint32_t, MemoryOrdering::Relaxed,
-                recordreplay::Behavior::DontPreserve>
-      sActiveAndFeatures;
+  static Atomic<uint32_t, MemoryOrdering::Relaxed> sActiveAndFeatures;
 };
 
 MFBT_API bool IsThreadBeingProfiled();
@@ -737,6 +731,11 @@ MFBT_API void profiler_add_marker(const char* aMarkerName,
 
 MFBT_API void profiler_add_js_marker(const char* aMarkerName);
 
+// Returns true if the profiler lock is currently held *on the current thread*.
+// This may be used by re-entrant code that may call profiler functions while
+// the profiler already has the lock (which would deadlock).
+bool profiler_is_locked_on_current_thread();
+
 // Insert a marker in the profile timeline for a specified thread.
 MFBT_API void profiler_add_marker_for_thread(
     int aThreadId, ProfilingCategoryPair aCategoryPair, const char* aMarkerName,
@@ -1029,6 +1028,6 @@ MFBT_API void GetProfilerEnvVarsForChildProcess(
 }  // namespace baseprofiler
 }  // namespace mozilla
 
-#endif  // !MOZ_BASE_PROFILER
+#endif  // !MOZ_GECKO_PROFILER
 
 #endif  // BaseProfiler_h

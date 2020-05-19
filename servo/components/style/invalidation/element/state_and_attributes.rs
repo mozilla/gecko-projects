@@ -79,6 +79,39 @@ impl<'a, 'b: 'a, E: TElement + 'b> StateAndAttrInvalidationProcessor<'a, 'b, E> 
     }
 }
 
+/// Checks a dependency against a given element and wrapper, to see if something
+/// changed.
+pub fn check_dependency<E, W>(
+    dependency: &Dependency,
+    element: &E,
+    wrapper: &W,
+    mut context: &mut MatchingContext<'_, E::Impl>,
+) -> bool
+where
+    E: TElement,
+    W: selectors::Element<Impl = E::Impl>,
+{
+    let matches_now = matches_selector(
+        &dependency.selector,
+        dependency.selector_offset,
+        None,
+        element,
+        &mut context,
+        &mut |_, _| {},
+    );
+
+    let matched_then = matches_selector(
+        &dependency.selector,
+        dependency.selector_offset,
+        None,
+        wrapper,
+        &mut context,
+        &mut |_, _| {},
+    );
+
+    matched_then != matches_now
+}
+
 /// Whether we should process the descendants of a given element for style
 /// invalidation.
 pub fn should_process_descendants(data: &ElementData) -> bool {
@@ -90,7 +123,7 @@ pub fn invalidated_descendants<E>(element: E, child: E)
 where
     E: TElement,
 {
-    if child.get_data().is_none() {
+    if !child.has_data() {
         return;
     }
 
@@ -131,6 +164,14 @@ where
     /// content being generated.
     fn invalidates_on_eager_pseudo_element(&self) -> bool {
         true
+    }
+
+    fn check_outer_dependency(&mut self, dependency: &Dependency, element: E) -> bool {
+        // We cannot assert about `element` having a snapshot here (in fact it
+        // most likely won't), because it may be an arbitrary descendant or
+        // later-sibling of the element we started invalidating with.
+        let wrapper = ElementWrapper::new(element, &*self.shared_context.snapshot_map);
+        check_dependency(dependency, &element, &wrapper, &mut self.matching_context)
     }
 
     fn matching_context(&mut self) -> &mut MatchingContext<'a, E::Impl> {
@@ -412,28 +453,9 @@ where
     }
 
     /// Check whether a dependency should be taken into account.
+    #[inline]
     fn check_dependency(&mut self, dependency: &Dependency) -> bool {
-        let element = &self.element;
-        let wrapper = &self.wrapper;
-        let matches_now = matches_selector(
-            &dependency.selector,
-            dependency.selector_offset,
-            None,
-            element,
-            &mut self.matching_context,
-            &mut |_, _| {},
-        );
-
-        let matched_then = matches_selector(
-            &dependency.selector,
-            dependency.selector_offset,
-            None,
-            wrapper,
-            &mut self.matching_context,
-            &mut |_, _| {},
-        );
-
-        matched_then != matches_now
+        check_dependency(dependency, &self.element, &self.wrapper, &mut self.matching_context)
     }
 
     fn scan_dependency(&mut self, dependency: &'selectors Dependency) {
@@ -456,7 +478,13 @@ where
 
         let invalidation_kind = dependency.invalidation_kind();
         if matches!(invalidation_kind, DependencyInvalidationKind::Element) {
-            self.invalidates_self = true;
+            if let Some(ref parent) = dependency.parent {
+                // We know something changed in the inner selector, go outwards
+                // now.
+                self.scan_dependency(parent);
+            } else {
+                self.invalidates_self = true;
+            }
             return;
         }
 
@@ -464,9 +492,8 @@ where
         debug_assert_ne!(dependency.selector_offset, dependency.selector.len());
 
         let invalidation = Invalidation::new(
-            &dependency.selector,
+            &dependency,
             self.matching_context.current_host.clone(),
-            dependency.selector.len() - dependency.selector_offset + 1,
         );
 
         match invalidation_kind {

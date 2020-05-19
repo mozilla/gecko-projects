@@ -6,6 +6,8 @@
 #ifndef mozilla_widget_IMEData_h_
 #define mozilla_widget_IMEData_h_
 
+#include "mozilla/EventForwards.h"
+
 #include "nsPoint.h"
 #include "nsRect.h"
 #include "nsString.h"
@@ -811,6 +813,10 @@ std::ostream& operator<<(std::ostream& aStream,
                          const InputContextAction::Cause& aCause);
 std::ostream& operator<<(std::ostream& aStream,
                          const InputContextAction::FocusChange& aFocusChange);
+std::ostream& operator<<(std::ostream& aStream,
+                         const IMENotification::SelectionChangeDataBase& aData);
+std::ostream& operator<<(std::ostream& aStream,
+                         const IMENotification::TextChangeDataBase& aData);
 
 }  // namespace widget
 }  // namespace mozilla

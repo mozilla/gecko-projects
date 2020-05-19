@@ -12,7 +12,6 @@
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/layers/AnimationInfo.h"
-#include "mozilla/layers/RenderRootBoundary.h"
 #include "mozilla/dom/RemoteBrowser.h"
 #include "mozilla/UniquePtr.h"
 #include "nsIFrame.h"
@@ -21,6 +20,10 @@
 class nsDisplayItemGeometry;
 
 namespace mozilla {
+namespace webgpu {
+class WebGPUChild;
+}
+
 namespace wr {
 class IpcResourceUpdateQueue;
 }
@@ -35,9 +38,10 @@ class ImageClient;
 class ImageContainer;
 class WebRenderBridgeChild;
 class WebRenderCanvasData;
-class WebRenderCanvasRendererAsync;
+class WebRenderCanvasRenderer;
 class WebRenderImageData;
 class WebRenderFallbackData;
+class WebRenderLocalCanvasData;
 class RenderRootStateManager;
 class WebRenderGroupData;
 
@@ -73,17 +77,19 @@ class WebRenderUserData {
   virtual WebRenderImageData* AsImageData() { return nullptr; }
   virtual WebRenderFallbackData* AsFallbackData() { return nullptr; }
   virtual WebRenderCanvasData* AsCanvasData() { return nullptr; }
+  virtual WebRenderLocalCanvasData* AsLocalCanvasData() { return nullptr; }
   virtual WebRenderGroupData* AsGroupData() { return nullptr; }
 
   enum class UserDataType {
     eImage,
     eFallback,
+    eAPZAnimation,
     eAnimation,
     eCanvas,
+    eLocalCanvas,
     eRemote,
     eGroup,
     eMask,
-    eRenderRoot,
   };
 
   virtual UserDataType GetType() = 0;
@@ -220,6 +226,20 @@ class WebRenderFallbackData : public WebRenderUserData {
   bool mInvalid;
 };
 
+class WebRenderAPZAnimationData : public WebRenderUserData {
+ public:
+  WebRenderAPZAnimationData(RenderRootStateManager* aManager,
+                            nsDisplayItem* aItem);
+  virtual ~WebRenderAPZAnimationData() = default;
+
+  UserDataType GetType() override { return UserDataType::eAPZAnimation; }
+  static UserDataType Type() { return UserDataType::eAPZAnimation; }
+  uint64_t GetAnimationId() { return mAnimationId; }
+
+ private:
+  uint64_t mAnimationId;
+};
+
 class WebRenderAnimationData : public WebRenderUserData {
  public:
   WebRenderAnimationData(RenderRootStateManager* aManager,
@@ -256,6 +276,32 @@ class WebRenderCanvasData : public WebRenderUserData {
   RefPtr<ImageContainer> mContainer;
 };
 
+// WebRender data assocatiated with canvases that don't need to
+// synchronize across content-GPU process barrier.
+class WebRenderLocalCanvasData : public WebRenderUserData {
+ public:
+  WebRenderLocalCanvasData(RenderRootStateManager* aManager,
+                           nsDisplayItem* aItem);
+  virtual ~WebRenderLocalCanvasData();
+
+  WebRenderLocalCanvasData* AsLocalCanvasData() override { return this; }
+  UserDataType GetType() override { return UserDataType::eLocalCanvas; }
+  static UserDataType Type() { return UserDataType::eLocalCanvas; }
+
+  void RequestFrameReadback();
+  void RefreshExternalImage();
+
+  // TODO: introduce a CanvasRenderer derivative to store here?
+
+  WeakPtr<webgpu::WebGPUChild> mGpuBridge;
+  uint64_t mGpuTextureId = 0;
+  wr::ExternalImageId mExternalImageId = {0};
+  wr::ImageKey mImageKey = {};
+  wr::ImageDescriptor mDescriptor;
+  gfx::SurfaceFormat mFormat = gfx::SurfaceFormat::UNKNOWN;
+  bool mDirty = false;
+};
+
 class WebRenderRemoteData : public WebRenderUserData {
  public:
   WebRenderRemoteData(RenderRootStateManager* aManager, nsDisplayItem* aItem);
@@ -270,21 +316,6 @@ class WebRenderRemoteData : public WebRenderUserData {
 
  protected:
   RefPtr<dom::RemoteBrowser> mRemoteBrowser;
-};
-
-class WebRenderRenderRootData : public WebRenderUserData {
- public:
-  WebRenderRenderRootData(RenderRootStateManager* aManager,
-                          nsDisplayItem* aItem);
-  virtual ~WebRenderRenderRootData();
-
-  UserDataType GetType() override { return UserDataType::eRenderRoot; }
-  static UserDataType Type() { return UserDataType::eRenderRoot; }
-
-  RenderRootBoundary& EnsureHasBoundary(wr::RenderRoot aChildType);
-
- protected:
-  Maybe<RenderRootBoundary> mBoundary;
 };
 
 extern void DestroyWebRenderUserDataTable(WebRenderUserDataTable* aTable);

@@ -12,26 +12,66 @@ const { createSelector } = require("devtools/client/shared/vendor/reselect");
  */
 const getDisplayedFrames = createSelector(
   state => state.webSockets,
-  ({ frames, frameFilterType, frameFilterText, currentChannelId }) => {
+  ({
+    frames,
+    frameFilterType,
+    showControlFrames,
+    frameFilterText,
+    currentChannelId,
+  }) => {
     if (!currentChannelId || !frames.get(currentChannelId)) {
       return [];
     }
 
     const framesArray = frames.get(currentChannelId);
     if (frameFilterType === "all" && frameFilterText.length === 0) {
-      return framesArray;
+      return framesArray.filter(frame =>
+        typeFilter(frame, frameFilterType, showControlFrames)
+      );
     }
+
+    const filter = searchFilter(frameFilterText);
 
     // If frame payload is > 10,000 characters long, we check the LongStringActor payload string
     return framesArray.filter(
       frame =>
         (frame.payload.initial
-          ? frame.payload.initial.includes(frameFilterText)
-          : frame.payload.includes(frameFilterText)) &&
-        (frameFilterType === "all" || frameFilterType === frame.type)
+          ? filter(frame.payload.initial)
+          : filter(frame.payload)) &&
+        typeFilter(frame, frameFilterType, showControlFrames)
     );
   }
 );
+
+function typeFilter(frame, frameFilterType, showControlFrames) {
+  const controlFrames = [0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf];
+  const isControlFrame = controlFrames.includes(frame.opCode);
+  if (frameFilterType === "all" || frameFilterType === frame.type) {
+    return showControlFrames || !isControlFrame;
+  }
+  return false;
+}
+
+function searchFilter(frameFilterText) {
+  let regex;
+  if (looksLikeRegex(frameFilterText)) {
+    try {
+      regex = regexFromText(frameFilterText);
+    } catch (e) {}
+  }
+
+  return regex
+    ? payload => regex.test(payload)
+    : payload => payload.includes(frameFilterText);
+}
+
+function looksLikeRegex(text) {
+  return text.startsWith("/") && text.endsWith("/") && text.length > 2;
+}
+
+function regexFromText(text) {
+  return new RegExp(text.slice(1, -1), "im");
+}
 
 /**
  * Checks if the selected frame is visible.

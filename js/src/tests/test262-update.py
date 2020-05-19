@@ -21,38 +21,32 @@ from operator import itemgetter
 # Skip all tests which use features not supported in SpiderMonkey.
 UNSUPPORTED_FEATURES = set([
     "tail-call-optimization",
-    "class-static-fields-public",
     "class-fields-private",
     "class-static-fields-private",
     "class-methods-private",
     "class-static-methods-private",
-    "regexp-dotall",
-    "regexp-lookbehind",
     "regexp-match-indices",
     "regexp-named-groups",
-    "regexp-unicode-property-escapes",
     "export-star-as-namespace-from-module",
     "Intl.DateTimeFormat-quarter",
     "Intl.DateTimeFormat-datetimestyle",
-    "Intl.DateTimeFormat-dayPeriod",
     "Intl.DateTimeFormat-formatRange",
     "Intl.DisplayNames",
     "Intl.Segmenter",
-    "optional-chaining",
     "top-level-await",
 ])
 FEATURE_CHECK_NEEDED = {
     "Atomics": "!this.hasOwnProperty('Atomics')",
-    "FinalizationGroup": "!this.hasOwnProperty('FinalizationGroup')",
+    "FinalizationRegistry": "!this.hasOwnProperty('FinalizationRegistry')",
     "SharedArrayBuffer": "!this.hasOwnProperty('SharedArrayBuffer')",
     "WeakRef": "!this.hasOwnProperty('WeakRef')",
 }
 RELEASE_OR_BETA = set([
-    "Intl.NumberFormat-unified",
     "Intl.DateTimeFormat-fractionalSecondDigits",
+    "Intl.DateTimeFormat-dayPeriod",
     "Promise.any",
     "AggregateError",
-    "String.prototype.replaceAll",
+    "logical-assignment-operators",
 ])
 
 
@@ -320,7 +314,7 @@ def convertTestFile(test262parser, testSource, testName, includeSet, strictTests
                                       "&&getBuildConfiguration()['arm64-simulator'])",
                                       "ARM64 Simulator cannot emulate atomics"))
 
-            if "WeakRef" in testRec["features"] or "FinalizationGroup" in testRec["features"]:
+            if "WeakRef" in testRec["features"] or "FinalizationRegistry" in testRec["features"]:
                 refTestOptions.append("shell-option(--enable-weak-refs)")
 
     # Includes for every test file in a directory is collected in a single
@@ -429,9 +423,6 @@ def process_test262(test262Dir, test262OutDir, strictTests, externManifests):
     explicitIncludes[os.path.join("built-ins", "TypedArray")] = ["byteConversionValues.js",
                                                                  "detachArrayBuffer.js", "nans.js"]
     explicitIncludes[os.path.join("built-ins", "TypedArrays")] = ["detachArrayBuffer.js"]
-
-    # Intl.Locale and Intl.ListFormat aren't yet enabled by default.
-    localIncludesMap[os.path.join("intl402")] = ["test262-intl-locale.js"]
 
     # Process all test directories recursively.
     for (dirPath, dirNames, fileNames) in os.walk(testDir):

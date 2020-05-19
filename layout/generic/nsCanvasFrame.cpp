@@ -24,6 +24,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/ComputedStyle.h"
+#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/dom/AnonymousContent.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/RenderRootStateManager.h"
@@ -146,10 +147,9 @@ nsresult nsCanvasFrame::CreateAnonymousContent(
     mCustomContentContainer->AppendChildTo(&anonContent->ContentNode(), false);
   }
 
-  // Create a popupgroup element for chrome privileged top level non-XUL
-  // documents to support context menus and tooltips.
-  if (PresContext()->IsChrome() && PresContext()->IsRoot() &&
-      doc->AllowXULXBL()) {
+  // Create a popupgroup element for system privileged non-XUL documents to
+  // support context menus and tooltips.
+  if (XRE_IsParentProcess() && doc->NodePrincipal()->IsSystemPrincipal()) {
     nsNodeInfoManager* nodeInfoManager = doc->NodeInfoManager();
     RefPtr<NodeInfo> nodeInfo =
         nodeInfoManager->GetNodeInfo(nsGkAtoms::popupgroup, nullptr,
@@ -516,13 +516,23 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     bool needBlendContainer = false;
     nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
 
+    // In high-contrast-mode, we suppress background-image on the canvas frame
+    // (even when backplating), because users expect site backgrounds to conform
+    // to their HCM background color when a solid color is rendered, and some
+    // websites use solid-color images instead of an overwritable background
+    // color.
+    const bool suppressBackgroundImage =
+        !PresContext()->PrefSheetPrefs().mUseDocumentColors &&
+        StaticPrefs::
+            browser_display_suppress_canvas_background_image_on_forced_colors();
+
     // Create separate items for each background layer.
     const nsStyleImageLayers& layers = bg->StyleBackground()->mImage;
     NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, layers) {
-      if (layers.mLayers[i].mImage.IsNone()) {
+      if (layers.mLayers[i].mImage.IsNone() || suppressBackgroundImage) {
         continue;
       }
-      if (layers.mLayers[i].mBlendMode != NS_STYLE_BLEND_NORMAL) {
+      if (layers.mLayers[i].mBlendMode != StyleBlend::Normal) {
         needBlendContainer = true;
       }
 
@@ -559,33 +569,33 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         {
           DisplayListClipState::AutoSaveRestore bgImageClip(aBuilder);
           bgImageClip.Clear();
-          bgItem = MakeDisplayItem<nsDisplayCanvasBackgroundImage>(
-              aBuilder, this, bgData);
+          bgItem = MakeDisplayItemWithIndex<nsDisplayCanvasBackgroundImage>(
+              aBuilder, this, /* aIndex = */ i, bgData);
           if (bgItem) {
             bgItem->SetDependentFrame(aBuilder, dependentFrame);
           }
         }
         if (bgItem) {
           thisItemList.AppendToTop(
-              nsDisplayFixedPosition::CreateForFixedBackground(aBuilder, this,
-                                                               bgItem, i));
+              nsDisplayFixedPosition::CreateForFixedBackground(
+                  aBuilder, this, nullptr, bgItem, i));
         }
 
       } else {
         nsDisplayCanvasBackgroundImage* bgItem =
-            MakeDisplayItem<nsDisplayCanvasBackgroundImage>(aBuilder, this,
-                                                            bgData);
+            MakeDisplayItemWithIndex<nsDisplayCanvasBackgroundImage>(
+                aBuilder, this, /* aIndex = */ i, bgData);
         if (bgItem) {
           bgItem->SetDependentFrame(aBuilder, dependentFrame);
           thisItemList.AppendToTop(bgItem);
         }
       }
 
-      if (layers.mLayers[i].mBlendMode != NS_STYLE_BLEND_NORMAL) {
+      if (layers.mLayers[i].mBlendMode != StyleBlend::Normal) {
         DisplayListClipState::AutoSaveRestore blendClip(aBuilder);
-        thisItemList.AppendNewToTop<nsDisplayBlendMode>(
-            aBuilder, this, &thisItemList, layers.mLayers[i].mBlendMode,
-            thisItemASR, i + 1);
+        thisItemList.AppendNewToTopWithIndex<nsDisplayBlendMode>(
+            aBuilder, this, i + 1, &thisItemList, layers.mLayers[i].mBlendMode,
+            thisItemASR, true);
       }
       aLists.BorderBackground()->AppendToTop(&thisItemList);
     }
@@ -595,7 +605,8 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       DisplayListClipState::AutoSaveRestore blendContainerClip(aBuilder);
       aLists.BorderBackground()->AppendToTop(
           nsDisplayBlendContainer::CreateForBackgroundBlendMode(
-              aBuilder, this, aLists.BorderBackground(), containerASR));
+              aBuilder, this, nullptr, aLists.BorderBackground(),
+              containerASR));
     }
   }
 
@@ -752,7 +763,7 @@ void nsCanvasFrame::Reflow(nsPresContext* aPresContext,
       if (!nextFrame) {
         nextFrame = aPresContext->PresShell()
                         ->FrameConstructor()
-                        ->CreateContinuingFrame(aPresContext, kidFrame, this);
+                        ->CreateContinuingFrame(kidFrame, this);
         SetOverflowFrames(nsFrameList(nextFrame, nextFrame));
         // Root overflow containers will be normal children of
         // the canvas frame, but that's ok because there

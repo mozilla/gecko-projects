@@ -38,5 +38,36 @@ def test_parse_test_types(parse):
     assert tests[4]['type'] == 'print'
 
 
+def test_parse_failure_type_interactions(parse):
+    """Tests interactions between skip and fails."""
+    tests = parse('failure-type-interactions.list')
+    for t in tests:
+        if 'skip' in t['name']:
+            assert t['skip']
+        else:
+            assert not t['skip']
+
+        # 0 => EXPECTED_PASS, 1 => EXPECTED_FAIL
+        if 'fails' in t['name']:
+            assert t['expected'] == 1
+        else:
+            assert t['expected'] == 0
+
+
+def test_parse_invalid_manifests(parse):
+    # XXX We should assert that the output contains the appropriate error
+    # message, but we seem to be hitting an issue in pytest that is preventing
+    # us from capturing the Gecko output with the capfd fixture. See:
+    # https://github.com/pytest-dev/pytest/issues/5997
+    with pytest.raises(SystemExit):
+        parse('invalid-defaults.list')
+
+    with pytest.raises(SystemExit):
+        parse('invalid-defaults-include.list')
+
+    with pytest.raises(SystemExit):
+        parse('invalid-include.list')
+
+
 if __name__ == '__main__':
     mozunit.main()

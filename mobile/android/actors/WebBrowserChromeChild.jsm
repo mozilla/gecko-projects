@@ -13,6 +13,7 @@ const { GeckoViewActorChild } = ChromeUtils.import(
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
   E10SUtils: "resource://gre/modules/E10SUtils.jsm",
+  GeckoViewSettings: "resource://gre/modules/GeckoViewSettings.jsm",
 });
 
 var EXPORTED_SYMBOLS = ["WebBrowserChromeChild"];
@@ -41,6 +42,12 @@ class WebBrowserChromeChild extends GeckoViewActorChild {
   ) {
     debug`shouldLoadURI ${aURI.displaySpec}`;
 
+    if (!GeckoViewSettings.useMultiprocess) {
+      // If we're in non-e10s mode there's no other process we can load this
+      // page in.
+      return true;
+    }
+
     if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aHasPostData)) {
       E10SUtils.redirectLoad(
         aDocShell,
@@ -60,7 +67,7 @@ class WebBrowserChromeChild extends GeckoViewActorChild {
   // nsIWebBrowserChrome
   shouldLoadURIInThisProcess(aURI) {
     debug`shouldLoadURIInThisProcess ${aURI.displaySpec}`;
-    let remoteSubframes = this.docShell.nsILoadContext.useRemoteSubframes;
+    const remoteSubframes = this.docShell.nsILoadContext.useRemoteSubframes;
     return E10SUtils.shouldLoadURIInThisProcess(aURI, remoteSubframes);
   }
 

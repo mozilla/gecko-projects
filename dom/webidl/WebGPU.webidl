@@ -111,9 +111,10 @@ interface GPUDevice {
     GPUBuffer createBuffer(GPUBufferDescriptor descriptor);
     [NewObject, Throws]
     GPUMappedBuffer createBufferMapped(GPUBufferDescriptor descriptor);
-    //Promise<GPUMappedBuffer> createBufferMappedAsync(GPUBufferDescriptor descriptor);
-    //GPUTexture createTexture(GPUTextureDescriptor descriptor);
-    //GPUSampler createSampler(optional GPUSamplerDescriptor descriptor = {});
+    [NewObject]
+    GPUTexture createTexture(GPUTextureDescriptor descriptor);
+    [NewObject]
+    GPUSampler createSampler(optional GPUSamplerDescriptor descriptor = {});
 
     GPUBindGroupLayout createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
     GPUPipelineLayout createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
@@ -121,7 +122,7 @@ interface GPUDevice {
 
     GPUShaderModule createShaderModule(GPUShaderModuleDescriptor descriptor);
     GPUComputePipeline createComputePipeline(GPUComputePipelineDescriptor descriptor);
-    //GPURenderPipeline createRenderPipeline(GPURenderPipelineDescriptor descriptor);
+    GPURenderPipeline createRenderPipeline(GPURenderPipelineDescriptor descriptor);
 
     [NewObject]
     GPUCommandEncoder createCommandEncoder(optional GPUCommandEncoderDescriptor descriptor = {});
@@ -211,7 +212,7 @@ interface GPUBuffer {
     [Throws]
     void unmap();
 
-    //void destroy();
+    void destroy();
 };
 GPUBuffer includes GPUObjectBase;
 
@@ -291,7 +292,6 @@ interface GPUTextureUsage {
 
 dictionary GPUTextureDescriptor {
     required GPUExtent3D size;
-    u32 arrayLayerCount = 1;
     u32 mipLevelCount = 1;
     u32 sampleCount = 1;
     GPUTextureDimension dimension = "2d";
@@ -302,9 +302,10 @@ dictionary GPUTextureDescriptor {
 [Pref="dom.webgpu.enabled",
  Exposed=Window]
 interface GPUTexture {
-    //GPUTextureView createView(GPUTextureViewDescriptor descriptor);
+    [NewObject]
+    GPUTextureView createView(optional GPUTextureViewDescriptor descriptor = {});
 
-    //void destroy();
+    void destroy();
 };
 GPUTexture includes GPUObjectBase;
 
@@ -325,9 +326,9 @@ enum GPUTextureAspect {
 };
 
 dictionary GPUTextureViewDescriptor : GPUObjectDescriptorBase {
-    required GPUTextureFormat format;
-    required GPUTextureViewDimension dimension;
-    required GPUTextureAspect aspect;
+    GPUTextureFormat format;
+    GPUTextureViewDimension dimension;
+    GPUTextureAspect aspect = "all";
     u32 baseMipLevel = 0;
     u32 mipLevelCount = 1;
     u32 baseArrayLayer = 0;
@@ -372,7 +373,7 @@ dictionary GPUSamplerDescriptor : GPUObjectDescriptorBase {
     GPUFilterMode mipmapFilter = "nearest";
     float lodMinClamp = 0;
     float lodMaxClamp = 1000.0; //TODO?
-    GPUCompareFunction compare = "never";
+    GPUCompareFunction compare;
 };
 
 [Pref="dom.webgpu.enabled",
@@ -418,22 +419,25 @@ enum GPUBindingType {
     "storage-buffer",
     "readonly-storage-buffer",
     "sampler",
+    "comparison-sampler",
     "sampled-texture",
-    "storage-texture",
+    "readonly-storage-texture",
+    "writeonly-storage-texture",
 };
 
-dictionary GPUBindGroupLayoutBinding {
+dictionary GPUBindGroupLayoutEntry {
     required u32 binding;
     required GPUShaderStageFlags visibility;
     required GPUBindingType type;
-    GPUTextureViewDimension textureDimension = "2d";
+    GPUTextureViewDimension viewDimension = "2d";
     GPUTextureComponentType textureComponentType = "float";
     boolean multisampled = false;
-    boolean dynamic = false;
+    boolean hasDynamicOffset = false;
+    GPUTextureFormat storageTextureFormat;
 };
 
 dictionary GPUBindGroupLayoutDescriptor : GPUObjectDescriptorBase {
-    required sequence<GPUBindGroupLayoutBinding> bindings;
+    required sequence<GPUBindGroupLayoutEntry> entries;
 };
 
 [Pref="dom.webgpu.enabled",
@@ -451,14 +455,14 @@ dictionary GPUBufferBinding {
 
 typedef (GPUSampler or GPUTextureView or GPUBufferBinding) GPUBindingResource;
 
-dictionary GPUBindGroupBinding {
+dictionary GPUBindGroupEntry {
     required u32 binding;
     required GPUBindingResource resource;
 };
 
 dictionary GPUBindGroupDescriptor : GPUObjectDescriptorBase {
     required GPUBindGroupLayout layout;
-    required sequence<GPUBindGroupBinding> bindings;
+    required sequence<GPUBindGroupEntry> entries;
 };
 
 [Pref="dom.webgpu.enabled",
@@ -517,8 +521,8 @@ interface GPUColorWrite {
 dictionary GPUColorStateDescriptor {
     required GPUTextureFormat format;
 
-    GPUBlendDescriptor alpha;
-    GPUBlendDescriptor color;
+    GPUBlendDescriptor alphaBlend = {};
+    GPUBlendDescriptor colorBlend = {};
     GPUColorWriteFlags writeMask = 0xF;
 };
 
@@ -547,8 +551,8 @@ dictionary GPUDepthStencilStateDescriptor {
     boolean depthWriteEnabled = false;
     GPUCompareFunction depthCompare = "always";
 
-    required GPUStencilStateFaceDescriptor stencilFront;
-    required GPUStencilStateFaceDescriptor stencilBack;
+    GPUStencilStateFaceDescriptor stencilFront = {};
+    GPUStencilStateFaceDescriptor stencilBack = {};
 
     u32 stencilReadMask = 0xFFFFFFFF;
     u32 stencilWriteMask = 0xFFFFFFFF;
@@ -604,15 +608,15 @@ dictionary GPUVertexAttributeDescriptor {
     required u32 shaderLocation;
 };
 
-dictionary GPUVertexBufferDescriptor {
-    required u64 stride;
+dictionary GPUVertexBufferLayoutDescriptor {
+    required u64 arrayStride;
     GPUInputStepMode stepMode = "vertex";
-    required sequence<GPUVertexAttributeDescriptor> attributeSet;
+    required sequence<GPUVertexAttributeDescriptor> attributes;
 };
 
-dictionary GPUVertexInputDescriptor {
+dictionary GPUVertexStateDescriptor {
     GPUIndexFormat indexFormat = "uint32";
-    required sequence<GPUVertexBufferDescriptor?> vertexBuffers;
+    sequence<GPUVertexBufferLayoutDescriptor?> vertexBuffers = [];
 };
 
 // ShaderModule
@@ -683,10 +687,10 @@ dictionary GPURenderPipelineDescriptor : GPUPipelineDescriptorBase {
     GPUProgrammableStageDescriptor fragmentStage;
 
     required GPUPrimitiveTopology primitiveTopology;
-    GPURasterizationStateDescriptor rasterizationState;
+    GPURasterizationStateDescriptor rasterizationState = {};
     required sequence<GPUColorStateDescriptor> colorStates;
     GPUDepthStencilStateDescriptor depthStencilState;
-    required GPUVertexInputDescriptor vertexInput;
+    GPUVertexStateDescriptor vertexState = {};
 
     u32 sampleCount = 1;
     u32 sampleMask = 0xFFFFFFFF;
@@ -717,7 +721,7 @@ dictionary GPURenderPassColorAttachmentDescriptor {
     GPUTextureView resolveTarget;
 
     required (GPULoadOp or GPUColor) loadValue;
-    required GPUStoreOp storeOp;
+    GPUStoreOp storeOp = "store";
 };
 
 dictionary GPURenderPassDepthStencilAttachmentDescriptor {
@@ -738,8 +742,8 @@ dictionary GPURenderPassDescriptor : GPUObjectDescriptorBase {
 dictionary GPUBufferCopyView {
     required GPUBuffer buffer;
     u64 offset = 0;
-    required u32 rowPitch;
-    required u32 imageHeight;
+    required u32 bytesPerRow;
+    u32 rowsPerImage = 0;
 };
 
 dictionary GPUTextureCopyView {
@@ -772,7 +776,6 @@ interface GPUCommandEncoder {
         u64 destinationOffset,
         u64 size);
 
-    /*
     void copyBufferToTexture(
         GPUBufferCopyView source,
         GPUTextureCopyView destination,
@@ -788,6 +791,7 @@ interface GPUCommandEncoder {
         GPUTextureCopyView destination,
         GPUExtent3D copySize);
 
+    /*
     void copyImageBitmapToTexture(
         GPUImageBitmapCopyView source,
         GPUTextureCopyView destination,
@@ -816,8 +820,8 @@ interface mixin GPUProgrammablePassEncoder {
 interface mixin GPURenderEncoderBase {
     void setPipeline(GPURenderPipeline pipeline);
 
-    void setIndexBuffer(GPUBuffer buffer, optional u64 offset = 0);
-    void setVertexBuffer(u32 slot, GPUBuffer buffer, optional u64 offset = 0);
+    void setIndexBuffer(GPUBuffer buffer, optional u64 offset = 0, optional u64 size = 0);
+    void setVertexBuffer(u32 slot, GPUBuffer buffer, optional u64 offset = 0, optional u64 size = 0);
 
     void draw(u32 vertexCount, u32 instanceCount,
               u32 firstVertex, u32 firstInstance);
@@ -930,14 +934,14 @@ GPUQueue includes GPUObjectBase;
 [Pref="dom.webgpu.enabled",
  Exposed=Window]
 interface GPUSwapChain {
-    //GPUTexture getCurrentTexture();
+    GPUTexture getCurrentTexture();
 };
 GPUSwapChain includes GPUObjectBase;
 
 dictionary GPUSwapChainDescriptor : GPUObjectDescriptorBase {
     required GPUDevice device;
     required GPUTextureFormat format;
-    GPUTextureUsageFlags usage = 0x10;  // GPUTextureUsage.OUTPUT_ATTACHMENT
+    GPUTextureUsageFlags usage = 0x10; //GPUTextureUsage.OUTPUT_ATTACHMENT
 };
 
 [Pref="dom.webgpu.enabled",
@@ -945,7 +949,8 @@ dictionary GPUSwapChainDescriptor : GPUObjectDescriptorBase {
 interface GPUCanvasContext {
     // Calling configureSwapChain a second time invalidates the previous one,
     // and all of the textures it's produced.
-    //GPUSwapChain configureSwapChain(GPUSwapChainDescriptor descriptor);
+    [Throws]
+    GPUSwapChain configureSwapChain(GPUSwapChainDescriptor descriptor);
 
     //Promise<GPUTextureFormat> getSwapChainPreferredFormat(GPUDevice device);
 };

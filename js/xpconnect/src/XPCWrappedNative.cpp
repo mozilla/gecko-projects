@@ -546,10 +546,6 @@ inline void XPCWrappedNative::SetFlatJSObject(JSObject* object) {
 
   mFlatJSObject = object;
   mFlatJSObject.setFlags(FLAT_JS_OBJECT_VALID);
-
-  // Never collect the wrapper object while recording or replaying, to avoid
-  // non-deterministically releasing references during finalization.
-  recordreplay::HoldJSObject(object);
 }
 
 inline void XPCWrappedNative::UnsetFlatJSObject() {
@@ -1425,11 +1421,9 @@ bool CallMethodHelper::InitializeDispatchParams() {
   mJSContextIndex = mMethodInfo->IndexOfJSContext();
 
   // Allocate enough space in mDispatchParams up-front.
-  if (!mDispatchParams.AppendElements(paramCount + wantsJSContext +
-                                      wantsOptArgc)) {
-    Throw(NS_ERROR_OUT_OF_MEMORY, mCallContext);
-    return false;
-  }
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  mDispatchParams.AppendElements(paramCount + wantsJSContext + wantsOptArgc);
 
   // Initialize each parameter to a valid state (for safe cleanup later).
   for (uint8_t i = 0, paramIdx = 0; i < mDispatchParams.Length(); i++) {

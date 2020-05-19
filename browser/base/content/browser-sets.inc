@@ -30,7 +30,8 @@
     <command id="cmd_pageSetup" oncommand="PrintUtils.showPageSetup();"/>
     <command id="cmd_print" oncommand="PrintUtils.printWindow(window.gBrowser.selectedBrowser.browsingContext);"/>
     <command id="cmd_printPreview" oncommand="PrintUtils.printPreview(PrintPreviewListener);"/>
-    <command id="cmd_importFromAnotherBrowser" oncommand="MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_FILE_MENU]);"/>
+    <command id="cmd_file_importFromAnotherBrowser" oncommand="MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_FILE_MENU]);"/>
+    <command id="cmd_help_importFromAnotherBrowser" oncommand="MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_HELP_MENU]);"/>
     <command id="cmd_close" oncommand="BrowserCloseTabOrWindow(event);"/>
     <command id="cmd_closeWindow" oncommand="BrowserTryToCloseWindow()"/>
     <command id="cmd_toggleMute" oncommand="gBrowser.toggleMuteAudioOnMultiSelectedTabs(gBrowser.selectedTab)"/>
@@ -41,7 +42,7 @@
     <command id="View:PageSource" oncommand="BrowserViewSource(window.gBrowser.selectedBrowser);"/>
     <command id="View:PageInfo" oncommand="BrowserPageInfo();"/>
     <command id="View:FullScreen" oncommand="BrowserFullScreen();"/>
-    <command id="View:ReaderView" oncommand="ReaderParent.toggleReaderMode(event);"/>
+    <command id="View:ReaderView" oncommand="AboutReaderParent.toggleReaderMode(event);"/>
     <command id="View:PictureInPicture" oncommand="PictureInPicture.onCommand(event);"/>
     <command id="cmd_find" oncommand="gLazyFindCommand('onFindCommand')"/>
     <command id="cmd_findAgain" oncommand="gLazyFindCommand('onFindAgainCommand', false)"/>
@@ -53,7 +54,7 @@
     <command id="Browser:AddBookmarkAs"
              oncommand="PlacesCommandHook.bookmarkPage();"/>
     <command id="Browser:BookmarkAllTabs"
-             oncommand="PlacesCommandHook.bookmarkPages(PlacesCommandHook.uniqueCurrentPages);"/>
+             oncommand="PlacesUIUtils.showBookmarkPagesDialog(PlacesCommandHook.uniqueCurrentPages);"/>
     <command id="Browser:Back"    oncommand="BrowserBack();" disabled="true"/>
     <command id="Browser:BackOrBackDuplicate" oncommand="BrowserBack(event);" disabled="true">
       <observes element="Browser:Back" attribute="disabled"/>
@@ -101,8 +102,9 @@
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();"/>
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
 
+    <command id="wrCaptureCmd" oncommand="gGfxUtils.webrenderCapture();" disabled="true"/>
+    <command id="wrToggleCaptureSequenceCmd" oncommand="gGfxUtils.toggleWebrenderCaptureSequence();" disabled="true"/>
 #ifdef NIGHTLY_BUILD
-    <command id="wrCaptureCmd" oncommand="gGfxUtils.webrenderCapture();"/>
     <command id="windowRecordingCmd" oncommand="gGfxUtils.toggleWindowRecording();"/>
     <command id="wrTransactionLoggingCmd" oncommand="gGfxUtils.toggleTransactionLogging();"/>
 #endif
@@ -254,7 +256,10 @@
     <key data-l10n-id="search-find-again-shortcut-alt" command="cmd_findPrevious" modifiers="shift"/>
 
     <key id="addBookmarkAsKb" data-l10n-id="bookmark-this-page-shortcut" command="Browser:AddBookmarkAs" modifiers="accel"/>
-    <key id="bookmarkAllTabsKb" data-l10n-id="bookmark-this-page-shortcut" oncommand="PlacesCommandHook.bookmarkPages(PlacesCommandHook.uniqueCurrentPages);" modifiers="accel,shift"/>
+    <key id="bookmarkAllTabsKb"
+         data-l10n-id="bookmark-this-page-shortcut"
+         oncommand="PlacesUIUtils.showBookmarkPagesDialog(PlacesCommandHook.uniqueCurrentPages);"
+         modifiers="accel,shift"/>
     <key id="manBookmarkKb" data-l10n-id="bookmark-show-all-shortcut" command="Browser:ShowAllBookmarks" modifiers="accel,shift"/>
     <key id="viewBookmarksSidebarKb"
          data-l10n-id="bookmark-show-sidebar-shortcut"
@@ -327,7 +332,6 @@
 #expand    <key id="key_selectTab8" oncommand="gBrowser.selectTabAtIndex(7, event);" key="8" modifiers="__NUM_SELECT_TAB_MODIFIER__"/>
 #expand    <key id="key_selectLastTab" oncommand="gBrowser.selectTabAtIndex(-1, event);" key="9" modifiers="__NUM_SELECT_TAB_MODIFIER__"/>
 
-#ifdef NIGHTLY_BUILD
     <key id="key_wrCaptureCmd"
 #ifdef XP_MACOSX
     key="3" modifiers="control,shift"
@@ -335,6 +339,14 @@
     key="#" modifiers="control"
 #endif
     command="wrCaptureCmd"/>
+    <key id="key_wrToggleCaptureSequenceCmd"
+#ifdef XP_MACOSX
+    key="6" modifiers="control,shift"
+#else
+    key="^" modifiers="control"
+#endif
+    command="wrToggleCaptureSequenceCmd"/>
+#ifdef NIGHTLY_BUILD
     <key id="key_windowRecordingCmd"
 #ifdef XP_MACOSX
     key="4" modifiers="control,shift"
@@ -362,7 +374,6 @@
     <!-- These are used to build the Application menu -->
     <key id="key_preferencesCmdMac"
          data-l10n-id="preferences-shortcut"
-         reserved="true"
          modifiers="accel"/>
     <key id="key_hideThisAppCmdMac"
          data-l10n-id="hide-app-shortcut"

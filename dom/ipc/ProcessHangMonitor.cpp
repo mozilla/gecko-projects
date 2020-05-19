@@ -137,14 +137,16 @@ class HangMonitorChild : public PProcessHangMonitorChild,
 
   void AnnotateHang(BackgroundHangAnnotations& aAnnotations) override;
 
+ protected:
+  friend class mozilla::ProcessHangMonitor;
+  static Maybe<Monitor> sMonitor;
+
+  static Atomic<bool, SequentiallyConsistent> sInitializing;
+
  private:
   void ShutdownOnThread();
 
-  // Ordering of this atomic is not preserved while recording/replaying, as it
-  // may be accessed during the JS interrupt callback.
-  static Atomic<HangMonitorChild*, SequentiallyConsistent,
-                recordreplay::Behavior::DontPreserve>
-      sInstance;
+  static Atomic<HangMonitorChild*, SequentiallyConsistent> sInstance;
 
   const RefPtr<ProcessHangMonitor> mHangMonitor;
   Monitor mMonitor;
@@ -177,9 +179,11 @@ class HangMonitorChild : public PProcessHangMonitorChild,
   Atomic<bool> mPaintWhileInterruptingJSActive;
 };
 
-Atomic<HangMonitorChild*, SequentiallyConsistent,
-       recordreplay::Behavior::DontPreserve>
-    HangMonitorChild::sInstance;
+Maybe<Monitor> HangMonitorChild::sMonitor;
+
+Atomic<bool, SequentiallyConsistent> HangMonitorChild::sInitializing;
+
+Atomic<HangMonitorChild*, SequentiallyConsistent> HangMonitorChild::sInstance;
 
 /* Parent process objects */
 
@@ -310,9 +314,7 @@ class HangMonitorParent : public PProcessHangMonitorParent,
 
 HangMonitorChild::HangMonitorChild(ProcessHangMonitor* aMonitor)
     : mHangMonitor(aMonitor),
-      // Ordering of this atomic is not preserved while recording/replaying, as
-      // it may be accessed during the JS interrupt callback.
-      mMonitor("HangMonitorChild lock", recordreplay::Behavior::DontPreserve),
+      mMonitor("HangMonitorChild lock"),
       mSentReport(false),
       mTerminateScript(false),
       mTerminateGlobal(false),
@@ -327,9 +329,17 @@ HangMonitorChild::HangMonitorChild(ProcessHangMonitor* aMonitor)
       mIPCOpen(true),
       mPaintWhileInterruptingJSActive(false) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!sInstance);
   mContext = danger::GetJSContext();
 
   BackgroundHangMonitor::RegisterAnnotator(*this);
+
+  MOZ_ASSERT(!sMonitor.isSome());
+  sMonitor.emplace("HangMonitorChild::sMonitor");
+  MonitorAutoLock mal(*sMonitor);
+
+  MOZ_ASSERT(!sInitializing);
+  sInitializing = true;
 }
 
 HangMonitorChild::~HangMonitorChild() {
@@ -340,13 +350,6 @@ HangMonitorChild::~HangMonitorChild() {
 
 bool HangMonitorChild::InterruptCallback() {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-
-  // The interrupt callback is triggered at non-deterministic points when
-  // recording/replaying, so don't perform any operations that can interact
-  // with the recording.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return true;
-  }
 
   // Don't start painting if we're not in a good place to run script. We run
   // chrome script during layout and such, and it wouldn't be good to interrupt
@@ -575,11 +578,16 @@ mozilla::ipc::IPCResult HangMonitorChild::RecvCancelContentJSExecutionIfRunning(
 void HangMonitorChild::Bind(Endpoint<PProcessHangMonitorChild>&& aEndpoint) {
   MOZ_RELEASE_ASSERT(IsOnThread());
 
+  MonitorAutoLock mal(*sMonitor);
+
   MOZ_ASSERT(!sInstance);
   sInstance = this;
 
   DebugOnly<bool> ok = aEndpoint.Bind(this);
   MOZ_ASSERT(ok);
+
+  sInitializing = false;
+  mal.Notify();
 }
 
 void HangMonitorChild::NotifySlowScriptAsync(TabId aTabId,
@@ -1242,15 +1250,21 @@ ProcessHangMonitor::Observe(nsISupports* aSubject, const char* aTopic,
                             const char16_t* aData) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (!strcmp(aTopic, "xpcom-shutdown")) {
-    if (HangMonitorChild* child = HangMonitorChild::Get()) {
-      child->Shutdown();
-      delete child;
+    if (HangMonitorChild::sMonitor) {
+      MonitorAutoLock mal(*HangMonitorChild::sMonitor);
+      if (HangMonitorChild::sInitializing) {
+        mal.Wait();
+      }
+
+      if (HangMonitorChild* child = HangMonitorChild::Get()) {
+        child->Shutdown();
+        delete child;
+      }
     }
+    HangMonitorChild::sMonitor.reset();
 
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-      obs->RemoveObserver(this, "xpcom-shutdown");
-    }
+    obs->RemoveObserver(this, "xpcom-shutdown");
   }
   return NS_OK;
 }

@@ -27,8 +27,6 @@
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/dom/Location.h"
 
-#include "unicode/uloc.h"
-
 nsChromeRegistry* nsChromeRegistry::gChromeRegistry;
 
 // DO NOT use namespace mozilla; it'll break due to a naming conflict between
@@ -137,7 +135,10 @@ nsresult nsChromeRegistry::GetProviderAndPath(nsIURI* aChromeURL,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (path.Length() < 3) {
-    LogMessage("Invalid chrome URI: %s", path.get());
+#ifdef DEBUG
+    LogMessage("Invalid chrome URI (need path): %s",
+               aChromeURL->GetSpecOrDefault().get());
+#endif
     return NS_ERROR_FAILURE;
   }
 
@@ -146,7 +147,10 @@ nsresult nsChromeRegistry::GetProviderAndPath(nsIURI* aChromeURL,
 
   int32_t slash = path.FindChar('/', 1);
   if (slash == 1) {
-    LogMessage("Invalid chrome URI: %s", path.get());
+#ifdef DEBUG
+    LogMessage("Invalid chrome URI (path cannot start with another slash): %s",
+               aChromeURL->GetSpecOrDefault().get());
+#endif
     return NS_ERROR_FAILURE;
   }
 
@@ -390,21 +394,4 @@ already_AddRefed<nsChromeRegistry> nsChromeRegistry::GetSingleton() {
   if (NS_FAILED(cr->Init())) return nullptr;
 
   return cr.forget();
-}
-
-void nsChromeRegistry::SanitizeForBCP47(nsACString& aLocale) {
-  // Currently, the only locale code we use that's not BCP47-conformant is
-  // "ja-JP-mac" on OS X, but let's try to be more general than just
-  // hard-coding that here.
-  const int32_t LANG_TAG_CAPACITY = 128;
-  char langTag[LANG_TAG_CAPACITY];
-  nsAutoCString locale(aLocale);
-  UErrorCode err = U_ZERO_ERROR;
-  // This is a fail-safe method that will set langTag to "und" if it cannot
-  // match any part of the input locale code.
-  int32_t len =
-      uloc_toLanguageTag(locale.get(), langTag, LANG_TAG_CAPACITY, false, &err);
-  if (U_SUCCESS(err) && len > 0) {
-    aLocale.Assign(langTag, len);
-  }
 }

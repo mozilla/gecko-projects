@@ -124,7 +124,9 @@ nsresult MaybeLoadLibSecret() {
 // TSan does not support unloading libraries that are matched from its
 // suppression list. Hence we just keep the library loaded in TSan builds.
 #ifdef MOZ_TSAN
-#  define UNLOAD_LIBSECRET(x) do {} while(0)
+#  define UNLOAD_LIBSECRET(x) \
+    do {                      \
+    } while (0)
 #else
 #  define UNLOAD_LIBSECRET(x) PR_UnloadLibrary(x)
 #endif
@@ -187,7 +189,7 @@ typedef std::unique_ptr<SecretCollection, ScopedMaybeDelete<SecretCollection>>
 typedef std::unique_ptr<SecretService, ScopedMaybeDelete<SecretService>>
     ScopedSecretService;
 
-LibSecret::LibSecret() {}
+LibSecret::LibSecret() = default;
 
 LibSecret::~LibSecret() {
   MOZ_ASSERT(NS_IsMainThread());

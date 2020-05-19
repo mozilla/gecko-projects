@@ -7,6 +7,7 @@
 #ifndef MOZILLA_GFX_RENDERCOMPOSITOR_OGL_H
 #define MOZILLA_GFX_RENDERCOMPOSITOR_OGL_H
 
+#include "GLTypes.h"
 #include "mozilla/webrender/RenderCompositor.h"
 #include "mozilla/TimeStamp.h"
 
@@ -57,13 +58,14 @@ class RenderCompositorOGL : public RenderCompositor {
             wr::DeviceIntRect aDirtyRect,
             wr::DeviceIntRect aValidRect) override;
   void Unbind() override;
-  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aTileSize,
-                     bool aIsOpaque) override;
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aVirtualOffset,
+                     wr::DeviceIntSize aTileSize, bool aIsOpaque) override;
   void DestroySurface(NativeSurfaceId aId) override;
   void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void DestroyTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
                   wr::DeviceIntRect aClipRect) override;
+  CompositorCapabilities GetCompositorCapabilities() override;
 
   struct TileKey {
     TileKey(int32_t aX, int32_t aY) : mX(aX), mY(aY) {}
@@ -92,7 +94,9 @@ class RenderCompositorOGL : public RenderCompositor {
   struct Surface {
     explicit Surface(wr::DeviceIntSize aTileSize, bool aIsOpaque)
         : mTileSize(aTileSize), mIsOpaque(aIsOpaque) {}
-    IntSize TileSize() { return IntSize(mTileSize.width, mTileSize.height); }
+    gfx::IntSize TileSize() {
+      return gfx::IntSize(mTileSize.width, mTileSize.height);
+    }
 
     wr::DeviceIntSize mTileSize;
     bool mIsOpaque;

@@ -9,6 +9,7 @@
 #include "MediaController.h"
 #include "MediaControlUtils.h"
 #include "MediaControlService.h"
+#include "mozilla/dom/MediaSessionUtils.h"
 #include "mozilla/Logging.h"
 
 namespace mozilla {
@@ -31,12 +32,15 @@ void MediaControlKeysHandler::OnKeyPressed(MediaControlKeysEvent aKeyEvent) {
 
   RefPtr<MediaControlService> service = MediaControlService::GetService();
   MOZ_ASSERT(service);
-  RefPtr<MediaController> controller = service->GetMainController();
+  RefPtr<IMediaController> controller = service->GetMainController();
   if (!controller) {
     return;
   }
 
   switch (aKeyEvent) {
+    case MediaControlKeysEvent::eFocus:
+      controller->Focus();
+      return;
     case MediaControlKeysEvent::ePlay:
       controller->Play();
       return;
@@ -44,7 +48,7 @@ void MediaControlKeysHandler::OnKeyPressed(MediaControlKeysEvent aKeyEvent) {
       controller->Pause();
       return;
     case MediaControlKeysEvent::ePlayPause: {
-      if (controller->GetState() == PlaybackState::ePlaying) {
+      if (controller->IsPlaying()) {
         controller->Pause();
       } else {
         controller->Play();
@@ -73,7 +77,7 @@ void MediaControlKeysHandler::OnKeyPressed(MediaControlKeysEvent aKeyEvent) {
 }
 
 MediaControlKeysEventSource::MediaControlKeysEventSource()
-    : mPlaybackState(PlaybackState::eStopped) {}
+    : mPlaybackState(MediaSessionPlaybackState::None) {}
 
 void MediaControlKeysEventSource::AddListener(
     MediaControlKeysEventListener* aListener) {
@@ -98,15 +102,17 @@ void MediaControlKeysEventSource::Close() {
   mListeners.Clear();
 }
 
-void MediaControlKeysEventSource::SetPlaybackState(PlaybackState aState) {
+void MediaControlKeysEventSource::SetPlaybackState(
+    MediaSessionPlaybackState aState) {
   if (mPlaybackState == aState) {
     return;
   }
-  LOG_SOURCE("SetPlaybackState '%s'", ToPlaybackStateEventStr(aState));
+  LOG_SOURCE("SetPlaybackState '%s'", ToMediaSessionPlaybackStateStr(aState));
   mPlaybackState = aState;
 }
 
-PlaybackState MediaControlKeysEventSource::GetPlaybackState() const {
+MediaSessionPlaybackState MediaControlKeysEventSource::GetPlaybackState()
+    const {
   return mPlaybackState;
 }
 

@@ -22,7 +22,6 @@
 #ifdef XP_WIN
 #  include "mozilla/TimeStamp_windows.h"
 #endif
-#include "mozilla/TypeTraits.h"
 #include "mozilla/IntegerTypeTraits.h"
 #include "mozilla/Vector.h"
 
@@ -252,8 +251,10 @@ struct BitFlagsEnumSerializer
  */
 template <typename T>
 struct PlainOldDataSerializer {
-  // TODO: Once the mozilla::IsPod trait is in good enough shape (bug 900042),
-  //       static_assert that mozilla::IsPod<T>::value is true.
+  static_assert(
+      std::is_trivially_copyable<T>::value,
+      "PlainOldDataSerializer can only be used with trivially copyable types!");
+
   typedef T paramType;
 
   static void Write(Message* aMsg, const paramType& aParam) {
@@ -543,7 +544,7 @@ struct ParamTraits<nsTArray<E>> {
   // a data structure T for which IsPod<T>::value is true, yet also have a
   // ParamTraits<T> specialization.
   static const bool sUseWriteBytes =
-      (mozilla::IsIntegral<E>::value || mozilla::IsFloatingPoint<E>::value);
+      (std::is_integral_v<E> || std::is_floating_point_v<E>);
 
   static void Write(Message* aMsg, const paramType& aParam) {
     uint32_t length = aParam.Length();
@@ -609,6 +610,9 @@ struct ParamTraits<nsTArray<E>> {
 };
 
 template <typename E>
+struct ParamTraits<CopyableTArray<E>> : ParamTraits<nsTArray<E>> {};
+
+template <typename E>
 struct ParamTraits<FallibleTArray<E>> {
   typedef FallibleTArray<E> paramType;
 
@@ -636,6 +640,9 @@ struct ParamTraits<AutoTArray<E, N>> : ParamTraits<nsTArray<E>> {
   typedef AutoTArray<E, N> paramType;
 };
 
+template <typename E, size_t N>
+struct ParamTraits<CopyableAutoTArray<E, N>> : ParamTraits<AutoTArray<E, N>> {};
+
 template <typename E, size_t N, typename AP>
 struct ParamTraits<mozilla::Vector<E, N, AP>> {
   typedef mozilla::Vector<E, N, AP> paramType;
@@ -646,7 +653,7 @@ struct ParamTraits<mozilla::Vector<E, N, AP>> {
   // a data structure T for which IsPod<T>::value is true, yet also have a
   // ParamTraits<T> specialization.
   static const bool sUseWriteBytes =
-      (mozilla::IsIntegral<E>::value || mozilla::IsFloatingPoint<E>::value);
+      (std::is_integral_v<E> || std::is_floating_point_v<E>);
 
   static void Write(Message* aMsg, const paramType& aParam) {
     uint32_t length = aParam.length();
@@ -727,7 +734,7 @@ struct ParamTraits<std::vector<E>> {
   // a data structure T for which IsPod<T>::value is true, yet also have a
   // ParamTraits<T> specialization.
   static const bool sUseWriteBytes =
-      (mozilla::IsIntegral<E>::value || mozilla::IsFloatingPoint<E>::value);
+      (std::is_integral_v<E> || std::is_floating_point_v<E>);
 
   static void Write(Message* aMsg, const paramType& aParam) {
     uint32_t length = aParam.size();
@@ -1262,24 +1269,15 @@ struct BitfieldHelper {
 // WriteParams(aMsg, aParam.foo, aParam.bar, aParam.baz)
 // ReadParams(aMsg, aIter, aParam.foo, aParam.bar, aParam.baz)
 
-// Base case
-void WriteParams(Message* aMsg);
-
-template <typename T0, typename... Tn>
-static void WriteParams(Message* aMsg, const T0& aArg,
-                        const Tn&... aRemainingArgs) {
-  WriteParam(aMsg, aArg);                // Write first arg
-  WriteParams(aMsg, aRemainingArgs...);  // Recurse for the rest
+template <typename... Ts>
+static void WriteParams(Message* aMsg, const Ts&... aArgs) {
+  (WriteParam(aMsg, aArgs), ...);
 }
 
-// Base case
-bool ReadParams(const Message* aMsg, PickleIterator* aIter);
-
-template <typename T0, typename... Tn>
-static bool ReadParams(const Message* aMsg, PickleIterator* aIter, T0& aArg,
-                       Tn&... aRemainingArgs) {
-  return ReadParam(aMsg, aIter, &aArg) &&             // Read first arg
-         ReadParams(aMsg, aIter, aRemainingArgs...);  // Recurse for the rest
+template <typename... Ts>
+static bool ReadParams(const Message* aMsg, PickleIterator* aIter,
+                       Ts&... aArgs) {
+  return (ReadParam(aMsg, aIter, &aArgs) && ...);
 }
 
 // Macros that allow syntax like:

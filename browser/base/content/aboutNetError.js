@@ -163,6 +163,31 @@ function disallowCertOverridesIfNeeded() {
   }
 }
 
+async function setErrorPageStrings(err) {
+  let title = err + "-title";
+
+  let isCertError = err == "nssBadCert";
+  let className = getCSSClass();
+  if (isCertError && (window !== window.top || className == "badStsCert")) {
+    title = err + "-sts-title";
+  }
+
+  let [errorCodeTitle] = await document.l10n.formatValues([
+    {
+      id: title,
+    },
+  ]);
+
+  let titleElement = document.querySelector(".title-text");
+  if (!errorCodeTitle) {
+    console.error("No strings exist for this error type");
+    document.l10n.setAttributes(titleElement, "generic-title");
+    return;
+  }
+
+  document.l10n.setAttributes(titleElement, title);
+}
+
 function initPage() {
   var err = getErrorCode();
   // List of error pages with an illustration.
@@ -206,15 +231,12 @@ function initPage() {
 
   // if it's an unknown error or there's no title or description
   // defined, get the generic message
-  var errTitle = document.getElementById("et_" + l10nErrId);
   var errDesc = document.getElementById("ed_" + l10nErrId);
-  if (!errTitle || !errDesc) {
-    errTitle = document.getElementById("et_generic");
+  if (!errDesc) {
     errDesc = document.getElementById("ed_generic");
   }
 
-  // eslint-disable-next-line no-unsanitized/property
-  document.querySelector(".title-text").innerHTML = errTitle.innerHTML;
+  setErrorPageStrings(err);
 
   var sd = document.getElementById("errorShortDescText");
   if (sd) {
@@ -225,15 +247,20 @@ function initPage() {
       sd.textContent = getDescription();
     }
   }
-  if (showCaptivePortalUI) {
-    initPageCaptivePortal();
-    return;
-  }
+
   if (gIsCertError) {
-    initPageCertError();
-    updateContainerPosition();
+    if (showCaptivePortalUI) {
+      initPageCaptivePortal();
+    } else {
+      initPageCertError();
+      updateContainerPosition();
+    }
+
+    initCertErrorPageActions();
+    setTechnicalDetailsOnCertError();
     return;
   }
+
   addAutofocus("#netErrorButtonContainer > .try-again");
 
   document.body.classList.add("neterror");
@@ -282,7 +309,11 @@ function initPage() {
       "security.tls.version.enable-deprecated"
     );
 
-    if (isTlsVersionError && !tls10OverrideEnabled) {
+    if (
+      isTlsVersionError &&
+      !tls10OverrideEnabled &&
+      !RPMPrefIsLocked("security.tls.version.min")
+    ) {
       // security.tls.* prefs may be reset by the user when they
       // encounter an error, so it's important that this has a
       // different pref branch.
@@ -334,11 +365,6 @@ function initPage() {
       span.textContent = document.location.hostname;
     }
   }
-
-  // Dispatch this event only for tests. This should only be sent after we're
-  // done initializing the error page.
-  let event = new CustomEvent("AboutNetErrorLoad", { bubbles: true });
-  document.dispatchEvent(event);
 }
 
 function setupErrorUI() {
@@ -399,18 +425,20 @@ async function setNetErrorMessageFromCode() {
 
   let desc = document.getElementById("errorShortDescText");
   let errorCodeStr = securityInfo.errorCodeString || "";
-
-  let [errorCodeMsg] = await document.l10n.formatValues([
-    {
-      id: errorCodeStr
-        .split("_")
-        .join("-")
-        .toLowerCase(),
-    },
-  ]);
+  let errorCodeMsg = "";
+  if (errorCodeStr) {
+    [errorCodeMsg] = await document.l10n.formatValues([
+      {
+        id: errorCodeStr
+          .split("_")
+          .join("-")
+          .toLowerCase(),
+      },
+    ]);
+  }
 
   if (!errorCodeMsg) {
-    console.error("No strings exist for this error type");
+    console.warn("This error page has no error code in its security info");
     document.l10n.setAttributes(desc, "ssl-connection-error", {
       errorMessage: errorCodeStr,
       hostname: hostString,
@@ -422,6 +450,7 @@ async function setNetErrorMessageFromCode() {
     errorMessage: errorCodeMsg,
     hostname: hostString,
   });
+
   let desc2 = document.getElementById("errorShortDescText2");
   document.l10n.setAttributes(desc2, "cert-error-code-prefix", {
     error: errorCodeStr,
@@ -486,6 +515,49 @@ function initPageCertError() {
     document.querySelector(".exceptionDialogButtonContainer").hidden = true;
   }
 
+  let els = document.querySelectorAll("[data-telemetry-id]");
+  for (let el of els) {
+    el.addEventListener("click", recordClickTelemetry);
+  }
+
+  let failedCertInfo = document.getFailedCertSecurityInfo();
+  // Truncate the error code to avoid going over the allowed
+  // string size limit for telemetry events.
+  let errorCode = failedCertInfo.errorCodeString.substring(0, 40);
+  RPMRecordTelemetryEvent(
+    "security.ui.certerror",
+    "load",
+    "aboutcerterror",
+    errorCode,
+    {
+      has_sts: (getCSSClass() == "badStsCert").toString(),
+      is_frame: (window.parent != window).toString(),
+    }
+  );
+
+  setCertErrorDetails();
+}
+
+function recordClickTelemetry(e) {
+  let target = e.originalTarget;
+  let telemetryId = target.dataset.telemetryId;
+  let failedCertInfo = document.getFailedCertSecurityInfo();
+  // Truncate the error code to avoid going over the allowed
+  // string size limit for telemetry events.
+  let errorCode = failedCertInfo.errorCodeString.substring(0, 40);
+  RPMRecordTelemetryEvent(
+    "security.ui.certerror",
+    "click",
+    telemetryId,
+    errorCode,
+    {
+      has_sts: (getCSSClass() == "badStsCert").toString(),
+      is_frame: (window.parent != window).toString(),
+    }
+  );
+}
+
+function initCertErrorPageActions() {
   document
     .getElementById("returnButton")
     .addEventListener("click", onReturnButtonClick);
@@ -501,13 +573,6 @@ function initPageCertError() {
   document
     .getElementById("exceptionDialogButton")
     .addEventListener("click", addCertException);
-
-  setCertErrorDetails();
-  setTechnicalDetailsOnCertError();
-
-  // Dispatch this event only for tests.
-  let event = new CustomEvent("AboutNetErrorLoad", { bubbles: true });
-  document.dispatchEvent(event);
 }
 
 function addCertException() {
@@ -572,7 +637,7 @@ async function getFailedCertificatesAsPEMString() {
   return details;
 }
 
-async function setCertErrorDetails(event) {
+function setCertErrorDetails(event) {
   // Check if the connection is being man-in-the-middled. When the parent
   // detects an intercepted connection, the page may be reloaded with a new
   // error code (MOZILLA_PKIX_ERROR_MITM_DETECTED).
@@ -589,8 +654,6 @@ async function setCertErrorDetails(event) {
     RPMSendAsyncMessage("Browser:PrimeMitm");
   }
 
-  let div = document.getElementById("certificateErrorText");
-  div.textContent = await getFailedCertificatesAsPEMString();
   let learnMoreLink = document.getElementById("learnMoreLink");
   let baseURL = RPMGetFormatURLPref("app.support.baseURL");
   learnMoreLink.setAttribute("href", baseURL + "connection-not-secure");
@@ -622,6 +685,7 @@ async function setCertErrorDetails(event) {
   let clockSkew = false;
   document.body.setAttribute("code", failedCertInfo.errorCodeString);
 
+  let titleElement = document.querySelector(".title-text");
   let desc;
   switch (failedCertInfo.errorCodeString) {
     case "SSL_ERROR_BAD_CERT_DOMAIN":
@@ -685,9 +749,8 @@ async function setCertErrorDetails(event) {
 
       learnMoreLink.href = baseURL + "security-error";
 
-      let title = document.getElementById("et_mitm");
+      document.l10n.setAttributes(titleElement, "certerror-mitm-title");
       desc = document.getElementById("ed_mitm");
-      document.querySelector(".title-text").textContent = title.textContent;
       // eslint-disable-next-line no-unsanitized/property
       document.getElementById("errorShortDescText").innerHTML = desc.innerHTML;
 
@@ -727,7 +790,7 @@ async function setCertErrorDetails(event) {
       // and adjusting the date per the interval would make the cert valid, warn the user:
       if (
         Math.abs(difference) > 60 * 60 * 24 &&
-        now - lastFetched <= 60 * 60 * 24 * 5 &&
+        now - lastFetched <= 60 * 60 * 24 * 5 * 1000 &&
         certRange.notBefore < approximateDate &&
         certRange.notAfter > approximateDate
       ) {
@@ -761,11 +824,8 @@ async function setCertErrorDetails(event) {
       ).textContent = systemDate;
       if (clockSkew) {
         document.body.classList.add("illustrated", "clockSkewError");
-        let clockErrTitle = document.getElementById("et_clockSkewError");
+        document.l10n.setAttributes(titleElement, "clockSkewError-title");
         let clockErrDesc = document.getElementById("ed_clockSkewError");
-        // eslint-disable-next-line no-unsanitized/property
-        document.querySelector(".title-text").textContent =
-          clockErrTitle.textContent;
         desc = document.getElementById("errorShortDescText");
         document.getElementById("errorShortDesc").style.display = "block";
         document.getElementById("certificateErrorReporting").style.display =
@@ -808,6 +868,14 @@ async function setCertErrorDetails(event) {
           let sd2 = document.getElementById("errorShortDescText2");
           // eslint-disable-next-line no-unsanitized/property
           sd2.innerHTML = errDesc2.innerHTML;
+          if (
+            Math.abs(difference) <= 60 * 60 * 24 &&
+            now - lastFetched <= 60 * 60 * 24 * 5 * 1000
+          ) {
+            errWhatToDo = document.getElementById(
+              "es_nssBadCert_SSL_ERROR_BAD_CERT_DOMAIN"
+            );
+          }
         }
 
         if (es) {
@@ -842,7 +910,7 @@ async function setCertErrorDetails(event) {
   }
 }
 
-function setTechnicalDetailsOnCertError() {
+async function setTechnicalDetailsOnCertError() {
   let technicalInfo = document.getElementById("badCertTechnicalInfo");
 
   function setL10NLabel(l10nId, args = {}, attrs = {}, rewrite = true) {
@@ -1035,6 +1103,7 @@ function setTechnicalDetailsOnCertError() {
       title: failedCertInfo.errorCodeString,
       id: "errorCode",
       "data-l10n-name": "error-code-link",
+      "data-telemetry-id": "error_code_link",
     },
     false
   );
@@ -1045,6 +1114,9 @@ function setTechnicalDetailsOnCertError() {
     // to fluent DOM overlays.
     technicalInfo.addEventListener("click", handleErrorCodeClick);
   }
+
+  let div = document.getElementById("certificateErrorText");
+  div.textContent = await getFailedCertificatesAsPEMString();
 }
 
 function handleErrorCodeClick(event) {
@@ -1055,6 +1127,7 @@ function handleErrorCodeClick(event) {
   let debugInfo = document.getElementById("certificateErrorDebugInformation");
   debugInfo.style.display = "block";
   debugInfo.scrollIntoView({ block: "start", behavior: "smooth" });
+  recordClickTelemetry(event);
 }
 
 /* Only do autofocus if we're the toplevel frame; otherwise we
@@ -1083,3 +1156,6 @@ for (let button of document.querySelectorAll(".try-again")) {
 // an onload handler. This is because error pages are loaded as
 // LOAD_BACKGROUND, which means that onload handlers will not be executed.
 initPage();
+// Dispatch this event so tests can detect that we finished loading the error page.
+let event = new CustomEvent("AboutNetErrorLoad", { bubbles: true });
+document.dispatchEvent(event);

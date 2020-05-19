@@ -110,6 +110,22 @@ public class GeckoDisplay {
     }
 
     /**
+     * Update the safe area insets of the surface on the screen.
+     *
+     * @param left   left margin of safe area
+     * @param top    top margin of safe area
+     * @param right  right margin of safe area
+     * @param bottom bottom margin of safe area
+     */
+    @UiThread
+    public void safeAreaInsetsChanged(final int top, final int right, final int bottom, final int left) {
+        ThreadUtils.assertOnUiThread();
+
+        if (mSession.getDisplay() == this) {
+            mSession.onSafeAreaInsetsChanged(top, right, bottom, left);
+        }
+    }
+    /**
      * Set the maximum height of the dynamic toolbar(s).
      *
      * If the toolbar is dynamic, this function needs to be called with the maximum
@@ -355,7 +371,14 @@ public class GeckoDisplay {
             }
 
             if (mRecycle == null) {
-                target = Bitmap.createBitmap(mOutWidth, mOutHeight, Bitmap.Config.ARGB_8888);
+                try {
+                    target = Bitmap.createBitmap(mOutWidth, mOutHeight, Bitmap.Config.ARGB_8888);
+                } catch (Throwable e) {
+                    if (e instanceof NullPointerException || e instanceof OutOfMemoryError) {
+                        return GeckoResult.fromException(new OutOfMemoryError("Not enough memory to allocate for bitmap"));
+                    }
+                    return GeckoResult.fromException(new Throwable("Failed to create bitmap", e));
+                }
             } else {
                 target = mRecycle;
             }

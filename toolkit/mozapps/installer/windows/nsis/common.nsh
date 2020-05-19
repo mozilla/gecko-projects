@@ -5663,6 +5663,13 @@ end:
               StrCpy $InstallMaintenanceService "1"
             ${EndIf}
 
+            ReadINIStr $R8 $R7 "Install" "RegisterDefaultAgent"
+            ${If} $R8 == "false"
+              StrCpy $RegisterDefaultAgent "0"
+            ${Else}
+              StrCpy $RegisterDefaultAgent "1"
+            ${EndIf}
+
             !ifdef MOZ_OPTIONAL_EXTENSIONS
               ReadINIStr $R8 $R7 "Install" "OptionalExtensions"
               ${If} $R8 == "false"
@@ -5708,6 +5715,7 @@ end:
         ${InstallGetOption} $R8 "StartMenuShortcut" $AddStartMenuSC
         ${InstallGetOption} $R8 "TaskbarShortcut" $AddTaskbarSC
         ${InstallGetOption} $R8 "MaintenanceService" $InstallMaintenanceService
+        ${InstallGetOption} $R8 "RegisterDefaultAgent" $RegisterDefaultAgent
         !ifdef MOZ_OPTIONAL_EXTENSIONS
           ${InstallGetOption} $R8 "OptionalExtensions" $InstallOptionalExtensions
         !endif
@@ -5929,7 +5937,7 @@ end:
 
       finish:
       ${UnloadUAC}
-      System::Call "shell32::SHChangeNotify(i ${SHCNE_ASSOCCHANGED}, i 0, i 0, i 0)"
+      ${RefreshShellIcons}
       Quit ; Nothing initialized so no need to call OnEndCommon
 
       continue:
@@ -7843,6 +7851,40 @@ end:
   !endif
 !macroend
 
+/**
+ * Copy the post-signing data, which was left alongside the installer
+ * by the self-extractor stub, into the global location for this data.
+ *
+ * If the post-signing data file doesn't exist, or is empty, "0" is
+ * pushed on the stack, and nothing is copied.
+ * Otherwise the first line of the post-signing data (including newline,
+ * if any) is pushed on the stack.
+ */
+!macro CopyPostSigningData
+  !ifndef ${_MOZFUNC_UN}CopyPostSigningData
+    !verbose push
+    !verbose ${_MOZFUNC_VERBOSE}
+    !define ${_MOZFUNC_UN}CopyPostSigningData "Call ${_MOZFUNC_UN}CopyPostSigningData"
+
+    Function CopyPostSigningData
+      Push $0   ; Stack: old $0
+
+      ${LineRead} "$EXEDIR\postSigningData" "1" $0
+      ${If} ${Errors}
+        ClearErrors
+        StrCpy $0 "0"
+      ${Else}
+        CreateDirectory "$LOCALAPPDATA\Mozilla\Firefox"
+        CopyFiles /SILENT "$EXEDIR\postSigningData" "$LOCALAPPDATA\Mozilla\Firefox"
+      ${Endif}
+
+      Exch $0   ; Stack: postSigningData
+    FunctionEnd
+
+    !verbose pop
+  !endif
+!macroend
+
 ################################################################################
 # Helpers for taskbar progress
 
@@ -8020,11 +8062,11 @@ end:
   !define DT_NOFULLWIDTHCHARBREAK 0x00080000
 !endif
 
+!define /ifndef GWL_STYLE -16
+!define /ifndef GWL_EXSTYLE -20
+
 !ifndef WS_EX_NOINHERITLAYOUT
   !define WS_EX_NOINHERITLAYOUT 0x00100000
-!endif
-!ifndef WS_EX_LAYOUTRTL
-  !define WS_EX_LAYOUTRTL 0x00400000
 !endif
 
 !ifndef PBS_MARQUEE
@@ -8252,6 +8294,23 @@ end:
 !define RemoveStyle "!insertmacro _RemoveStyle"
 
 /**
+ * Adds a single extended style to a control.
+ *
+ * _HANDLE  the handle of the control
+ * _EXSTYLE the extended style to add
+ */
+!macro _AddExStyle _HANDLE _EXSTYLE
+  Push $0
+
+  System::Call 'user32::GetWindowLongW(i ${_HANDLE}, i ${GWL_EXSTYLE}) i .r0'
+  IntOp $0 $0 | ${_EXSTYLE}
+  System::Call 'user32::SetWindowLongW(i ${_HANDLE}, i ${GWL_EXSTYLE}, i r0)'
+
+  Pop $0
+!macroend
+!define AddExStyle "!insertmacro _AddExStyle"
+
+/**
  * Removes a single extended style from a control.
  *
  * _HANDLE  the handle of the control
@@ -8268,6 +8327,25 @@ end:
   Pop $0
 !macroend
 !define RemoveExStyle "!insertmacro _RemoveExStyle"
+
+/**
+ * Set the necessary styles to configure the given window as right-to-left
+ *
+ * _HANDLE the handle of the control to configure
+ */
+!macro _MakeWindowRTL _HANDLE
+  !define /ifndef WS_EX_RIGHT 0x00001000
+  !define /ifndef WS_EX_LEFT 0x00000000
+  !define /ifndef WS_EX_RTLREADING 0x00002000
+  !define /ifndef WS_EX_LTRREADING 0x00000000
+  !define /ifndef WS_EX_LAYOUTRTL 0x00400000
+
+  ${AddExStyle} ${_HANDLE} ${WS_EX_LAYOUTRTL}
+  ${RemoveExStyle} ${_HANDLE} ${WS_EX_RTLREADING}
+  ${RemoveExStyle} ${_HANDLE} ${WS_EX_RIGHT}
+  ${AddExStyle} ${_HANDLE} ${WS_EX_LEFT}|${WS_EX_LTRREADING}
+!macroend
+!define MakeWindowRTL "!insertmacro _MakeWindowRTL"
 
 /**
  * Gets the extent of the specified text in pixels for sizing a control.

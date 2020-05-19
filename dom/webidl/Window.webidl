@@ -118,7 +118,6 @@ typedef OfflineResourceList ApplicationCache;
                     offscreenBuffering,
                     OffscreenCanvas,
                     OffscreenCanvasRenderingContext2D,
-                    onappinstalled,
                     onbeforeinstallprompt,
                     oncancel,
                     ondeviceorientationabsolute,
@@ -268,12 +267,6 @@ typedef OfflineResourceList ApplicationCache;
 };
 Window includes GlobalEventHandlers;
 Window includes WindowEventHandlers;
-
-// https://www.w3.org/TR/appmanifest/#onappinstalled-attribute
-partial interface Window {
-  [Pref="dom.manifest.onappinstalled"]
-  attribute EventHandler onappinstalled;
-};
 
 // http://www.whatwg.org/specs/web-apps/current-work/
 interface mixin WindowSessionStorage {
@@ -509,10 +502,7 @@ partial interface Window {
                                                optional DOMString options = "",
                                                any... extraArguments);
 
-  [
-#ifdef NIGHTLY_BUILD
-   ChromeOnly,
-#endif
+  [Func="nsGlobalWindowInner::ContentPropertyEnabled",
    NonEnumerable, Replaceable, Throws, NeedsCallerType]
   readonly attribute object? content;
 
@@ -544,9 +534,6 @@ partial interface Window {
    */
   [Constant, Throws, ChromeOnly]
   readonly attribute nsIDOMWindowUtils windowUtils;
-
-  [ChromeOnly]
-  readonly attribute boolean hasOpenerForInitialContentBrowser;
 
   [Pure, ChromeOnly]
   readonly attribute WindowGlobalChild? windowGlobalChild;
@@ -617,6 +604,10 @@ partial interface Window {
   void                      minimize();
   [Func="nsGlobalWindowInner::IsPrivilegedChromeWindow"]
   void                      restore();
+  [Func="nsGlobalWindowInner::IsPrivilegedChromeWindow"]
+  DOMString                 getWorkspaceID();
+  [Func="nsGlobalWindowInner::IsPrivilegedChromeWindow"]
+  void                      moveToWorkspace(DOMString workspaceID);
 
   /**
    * Notify a default button is loaded on a dialog or a wizard.

@@ -67,9 +67,9 @@ void AliasAnalysis::spewDependencyList() {
         JitSpewHeader(JitSpew_AliasSummaries);
         print.printf(" ");
         MDefinition::PrintOpcodeName(print, def->op());
-        print.printf("%d marked depending on ", def->id());
+        print.printf("%u marked depending on ", def->id());
         MDefinition::PrintOpcodeName(print, def->dependency()->op());
-        print.printf("%d\n", def->dependency()->id());
+        print.printf("%u\n", def->dependency()->id());
       }
     }
   }
@@ -84,7 +84,7 @@ static inline const MDefinition* MaybeUnwrap(const MDefinition* object) {
     object = object->getOperand(0);
   }
 
-  if (object->isTypedArrayElements()) {
+  if (object->isArrayBufferViewElements()) {
     return nullptr;
   }
   if (object->isConstantElements()) {
@@ -97,9 +97,10 @@ static inline const MDefinition* MaybeUnwrap(const MDefinition* object) {
 // Get the object of any load/store. Returns nullptr if not tied to
 // an object.
 static inline const MDefinition* GetObject(const MDefinition* ins) {
-  if (!ins->getAliasSet().isStore() && !ins->getAliasSet().isLoad()) {
+  if (ins->getAliasSet().isNone()) {
     return nullptr;
   }
+  MOZ_ASSERT(ins->getAliasSet().isStore() || ins->getAliasSet().isLoad());
 
   // Note: only return the object if that object owns that property.
   // I.e. the property isn't on the prototype chain.
@@ -108,8 +109,10 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::InitializedLength:
     case MDefinition::Opcode::LoadElement:
     case MDefinition::Opcode::LoadUnboxedScalar:
+    case MDefinition::Opcode::LoadDataViewElement:
     case MDefinition::Opcode::StoreElement:
     case MDefinition::Opcode::StoreUnboxedScalar:
+    case MDefinition::Opcode::StoreDataViewElement:
     case MDefinition::Opcode::SetInitializedLength:
     case MDefinition::Opcode::ArrayLength:
     case MDefinition::Opcode::SetArrayLength:
@@ -117,8 +120,8 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::Elements:
     case MDefinition::Opcode::MaybeCopyElementsForWrite:
     case MDefinition::Opcode::MaybeToDoubleElement:
-    case MDefinition::Opcode::TypedArrayLength:
-    case MDefinition::Opcode::TypedArrayByteOffset:
+    case MDefinition::Opcode::ArrayBufferViewLength:
+    case MDefinition::Opcode::ArrayBufferViewByteOffset:
     case MDefinition::Opcode::ArrayPopShift:
     case MDefinition::Opcode::ArrayPush:
     case MDefinition::Opcode::LoadTypedArrayElementHole:
@@ -132,15 +135,16 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::GuardReceiverPolymorphic:
     case MDefinition::Opcode::GuardObjectGroup:
     case MDefinition::Opcode::GuardObjectIdentity:
-    case MDefinition::Opcode::LoadSlot:
-    case MDefinition::Opcode::StoreSlot:
+    case MDefinition::Opcode::LoadDynamicSlot:
+    case MDefinition::Opcode::StoreDynamicSlot:
     case MDefinition::Opcode::InArray:
     case MDefinition::Opcode::LoadElementHole:
-    case MDefinition::Opcode::TypedArrayElements:
+    case MDefinition::Opcode::ArrayBufferViewElements:
     case MDefinition::Opcode::CopyLexicalEnvironmentObject:
     case MDefinition::Opcode::IsPackedArray:
     case MDefinition::Opcode::SuperFunction:
     case MDefinition::Opcode::InitHomeObject:
+    case MDefinition::Opcode::HomeObjectSuperBase:
       object = ins->getOperand(0);
       break;
     case MDefinition::Opcode::GetPropertyCache:
@@ -148,11 +152,11 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::GetDOMProperty:
     case MDefinition::Opcode::GetDOMMember:
     case MDefinition::Opcode::Call:
-    case MDefinition::Opcode::Compare:
+    case MDefinition::Opcode::Throw:
+    case MDefinition::Opcode::ThrowRuntimeLexicalError:
     case MDefinition::Opcode::GetArgumentsObjectArg:
     case MDefinition::Opcode::SetArgumentsObjectArg:
-    case MDefinition::Opcode::GetFrameArgument:
-    case MDefinition::Opcode::SetFrameArgument:
+    case MDefinition::Opcode::CreateThis:
     case MDefinition::Opcode::CompareExchangeTypedArrayElement:
     case MDefinition::Opcode::AtomicExchangeTypedArrayElement:
     case MDefinition::Opcode::AtomicTypedArrayElementBinop:
@@ -170,10 +174,7 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::WasmStoreGlobalVar:
     case MDefinition::Opcode::WasmStoreGlobalCell:
     case MDefinition::Opcode::WasmStoreRef:
-    case MDefinition::Opcode::ArrayJoin:
-    case MDefinition::Opcode::ArraySlice:
-    case MDefinition::Opcode::StoreElementHole:
-    case MDefinition::Opcode::FallibleStoreElement:
+    case MDefinition::Opcode::WasmStoreStackResult:
       return nullptr;
     default:
 #ifdef DEBUG
@@ -314,7 +315,7 @@ bool AliasAnalysis::analyze() {
     }
 
     if (block->isLoopHeader()) {
-      JitSpew(JitSpew_Alias, "Processing loop header %d", block->id());
+      JitSpew(JitSpew_Alias, "Processing loop header %u", block->id());
       loop_ = new (alloc().fallible()) LoopAliasInfo(alloc(), loop_, *block);
       if (!loop_) {
         return false;
@@ -398,7 +399,7 @@ bool AliasAnalysis::analyze() {
 
     if (block->isLoopBackedge()) {
       MOZ_ASSERT(loop_->loopHeader() == block->loopHeaderOfBackedge());
-      JitSpew(JitSpew_Alias, "Processing loop backedge %d (header %d)",
+      JitSpew(JitSpew_Alias, "Processing loop backedge %u (header %u)",
               block->id(), loop_->loopHeader()->id());
       LoopAliasInfo* outerLoop = loop_->outer();
       MInstruction* firstLoopIns = *loop_->loopHeader()->begin();

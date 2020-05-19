@@ -12,7 +12,6 @@ const {
 const {
   getEnvironmentVariable,
 } = require("devtools/client/performance-new/browser");
-const { presets } = require("devtools/shared/performance-new/recording-utils");
 
 /**
  * @typedef {import("../@types/perf").Action} Action
@@ -21,6 +20,8 @@ const { presets } = require("devtools/shared/performance-new/recording-utils");
  * @typedef {import("../@types/perf").SymbolTableAsTuple} SymbolTableAsTuple
  * @typedef {import("../@types/perf").RecordingState} RecordingState
  * @typedef {import("../@types/perf").InitializeStoreValues} InitializeStoreValues
+ * @typedef {import("../@types/perf").Presets} Presets
+ * @typedef {import("../@types/perf").PanelWindow} PanelWindow
  */
 
 /**
@@ -102,15 +103,15 @@ exports.changeEntries = entries =>
 
 /**
  * Updates the recording settings for the features.
- * @param {object} features
+ * @param {string[]} features
  * @return {ThunkAction<void>}
  */
 exports.changeFeatures = features => {
   return (dispatch, getState) => {
     let promptEnvRestart = null;
-    if (selectors.getPageContext(getState()) === "popup") {
-      // The popup supports checks to restart the browser for environment
-      // variables.
+    if (selectors.getPageContext(getState()) === "aboutprofiling") {
+      // TODO Bug 1615431 - The popup supported restarting the browser, but
+      // this hasn't been updated yet for the about:profiling workflow.
       if (
         !getEnvironmentVariable("JS_TRACE_LOGGING") &&
         features.includes("jstracer")
@@ -142,10 +143,11 @@ exports.changeThreads = threads =>
 
 /**
  * Change the preset.
+ * @param {Presets} presets
  * @param {string} presetName
  * @return {ThunkAction<void>}
  */
-exports.changePreset = presetName =>
+exports.changePreset = (presets, presetName) =>
   _dispatchAndUpdatePreferences({
     type: "CHANGE_PRESET",
     presetName,
@@ -200,19 +202,13 @@ exports.startRecording = () => {
 
 /**
  * Stops the profiler, and opens the profile in a new window.
- * @param {object} window - The current window for the page.
  * @return {ThunkAction<void>}
  */
-exports.getProfileAndStopProfiler = window => {
+exports.getProfileAndStopProfiler = () => {
   return async (dispatch, getState) => {
     const perfFront = selectors.getPerfFront(getState());
     dispatch(changeRecordingState("request-to-get-profile-and-stop-profiler"));
     const profile = await perfFront.getProfileAndStopProfiler();
-
-    if (window.gClosePopup) {
-      // The close popup function only exists when we are in the popup.
-      window.gClosePopup();
-    }
 
     const getSymbolTable = selectors.getSymbolTableGetter(getState())(profile);
     const receiveProfile = selectors.getReceiveProfileFn(getState());
@@ -229,6 +225,22 @@ exports.stopProfilerAndDiscardProfile = () => {
   return async (dispatch, getState) => {
     const perfFront = selectors.getPerfFront(getState());
     dispatch(changeRecordingState("request-to-stop-profiler"));
-    perfFront.stopProfilerAndDiscardProfile();
+
+    try {
+      await perfFront.stopProfilerAndDiscardProfile();
+    } catch (error) {
+      /** @type {any} */
+      const anyWindow = window;
+      /** @type {PanelWindow} - Coerce the window into the PanelWindow. */
+      const { gIsPanelDestroyed } = anyWindow;
+
+      if (gIsPanelDestroyed) {
+        // This error is most likely "Connection closed, pending request" as the
+        // command can race with closing the panel. Do not report an error. It's
+        // most likely fine.
+      } else {
+        throw error;
+      }
+    }
   };
 };

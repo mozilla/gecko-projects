@@ -16,10 +16,10 @@ async function loadShortcutsView() {
   // Load the theme view initially so we can verify that the category is switched
   // to "extension" when the shortcuts view is loaded.
   let win = await loadInitialView("theme");
-  let { managerWindow } = win;
+  let categoryUtils = new CategoryUtilities(win.managerWindow);
 
   is(
-    managerWindow.gCategories.node.value,
+    categoryUtils.getSelectedViewId(),
     "addons://list/theme",
     "The theme category is selected"
   );
@@ -34,7 +34,7 @@ async function loadShortcutsView() {
   await loaded;
 
   is(
-    managerWindow.gCategories.node.value,
+    categoryUtils.getSelectedViewId(),
     "addons://list/extension",
     "The extension category is now selected"
   );
@@ -178,7 +178,7 @@ add_task(async function testUpdatingCommands() {
   }
   checkLabel("commandOne", "commandOne");
   checkLabel("commandTwo", "Command Two!");
-  checkLabel("_execute_browser_action", "shortcuts-browserAction");
+  checkLabel("_execute_browser_action", "shortcuts-browserAction2");
 
   await closeView(win);
   await extension.unload();

@@ -88,9 +88,7 @@ const PingServer = {
     this.registerPingHandler((request, response) => {
       let r = request;
       this._log.trace(
-        `defaultPingHandler() - ${r.method} ${r.scheme}://${r.host}:${r.port}${
-          r.path
-        }`
+        `defaultPingHandler() - ${r.method} ${r.scheme}://${r.host}:${r.port}${r.path}`
       );
       let deferred = this._defers[this._defers.length - 1];
       this._defers.push(PromiseUtils.defer());
@@ -210,9 +208,7 @@ function decodeRequestPayload(request) {
     Assert.notEqual(
       TelemetryUtils.knownClientID,
       payload.clientId,
-      `Known clientId shouldn't appear in a "${
-        payload.type
-      }" ping on the server.`
+      `Known clientId shouldn't appear in a "${payload.type}" ping on the server.`
     );
   }
 
@@ -452,7 +448,10 @@ function truncateToDays(aMsec) {
 // Returns a promise that resolves to true when the passed promise rejects,
 // false otherwise.
 function promiseRejects(promise) {
-  return promise.then(() => false, () => true);
+  return promise.then(
+    () => false,
+    () => true
+  );
 }
 
 // Generates a random string of at least a specific length.
@@ -565,6 +564,9 @@ if (runningInParent) {
 TelemetryController.testInitLogging();
 
 // Avoid timers interrupting test behavior.
-fakeSchedulerTimer(() => {}, () => {});
+fakeSchedulerTimer(
+  () => {},
+  () => {}
+);
 // Make pind sending predictable.
 fakeMidnightPingFuzzingDelay(0);

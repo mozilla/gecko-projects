@@ -328,7 +328,7 @@ class MediaData {
  protected:
   explicit MediaData(Type aType) : mType(aType), mOffset(0), mKeyframe(false) {}
 
-  virtual ~MediaData() {}
+  virtual ~MediaData() = default;
 };
 
 // NullData is for decoder generating a sample which doesn't need to be
@@ -396,7 +396,7 @@ class AudioData : public MediaData {
   RefPtr<SharedBuffer> mAudioBuffer;
 
  protected:
-  ~AudioData() {}
+  ~AudioData() = default;
 
  private:
   AudioDataValue* GetAdjustedData() const;
@@ -539,20 +539,20 @@ class CryptoTrack {
         mSkipByteBlock(0) {}
   CryptoScheme mCryptoScheme;
   int32_t mIVSize;
-  nsTArray<uint8_t> mKeyId;
+  CopyableTArray<uint8_t> mKeyId;
   uint8_t mCryptByteBlock;
   uint8_t mSkipByteBlock;
-  nsTArray<uint8_t> mConstantIV;
+  CopyableTArray<uint8_t> mConstantIV;
 
   bool IsEncrypted() const { return mCryptoScheme != CryptoScheme::None; }
 };
 
 class CryptoSample : public CryptoTrack {
  public:
-  nsTArray<uint16_t> mPlainSizes;
-  nsTArray<uint32_t> mEncryptedSizes;
-  nsTArray<uint8_t> mIV;
-  nsTArray<nsTArray<uint8_t>> mInitDatas;
+  CopyableTArray<uint16_t> mPlainSizes;
+  CopyableTArray<uint32_t> mEncryptedSizes;
+  CopyableTArray<uint8_t> mIV;
+  CopyableTArray<CopyableTArray<uint8_t>> mInitDatas;
   nsString mInitDataType;
 };
 
@@ -591,12 +591,12 @@ class MediaRawDataWriter {
 
   // Set size of buffer, allocating memory as required.
   // If size is increased, new buffer area is filled with 0.
-  MOZ_MUST_USE bool SetSize(size_t aSize);
+  [[nodiscard]] bool SetSize(size_t aSize);
   // Add aData at the beginning of buffer.
-  MOZ_MUST_USE bool Prepend(const uint8_t* aData, size_t aSize);
-  MOZ_MUST_USE bool Append(const uint8_t* aData, size_t aSize);
+  [[nodiscard]] bool Prepend(const uint8_t* aData, size_t aSize);
+  [[nodiscard]] bool Append(const uint8_t* aData, size_t aSize);
   // Replace current content with aData.
-  MOZ_MUST_USE bool Replace(const uint8_t* aData, size_t aSize);
+  [[nodiscard]] bool Replace(const uint8_t* aData, size_t aSize);
   // Clear the memory buffer. Will set target mData and mSize to 0.
   void Clear();
   // Remove aSize bytes from the front of the sample.
@@ -605,7 +605,7 @@ class MediaRawDataWriter {
  private:
   friend class MediaRawData;
   explicit MediaRawDataWriter(MediaRawData* aMediaRawData);
-  MOZ_MUST_USE bool EnsureSize(size_t aSize);
+  [[nodiscard]] bool EnsureSize(size_t aSize);
   MediaRawData* mTarget;
 };
 
@@ -676,7 +676,7 @@ class MediaByteBuffer : public nsTArray<uint8_t> {
   explicit MediaByteBuffer(size_t aCapacity) : nsTArray<uint8_t>(aCapacity) {}
 
  private:
-  ~MediaByteBuffer() {}
+  ~MediaByteBuffer() = default;
 };
 
 }  // namespace mozilla

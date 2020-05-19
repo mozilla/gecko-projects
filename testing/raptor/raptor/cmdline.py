@@ -15,7 +15,11 @@ from mozlog.commandline import add_logging_group
 (FENNEC,
  GECKOVIEW,
  REFBROW,
- FENIX) = FIREFOX_ANDROID_APPS = ["fennec", "geckoview", "refbrow", "fenix"]
+ FENIX,
+ CHROME_ANDROID) = FIREFOX_ANDROID_APPS = [
+    "fennec", "geckoview", "refbrow", "fenix", "chrome-m"
+]
+
 CHROMIUM_DISTROS = [CHROME, CHROMIUM]
 APPS = {
     FIREFOX: {
@@ -37,6 +41,10 @@ APPS = {
     FENIX: {
         "long_name": "Firefox Android Fenix Browser",
         "default_activity": "org.mozilla.fenix.IntentReceiverActivity",
+        "default_intent": "android.intent.action.VIEW"},
+    CHROME_ANDROID: {
+        "long_name": "Google Chrome on Android",
+        "default_activity": "com.android.chrome/com.google.android.apps.chrome.Main",
         "default_intent": "android.intent.action.VIEW"}
 }
 INTEGRATED_APPS = list(APPS.keys())
@@ -87,12 +95,13 @@ def create_parser(mach_interface=False):
     add_arg('--power-test', dest="power_test", action="store_true",
             help="Use Raptor to measure power usage on Android browsers (Geckoview Example, "
             "Fenix, Refbrow, and Fennec) as well as on Intel-based MacOS machines that have "
-            "Intel Power Gadget installed. The host ip address must be specified via the "
-            "--host command line argument if an android device/browser is being tested.")
+            "Intel Power Gadget installed.")
     add_arg('--memory-test', dest="memory_test", action="store_true",
             help="Use Raptor to measure memory usage.")
     add_arg('--cpu-test', dest="cpu_test", action="store_true",
             help="Use Raptor to measure CPU usage. Currently supported for Android only.")
+    add_arg('--live-sites', dest="live_sites", action="store_true", default=False,
+            help="Run tests using live sites instead of recorded sites.")
     add_arg('--is-release-build', dest="is_release_build", default=False,
             action='store_true',
             help="Whether the build is a release build which requires workarounds "
@@ -129,7 +138,9 @@ def create_parser(mach_interface=False):
             help='How long to wait (ms) after browser start-up before starting the tests')
     add_arg('--browser-cycles', dest="browser_cycles", type=int,
             help="The number of times a cold load test is repeated (for cold load tests only, "
-            "where the browser is shutdown and restarted between test iterations)")
+            "where the browser is shutdown and restarted between test iterations)"),
+    add_arg('--project', dest='project', type=str, default='mozilla-central',
+            help="Project name (try, mozilla-central, etc.)"),
     add_arg('--test-url-params', dest='test_url_params',
             help="Parameters to add to the test_url query string")
     add_arg('--print-tests', action=_PrintTests,
@@ -157,6 +168,10 @@ def create_parser(mach_interface=False):
             help="Flag which indicates if Raptor should not offer to install Android APK.")
     add_arg('--installerpath', dest="installerpath", default=None, type=str,
             help="Location where Android browser APK was extracted to before installation.")
+    add_arg('--disable-perf-tuning', dest='disable_perf_tuning', default=False,
+            action="store_true", help="Disable performance tuning on android.")
+    add_arg('--conditioned-profile-scenario', dest='conditioned_profile_scenario',
+            default='settled', type=str, help="Name of profile scenario.")
 
     # for browsertime jobs, cold page load is determined by a '--cold' cmd line argument
     add_arg('--cold', dest="cold", action="store_true",
@@ -176,15 +191,26 @@ def create_parser(mach_interface=False):
             help="path to ffmpeg executable (for `--video=true`)")
     add_arg('--browsertime-geckodriver', dest='browsertime_geckodriver',
             help="path to geckodriver executable")
-
+    add_arg('--verbose', dest="verbose", action="store_true", default=False,
+            help="Verbose output")
     add_logging_group(parser)
     return parser
 
 
 def verify_options(parser, args):
     ctx = vars(args)
-    if args.binary is None:
+    if args.binary is None and args.app != "chrome-m":
         parser.error("--binary is required!")
+
+    # if running chrome android tests, make sure it's on browsertime and
+    # that the chromedriver path was provided
+    if args.app == "chrome-m":
+        if not args.browsertime:
+            parser.error("--browsertime is required to run android chrome tests")
+        if not args.browsertime_chromedriver:
+            parser.error(
+                "--browsertime-chromedriver path is required for android chrome tests"
+            )
 
     # if running on a desktop browser make sure the binary exists
     if args.app in DESKTOP_APPS:
@@ -195,15 +221,12 @@ def verify_options(parser, args):
     if args.gecko_profile and args.app in CHROMIUM_DISTROS:
         parser.error("Gecko profiling is not supported on Chrome/Chromium!")
 
-    # if running power tests on geckoview/android, --host must be specified.
     if args.power_test:
-        if args.app in ["fennec", "geckoview", "refbrow", "fenix"]:
-            if args.host in ('localhost', '127.0.0.1'):
-                parser.error("When running power tests on Android browsers, the --host "
-                             "argument is required.")
-        elif platform.system().lower() not in ('darwin',):
-            parser.error("--power-test is only available on MacOS desktop machines, "
-                         "platform detected: %s." % platform.system().lower())
+        if args.app not in ["fennec", "geckoview", "refbrow", "fenix"]:
+            if platform.system().lower() not in ('darwin',):
+                parser.error("Power tests are only available on MacOS desktop machines or "
+                             "Firefox android browers. App requested: %s. Platform "
+                             "detected: %s." % (args.app, platform.system().lower()))
 
     if args.cpu_test:
         if args.app not in ["fennec", "geckoview", "refbrow", "fenix"]:

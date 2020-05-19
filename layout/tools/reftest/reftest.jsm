@@ -30,7 +30,7 @@ XPCOMUtils.defineLazyGetter(this, "OS", function() {
 });
 
 XPCOMUtils.defineLazyGetter(this, "PDFJS", function() {
-    const { require } = Cu.import("resource://gre/modules/commonjs/toolkit/require.js", {});
+    const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
     return {
         main: require('resource://pdf.js/build/pdf.js'),
         worker: require('resource://pdf.js/build/pdf.worker.js')
@@ -449,6 +449,7 @@ function ReadTests() {
     } catch(e) {
         ++g.testResults.Exception;
         logger.error("EXCEPTION: " + e);
+        DoneTests();
     }
 }
 
@@ -496,7 +497,7 @@ function StartTests()
         // tURLs is a temporary array containing all active tests
         var tURLs = new Array();
         for (var i = 0; i < g.urls.length; ++i) {
-            if (g.urls[i].expected == EXPECTED_DEATH)
+            if (g.urls[i].skip)
                 continue;
 
             if (g.urls[i].needsFocus && !Focus())
@@ -530,8 +531,12 @@ function StartTests()
         }
 
         if (g.manageSuite && !g.suiteStarted) {
-            var ids = g.urls.map(function(obj) {
-                return obj.identifier;
+            var ids = {};
+            g.urls.forEach(function(test) {
+                if (!(test.manifestID in ids)) {
+                    ids[test.manifestID] = [];
+                }
+                ids[test.manifestID].push(test.identifier);
             });
             var suite = prefs.getStringPref('reftest.suite', 'reftest');
             logger.suiteStart(ids, suite, {"skipped": g.urls.length - numActiveTests});
@@ -596,7 +601,7 @@ function BuildUseCounts()
     g.uriUseCounts = {};
     for (var i = 0; i < g.urls.length; ++i) {
         var url = g.urls[i];
-        if (url.expected != EXPECTED_DEATH &&
+        if (!url.skip &&
             (url.type == TYPE_REFTEST_EQUAL ||
              url.type == TYPE_REFTEST_NOTEQUAL)) {
             if (url.prefSettings1.length == 0) {
@@ -641,7 +646,7 @@ function StartCurrentTest()
     while (g.urls.length > 0) {
         var test = g.urls[0];
         logger.testStart(test.identifier);
-        if (test.expected == EXPECTED_DEATH) {
+        if (test.skip) {
             ++g.testResults.Skip;
             logger.testEnd(test.identifier, "SKIP");
             g.urls.shift();
@@ -1571,6 +1576,9 @@ function RegisterMessageListenersAndLoadContentScript(aReload)
         },
         child: {
           moduleURI: "resource://reftest/ReftestFissionChild.jsm",
+          events: {
+            MozAfterPaint: {},
+          },
         },
         allFrames: true,
         includeChrome: true,
@@ -1757,10 +1765,11 @@ function readPdf(path, callback) {
                 let fakePort = new PDFJS.main.LoopbackPort(true);
                 PDFJS.worker.WorkerMessageHandler.initializeFromPort(fakePort);
                 let myWorker = new PDFJS.main.PDFWorker("worker", fakePort);
-                PDFJS.main.PDFJS.getDocument({
+                PDFJS.main.GlobalWorkerOptions.workerSrc = "resource://pdf.js/build/pdf.worker.js";
+                PDFJS.main.getDocument({
                     worker: myWorker,
                     data: data
-                }).then(function (pdf) {
+                }).promise.then(function (pdf) {
                     callback(null, pdf);
                 }, function () {
                     callback(new Error("Couldn't parse " + path));

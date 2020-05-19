@@ -7,7 +7,7 @@
 with Files('**'):
     BUG_COMPONENT = ('Firefox', 'Firefox Accounts')
 
-DIRS += ['interfaces']
+DIRS += ['rust-bridge']
 
 MOCHITEST_CHROME_MANIFESTS += ['tests/mochitest/chrome.ini']
 
@@ -33,6 +33,7 @@ EXTRA_JS_MODULES += [
   'FxAccountsStorage.jsm',
   'FxAccountsTelemetry.jsm',
   'FxAccountsWebChannel.jsm',
+  'RustFxAccount.js',
 ]
 
 XPCOM_MANIFESTS += [

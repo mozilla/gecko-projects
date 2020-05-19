@@ -36,7 +36,7 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
                               public nsISerializable,
                               public nsIClassInfo {
  protected:
-  virtual ~TransportSecurityInfo() {}
+  virtual ~TransportSecurityInfo() = default;
 
  public:
   TransportSecurityInfo();
@@ -95,6 +95,8 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
     mCertificateTransparencyStatus = aCertificateTransparencyStatus;
   }
 
+  void SetResumed(bool aResumed);
+
   uint16_t mCipherSuite;
   uint16_t mProtocolVersion;
   uint16_t mCertificateTransparencyStatus;
@@ -125,6 +127,10 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
  protected:
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
   nsTArray<RefPtr<nsIX509Cert>> mSucceededCertChain;
+  bool mNPNCompleted;
+  nsCString mNegotiatedNPN;
+  bool mResumed;
+  bool mIsBuiltCertChainRootBuiltInRoot;
 
  private:
   uint32_t mSecurityState;

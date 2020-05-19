@@ -485,9 +485,11 @@ void WebExtensionPolicy::GetReadyPromise(
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebExtensionPolicy, mParent,
-                                      mLocalizeCallback, mHostPermissions,
-                                      mWebAccessiblePaths, mContentScripts)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_WEAK_PTR(WebExtensionPolicy, mParent,
+                                               mLocalizeCallback,
+                                               mHostPermissions,
+                                               mWebAccessiblePaths,
+                                               mContentScripts)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WebExtensionPolicy)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -574,9 +576,9 @@ WebExtensionContentScript::WebExtensionContentScript(
     : MozDocumentMatcher(aGlobal, aInit,
                          !aExtension.HasPermission(nsGkAtoms::mozillaAddons),
                          aRv),
-      mCssPaths(aInit.mCssPaths),
-      mJsPaths(aInit.mJsPaths),
       mRunAt(aInit.mRunAt) {
+  mCssPaths.Assign(aInit.mCssPaths);
+  mJsPaths.Assign(aInit.mJsPaths);
   mExtension = &aExtension;
 }
 
@@ -842,8 +844,9 @@ const URLInfo& DocInfo::PrincipalURL() const {
 
   if (mPrincipalURL.isNothing()) {
     nsIPrincipal* prin = Principal();
+    auto* basePrin = BasePrincipal::Cast(prin);
     nsCOMPtr<nsIURI> uri;
-    if (NS_SUCCEEDED(prin->GetURI(getter_AddRefs(uri)))) {
+    if (NS_SUCCEEDED(basePrin->GetURI(getter_AddRefs(uri)))) {
       MOZ_DIAGNOSTIC_ASSERT(uri);
       mPrincipalURL.emplace(uri);
     } else {

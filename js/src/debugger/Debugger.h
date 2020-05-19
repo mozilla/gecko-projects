@@ -54,7 +54,7 @@
 class JS_PUBLIC_API JSFunction;
 
 namespace JS {
-class AutoStableStringChars;
+class JS_FRIEND_API AutoStableStringChars;
 class JS_PUBLIC_API Compartment;
 class JS_PUBLIC_API Realm;
 class JS_PUBLIC_API Zone;
@@ -291,9 +291,7 @@ typedef HashSet<WeakHeapPtrGlobalObject,
     WeakGlobalObjectSet;
 
 #ifdef DEBUG
-extern void CheckDebuggeeThing(JSScript* script, bool invisibleOk);
-
-extern void CheckDebuggeeThing(LazyScript* script, bool invisibleOk);
+extern void CheckDebuggeeThing(BaseScript* script, bool invisibleOk);
 
 extern void CheckDebuggeeThing(JSObject* obj, bool invisibleOk);
 #endif
@@ -341,8 +339,8 @@ extern void CheckDebuggeeThing(JSObject* obj, bool invisibleOk);
 template <class Referent, class Wrapper, bool InvisibleKeysOk = false>
 class DebuggerWeakMap : private WeakMap<HeapPtr<Referent*>, HeapPtr<Wrapper*>> {
  private:
-  typedef HeapPtr<Referent*> Key;
-  typedef HeapPtr<Wrapper*> Value;
+  using Key = HeapPtr<Referent*>;
+  using Value = HeapPtr<Wrapper*>;
 
   JS::Compartment* compartment;
 
@@ -438,15 +436,11 @@ class MOZ_RAII EvalOptions {
  * CallObject, LexicalEnvironmentObject, and WithEnvironmentObject, among
  * others--but environments and objects are really two different concepts.
  */
-typedef JSObject Env;
+using Env = JSObject;
 
 // The referent of a Debugger.Script.
 //
-// - For most scripts, we point at their LazyScript, because that address
-//   doesn't change as the script is lazified/delazified.
-//
-// - For scripts that cannot be lazified, and thus have no LazyScript, we point
-//   directly to their JSScript.
+// - For most scripts, we point at their BaseScript.
 //
 // - For Web Assembly instances for which we are presenting a script-like
 //   interface, we point at their WasmInstanceObject.
@@ -457,7 +451,7 @@ typedef JSObject Env;
 // does point to something okay. Instead, we immediately build an instance of
 // this type from the Cell* and use that instead, so we can benefit from
 // Variant's static checks.
-typedef mozilla::Variant<JSScript*, LazyScript*, WasmInstanceObject*>
+typedef mozilla::Variant<BaseScript*, WasmInstanceObject*>
     DebuggerScriptReferent;
 
 // The referent of a Debugger.Source.
@@ -506,11 +500,20 @@ class MOZ_RAII DebuggerList {
                                            FireHookFun fireHook);
 };
 
+class DebuggerInstanceObject : public NativeObject {
+ private:
+  static const JSClassOps classOps_;
+
+ public:
+  static const JSClass class_;
+};
+
 class Debugger : private mozilla::LinkedListElement<Debugger> {
   friend class DebugAPI;
   friend class Breakpoint;
   friend class DebuggerFrame;
   friend class DebuggerMemory;
+  friend class DebuggerInstanceObject;
 
   template <typename>
   friend class DebuggerList;
@@ -734,7 +737,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
    *
    * An entry is present in this table when:
    *  - both the debuggee generator object and the Debugger.Frame object exists
-   *  - the debuggee generator object belongs to a relam that is a debuggee of
+   *  - the debuggee generator object belongs to a realm that is a debuggee of
    *    the Debugger.Frame's owner.
    *
    * regardless of whether the frame is currently suspended. (This list is
@@ -748,14 +751,11 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
       GeneratorWeakMap;
   GeneratorWeakMap generatorFrames;
 
-  /* An ephemeral map from JSScript* to Debugger.Script instances. */
-  typedef DebuggerWeakMap<JSScript, DebuggerScript> ScriptWeakMap;
+  // An ephemeral map from BaseScript* to Debugger.Script instances.
+  using ScriptWeakMap = DebuggerWeakMap<BaseScript, DebuggerScript>;
   ScriptWeakMap scripts;
 
-  using LazyScriptWeakMap = DebuggerWeakMap<LazyScript, DebuggerScript>;
-  LazyScriptWeakMap lazyScripts;
-
-  using LazyScriptVector = JS::GCVector<LazyScript*>;
+  using BaseScriptVector = JS::GCVector<BaseScript*>;
 
   // The map from debuggee source script objects to their Debugger.Source
   // instances.
@@ -876,11 +876,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   void traceForMovingGC(JSTracer* trc);
   void traceCrossCompartmentEdges(JSTracer* tracer);
 
-  static const JSClassOps classOps_;
-
- public:
-  static const JSClass class_;
-
  private:
   template <typename F>
   void forEachWeakMap(const F& f);
@@ -961,6 +956,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
 
   JSObject* getHook(Hook hook) const;
   bool hasAnyLiveHooks() const;
+  inline bool isHookCallAllowed(JSContext* cx) const;
 
   static void slowPathPromiseHook(JSContext* cx, Hook hook,
                                   Handle<PromiseObject*> promise);
@@ -977,6 +973,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
 
   template <typename RunImpl /* bool () */>
   MOZ_MUST_USE bool enterDebuggerHook(JSContext* cx, RunImpl runImpl) {
+    if (!isHookCallAllowed(cx)) {
+      return true;
+    }
+
     AutoRealm ar(cx, object);
 
     if (!runImpl()) {
@@ -1025,7 +1025,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
    * Prefer using wrapScript, wrapWasmScript, wrapSource, and wrapWasmSource
    * whenever possible.
    */
-  template <typename Map>
+  template <typename ReferentType, typename Map>
   typename Map::WrapperType* wrapVariantReferent(
       JSContext* cx, Map& map,
       Handle<typename Map::WrapperType::ReferentVariant> referent);
@@ -1186,6 +1186,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
    */
   MOZ_MUST_USE bool getFrame(JSContext* cx, const FrameIter& iter,
                              MutableHandleValue vp);
+  MOZ_MUST_USE bool getFrame(JSContext* cx, MutableHandleDebuggerFrame result);
   MOZ_MUST_USE bool getFrame(JSContext* cx, const FrameIter& iter,
                              MutableHandleDebuggerFrame result);
   MOZ_MUST_USE bool getFrame(JSContext* cx,
@@ -1197,9 +1198,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
    * needed. The context |cx| must be in the debugger realm; |script| must be
    * a script in a debuggee realm.
    */
-  DebuggerScript* wrapScript(JSContext* cx, HandleScript script);
-
-  DebuggerScript* wrapLazyScript(JSContext* cx, Handle<LazyScript*> script);
+  DebuggerScript* wrapScript(JSContext* cx, Handle<BaseScript*> script);
 
   /*
    * Return the Debugger.Script object for |wasmInstance| (the toplevel
@@ -1301,7 +1300,7 @@ class DebuggerDebuggeeLink : public NativeObject {
  * js::gc::MemoryUse categories.
  */
 struct Handler {
-  virtual ~Handler() {}
+  virtual ~Handler() = default;
 
   /*
    * If this Handler is a reference to a callable JSObject, return that
@@ -1385,8 +1384,8 @@ class BreakpointSite {
   BreakpointList breakpoints;
 
  protected:
-  BreakpointSite(){};
-  virtual ~BreakpointSite() {}
+  BreakpointSite() = default;
+  virtual ~BreakpointSite() = default;
   void finalize(JSFreeOp* fop);
   virtual gc::Cell* owningCell() = 0;
 
@@ -1551,7 +1550,6 @@ MOZ_MUST_USE bool ReportObjectRequired(JSContext* cx);
 
 JSObject* IdVectorToArray(JSContext* cx, Handle<IdVector> ids);
 bool IsInterpretedNonSelfHostedFunction(JSFunction* fun);
-bool EnsureFunctionHasScript(JSContext* cx, HandleFunction fun);
 JSScript* GetOrCreateFunctionScript(JSContext* cx, HandleFunction fun);
 bool ValueToIdentifier(JSContext* cx, HandleValue v, MutableHandleId id);
 bool ValueToStableChars(JSContext* cx, const char* fnname, HandleValue value,

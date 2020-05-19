@@ -102,9 +102,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont {
   // and if so if it has been modified by a factor/offset
   float mFontSizeFactor;
   nscoord mFontSizeOffset;
-  uint8_t mFontSizeKeyword;  // NS_STYLE_FONT_SIZE_*, is
-                             // NS_STYLE_FONT_SIZE_NO_KEYWORD when not
-                             // keyword-derived
+  mozilla::StyleFontSize mFontSizeKeyword;  // StyleFontSize is Nokeyword when
+                                            // not keyword-derived
 
   mozilla::StyleGenericFontFamily mGenericID;
 
@@ -122,8 +121,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont {
   bool mExplicitLanguage;
 
   // should calls to ZoomText() and UnZoomText() be made to the font
-  // size on this nsStyleFont?
-  bool mAllowZoom;
+  // size on this nsStyleFont? Also used to prevent SVG text from being
+  // affected by minimum font size pref.
+  bool mAllowZoomAndMinSize;
 
   // The value mSize would have had if scriptminsize had never been applied
   nscoord mScriptUnconstrainedSize;
@@ -171,36 +171,17 @@ struct CachedBorderImageData {
 };
 
 struct nsStyleImageLayers {
-  // Indices into kBackgroundLayerTable and kMaskLayerTable
-  enum {
-    shorthand = 0,
-    color,
-    image,
-    repeat,
-    positionX,
-    positionY,
-    clip,
-    origin,
-    size,
-    attachment,
-    maskMode,
-    composite
-  };
-
   enum class LayerType : uint8_t { Background = 0, Mask };
 
   explicit nsStyleImageLayers(LayerType aType);
   nsStyleImageLayers(const nsStyleImageLayers& aSource);
   MOZ_COUNTED_DTOR(nsStyleImageLayers)
 
-  static bool IsInitialPositionForLayerType(mozilla::Position aPosition,
-                                            LayerType aType);
-
   struct Repeat {
     mozilla::StyleImageLayerRepeat mXRepeat, mYRepeat;
 
     // Initialize nothing
-    Repeat() {}
+    Repeat() = default;
 
     bool IsInitialValue() const {
       return mXRepeat == mozilla::StyleImageLayerRepeat::Repeat &&
@@ -242,13 +223,13 @@ struct nsStyleImageLayers {
 
     // This property is used for background layer only.
     // For a mask layer, it should always be the initial value, which is
-    // NS_STYLE_BLEND_NORMAL.
-    uint8_t mBlendMode;  // NS_STYLE_BLEND_*
+    // StyleBlend::Normal.
+    mozilla::StyleBlend mBlendMode;
 
     // This property is used for mask layer only.
     // For a background layer, it should always be the initial value, which is
-    // NS_STYLE_COMPOSITE_MODE_ADD.
-    uint8_t mComposite;  // NS_STYLE_MASK_COMPOSITE_*
+    // StyleMaskComposite::Add.
+    mozilla::StyleMaskComposite mComposite;
 
     // mask-only property. This property is used for mask layer only. For a
     // background layer, it should always be the initial value, which is
@@ -423,6 +404,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleMargin {
   // (defined in WritingModes.h since we need the full WritingMode type)
   inline bool HasBlockAxisAuto(mozilla::WritingMode aWM) const;
   inline bool HasInlineAxisAuto(mozilla::WritingMode aWM) const;
+  inline bool HasAuto(mozilla::LogicalAxis, mozilla::WritingMode) const;
 
   mozilla::StyleRect<mozilla::LengthPercentageOrAuto> mMargin;
   mozilla::StyleRect<mozilla::StyleLength> mScrollMargin;
@@ -730,6 +712,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   using StyleMaxSize = mozilla::StyleMaxSize;
   using StyleFlexBasis = mozilla::StyleFlexBasis;
   using WritingMode = mozilla::WritingMode;
+  using LogicalAxis = mozilla::LogicalAxis;
   using StyleImplicitGridTracks = mozilla::StyleImplicitGridTracks;
   using ComputedStyle = mozilla::ComputedStyle;
   using StyleAlignSelf = mozilla::StyleAlignSelf;
@@ -765,6 +748,33 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
    */
   StyleJustifySelf UsedJustifySelf(const ComputedStyle*) const;
 
+  /**
+   * Return the used value for 'justify/align-self' in aAxis given our parent
+   * ComputedStyle aParent (or null for the root).
+   * (defined in WritingModes.h since we need the full WritingMode type)
+   */
+  inline mozilla::StyleAlignFlags UsedSelfAlignment(
+      LogicalAxis aAxis, const mozilla::ComputedStyle* aParent) const;
+
+  /**
+   * Return the used value for 'justify/align-content' in aAxis.
+   * (defined in WritingModes.h since we need the full WritingMode type)
+   */
+  inline mozilla::StyleContentDistribution UsedContentAlignment(
+      LogicalAxis aAxis) const;
+
+  /**
+   * Return the used value for 'align-tracks'/'justify-tracks' for a track
+   * in the given axis.
+   * (defined in WritingModes.h since we need the full LogicalAxis type)
+   */
+  inline mozilla::StyleContentDistribution UsedTracksAlignment(
+      LogicalAxis aAxis, uint32_t aIndex) const;
+
+  // Each entry has the same encoding as *-content, see below.
+  mozilla::StyleAlignTracks mAlignTracks;
+  mozilla::StyleJustifyTracks mJustifyTracks;
+
   Position mObjectPosition;
   StyleRect<LengthPercentageOrAuto> mOffset;
   StyleSize mWidth;
@@ -778,7 +788,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   StyleImplicitGridTracks mGridAutoRows;
   float mAspectRatio;
   mozilla::StyleGridAutoFlow mGridAutoFlow;
-  mozilla::StyleBoxSizing mBoxSizing;
+  uint8_t mMasonryAutoFlow;  // NS_STYLE_MASONRY_*
 
   mozilla::StyleAlignContent mAlignContent;
   mozilla::StyleAlignItems mAlignItems;
@@ -789,6 +799,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   mozilla::StyleFlexDirection mFlexDirection;
   mozilla::StyleFlexWrap mFlexWrap;
   mozilla::StyleObjectFit mObjectFit;
+  mozilla::StyleBoxSizing mBoxSizing;
   int32_t mOrder;
   float mFlexGrow;
   float mFlexShrink;
@@ -819,6 +830,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   inline const StyleSize& BSize(WritingMode) const;
   inline const StyleSize& MinBSize(WritingMode) const;
   inline const StyleMaxSize& MaxBSize(WritingMode) const;
+  inline const StyleSize& Size(LogicalAxis, WritingMode) const;
+  inline const StyleSize& MinSize(LogicalAxis, WritingMode) const;
+  inline const StyleMaxSize& MaxSize(LogicalAxis, WritingMode) const;
   inline bool ISizeDependsOnContainer(WritingMode) const;
   inline bool MinISizeDependsOnContainer(WritingMode) const;
   inline bool MaxISizeDependsOnContainer(WritingMode) const;
@@ -886,8 +900,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
 
   mozilla::StyleRGBA mColor;
   mozilla::StyleTextTransform mTextTransform;
-  uint8_t mTextAlign;      // NS_STYLE_TEXT_ALIGN_*
-  uint8_t mTextAlignLast;  // NS_STYLE_TEXT_ALIGN_*
+  mozilla::StyleTextAlign mTextAlign;
+  mozilla::StyleTextAlignLast mTextAlignLast;
   mozilla::StyleTextJustify mTextJustify;
   mozilla::StyleWhiteSpace mWhiteSpace;
   mozilla::StyleLineBreak mLineBreak = mozilla::StyleLineBreak::Auto;
@@ -902,9 +916,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
   mozilla::StyleRubyPosition mRubyPosition;
   mozilla::StyleTextSizeAdjust mTextSizeAdjust;
   uint8_t mTextCombineUpright;  // NS_STYLE_TEXT_COMBINE_UPRIGHT_*
-  uint8_t
-      mControlCharacterVisibility;  // NS_STYLE_CONTROL_CHARACTER_VISIBILITY_*
-  uint8_t mTextEmphasisPosition;    // NS_STYLE_TEXT_EMPHASIS_POSITION_*
+  mozilla::StyleControlCharacterVisibility mControlCharacterVisibility;
+  uint8_t mTextEmphasisPosition;  // NS_STYLE_TEXT_EMPHASIS_POSITION_*
   mozilla::StyleTextRendering mTextRendering;
   mozilla::StyleColor mTextEmphasisColor;
   mozilla::StyleColor mWebkitTextFillColor;
@@ -992,6 +1005,36 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
       return false;
     }
     return true;
+  }
+
+  mozilla::StyleTextAlign TextAlignForLastLine() const {
+    switch (mTextAlignLast) {
+      case mozilla::StyleTextAlignLast::Auto:
+        // 'text-align-last: auto' is equivalent to the value of the
+        // 'text-align' property except when 'text-align' is set to 'justify',
+        // in which case it is 'justify' when 'text-justify' is 'distribute' and
+        // 'start' otherwise.
+        //
+        // XXX: the code below will have to change when we implement
+        // text-justify
+        if (mTextAlign == mozilla::StyleTextAlign::Justify) {
+          return mozilla::StyleTextAlign::Start;
+        }
+        return mTextAlign;
+      case mozilla::StyleTextAlignLast::Center:
+        return mozilla::StyleTextAlign::Center;
+      case mozilla::StyleTextAlignLast::Start:
+        return mozilla::StyleTextAlign::Start;
+      case mozilla::StyleTextAlignLast::End:
+        return mozilla::StyleTextAlign::End;
+      case mozilla::StyleTextAlignLast::Left:
+        return mozilla::StyleTextAlign::Left;
+      case mozilla::StyleTextAlignLast::Right:
+        return mozilla::StyleTextAlign::Right;
+      case mozilla::StyleTextAlignLast::Justify:
+        return mozilla::StyleTextAlign::Justify;
+    }
+    return mozilla::StyleTextAlign::Start;
   }
 
   bool HasWebkitTextStroke() const { return mWebkitTextStrokeWidth > 0; }
@@ -1203,7 +1246,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   mozilla::StyleTranslate mTranslate;
   mozilla::StyleScale mScale;
 
-  uint8_t mBackfaceVisibility;
+  mozilla::StyleBackfaceVisibility mBackfaceVisibility;
   mozilla::StyleTransformStyle mTransformStyle;
   StyleGeometryBox mTransformBox;
 
@@ -1454,7 +1497,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   bool HasPerspectiveStyle() const { return !mChildPerspective.IsNone(); }
 
   bool BackfaceIsHidden() const {
-    return mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN;
+    return mBackfaceVisibility == mozilla::StyleBackfaceVisibility::Hidden;
   }
 
   // FIXME(emilio): This should be more fine-grained on each caller to
@@ -1618,31 +1661,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
 
   mozilla::StyleUserSelect mUserSelect;  // [reset](selection-style)
   mozilla::StyleScrollbarWidth mScrollbarWidth;
-  uint8_t mForceBrokenImageIcon;  // (0 if not forcing, otherwise forcing)
+  uint8_t mMozForceBrokenImageIcon;  // (0 if not forcing, otherwise forcing)
   mozilla::StyleImeMode mIMEMode;
   mozilla::StyleWindowDragging mWindowDragging;
   mozilla::StyleWindowShadow mWindowShadow;
   float mWindowOpacity;
   mozilla::StyleTransform mMozWindowTransform;
   mozilla::StyleTransformOrigin mWindowTransformOrigin;
-};
-
-struct nsCursorImage {
-  bool mHaveHotspot;
-  float mHotspotX, mHotspotY;
-  mozilla::StyleComputedImageUrl mImage;
-
-  explicit nsCursorImage(const mozilla::StyleComputedImageUrl&);
-  nsCursorImage(const nsCursorImage&);
-
-  nsCursorImage& operator=(const nsCursorImage& aOther);
-
-  bool operator==(const nsCursorImage& aOther) const;
-  bool operator!=(const nsCursorImage& aOther) const {
-    return !(*this == aOther);
-  }
-
-  imgRequestProxy* GetImage() const { return mImage.GetImage(); }
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUI {
@@ -1660,8 +1685,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUI {
   mozilla::StyleUserFocus mUserFocus;    // (auto-select)
   mozilla::StylePointerEvents mPointerEvents;
 
-  mozilla::StyleCursorKind mCursor;
-  nsTArray<nsCursorImage> mCursorImages;  // images and coords
+  mozilla::StyleCursor mCursor;
 
   mozilla::StyleColorOrAuto mCaretColor;
   mozilla::StyleScrollbarColor mScrollbarColor;
@@ -1728,12 +1752,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColumn {
   nscoord mTwipsPerPixel;
 };
 
-enum nsStyleSVGOpacitySource : uint8_t {
-  eStyleSVGOpacitySource_Normal,
-  eStyleSVGOpacitySource_ContextFillOpacity,
-  eStyleSVGOpacitySource_ContextStrokeOpacity
-};
-
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   explicit nsStyleSVG(const mozilla::dom::Document&);
   nsStyleSVG(const nsStyleSVG& aSource);
@@ -1747,19 +1765,19 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   mozilla::StyleUrlOrNone mMarkerEnd;
   mozilla::StyleUrlOrNone mMarkerMid;
   mozilla::StyleUrlOrNone mMarkerStart;
-  nsTArray<mozilla::NonNegativeLengthPercentage> mStrokeDasharray;
   mozilla::StyleMozContextProperties mMozContextProperties;
 
-  mozilla::LengthPercentage mStrokeDashoffset;
-  mozilla::NonNegativeLengthPercentage mStrokeWidth;
+  mozilla::StyleSVGStrokeDashArray mStrokeDasharray;
+  mozilla::StyleSVGLength mStrokeDashoffset;
+  mozilla::StyleSVGWidth mStrokeWidth;
 
-  float mFillOpacity;
+  mozilla::StyleSVGOpacity mFillOpacity;
   float mStrokeMiterlimit;
-  float mStrokeOpacity;
+  mozilla::StyleSVGOpacity mStrokeOpacity;
 
   mozilla::StyleFillRule mClipRule;
-  uint8_t mColorInterpolation;         // NS_STYLE_COLOR_INTERPOLATION_*
-  uint8_t mColorInterpolationFilters;  // NS_STYLE_COLOR_INTERPOLATION_*
+  mozilla::StyleColorInterpolation mColorInterpolation;
+  mozilla::StyleColorInterpolation mColorInterpolationFilters;
   mozilla::StyleFillRule mFillRule;
   mozilla::StyleSVGPaintOrder mPaintOrder;
   mozilla::StyleShapeRendering mShapeRendering;
@@ -1774,63 +1792,33 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
     return bool(mMozContextProperties.bits);
   }
 
-  nsStyleSVGOpacitySource FillOpacitySource() const {
-    uint8_t value =
-        (mContextFlags & FILL_OPACITY_SOURCE_MASK) >> FILL_OPACITY_SOURCE_SHIFT;
-    return nsStyleSVGOpacitySource(value);
-  }
-  nsStyleSVGOpacitySource StrokeOpacitySource() const {
-    uint8_t value = (mContextFlags & STROKE_OPACITY_SOURCE_MASK) >>
-                    STROKE_OPACITY_SOURCE_SHIFT;
-    return nsStyleSVGOpacitySource(value);
-  }
-  bool StrokeDasharrayFromObject() const {
-    return mContextFlags & STROKE_DASHARRAY_CONTEXT;
-  }
-  bool StrokeDashoffsetFromObject() const {
-    return mContextFlags & STROKE_DASHOFFSET_CONTEXT;
-  }
-  bool StrokeWidthFromObject() const {
-    return mContextFlags & STROKE_WIDTH_CONTEXT;
-  }
-
   bool HasMarker() const {
     return mMarkerStart.IsUrl() || mMarkerMid.IsUrl() || mMarkerEnd.IsUrl();
   }
 
   /**
    * Returns true if the stroke is not "none" and the stroke-opacity is greater
-   * than zero. This ignores stroke-widths as that depends on the context.
+   * than zero (or a context-dependent value).
+   *
+   * This ignores stroke-widths as that depends on the context.
    */
   bool HasStroke() const {
-    return !mStroke.kind.IsNone() && mStrokeOpacity > 0;
+    if (mStroke.kind.IsNone()) {
+      return false;
+    }
+    return !mStrokeOpacity.IsOpacity() || mStrokeOpacity.AsOpacity() > 0;
   }
 
   /**
    * Returns true if the fill is not "none" and the fill-opacity is greater
-   * than zero.
+   * than zero (or a context-dependent value).
    */
-  bool HasFill() const { return !mFill.kind.IsNone() && mFillOpacity > 0; }
-
- private:
-  // Flags to represent the use of context-fill and context-stroke
-  // for fill-opacity or stroke-opacity, and context-value for stroke-dasharray,
-  // stroke-dashoffset and stroke-width.
-
-  // fill-opacity: context-{fill,stroke}
-  static const uint8_t FILL_OPACITY_SOURCE_MASK = 0x03;
-  // stroke-opacity: context-{fill,stroke}
-  static const uint8_t STROKE_OPACITY_SOURCE_MASK = 0x0C;
-  // stroke-dasharray: context-value
-  static const uint8_t STROKE_DASHARRAY_CONTEXT = 0x10;
-  // stroke-dashoffset: context-value
-  static const uint8_t STROKE_DASHOFFSET_CONTEXT = 0x20;
-  // stroke-width: context-value
-  static const uint8_t STROKE_WIDTH_CONTEXT = 0x40;
-  static const uint8_t FILL_OPACITY_SOURCE_SHIFT = 0;
-  static const uint8_t STROKE_OPACITY_SOURCE_SHIFT = 2;
-
-  uint8_t mContextFlags;
+  bool HasFill() const {
+    if (mFill.kind.IsNone()) {
+      return false;
+    }
+    return !mFillOpacity.IsOpacity() || mFillOpacity.AsOpacity() > 0;
+  }
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset {
@@ -1851,7 +1839,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset {
   bool HasMask() const;
 
   bool HasNonScalingStroke() const {
-    return mVectorEffect == NS_STYLE_VECTOR_EFFECT_NON_SCALING_STROKE;
+    return mVectorEffect == mozilla::StyleVectorEffect::NonScalingStroke;
   }
 
   // geometry properties
@@ -1872,7 +1860,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset {
   float mStopOpacity;
   float mFloodOpacity;
 
-  uint8_t mVectorEffect;  // NS_STYLE_VECTOR_EFFECT_*
+  mozilla::StyleVectorEffect mVectorEffect;
   mozilla::StyleMaskType mMaskType;
 };
 
@@ -1898,7 +1886,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
   }
 
   bool HasMixBlendMode() const {
-    return mMixBlendMode != NS_STYLE_BLEND_NORMAL;
+    return mMixBlendMode != mozilla::StyleBlend::Normal;
   }
 
   mozilla::StyleOwnedSlice<mozilla::StyleFilter> mFilters;
@@ -1906,7 +1894,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
   mozilla::StyleOwnedSlice<mozilla::StyleFilter> mBackdropFilters;
   mozilla::StyleClipRectOrAuto mClip;  // offsets from UL border edge
   float mOpacity;
-  uint8_t mMixBlendMode;  // NS_STYLE_BLEND_*
+  mozilla::StyleBlend mMixBlendMode;
 };
 
 #define STATIC_ASSERT_TYPE_LAYOUTS_MATCH(T1, T2)           \
@@ -1993,13 +1981,22 @@ STATIC_ASSERT_TYPE_LAYOUTS_MATCH(mozilla::UniquePtr<int>,
  */
 template <typename T>
 class nsTArray_Simple {
+ protected:
   T* mBuffer;
 
  public:
-  // The existence of a destructor here prevents bindgen from deriving the Clone
-  // trait via a simple memory copy.
-  ~nsTArray_Simple(){};
+  ~nsTArray_Simple() {
+    // The existence of a user-provided, and therefore non-trivial, destructor
+    // here prevents bindgen from deriving the Clone trait via a simple memory
+    // copy.
+  }
 };
+
+/**
+ * <div rustbindgen replaces="CopyableTArray"></div>
+ */
+template <typename T>
+class CopyableTArray_Simple : public nsTArray_Simple<T> {};
 
 STATIC_ASSERT_TYPE_LAYOUTS_MATCH(nsTArray<nsStyleImageLayers::Layer>,
                                  nsTArray_Simple<nsStyleImageLayers::Layer>);

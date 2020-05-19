@@ -10,6 +10,7 @@
 #include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/MediaSessionBinding.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
@@ -19,9 +20,6 @@ class nsIGlobalObject;
 namespace mozilla {
 namespace dom {
 
-struct MediaImage;
-struct MediaMetadataInit;
-
 class MediaMetadataBase {
  public:
   MediaMetadataBase() = default;
@@ -29,10 +27,12 @@ class MediaMetadataBase {
                     const nsString& aAlbum)
       : mTitle(aTitle), mArtist(aArtist), mAlbum(aAlbum) {}
 
+  static MediaMetadataBase EmptyData() { return MediaMetadataBase(); }
+
   nsString mTitle;
   nsString mArtist;
   nsString mAlbum;
-  nsTArray<MediaImage> mArtwork;
+  CopyableTArray<MediaImage> mArtwork;
 };
 
 class MediaMetadata final : public nsISupports,
@@ -70,6 +70,11 @@ class MediaMetadata final : public nsISupports,
 
   void SetArtwork(JSContext* aCx, const Sequence<JSObject*>& aArtwork,
                   ErrorResult& aRv);
+
+  // This would expose MediaMetadataBase's members as public, so use this method
+  // carefully. Now we only use this when we want to update the metadata to the
+  // media session controller in the chrome process.
+  MediaMetadataBase* AsMetadataBase() { return this; }
 
  private:
   MediaMetadata(nsIGlobalObject* aParent, const nsString& aTitle,

@@ -35,6 +35,7 @@ ABIArg ABIArgGenerator::next(MIRType type) {
     case MIRType::Int64:
     case MIRType::Pointer:
     case MIRType::RefOrNull:
+    case MIRType::StackResults:
       if (intRegIndex_ == NumIntArgRegs) {
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uintptr_t);
@@ -59,6 +60,9 @@ ABIArg ABIArgGenerator::next(MIRType type) {
       break;
 
     default:
+      // Note that in Assembler-x64.cpp there's a special case for Win64 which
+      // does not allow passing SIMD by value.  Since there's Win64 on ARM64 we
+      // may need to duplicate that logic here.
       MOZ_CRASH("Unexpected argument type");
   }
   return current_;

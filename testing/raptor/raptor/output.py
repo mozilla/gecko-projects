@@ -33,6 +33,7 @@ class PerftestOutput(object):
         self.summarized_supporting_data = []
         self.summarized_screenshots = []
         self.subtest_alert_on = subtest_alert_on
+        self.mozproxy_data = False
         self.browser_name = None
         self.browser_version = None
 
@@ -50,26 +51,39 @@ class PerftestOutput(object):
         Supporting data was gathered outside of the main raptor test; it will be kept
         separate from the main raptor test results. Summarize it appropriately.
 
-        supporting_data = {'type': 'data-type',
-                           'test': 'raptor-test-ran-when-data-was-gathered',
-                           'unit': 'unit that the values are in',
-                           'values': {
-                               'name': value,
-                               'nameN': valueN}}
+        supporting_data = {
+            'type': 'data-type',
+            'test': 'raptor-test-ran-when-data-was-gathered',
+            'unit': 'unit that the values are in',
+            'summarize-values': True/False,
+            'suite-suffix-type': True/False,
+            'values': {
+                'name': value_dict,
+                'nameN': value_dictN
+            }
+        }
 
-        More specifically, power data will look like this:
+        More specifically, subtest supporting data will look like this:
 
-        supporting_data = {'type': 'power',
-                           'test': 'raptor-speedometer-geckoview',
-                           'unit': 'mAh',
-                           'values': {
-                               'cpu': cpu,
-                               'wifi': wifi,
-                               'screen': screen,
-                               'proportional': proportional}}
+        supporting_data = {
+            'type': 'power',
+            'test': 'raptor-speedometer-geckoview',
+            'unit': 'mAh',
+            'values': {
+                'cpu': {
+                    'values': val,
+                    'lowerIsBetter': True/False,
+                    'alertThreshold': 2.0,
+                    'subtest-prefix-type': True/False,
+                    'unit': 'mWh'
+                },
+                'wifi': ...
+            }
+        }
 
         We want to treat each value as a 'subtest'; and for the overall aggregated
-        test result we will add all of these subtest values together.
+        test result the summary value is dependent on the unit. An exception is
+        raised in case we don't know about the specified unit.
         """
         if self.supporting_data is None:
             return
@@ -82,6 +96,9 @@ class PerftestOutput(object):
             data_type = data_set["type"]
             LOG.info("summarizing %s data" % data_type)
 
+            if "mozproxy" in data_type:
+                self.mozproxy_data = True
+
             if data_type not in support_data_by_type:
                 support_data_by_type[data_type] = {
                     "framework": {"name": "raptor"},
@@ -92,33 +109,50 @@ class PerftestOutput(object):
             # supporting data i.e. 'raptor-speedometer-geckoview-power'
             vals = []
             subtests = []
+
+            suite_name = data_set["test"]
+            if data_set.get("suite-suffix-type", True):
+                suite_name = "%s-%s" % (data_set["test"], data_set["type"])
+
             suite = {
-                "name": data_set["test"] + "-" + data_set["type"],
+                "name": suite_name,
                 "type": data_set["type"],
                 "subtests": subtests,
-                "lowerIsBetter": True,
-                "unit": data_set["unit"],
-                "alertThreshold": 2.0,
             }
+            if data_set.get("summarize-values", True):
+                suite.update({
+                    "lowerIsBetter": True,
+                    "unit": data_set["unit"],
+                    "alertThreshold": 2.0,
+                })
+
+            for result in self.results:
+                if result["name"] == data_set["test"]:
+                    suite["extraOptions"] = result["extra_options"]
+                    break
 
             support_data_by_type[data_type]["suites"].append(suite)
+            for measurement_name, value_info in data_set["values"].iteritems():
+                # Subtests are expected to be specified in a dictionary, this
+                # provides backwards compatibility with the old method
+                if not isinstance(value_info, dict):
+                    value_info = {"values": value_info}
 
-            # each supporting data measurement becomes a subtest, with the measurement type
-            # used for the subtest name. i.e. 'power-cpu'
-            # the overall 'suite' value for supporting data is dependent on
-            # the unit of the values, by default the sum of all measurements
-            # is taken.
-            for measurement_name, value in data_set["values"].iteritems():
                 new_subtest = {}
-                new_subtest["name"] = data_type + "-" + measurement_name
-                new_subtest["value"] = value
-                new_subtest["lowerIsBetter"] = True
-                new_subtest["alertThreshold"] = 2.0
-                new_subtest["unit"] = data_set["unit"]
+                if value_info.get("subtest-prefix-type", True):
+                    new_subtest["name"] = data_type + "-" + measurement_name
+                else:
+                    new_subtest["name"] = measurement_name
+
+                new_subtest["value"] = value_info["values"]
+                new_subtest["lowerIsBetter"] = value_info.get("lowerIsBetter", True)
+                new_subtest["alertThreshold"] = value_info.get("alertThreshold", 2.0)
+                new_subtest["unit"] = value_info.get("unit", data_set["unit"])
+
                 subtests.append(new_subtest)
                 vals.append([new_subtest["value"], new_subtest["name"]])
 
-            if len(subtests) >= 1:
+            if len(subtests) >= 1 and data_set.get("summarize-values", True):
                 suite["value"] = self.construct_summary(
                     vals, testname="supporting_data", unit=data_set["unit"]
                 )
@@ -195,7 +229,7 @@ class PerftestOutput(object):
         if "gecko_profile" in extra_opts:
             LOG.info("gecko profiling enabled %s" % not_posting)
             output_perf_data = False
-        elif test_type == "scenario":
+        if test_type == "scenario":
             # if a resource-usage flag was supplied the perfherder data
             # will still be output from output_supporting_data
             LOG.info("scenario test type was run %s" % not_posting)
@@ -212,7 +246,7 @@ class PerftestOutput(object):
             # dumped out. TODO: Bug 1515406 - Add option to output both supplementary
             # data (i.e. power) and the regular Raptor test result
             # Both are already available as separate PERFHERDER_DATA json blobs
-            if len(self.summarized_supporting_data) == 0:
+            if len(self.summarized_supporting_data) == 0 or self.mozproxy_data:
                 LOG.info("PERFHERDER_DATA: %s" % json.dumps(self.summarized_results))
                 total_perfdata = 1
             else:
@@ -280,7 +314,7 @@ class PerftestOutput(object):
         if testname.startswith("raptor-v8_7"):
             return 100 * filters.geometric_mean(_filter(vals))
 
-        if testname.startswith("raptor-speedometer"):
+        if testname.startswith("raptor-speedometer") or testname.startswith("speedometer"):
             correctionFactor = 3
             results = _filter(vals)
             # speedometer has 16 tests, each of these are made of up 9 subtests
@@ -361,19 +395,29 @@ class PerftestOutput(object):
             return round(filters.mean(_filter(vals)), 2)
 
         if testname.startswith("supporting_data"):
-            if unit:
-                if unit in ("%",):
-                    return filters.mean(_filter(vals))
-                elif unit in ("W", "MHz"):
-                    # For power in Watts and clock frequencies,
-                    # summarize with the sum of the averages
-                    allavgs = []
-                    for (val, subtest) in vals:
-                        if "avg" in subtest:
-                            allavgs.append(val)
-                    if allavgs:
-                        return sum(allavgs)
-            return sum(_filter(vals))
+            if not unit:
+                return sum(_filter(vals))
+
+            if unit == "%":
+                return filters.mean(_filter(vals))
+
+            if unit in ("W", "MHz"):
+                # For power in Watts and clock frequencies,
+                # summarize with the sum of the averages
+                allavgs = []
+                for val, subtest in vals:
+                    if "avg" in subtest:
+                        allavgs.append(val)
+                if allavgs:
+                    return sum(allavgs)
+
+                raise Exception(
+                    "No average measurements found for supporting data with W, or MHz unit .")
+
+            if unit in ["KB", "mAh", "mWh"]:
+                return sum(_filter(vals))
+
+            raise NotImplementedError("Unit %s not suported" % unit)
 
         if len(vals) > 1:
             return round(filters.geometric_mean(_filter(vals)), 2)
@@ -635,7 +679,28 @@ class RaptorOutput(PerftestOutput):
                     subtests.append(new_subtest)
 
             elif test["type"] == "benchmark":
-                if "assorted-dom" in test["measurements"]:
+
+                # to reduce the conditions in the if below, i will use this list
+                # to check if we are running an youtube playback perf test
+                youtube_playback_tests = [
+                    "youtube-playbackperf-sfr-vp9-test",
+                    "youtube-playbackperf-sfr-h264-test",
+                    "youtube-playbackperf-sfr-av1-test",
+                    "youtube-playbackperf-hfr-test",
+                    "youtube-playbackperf-widevine-sfr-vp9-test",
+                    "youtube-playbackperf-widevine-sfr-h264-test",
+                    "youtube-playbackperf-widevine-hfr-test",
+                ]
+
+                youtube_playback_test_name = [
+                    i for i in youtube_playback_tests if i in test["measurements"]
+                ]
+
+                if youtube_playback_test_name:
+                    subtests, vals = self.parseYoutubePlaybackPerformanceOutput(
+                        test, test_name=youtube_playback_test_name[0]
+                    )
+                elif "assorted-dom" in test["measurements"]:
                     subtests, vals = self.parseAssortedDomOutput(test)
                 elif "ares6" in test["measurements"]:
                     subtests, vals = self.parseAresSixOutput(test)
@@ -655,8 +720,7 @@ class RaptorOutput(PerftestOutput):
                     subtests, vals = self.parseWASMMiscOutput(test)
                 elif "webaudio" in test["measurements"]:
                     subtests, vals = self.parseWebaudioOutput(test)
-                elif "youtube-playbackperf-test" in test["measurements"]:
-                    subtests, vals = self.parseYoutubePlaybackPerformanceOutput(test)
+
                 suite["subtests"] = subtests
 
             else:
@@ -1164,7 +1228,7 @@ class RaptorOutput(PerftestOutput):
 
         return subtests, vals
 
-    def parseYoutubePlaybackPerformanceOutput(self, test):
+    def parseYoutubePlaybackPerformanceOutput(self, test, test_name):
         """Parse the metrics for the Youtube playback performance test.
 
         For each video measured values for dropped and decoded frames will be
@@ -1178,7 +1242,7 @@ class RaptorOutput(PerftestOutput):
         All those three values will then be emitted as separate sub tests.
         """
         _subtests = {}
-        data = test["measurements"]["youtube-playbackperf-test"]
+        data = test["measurements"].get(test_name)
 
         def create_subtest_entry(
             name,
@@ -1215,7 +1279,7 @@ class RaptorOutput(PerftestOutput):
                     percent_dropped = 100.0
 
                 # Remove the not needed "PlaybackPerf." prefix from each test
-                _sub = _sub.split("PlaybackPerf.", 1)[-1]
+                _sub = _sub.split("PlaybackPerf", 1)[-1]
 
                 # build a list of subtests and append all related replicates
                 create_subtest_entry(

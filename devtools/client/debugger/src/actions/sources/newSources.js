@@ -49,6 +49,8 @@ import { validateNavigateContext, ContextError } from "../../utils/context";
 import type {
   Source,
   SourceActorId,
+  SourceId,
+  ThreadId,
   Context,
   OriginalSourceData,
   GeneratedSourceData,
@@ -104,18 +106,6 @@ function loadSourceMap(cx: Context, sourceActor: SourceActor) {
 
     let data = null;
     try {
-      // Unable to correctly type the result of a spread on a union type.
-      // See https://github.com/facebook/flow/pull/7298
-      let url = sourceActor.url || "";
-      if (!sourceActor.url && typeof sourceActor.introductionUrl === "string") {
-        // If the source was dynamically generated (via eval, dynamically
-        // created script elements, and so forth), it won't have a URL, so that
-        // it is not collapsed into other sources from the same place. The
-        // introduction URL will include the point it was constructed at,
-        // however, so use that for resolving any source maps in the source.
-        url = sourceActor.introductionUrl;
-      }
-
       // Ignore sourceMapURL on scripts that are part of HTML files, since
       // we currently treat sourcemaps as Source-wide, not SourceActor-specific.
       const source = getSourceByActorId(getState(), sourceActor.id);
@@ -124,7 +114,8 @@ function loadSourceMap(cx: Context, sourceActor: SourceActor) {
           // Using source ID here is historical and eventually we'll want to
           // switch to all of this being per-source-actor.
           id: source.id,
-          url,
+          url: sourceActor.url || "",
+          sourceMapBaseURL: sourceActor.sourceMapBaseURL || "",
           sourceMapURL: sourceActor.sourceMapURL || "",
           isWasm: sourceActor.introductionType === "wasm",
         });
@@ -152,7 +143,7 @@ function loadSourceMap(cx: Context, sourceActor: SourceActor) {
 
 // If a request has been made to show this source, go ahead and
 // select it.
-function checkSelectedSource(cx: Context, sourceId: string) {
+function checkSelectedSource(cx: Context, sourceId: SourceId) {
   return async ({ dispatch, getState }: ThunkArgs) => {
     const state = getState();
     const pendingLocation = getPendingSelectedLocation(state);
@@ -188,7 +179,7 @@ function checkSelectedSource(cx: Context, sourceId: string) {
   };
 }
 
-function checkPendingBreakpoints(cx: Context, sourceId: string) {
+function checkPendingBreakpoints(cx: Context, sourceId: SourceId) {
   return async ({ dispatch, getState }: ThunkArgs) => {
     // source may have been modified by selectLocation
     const source = getSource(getState(), sourceId);
@@ -219,8 +210,8 @@ function checkPendingBreakpoints(cx: Context, sourceId: string) {
 }
 
 function restoreBlackBoxedSources(cx: Context, sources: Source[]) {
-  return async ({ dispatch }: ThunkArgs) => {
-    const tabs = getBlackBoxList();
+  return async ({ dispatch, getState }: ThunkArgs) => {
+    const tabs = getBlackBoxList(getState());
     if (tabs.length == 0) {
       return;
     }
@@ -279,8 +270,6 @@ export function newOriginalSources(sourceInfo: Array<OriginalSourceData>) {
         isPrettyPrinted: false,
         isWasm: false,
         isBlackBoxed: false,
-        introductionUrl: null,
-        introductionType: undefined,
         isExtension: false,
         extensionName: null,
         isOriginal: true,
@@ -312,6 +301,11 @@ export function newGeneratedSources(sourceInfo: Array<GeneratedSourceData>) {
     getState,
     client,
   }: ThunkArgs): Promise<Array<Source>> => {
+    // bails early for unnecessary calls to newGeneratedSources. This simplifies the reducers which still create a new state, but don't need to.
+    if (sourceInfo.length == 0) {
+      return [];
+    }
+
     const resultIds = [];
     const newSourcesObj = {};
     const newSourceActors: Array<SourceActor> = [];
@@ -326,8 +320,6 @@ export function newGeneratedSources(sourceInfo: Array<GeneratedSourceData>) {
           relativeUrl: source.url,
           isPrettyPrinted: false,
           extensionName: source.extensionName,
-          introductionUrl: source.introductionUrl,
-          introductionType: source.introductionType,
           isBlackBoxed: false,
           isWasm:
             !!supportsWasm(getState()) && source.introductionType === "wasm",
@@ -347,9 +339,9 @@ export function newGeneratedSources(sourceInfo: Array<GeneratedSourceData>) {
           thread,
           source: newId,
           isBlackBoxed: source.isBlackBoxed,
+          sourceMapBaseURL: source.sourceMapBaseURL,
           sourceMapURL: source.sourceMapURL,
           url: source.url,
-          introductionUrl: source.introductionUrl,
           introductionType: source.introductionType,
         });
       }
@@ -394,13 +386,13 @@ export function newGeneratedSources(sourceInfo: Array<GeneratedSourceData>) {
   };
 }
 
-function addSources(cx, sources: Array<Source>) {
+function addSources(cx: Context, sources: Array<Source>) {
   return ({ dispatch, getState }: ThunkArgs) => {
     dispatch({ type: "ADD_SOURCES", cx, sources });
   };
 }
 
-function checkNewSources(cx, sources: Source[]) {
+function checkNewSources(cx: Context, sources: Source[]) {
   return async ({ dispatch, getState }: ThunkArgs) => {
     for (const source of sources) {
       dispatch(checkSelectedSource(cx, source.id));
@@ -412,7 +404,10 @@ function checkNewSources(cx, sources: Source[]) {
   };
 }
 
-export function ensureSourceActor(thread: string, sourceActor: SourceActorId) {
+export function ensureSourceActor(
+  thread: ThreadId,
+  sourceActor: SourceActorId
+) {
   return async function({ dispatch, getState, client }: ThunkArgs) {
     await sourceQueue.flush();
     if (hasSourceActor(getState(), sourceActor)) {

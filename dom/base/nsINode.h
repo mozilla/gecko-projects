@@ -175,8 +175,12 @@ enum {
 
   NODE_HAS_BEEN_IN_UA_WIDGET = NODE_FLAG_BIT(15),
 
+  // Set if the node has a nonce value and a header delivered CSP.
+  NODE_HAS_NONCE_AND_HEADER_CSP = NODE_FLAG_BIT(16),
+
+  NODE_KEEPS_DOMARENA = NODE_FLAG_BIT(17),
   // Remaining bits are node type specific.
-  NODE_TYPE_SPECIFIC_BITS_OFFSET = 16
+  NODE_TYPE_SPECIFIC_BITS_OFFSET = 18
 };
 
 // Make sure we have space for our bits
@@ -304,6 +308,11 @@ class nsINode : public mozilla::dom::EventTarget {
   static const auto DOCUMENT_FRAGMENT_NODE =
       mozilla::dom::Node_Binding::DOCUMENT_FRAGMENT_NODE;
   static const auto NOTATION_NODE = mozilla::dom::Node_Binding::NOTATION_NODE;
+  static const auto MAX_NODE_TYPE = NOTATION_NODE;
+
+  void* operator new(size_t aSize, nsNodeInfoManager* aManager);
+  void* operator new(size_t aSize) = delete;
+  void operator delete(void* aPtr);
 
   template <class T>
   using Sequence = mozilla::dom::Sequence<T>;
@@ -980,6 +989,12 @@ class nsINode : public mozilla::dom::EventTarget {
   mozilla::dom::Element* GetParentElementCrossingShadowRoot() const;
 
   /**
+   * Get closest element node for the node.  Meaning that if the node is an
+   * element node, returns itself.  Otherwise, returns parent element or null.
+   */
+  inline mozilla::dom::Element* GetAsElementOrParentElement() const;
+
+  /**
    * Get the root of the subtree this node belongs to.  This never returns
    * null.  It may return 'this' (e.g. for document nodes, and nodes that
    * are the roots of disconnected subtrees).
@@ -1361,7 +1376,7 @@ class nsINode : public mozilla::dom::EventTarget {
    * ancestor. This node is definitely not selected when |false| is returned,
    * but it may or may not be selected when |true| is returned.
    */
-  bool IsSelectionDescendant() const {
+  bool IsMaybeSelected() const {
     return IsDescendantOfClosestCommonInclusiveAncestorForRangeInSelection() ||
            IsClosestCommonInclusiveAncestorForRangeInSelection();
   }
@@ -1994,6 +2009,10 @@ class nsINode : public mozilla::dom::EventTarget {
   void GetBoxQuads(const BoxQuadOptions& aOptions,
                    nsTArray<RefPtr<DOMQuad>>& aResult, CallerType aCallerType,
                    ErrorResult& aRv);
+
+  void GetBoxQuadsFromWindowOrigin(const BoxQuadOptions& aOptions,
+                                   nsTArray<RefPtr<DOMQuad>>& aResult,
+                                   ErrorResult& aRv);
 
   already_AddRefed<DOMQuad> ConvertQuadFromNode(
       DOMQuad& aQuad, const TextOrElementOrDocument& aFrom,

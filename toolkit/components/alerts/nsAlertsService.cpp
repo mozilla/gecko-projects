@@ -63,7 +63,7 @@ class IconCallback final : public nsIFaviconDataCallback {
   }
 
  private:
-  virtual ~IconCallback() {}
+  virtual ~IconCallback() = default;
 
   nsCOMPtr<nsIAlertsService> mBackend;
   nsCOMPtr<nsIAlertNotification> mAlert;
@@ -138,7 +138,7 @@ nsAlertsService::nsAlertsService() : mBackend(nullptr) {
   mBackend = do_GetService(NS_SYSTEMALERTSERVICE_CONTRACTID);
 }
 
-nsAlertsService::~nsAlertsService() {}
+nsAlertsService::~nsAlertsService() = default;
 
 bool nsAlertsService::ShouldShowAlert() {
   bool result = true;
@@ -151,6 +151,16 @@ bool nsAlertsService::ShouldShowAlert() {
     }
   }
 #endif
+
+  nsCOMPtr<nsIAlertsDoNotDisturb> alertsDND(GetDNDBackend());
+  if (alertsDND) {
+    bool suppressForScreenSharing = false;
+    nsresult rv =
+        alertsDND->GetSuppressForScreenSharing(&suppressForScreenSharing);
+    if (NS_SUCCEEDED(rv)) {
+      result &= !suppressForScreenSharing;
+    }
+  }
 
   return result;
 }
@@ -283,6 +293,26 @@ NS_IMETHODIMP nsAlertsService::SetManualDoNotDisturb(bool aDoNotDisturb) {
     Telemetry::Accumulate(Telemetry::ALERTS_SERVICE_DND_ENABLED, 1);
   }
   return rv;
+#endif
+}
+
+NS_IMETHODIMP nsAlertsService::GetSuppressForScreenSharing(bool* aRetVal) {
+#ifdef MOZ_WIDGET_ANDROID
+  return NS_ERROR_NOT_IMPLEMENTED;
+#else
+  nsCOMPtr<nsIAlertsDoNotDisturb> alertsDND(GetDNDBackend());
+  NS_ENSURE_TRUE(alertsDND, NS_ERROR_NOT_IMPLEMENTED);
+  return alertsDND->GetSuppressForScreenSharing(aRetVal);
+#endif
+}
+
+NS_IMETHODIMP nsAlertsService::SetSuppressForScreenSharing(bool aSuppress) {
+#ifdef MOZ_WIDGET_ANDROID
+  return NS_ERROR_NOT_IMPLEMENTED;
+#else
+  nsCOMPtr<nsIAlertsDoNotDisturb> alertsDND(GetDNDBackend());
+  NS_ENSURE_TRUE(alertsDND, NS_ERROR_NOT_IMPLEMENTED);
+  return alertsDND->SetSuppressForScreenSharing(aSuppress);
 #endif
 }
 

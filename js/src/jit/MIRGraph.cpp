@@ -37,6 +37,8 @@ MIRGenerator::MIRGenerator(CompileRealm* realm,
       safeForMinorGC_(true),
       stringsCanBeInNursery_(realm ? realm->zone()->canNurseryAllocateStrings()
                                    : false),
+      bigIntsCanBeInNursery_(realm ? realm->zone()->canNurseryAllocateBigInts()
+                                   : false),
       minWasmHeapLength_(0),
       options(options),
       gs_(alloc) {}
@@ -692,7 +694,7 @@ void MBasicBlock::setArgumentsObject(MDefinition* argsObj) {
 }
 
 void MBasicBlock::pick(int32_t depth) {
-  // pick take an element and move it to the top.
+  // pick takes a value and moves it to the top.
   // pick(-2):
   //   A B C D E
   //   A B D C E [ swapAt(-2) ]
@@ -703,7 +705,7 @@ void MBasicBlock::pick(int32_t depth) {
 }
 
 void MBasicBlock::unpick(int32_t depth) {
-  // unpick take the top of the stack element and move it under the depth-th
+  // unpick takes the value on top of the stack and moves it under the depth-th
   // element;
   // unpick(-2):
   //   A B C D E
@@ -1535,7 +1537,7 @@ void MBasicBlock::dumpStack(GenericPrinter& out) {
   out.printf(" %-3s %-16s %-6s %-10s\n", "#", "name", "copyOf", "first/next");
   out.printf("-------------------------------------------\n");
   for (uint32_t i = 0; i < stackPosition_; i++) {
-    out.printf(" %-3d", i);
+    out.printf(" %-3u", i);
     out.printf(" %-16p\n", (void*)slots_[i]);
   }
 #endif

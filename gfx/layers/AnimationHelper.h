@@ -8,7 +8,8 @@
 #define mozilla_layers_AnimationHelper_h
 
 #include "mozilla/dom/Nullable.h"
-#include "mozilla/ComputedTimingFunction.h"    // for ComputedTimingFunction
+#include "mozilla/ComputedTimingFunction.h"  // for ComputedTimingFunction
+#include "mozilla/layers/AnimationStorageData.h"
 #include "mozilla/layers/LayersMessages.h"     // for TransformData, etc
 #include "mozilla/webrender/WebRenderTypes.h"  // for RenderRoot
 #include "mozilla/TimeStamp.h"                 // for TimeStamp
@@ -28,50 +29,6 @@ namespace layers {
 class Animation;
 
 typedef nsTArray<layers::Animation> AnimationArray;
-
-struct PropertyAnimation {
-  struct SegmentData {
-    RefPtr<RawServoAnimationValue> mStartValue;
-    RefPtr<RawServoAnimationValue> mEndValue;
-    Maybe<mozilla::ComputedTimingFunction> mFunction;
-    float mStartPortion;
-    float mEndPortion;
-    dom::CompositeOperation mStartComposite;
-    dom::CompositeOperation mEndComposite;
-  };
-  nsTArray<SegmentData> mSegments;
-  TimingParams mTiming;
-
-  // These two variables correspond to the variables of the same name in
-  // KeyframeEffectReadOnly and are used for the same purpose: to skip composing
-  // animations whose progress has not changed.
-  dom::Nullable<double> mProgressOnLastCompose;
-  uint64_t mCurrentIterationOnLastCompose = 0;
-  // These two variables are used for a similar optimization above but are
-  // applied to the timing function in each keyframe.
-  uint32_t mSegmentIndexOnLastCompose = 0;
-  dom::Nullable<double> mPortionInSegmentOnLastCompose;
-
-  TimeStamp mOriginTime;
-  Maybe<TimeDuration> mStartTime;
-  TimeDuration mHoldTime;
-  float mPlaybackRate;
-  dom::IterationCompositeOperation mIterationComposite;
-  bool mIsNotPlaying;
-};
-
-struct PropertyAnimationGroup {
-  nsCSSPropertyID mProperty;
-
-  nsTArray<PropertyAnimation> mAnimations;
-  RefPtr<RawServoAnimationValue> mBaseStyle;
-
-  bool IsEmpty() const { return mAnimations.IsEmpty(); }
-  void Clear() {
-    mAnimations.Clear();
-    mBaseStyle = nullptr;
-  }
-};
 
 struct AnimationTransform {
   /*
@@ -115,31 +72,6 @@ struct AnimatedValue final {
   AnimatedValueType mValue;
 };
 
-struct CompositorAnimationData {
-  Maybe<TransformData> mTransform;
-  Maybe<MotionPathData> mMotionPath;
-
-  bool HasData() const { return mTransform || mMotionPath; }
-  void Clear() {
-    mTransform.reset();
-    mMotionPath.reset();
-  }
-};
-
-struct AnimationStorageData {
-  nsTArray<PropertyAnimationGroup> mAnimation;
-  CompositorAnimationData mTransformLikeMetaData;
-  RefPtr<gfx::Path> mCachedMotionPath;
-
-  AnimationStorageData() = default;
-  AnimationStorageData(AnimationStorageData&& aOther) = default;
-  AnimationStorageData& operator=(AnimationStorageData&& aOther) = default;
-
-  // Avoid any copy because mAnimation could be a large array.
-  AnimationStorageData(const AnimationStorageData& aOther) = delete;
-  AnimationStorageData& operator=(const AnimationStorageData& aOther) = delete;
-};
-
 // CompositorAnimationStorage stores the animations and animated values
 // keyed by a CompositorAnimationsId. The "animations" are a representation of
 // an entire animation over time, while the "animated values" are values sampled
@@ -158,8 +90,6 @@ class CompositorAnimationStorage final {
   typedef nsClassHashtable<nsUint64HashKey, AnimatedValue> AnimatedValueTable;
   typedef nsDataHashtable<nsUint64HashKey, AnimationStorageData>
       AnimationsTable;
-  typedef nsDataHashtable<nsUint64HashKey, wr::RenderRoot>
-      AnimationsRenderRootsTable;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositorAnimationStorage)
  public:
@@ -205,8 +135,7 @@ class CompositorAnimationStorage final {
   /**
    * Set the animations based on the unique id
    */
-  void SetAnimations(uint64_t aId, const AnimationArray& aAnimations,
-                     wr::RenderRoot aRenderRoot);
+  void SetAnimations(uint64_t aId, const AnimationArray& aAnimations);
 
   /**
    * Return the iterator of animations table
@@ -216,10 +145,6 @@ class CompositorAnimationStorage final {
   }
 
   uint32_t AnimationsCount() const { return mAnimations.Count(); }
-
-  wr::RenderRoot AnimationRenderRoot(const uint64_t& aId) const {
-    return mAnimationRenderRoots.Get(aId);
-  }
 
   /**
    * Clear AnimatedValues and Animations data
@@ -233,7 +158,6 @@ class CompositorAnimationStorage final {
  private:
   AnimatedValueTable mAnimatedValues;
   AnimationsTable mAnimations;
-  AnimationsRenderRootsTable mAnimationRenderRoots;
 };
 
 /**
@@ -359,8 +283,7 @@ class AnimationHelper {
    */
   static gfx::Matrix4x4 ServoAnimationValueToMatrix4x4(
       const nsTArray<RefPtr<RawServoAnimationValue>>& aValue,
-      const CompositorAnimationData& aAnimationData,
-      gfx::Path* aCachedMotionPath);
+      const TransformData& aTransformData, gfx::Path* aCachedMotionPath);
 };
 
 }  // namespace layers

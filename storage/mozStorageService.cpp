@@ -9,7 +9,6 @@
 
 #include "mozStorageService.h"
 #include "mozStorageConnection.h"
-#include "nsAutoPtr.h"
 #include "nsCollationCID.h"
 #include "nsComponentManagerUtils.h"
 #include "nsEmbedCID.h"
@@ -31,8 +30,6 @@
 // "windows.h" was included and it can #define lots of things we care about...
 #  undef CompareString
 #endif
-
-#include "nsIPromptService.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Defines
@@ -182,31 +179,6 @@ Service* Service::gService = nullptr;
 already_AddRefed<Service> Service::getSingleton() {
   if (gService) {
     return do_AddRef(gService);
-  }
-
-  // Ensure that we are using the same version of SQLite that we compiled with
-  // or newer.  Our configure check ensures we are using a new enough version
-  // at compile time.
-  if (SQLITE_VERSION_NUMBER > ::sqlite3_libversion_number() ||
-      !::sqlite3_compileoption_used("SQLITE_SECURE_DELETE") ||
-      !::sqlite3_compileoption_used("SQLITE_THREADSAFE=1") ||
-      !::sqlite3_compileoption_used("SQLITE_ENABLE_FTS3") ||
-      !::sqlite3_compileoption_used("SQLITE_ENABLE_UNLOCK_NOTIFY") ||
-      !::sqlite3_compileoption_used("SQLITE_ENABLE_DBSTAT_VTAB")) {
-    nsCOMPtr<nsIPromptService> ps(do_GetService(NS_PROMPTSERVICE_CONTRACTID));
-    if (ps) {
-      nsAutoString title, message;
-      title.AppendLiteral("SQLite Version Error");
-      message.AppendLiteral(
-          "The application has been updated, but the SQLite "
-          "library wasn't updated properly and the application "
-          "cannot run. Please try to launch the application again. "
-          "If that should still fail, please try reinstalling "
-          "it, or contact the support of where you got the "
-          "application from.");
-      (void)ps->Alert(nullptr, title.get(), message.get());
-    }
-    MOZ_CRASH("SQLite Version Error");
   }
 
   // The first reference to the storage service must be obtained on the
@@ -502,16 +474,15 @@ class AsyncInitDatabase final : public Runnable {
   }
 
   ~AsyncInitDatabase() {
-    NS_ReleaseOnMainThreadSystemGroup("AsyncInitDatabase::mStorageFile",
-                                      mStorageFile.forget());
-    NS_ReleaseOnMainThreadSystemGroup("AsyncInitDatabase::mConnection",
-                                      mConnection.forget());
+    NS_ReleaseOnMainThread("AsyncInitDatabase::mStorageFile",
+                           mStorageFile.forget());
+    NS_ReleaseOnMainThread("AsyncInitDatabase::mConnection",
+                           mConnection.forget());
 
     // Generally, the callback will be released by CallbackComplete.
     // However, if for some reason Run() is not executed, we still
     // need to ensure that it is released here.
-    NS_ReleaseOnMainThreadSystemGroup("AsyncInitDatabase::mCallback",
-                                      mCallback.forget());
+    NS_ReleaseOnMainThread("AsyncInitDatabase::mCallback", mCallback.forget());
   }
 
   RefPtr<Connection> mConnection;

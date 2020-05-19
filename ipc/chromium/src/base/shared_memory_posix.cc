@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #ifdef ANDROID
-#  include <linux/ashmem.h>
+#  include "mozilla/Ashmem.h"
 #endif
 
 #include "base/eintr_wrapper.h"
@@ -202,13 +202,9 @@ bool SharedMemory::CreateInternal(size_t size, bool freezeable) {
 
 #ifdef ANDROID
   // Android has its own shared memory facility:
-  fd.reset(open("/" ASHMEM_NAME_DEF, O_RDWR, 0600));
+  fd.reset(mozilla::android::ashmem_create(nullptr, size));
   if (!fd) {
     CHROMIUM_LOG(WARNING) << "failed to open shm: " << strerror(errno);
-    return false;
-  }
-  if (ioctl(fd.get(), ASHMEM_SET_SIZE, size) != 0) {
-    CHROMIUM_LOG(WARNING) << "failed to set shm size: " << strerror(errno);
     return false;
   }
   needs_truncate = false;
@@ -265,26 +261,40 @@ bool SharedMemory::CreateInternal(size_t size, bool freezeable) {
   return true;
 }
 
-bool SharedMemory::Freeze() {
+bool SharedMemory::ReadOnlyCopy(SharedMemory* ro_out) {
   DCHECK(!read_only_);
   CHECK(freezeable_);
-  Unmap();
 
+  if (ro_out == this) {
+    DCHECK(!memory_);
+  }
+
+  int ro_file = -1;
 #ifdef ANDROID
-  if (ioctl(mapped_file_, ASHMEM_SET_PROT_MASK, PROT_READ) != 0) {
-    CHROMIUM_LOG(WARNING) << "failed to freeze shm: " << strerror(errno);
+  if (mozilla::android::ashmem_setProt(mapped_file_, PROT_READ) != 0) {
+    CHROMIUM_LOG(WARNING) << "failed to set ashmem read-only: "
+                          << strerror(errno);
     return false;
   }
+  ro_file = mapped_file_;
 #else
   DCHECK(frozen_file_ >= 0);
   DCHECK(mapped_file_ >= 0);
   close(mapped_file_);
-  mapped_file_ = frozen_file_;
+  ro_file = frozen_file_;
   frozen_file_ = -1;
 #endif
 
-  read_only_ = true;
+  DCHECK(ro_file >= 0);
+  mapped_file_ = -1;
   freezeable_ = false;
+
+  ro_out->Close();
+  ro_out->mapped_file_ = ro_file;
+  ro_out->max_size_ = max_size_;
+  ro_out->read_only_ = true;
+  ro_out->freezeable_ = false;
+
   return true;
 }
 

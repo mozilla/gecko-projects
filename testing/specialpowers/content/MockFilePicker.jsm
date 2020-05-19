@@ -17,7 +17,10 @@ const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // Allow stuff from this scope to be accessed from non-privileged scopes. This
 // would crash if used outside of automation.
-Cu.forcePermissiveCOWs();
+/* globals __URI__ */
+if (__URI__.includes("specialpowers")) {
+  Cu.forcePermissiveCOWs();
+}
 
 var registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
 var oldClassID;
@@ -28,12 +31,12 @@ var newFactory = function(window) {
   return {
     createInstance(aOuter, aIID) {
       if (aOuter) {
-        throw Cr.NS_ERROR_NO_AGGREGATION;
+        throw Components.Exception("", Cr.NS_ERROR_NO_AGGREGATION);
       }
       return new MockFilePickerInstance(window).QueryInterface(aIID);
     },
     lockFactory(aLock) {
-      throw Cr.NS_ERROR_NOT_IMPLEMENTED;
+      throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
     },
     QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory]),
   };
@@ -107,7 +110,10 @@ var MockFilePicker = {
     file.append("testfile");
     file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, 0o644);
     let promise = this.window.File.createFromNsIFile(file)
-      .then(domFile => domFile, () => null)
+      .then(
+        domFile => domFile,
+        () => null
+      )
       // domFile can be null.
       .then(domFile => {
         this.returnData = [this.internalFileData({ nsIFile: file, domFile })];

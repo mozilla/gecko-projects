@@ -889,9 +889,8 @@ MarkupView.prototype = {
    * Given the known reason, should the current selection be briefly highlighted
    * In a few cases, we don't want to highlight the node:
    * - If the reason is null (used to reset the selection),
-   * - if it's "inspector-open" (when the inspector opens up, let's not
-   * highlight the default node)
-   * - if it's "navigateaway" (since the page is being navigated away from)
+   * - if it's "inspector-default-selection" (initial node selected, either when
+   *   opening the inspector or after a navigation/reload)
    * - if it's "test" (this is a special case for mochitest. In tests, we often
    * need to select elements but don't necessarily want the highlighter to come
    * and go after a delay as this might break test scenarios)
@@ -902,8 +901,7 @@ MarkupView.prototype = {
   _shouldNewSelectionBeHighlighted: function() {
     const reason = this.inspector.selection.reason;
     const unwantedReasons = [
-      "inspector-open",
-      "navigateaway",
+      "inspector-default-selection",
       "nodeselected",
       "test",
     ];
@@ -1134,6 +1132,10 @@ MarkupView.prototype = {
     const shortcuts = new KeyShortcuts({
       window: this.win,
     });
+
+    // Keep a pointer on shortcuts to destroy them when destroying the markup
+    // view.
+    this._shortcuts = shortcuts;
 
     this._onShortcut = this._onShortcut.bind(this);
 
@@ -1753,7 +1755,7 @@ MarkupView.prototype = {
         (this.inspector.selection.nodeFront === removedNode && isHTMLTag)
       ) {
         const childContainers = parentContainer.getChildContainers();
-        if (childContainers && childContainers[childIndex]) {
+        if (childContainers?.[childIndex]) {
           const childContainer = childContainers[childIndex];
           this._markContainerAsSelected(childContainer, reason);
           if (childContainer.hasChildren) {
@@ -2073,8 +2075,8 @@ MarkupView.prototype = {
       return promise.resolve(container);
     }
 
-    const expand = options && options.expand;
-    const flash = options && options.flash;
+    const expand = options?.expand;
+    const flash = options?.flash;
 
     container.hasChildren = container.node.hasChildren;
     // Accessibility should either ignore empty children or semantically
@@ -2299,6 +2301,11 @@ MarkupView.prototype = {
     if (this._undo) {
       this._undo.destroy();
       this._undo = null;
+    }
+
+    if (this._shortcuts) {
+      this._shortcuts.destroy();
+      this._shortcuts = null;
     }
 
     this.popup.destroy();

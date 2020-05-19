@@ -58,17 +58,27 @@ void PrioritizedEventQueue::PutEvent(already_AddRefed<nsIRunnable>&& aEvent,
     case EventQueuePriority::Normal:
       mNormalQueue->PutEvent(event.forget(), priority, aProofOfLock, aDelay);
       break;
-    case EventQueuePriority::DeferredTimers:
-      MOZ_ASSERT(NS_IsMainThread(),
-                 "Should only queue deferred timers on main thread");
-      mDeferredTimersQueue->PutEvent(event.forget(), priority, aProofOfLock,
-                                     aDelay);
+    case EventQueuePriority::DeferredTimers: {
+      if (NS_IsMainThread()) {
+        mDeferredTimersQueue->PutEvent(event.forget(), priority, aProofOfLock,
+                                       aDelay);
+      } else {
+        // We don't want to touch our idle queues from off the main
+        // thread.  Queue it indirectly.
+        IndirectlyQueueRunnable(event.forget(), priority, aProofOfLock, aDelay);
+      }
       break;
-    case EventQueuePriority::Idle:
-      MOZ_ASSERT(NS_IsMainThread(),
-                 "Should only queue idle runnables on main thread");
-      mIdleQueue->PutEvent(event.forget(), priority, aProofOfLock, aDelay);
+    }
+    case EventQueuePriority::Idle: {
+      if (NS_IsMainThread()) {
+        mIdleQueue->PutEvent(event.forget(), priority, aProofOfLock, aDelay);
+      } else {
+        // We don't want to touch our idle queues from off the main
+        // thread.  Queue it indirectly.
+        IndirectlyQueueRunnable(event.forget(), priority, aProofOfLock, aDelay);
+      }
       break;
+    }
     case EventQueuePriority::Count:
       MOZ_CRASH("EventQueuePriority::Count isn't a valid priority");
       break;
@@ -141,6 +151,20 @@ EventQueuePriority PrioritizedEventQueue::SelectQueue(
   return queue;
 }
 
+void PrioritizedEventQueue::IndirectlyQueueRunnable(
+    already_AddRefed<nsIRunnable>&& aEvent, EventQueuePriority aPriority,
+    const MutexAutoLock& aProofOfLock, mozilla::TimeDuration* aDelay) {
+  nsCOMPtr<nsIRunnable> event(aEvent);
+
+  nsCOMPtr<nsIRunnable> mainThreadRunnable = NS_NewRunnableFunction(
+      "idle runnable shim",
+      [event = std::move(event), priority = aPriority]() mutable {
+        NS_DispatchToCurrentThreadQueue(event.forget(), priority);
+      });
+  mNormalQueue->PutEvent(mainThreadRunnable.forget(),
+                         EventQueuePriority::Normal, aProofOfLock, aDelay);
+}
+
 // The delay returned is the queuing delay a hypothetical Input event would
 // see due to the current running event if it had arrived while the current
 // event was queued.  This means that any event running at  priority below
@@ -179,14 +203,14 @@ already_AddRefed<nsIRunnable> PrioritizedEventQueue::GetEvent(
       break;
 
     case EventQueuePriority::High:
-      event = mHighQueue->GetEvent(aPriority, aProofOfLock,
+      event = mHighQueue->GetEvent(nullptr, aProofOfLock,
                                    aHypotheticalInputEventDelay);
       MOZ_ASSERT(event);
       mInputHandlingStartTime = TimeStamp();
       break;
 
     case EventQueuePriority::Input:
-      event = mInputQueue->GetEvent(aPriority, aProofOfLock,
+      event = mInputQueue->GetEvent(nullptr, aProofOfLock,
                                     aHypotheticalInputEventDelay);
       MOZ_ASSERT(event);
       break;
@@ -196,12 +220,12 @@ already_AddRefed<nsIRunnable> PrioritizedEventQueue::GetEvent(
       // if we're below Input; input events will only be delayed by the time
       // an event actually runs (if the event is below Input event's priority)
     case EventQueuePriority::MediumHigh:
-      event = mMediumHighQueue->GetEvent(aPriority, aProofOfLock);
+      event = mMediumHighQueue->GetEvent(nullptr, aProofOfLock);
       *aHypotheticalInputEventDelay = TimeDuration();
       break;
 
     case EventQueuePriority::Normal:
-      event = mNormalQueue->GetEvent(aPriority, aProofOfLock);
+      event = mNormalQueue->GetEvent(nullptr, aProofOfLock);
       *aHypotheticalInputEventDelay = TimeDuration();
       break;
 
@@ -220,9 +244,9 @@ already_AddRefed<nsIRunnable> PrioritizedEventQueue::GetEvent(
         return nullptr;
       }
 
-      event = mDeferredTimersQueue->GetEvent(aPriority, aProofOfLock);
+      event = mDeferredTimersQueue->GetEvent(nullptr, aProofOfLock);
       if (!event) {
-        event = mIdleQueue->GetEvent(aPriority, aProofOfLock);
+        event = mIdleQueue->GetEvent(nullptr, aProofOfLock);
       }
       if (event) {
         *aIsIdleEvent = true;
@@ -237,6 +261,8 @@ already_AddRefed<nsIRunnable> PrioritizedEventQueue::GetEvent(
   if (!event) {
     *aHypotheticalInputEventDelay = TimeDuration();
   }
+
+  MOZ_ASSERT_IF(aPriority, *aPriority == queue);
 
   return event.forget();
 }

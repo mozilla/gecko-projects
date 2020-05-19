@@ -504,11 +504,8 @@ END_GLOBALS
 // 6.25% of the process address space on a 32-bit OS for later use.
 static const size_t gRecycleLimit = 128_MiB;
 
-// The current amount of recycled bytes, updated atomically. Malloc may be
-// called non-deterministically when recording/replaying, so this atomic's
-// accesses are not recorded.
-static Atomic<size_t, ReleaseAcquire, recordreplay::Behavior::DontPreserve>
-    gRecycledSize;
+// The current amount of recycled bytes, updated atomically.
+static Atomic<size_t, ReleaseAcquire> gRecycledSize;
 
 // Maximum number of dirty pages per arena.
 #define DIRTY_MAX_DEFAULT (1U << 8)
@@ -547,11 +544,7 @@ static void* base_alloc(size_t aSize);
 // threads are created.
 static bool malloc_initialized;
 #else
-// Malloc may be called non-deterministically when recording/replaying, so this
-// atomic's accesses are not recorded.
-static Atomic<bool, SequentiallyConsistent,
-              recordreplay::Behavior::DontPreserve>
-    malloc_initialized;
+static Atomic<bool, SequentiallyConsistent> malloc_initialized;
 #endif
 
 static StaticMutex gInitLock = {STATIC_MUTEX_INIT};
@@ -1191,6 +1184,7 @@ static bool opt_zero = false;
 static const bool opt_junk = false;
 static const bool opt_zero = false;
 #endif
+static bool opt_randomize_small = true;
 
 // ***************************************************************************
 // Begin forward declarations.
@@ -2839,18 +2833,15 @@ void* arena_t::MallocSmall(size_t aSize, bool aZero) {
       // arc4random.  So we temporarily disable mRandomizeSmallAllocations to
       // skip this case and then re-enable it
       mRandomizeSmallAllocations = false;
-      mozilla::Maybe<uint64_t> prngState1, prngState2;
-      {
-        mozilla::recordreplay::AutoEnsurePassThroughThreadEvents pt;
-        prngState1 = mozilla::RandomUint64();
-        prngState2 = mozilla::RandomUint64();
-      }
+      mozilla::Maybe<uint64_t> prngState1 = mozilla::RandomUint64();
+      mozilla::Maybe<uint64_t> prngState2 = mozilla::RandomUint64();
       void* backing =
           base_alloc(sizeof(mozilla::non_crypto::XorShift128PlusRNG));
       mPRNG = new (backing) mozilla::non_crypto::XorShift128PlusRNG(
           prngState1.valueOr(0), prngState2.valueOr(0));
       mRandomizeSmallAllocations = true;
     }
+    MOZ_ASSERT(!mRandomizeSmallAllocations || mPRNG);
 
     MutexAutoLock lock(mLock);
     run = bin->mCurrentRun;
@@ -3534,12 +3525,24 @@ arena_t::arena_t(arena_params_t* aParams) {
 #endif
   mSpare = nullptr;
 
-  mNumDirty = 0;
-
-  mRandomizeSmallAllocations =
-      aParams && aParams->mFlags & ARENA_FLAG_RANDOMIZE_SMALL;
+  mRandomizeSmallAllocations = opt_randomize_small;
+  if (aParams) {
+    uint32_t flags = aParams->mFlags & ARENA_FLAG_RANDOMIZE_SMALL_MASK;
+    switch (flags) {
+      case ARENA_FLAG_RANDOMIZE_SMALL_ENABLED:
+        mRandomizeSmallAllocations = true;
+        break;
+      case ARENA_FLAG_RANDOMIZE_SMALL_DISABLED:
+        mRandomizeSmallAllocations = false;
+        break;
+      case ARENA_FLAG_RANDOMIZE_SMALL_DEFAULT:
+      default:
+        break;
+    }
+  }
   mPRNG = nullptr;
 
+  mNumDirty = 0;
   // The default maximum amount of dirty pages allowed on arenas is a fraction
   // of opt_dirty_max.
   mMaxDirty = (aParams && aParams->mMaxDirty) ? aParams->mMaxDirty
@@ -3625,11 +3628,7 @@ arena_t* ArenaCollection::CreateArena(bool aIsPrivate,
   // arena, stopping them from getting data they may want
 
   while (true) {
-    mozilla::Maybe<uint64_t> maybeRandomId;
-    {
-      mozilla::recordreplay::AutoEnsurePassThroughThreadEvents pt;
-      maybeRandomId = mozilla::RandomUint64();
-    }
+    mozilla::Maybe<uint64_t> maybeRandomId = mozilla::RandomUint64();
     MOZ_RELEASE_ASSERT(maybeRandomId.isSome());
 
     // Avoid 0 as an arena Id. We use 0 for disposed arenas.
@@ -3945,6 +3944,12 @@ static bool malloc_init_hard() {
             opt_zero = true;
             break;
 #endif
+          case 'r':
+            opt_randomize_small = false;
+            break;
+          case 'R':
+            opt_randomize_small = true;
+            break;
           default: {
             char cbuf[2];
 
@@ -4565,8 +4570,7 @@ static malloc_table_t gDynamicMallocTable = {
 // This briefly points to gDefaultMallocTable at startup. After that, it points
 // to either gOriginalMallocTable or gDynamicMallocTable. It's atomic to avoid
 // races when switching between tables.
-static Atomic<malloc_table_t const*, mozilla::MemoryOrdering::Relaxed,
-              recordreplay::Behavior::DontPreserve>
+static Atomic<malloc_table_t const*, mozilla::MemoryOrdering::Relaxed>
     gMallocTablePtr;
 
 #  ifdef MOZ_DYNAMIC_REPLACE_INIT

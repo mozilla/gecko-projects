@@ -196,7 +196,7 @@ int32_t nsNumberControlFrame::GetSpinButtonForPointerEvent(
     // default UA style sheet. See the comment in forms.css for why.
     LayoutDeviceIntPoint absPoint = aEvent->mRefPoint;
     nsPoint point = nsLayoutUtils::GetEventCoordinatesRelativeTo(
-        aEvent, absPoint, mSpinBox->GetPrimaryFrame());
+        aEvent, absPoint, RelativeTo{mSpinBox->GetPrimaryFrame()});
     if (point != nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)) {
       if (point.y < mSpinBox->GetPrimaryFrame()->GetSize().height / 2) {
         return eSpinButtonUp;
@@ -231,9 +231,8 @@ bool nsNumberControlFrame::SpinnerDownButtonIsDepressed() const {
       ->NumberSpinnerDownButtonIsDepressed();
 }
 
-#define STYLES_DISABLING_NATIVE_THEMING                          \
-  NS_AUTHOR_SPECIFIED_BACKGROUND | NS_AUTHOR_SPECIFIED_PADDING | \
-      NS_AUTHOR_SPECIFIED_BORDER
+#define STYLES_DISABLING_NATIVE_THEMING \
+  NS_AUTHOR_SPECIFIED_BORDER_OR_BACKGROUND | NS_AUTHOR_SPECIFIED_PADDING
 
 bool nsNumberControlFrame::ShouldUseNativeStyleForSpinner() const {
   MOZ_ASSERT(mSpinUp && mSpinDown,

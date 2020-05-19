@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 from __future__ import absolute_import
 import argparse
 import hashlib
@@ -26,6 +30,16 @@ from mozbuild.base import (
 )
 
 from mozbuild.util import ensureParentDir
+
+
+_COULD_NOT_FIND_ARTIFACTS_TEMPLATE = (
+    'Could not find artifacts for a toolchain build named `{build}`. Local '
+    'commits, dirty/stale files, and other changes in your checkout may cause '
+    'this error. Make sure you are on a fresh, current checkout of '
+    'mozilla-central. If you are already, you may be able to avoid this error '
+    'by running `mach clobber python`. Beware that commands like `mach '
+    'bootstrap` and `mach artifact` are unlikely to work on any versions of '
+    'the code besides recent revisions of mozilla-central.')
 
 
 class SymbolsAction(argparse.Action):
@@ -178,7 +192,7 @@ class PackageFrontend(MachCommandBase):
     def artifact_toolchain(self, verbose=False, cache_dir=None,
                            skip_cache=False, from_build=(),
                            tooltool_manifest=None, authentication_file=None,
-                           no_unpack=False, retry=None,
+                           no_unpack=False, retry=0,
                            artifact_manifest=None, files=()):
         '''Download, cache and install pre-built toolchains.
         '''
@@ -190,11 +204,13 @@ class PackageFrontend(MachCommandBase):
         )
         import redo
         import requests
+        import time
 
         from taskgraph.util.taskcluster import (
             get_artifact_url,
         )
 
+        start = time.time()
         self._set_log_level(verbose)
         # Normally, we'd use self.log_manager.enable_unstructured(),
         # but that enables all logging, while we only really want tooltool's
@@ -249,7 +265,7 @@ class PackageFrontend(MachCommandBase):
                     cot.raise_for_status()
 
                 digest = algorithm = None
-                data = json.loads(cot.content)
+                data = json.loads(cot.text)
                 for algorithm, digest in (data.get('artifacts', {})
                                               .get(artifact_name, {}).items()):
                     pass
@@ -315,11 +331,7 @@ class PackageFrontend(MachCommandBase):
                 artifact_name = task.attributes.get('toolchain-artifact')
                 if task_id in (True, False) or not artifact_name:
                     self.log(logging.ERROR, 'artifact', {'build': user_value},
-                             'Could not find artifacts for a toolchain build '
-                             'named `{build}`. Local commits and other changes '
-                             'in your checkout may cause this error. Try '
-                             'updating to a fresh checkout of mozilla-central '
-                             'to use artifact builds.')
+                             _COULD_NOT_FIND_ARTIFACTS_TEMPLATE)
                     return 1
 
                 record = ArtifactRecord(task_id, artifact_name)
@@ -406,7 +418,7 @@ class PackageFrontend(MachCommandBase):
             # Keep a sha256 of each downloaded file, for the chain-of-trust
             # validation.
             if artifact_manifest is not None:
-                with open(local) as fh:
+                with open(local, 'rb') as fh:
                     h = hashlib.sha256()
                     while True:
                         data = fh.read(1024 * 1024)
@@ -429,5 +441,21 @@ class PackageFrontend(MachCommandBase):
             ensureParentDir(artifact_manifest)
             with open(artifact_manifest, 'w') as fh:
                 json.dump(artifacts, fh, indent=4, sort_keys=True)
+
+        if 'MOZ_AUTOMATION' in os.environ:
+            end = time.time()
+
+            perfherder_data = {
+                'framework': {'name': 'build_metrics'},
+                'suites': [{
+                    'name': 'mach_artifact_toolchain',
+                    'value': end - start,
+                    'lowerIsBetter': True,
+                    'shouldAlert': False,
+                    'subtests': [],
+                }],
+            }
+            self.log(logging.INFO, 'perfherder', {'data': json.dumps(perfherder_data)},
+                     'PERFHERDER_DATA: {data}')
 
         return 0

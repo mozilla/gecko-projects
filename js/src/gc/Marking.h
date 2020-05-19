@@ -22,7 +22,6 @@ class JSTracer;
 namespace js {
 class BaseShape;
 class GCMarker;
-class LazyScript;
 class NativeObject;
 class ObjectGroup;
 class Shape;
@@ -107,6 +106,8 @@ inline Cell* ToMarkable(const Value& v) {
 }
 
 inline Cell* ToMarkable(Cell* cell) { return cell; }
+
+bool UnmarkGrayGCThingUnchecked(JSRuntime* rt, JS::GCCellPtr thing);
 
 } /* namespace gc */
 

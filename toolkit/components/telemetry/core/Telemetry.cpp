@@ -62,7 +62,7 @@
 #include "nsIMemoryReporter.h"
 #include "nsISeekableStream.h"
 #include "nsITelemetry.h"
-#if defined(XP_WIN) && defined(EARLY_BETA_OR_EARLIER)
+#if defined(XP_WIN)
 #  include "other/UntrustedModules.h"
 #endif
 #include "nsJSUtils.h"
@@ -83,6 +83,8 @@
 #include "nsXPCOMCIDInternal.h"
 #include "nsXPCOMPrivate.h"
 #include "nsXULAppAPI.h"
+#include "nsIPropertyBag2.h"
+#include "nsIXULAppInfo.h"
 #include "other/CombinedStacks.h"
 #include "other/TelemetryIOInterposeObserver.h"
 #include "plstr.h"
@@ -95,6 +97,9 @@
 #include "TelemetryHistogram.h"
 #include "TelemetryOrigin.h"
 #include "TelemetryScalar.h"
+#ifndef ANDROID
+#  include "nsTerminator.h"
+#endif
 
 namespace {
 
@@ -188,10 +193,8 @@ class TelemetryImpl final : public nsITelemetry, public nsIMemoryReporter {
   AutoHashtable<SlowSQLEntryType> mPrivateSQL;
   AutoHashtable<SlowSQLEntryType> mSanitizedSQL;
   Mutex mHashMutex;
-  Atomic<bool, SequentiallyConsistent, recordreplay::Behavior::DontPreserve>
-      mCanRecordBase;
-  Atomic<bool, SequentiallyConsistent, recordreplay::Behavior::DontPreserve>
-      mCanRecordExtended;
+  Atomic<bool, SequentiallyConsistent> mCanRecordBase;
+  Atomic<bool, SequentiallyConsistent> mCanRecordExtended;
 
 #if defined(MOZ_GECKO_PROFILER)
   // Stores data about stacks captured on demand.
@@ -687,7 +690,7 @@ TelemetryImpl::GetMaximalNumberOfConcurrentThreads(uint32_t* ret) {
 
 NS_IMETHODIMP
 TelemetryImpl::GetUntrustedModuleLoadEvents(JSContext* cx, Promise** aPromise) {
-#if defined(XP_WIN) && defined(EARLY_BETA_OR_EARLIER)
+#if defined(XP_WIN)
   return Telemetry::GetUntrustedModuleLoadEvents(cx, aPromise);
 #else
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -949,8 +952,8 @@ static bool IsValidBreakpadId(const std::string& breakpadId) {
 
 // Read a stack from the given file name. In case of any error, aStack is
 // unchanged.
-static void ReadStack(PathCharPtr aFileName,
-                      Telemetry::ProcessedStack& aStack) {
+static void ReadLateWriteStack(PathCharPtr aFileName,
+                               Telemetry::ProcessedStack& aStack) {
   IFStream file(aFileName);
 
   size_t numModules;
@@ -1014,6 +1017,14 @@ static void ReadStack(PathCharPtr aFileName,
     stack.AddFrame(frame);
   }
 
+  bool isFromTerminatorWatchdog;
+  file >> isFromTerminatorWatchdog;
+  if (file.fail()) {
+    ScalarAdd(mozilla::Telemetry::ScalarID::TELEMETRY_FAILED_LATE_WRITE, 1);
+    return;
+  }
+  stack.SetIsFromTerminatorWatchdog(isFromTerminatorWatchdog);
+
   aStack = stack;
 }
 
@@ -1033,9 +1044,12 @@ void TelemetryImpl::ReadLateWritesStacks(nsIFile* aProfileDir) {
     }
 
     Telemetry::ProcessedStack stack;
-    ReadStack(file->NativePath().get(), stack);
+    ReadLateWriteStack(file->NativePath().get(), stack);
     if (stack.GetStackSize() != 0) {
       mLateWritesStacks.AddStack(stack);
+      if (stack.GetIsFromTerminatorWatchdog()) {
+        mLateWritesStacks.SetIsFromTerminatorWatchdog(true);
+      }
     }
     // Delete the file so that we don't report it again on the next run.
     file->Remove(false);
@@ -1056,16 +1070,23 @@ TelemetryImpl::GetLateWrites(JSContext* cx, JS::MutableHandle<JS::Value> ret) {
   // CreateJSStackObject, but we would still need to figure out where to call
   // JS_RemoveObjectRoot. Would it be ok to never call JS_RemoveObjectRoot
   // and just set the pointer to nullptr is the telemetry destructor?
-
-  JSObject* report;
+  JS::Rooted<JSObject*> temp(cx, JS_NewPlainObject(cx));
   if (!mCachedTelemetryData) {
     CombinedStacks empty;
-    report = CreateJSStackObject(cx, empty);
+    temp = CreateJSStackObject(cx, empty);
   } else {
-    report = CreateJSStackObject(cx, mLateWritesStacks);
+    temp = CreateJSStackObject(cx, mLateWritesStacks);
   }
 
-  if (report == nullptr) {
+  // Add this information afer we CreateJSStackObject because
+  // the function is used elsewhere, not just for latewrites.
+  JS::Rooted<JSObject*> report(cx, temp);
+  bool isFromTerminatorWatchdog =
+      mLateWritesStacks.GetIsFromTerminatorWatchdog();
+  bool ok = JS_DefineProperty(cx, report, "isFromTerminatorWatchdog",
+                              isFromTerminatorWatchdog, JSPROP_ENUMERATE);
+
+  if (temp == nullptr || !ok) {
     return NS_ERROR_FAILURE;
   }
 
@@ -1101,9 +1122,6 @@ TelemetryImpl::GetCanRecordBase(bool* ret) {
 
 NS_IMETHODIMP
 TelemetryImpl::SetCanRecordBase(bool canRecord) {
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return NS_OK;
-  }
 #ifndef FUZZING
   if (canRecord != mCanRecordBase) {
     TelemetryHistogram::SetCanRecordBase(canRecord);
@@ -1130,9 +1148,6 @@ TelemetryImpl::GetCanRecordExtended(bool* ret) {
 
 NS_IMETHODIMP
 TelemetryImpl::SetCanRecordExtended(bool canRecord) {
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return NS_OK;
-  }
 #ifndef FUZZING
   if (canRecord != mCanRecordExtended) {
     TelemetryHistogram::SetCanRecordExtended(canRecord);
@@ -1167,6 +1182,75 @@ TelemetryImpl::GetIsOfficialTelemetry(bool* ret) {
   return NS_OK;
 }
 
+#if defined(MOZ_GLEAN)
+// The FOG API is implemented in Rust and exposed to C++ via a set of
+// C functions with the "fog_" prefix.
+// See toolkit/components/glean/*.
+extern "C" {
+nsresult fog_init(const nsACString* dataPath, const nsACString* buildId,
+                  const nsACString* appDisplayVersion, const char* channel,
+                  const nsACString* osVersion, const nsACString* architecture);
+}
+
+static void internal_initGlean() {
+  nsAutoCString dataPath;
+  nsresult rv = Preferences::GetCString(
+      "telemetry.fog.temporary_and_just_for_testing.data_path", dataPath);
+
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  nsCOMPtr<nsIXULAppInfo> appInfo =
+      do_GetService("@mozilla.org/xre/app-info;1");
+  if (!appInfo) {
+    NS_WARNING("Can't fetch app info. FOG will not be initialized.");
+    return;
+  }
+
+  nsAutoCString buildID;
+  rv = appInfo->GetAppBuildID(buildID);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't get build ID. FOG will not be initialized.");
+    return;
+  }
+
+  nsAutoCString appVersion;
+  rv = appInfo->GetVersion(appVersion);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't get app version. FOG will not be initialized.");
+    return;
+  }
+
+  nsCOMPtr<nsIPropertyBag2> infoService =
+      do_GetService("@mozilla.org/system-info;1");
+  if (!appInfo) {
+    NS_WARNING("Can't fetch info service. FOG will not be initialized.");
+    return;
+  }
+
+  nsAutoCString osVersion;
+  rv = infoService->GetPropertyAsACString(NS_LITERAL_STRING("version"),
+                                          osVersion);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't get OS version. FOG will not be initialized.");
+    return;
+  }
+
+  nsAutoCString architecture;
+  rv = infoService->GetPropertyAsACString(NS_LITERAL_STRING("arch"),
+                                          architecture);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't get architecture. FOG will not be initialized.");
+    return;
+  }
+
+  Unused << NS_WARN_IF(NS_FAILED(fog_init(&dataPath, &buildID, &appVersion,
+                                          MOZ_STRINGIFY(MOZ_UPDATE_CHANNEL),
+                                          &osVersion, &architecture)));
+}
+#endif  // defined(MOZ_GLEAN)
+
 already_AddRefed<nsITelemetry> TelemetryImpl::CreateTelemetryInstance() {
   {
     auto lock = sTelemetry.Lock();
@@ -1177,13 +1261,8 @@ already_AddRefed<nsITelemetry> TelemetryImpl::CreateTelemetryInstance() {
 
   bool useTelemetry = false;
 #ifndef FUZZING
-  if ((XRE_IsParentProcess() || XRE_IsContentProcess() || XRE_IsGPUProcess() ||
-       XRE_IsSocketProcess()) &&
-      // Telemetry is never accumulated when recording or replaying, both
-      // because the resulting measurements might be biased and because
-      // measurements might occur at non-deterministic points in execution
-      // (e.g. garbage collections).
-      !recordreplay::IsRecordingOrReplaying()) {
+  if (XRE_IsParentProcess() || XRE_IsContentProcess() || XRE_IsGPUProcess() ||
+      XRE_IsSocketProcess()) {
     useTelemetry = true;
   }
 #endif
@@ -1772,6 +1851,16 @@ TelemetryImpl::FlushBatchedChildTelemetry() {
 NS_IMETHODIMP
 TelemetryImpl::EarlyInit() {
   Unused << MemoryTelemetry::Get();
+
+#if defined(MOZ_GLEAN)
+  // Initialize FOG during early init, which gets called from
+  // TelemetryController.
+  // At that point we have a working preference store.
+  if (XRE_IsParentProcess()) {
+    internal_initGlean();
+  }
+#endif
+
   return NS_OK;
 }
 
@@ -2140,9 +2229,9 @@ void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
   TelemetryScalar::SetMaximum(aId, aKey, aVal);
 }
 
-void RecordEvent(mozilla::Telemetry::EventID aId,
-                 const mozilla::Maybe<nsCString>& aValue,
-                 const mozilla::Maybe<nsTArray<EventExtraEntry>>& aExtra) {
+void RecordEvent(
+    mozilla::Telemetry::EventID aId, const mozilla::Maybe<nsCString>& aValue,
+    const mozilla::Maybe<CopyableTArray<EventExtraEntry>>& aExtra) {
   TelemetryEvent::RecordEventNative(aId, aValue, aExtra);
 }
 

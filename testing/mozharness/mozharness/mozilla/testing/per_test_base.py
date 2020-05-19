@@ -146,7 +146,6 @@ class SingleTestMixin(object):
                 #   <subsuite> comes from "subsuite" tags in some manifest entries
                 #   <full-suite> is a unique id for the suite, matching desktop mozharness configs
                 ('mochitest-browser-chrome', 'devtools', None): 'mochitest-devtools-chrome',
-                ('mochitest-browser-chrome', 'devtools-webreplay', None): 'mochitest-devtools-chrome-webreplay', # noqa
                 ('mochitest-browser-chrome', 'remote', None): 'mochitest-remote',
                 ('mochitest-browser-chrome', 'screenshots', None): 'mochitest-browser-chrome-screenshots',  # noqa
                 ('mochitest-plain', 'media', None): 'mochitest-media',
@@ -227,7 +226,9 @@ class SingleTestMixin(object):
         revision = os.environ.get("GECKO_HEAD_REV")
         if not repository or not revision:
             self.warning("unable to run tests in per-test mode: no repo or revision!")
-            return []
+            self.suites = {}
+            self.tests_downloaded = True
+            return
 
         def get_automationrelevance():
             response = self.load_json_url(url)
@@ -280,7 +281,10 @@ class SingleTestMixin(object):
         total_tests = sum([len(self.suites[x]) for x in self.suites])
 
         if total_tests == 0:
-            self.fatal("No tests to verify: exiting.", 0)
+            self.warning("No tests to verify.")
+            self.suites = {}
+            self.tests_downloaded = True
+            return
 
         files_per_chunk = total_tests / float(self.config.get('total_chunks', 1))
         files_per_chunk = int(math.ceil(files_per_chunk))

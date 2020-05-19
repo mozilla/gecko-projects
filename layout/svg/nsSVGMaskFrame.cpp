@@ -98,8 +98,7 @@ already_AddRefed<SourceSurface> nsSVGMaskFrame::GetMaskForMaskedFrame(
   RefPtr<SourceSurface> surface;
   if (maskType == StyleMaskType::Luminance) {
     auto luminanceType = LuminanceType::LUMINANCE;
-    if (StyleSVG()->mColorInterpolation ==
-        NS_STYLE_COLOR_INTERPOLATION_LINEARRGB) {
+    if (StyleSVG()->mColorInterpolation == StyleColorInterpolation::Linearrgb) {
       luminanceType = LuminanceType::LINEARRGB;
     }
 
@@ -111,7 +110,7 @@ already_AddRefed<SourceSurface> nsSVGMaskFrame::GetMaskForMaskedFrame(
     surface = std::move(maskSnapshot);
   } else {
     maskDT->FillRect(maskSurfaceRect,
-                     ColorPattern(Color(1.0f, 1.0f, 1.0f, aParams.opacity)),
+                     ColorPattern(DeviceColor::MaskWhite(aParams.opacity)),
                      DrawOptions(1, CompositionOp::OP_IN));
     RefPtr<SourceSurface> maskSnapshot = maskDT->Snapshot();
     if (!maskSnapshot) {

@@ -39,8 +39,6 @@ nsresult SetupExtraData(nsIFile* aAppDataDirectory,
 
 nsresult UnsetExceptionHandler() { return NS_ERROR_NOT_IMPLEMENTED; }
 
-void NotifyCrashReporterClientCreated() {}
-
 nsresult AnnotateCrashReport(Annotation key, bool data) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -77,6 +75,11 @@ nsresult AppendAppNotesToCrashReport(const nsACString& data) {
 }
 
 bool GetAnnotation(const nsACString& key, nsACString& data) { return false; }
+
+void GetAnnotation(uint32_t childPid, Annotation annotation,
+                   nsACString& outStr) {
+  return;
+}
 
 nsresult RegisterAppMemory(void* ptr, size_t length) {
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -151,8 +154,6 @@ nsresult GetDefaultMemoryReportFile(nsIFile** aFile) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-void SetTelemetrySessionId(const nsACString& id) {}
-
 void DeleteMinidumpFilesForID(const nsAString& id) {}
 
 bool GetMinidumpForID(const nsAString& id, nsIFile** minidump) { return false; }
@@ -187,24 +188,18 @@ void UnregisterInjectorCallback(DWORD processID) {}
 
 bool GetLastRunCrashID(nsAString& id) { return false; }
 
-#if defined(XP_WIN)
-bool SetRemoteExceptionHandler(const nsACString& crashPipe,
-                               uintptr_t aCrashTimeAnnotationFile) {
-  return false;
-}
-
-#elif defined(XP_MACOSX)
-
-bool SetRemoteExceptionHandler(const nsACString& crashPipe) { return false; }
-
-#else
+#if !defined(XP_WIN) && !defined(XP_MACOSX)
 
 bool CreateNotificationPipeForChild(int* childCrashFd, int* childCrashRemapFd) {
   return false;
 }
 
-bool SetRemoteExceptionHandler() { return false; }
-#endif  // XP_WIN
+#endif  // !defined(XP_WIN) && !defined(XP_MACOSX)
+
+bool SetRemoteExceptionHandler(const char* aCrashPipe,
+                               uintptr_t aCrashTimeAnnotationFile) {
+  return false;
+}
 
 bool TakeMinidumpForChild(uint32_t childPid, nsIFile** dump,
                           AnnotationTable& aAnnotations, uint32_t* aSequence) {

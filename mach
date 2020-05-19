@@ -11,48 +11,32 @@
 # shell because `''':'`, `':'` and `:` are all equivalent, and `:` is a no-op.
 ''':'
 py2commands="
-    analyze
     android
     android-emulator
-    artifact
     awsy-test
     browsertime
-    build
-    build-backend
-    buildsymbols
     cargo
     check-spidermonkey
     clang-format
-    compileflags
-    configure
     cppunittest
     cramtest
     crashtest
     devtools-css-db
-    doctor
-    empty-makefiles
-    file-info
     firefox-ui-functional
     geckodriver
     geckodriver-test
     geckoview-junit
     gradle
     gtest
+    hazards
     ide
-    import-pr
-    install
-    jit-test
     jsapi-tests
     jsshell-bench
     jstestbrowser
     jstests
     marionette-test
     mochitest
-    mozbuild-reference
     mozharness
-    mozregression
-    package
-    package-multi-locale
     pastebin
     power
     prettier-format
@@ -66,11 +50,7 @@ py2commands="
     release-history
     remote
     repackage
-    resource-usage
-    robocop
-    run
     rusttests
-    show-log
     static-analysis
     talos-test
     taskcluster-build-image
@@ -80,12 +60,8 @@ py2commands="
     test
     test-info
     tps-build
-    try
     valgrind-test
     visualmetrics
-    warnings-list
-    warnings-summary
-    watch
     web-platform-tests
     web-platform-tests-update
     webidl-example

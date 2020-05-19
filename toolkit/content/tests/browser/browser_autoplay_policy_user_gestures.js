@@ -65,7 +65,7 @@ function setupTestPreferences() {
   return SpecialPowers.pushPrefEnv({
     set: [
       ["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
-      ["media.autoplay.enabled.user-gestures-needed", true],
+      ["media.autoplay.blocking_policy", 0],
       ["media.autoplay.block-event.enabled", true],
       ["media.autoplay.block-webaudio", true],
       ["media.navigator.permission.fake", true],
@@ -199,12 +199,6 @@ function createAudioContext() {
   });
 }
 
-async function checkingAudioContextRunningState() {
-  let ac = content.ac;
-  await ac.notAllowedToStart;
-  ok(ac.state === "suspended", `AudioContext is not started yet.`);
-}
-
 function resumeWithoutExpectedSuccess() {
   let ac = content.ac;
   let promise = ac.resume();
@@ -236,21 +230,25 @@ async function testWebAudioWithUserGesture(gesture) {
     "about:blank"
   );
   info("- create audio context -");
-  // We want the same audio context to be used across different content
-  // tasks, so it needs to be loaded by a frame script.
-  const mm = tab.linkedBrowser.messageManager;
-  mm.loadFrameScript("data:,(" + createAudioContext.toString() + ")();", false);
-
-  info("- check whether audio context starts running -");
-  try {
-    await SpecialPowers.spawn(
-      tab.linkedBrowser,
-      [],
-      checkingAudioContextRunningState
-    );
-  } catch (error) {
-    ok(false, error.toString());
-  }
+  await SpecialPowers.spawn(tab.linkedBrowser, [], () => {
+    content.ac = new content.AudioContext();
+    let ac = content.ac;
+    ac.resumePromises = [];
+    return new Promise(resolve => {
+      ac.addEventListener(
+        "blocked",
+        function() {
+          Assert.equal(
+            ac.state,
+            "suspended",
+            `AudioContext is not started yet.`
+          );
+          resolve();
+        },
+        { once: true }
+      );
+    });
+  });
 
   info("- calling resume() -");
   try {

@@ -89,39 +89,7 @@ class IpcResourceUpdateQueue {
   // 64k - 2 * 4k - 16 = 57328 bytes as the default alloc size.
   explicit IpcResourceUpdateQueue(
       layers::WebRenderBridgeChild* aAllocator,
-      wr::RenderRoot aRenderRoot = wr::RenderRoot::Default,
       size_t aChunkSize = 57328);
-
-  // Although resource updates don't belong to a particular document/render root
-  // in any concrete way, they still end up being tied to a render root because
-  // we need to know which WR document to generate a frame for when they change.
-  IpcResourceUpdateQueue& SubQueue(wr::RenderRoot aRenderRoot) {
-    MOZ_ASSERT(mRenderRoot == wr::RenderRoot::Default);
-    if (aRenderRoot == wr::RenderRoot::Default) {
-      MOZ_ASSERT(mRenderRoot == wr::RenderRoot::Default);
-      return *this;
-    }
-    if (!mSubQueues[aRenderRoot]) {
-      mSubQueues[aRenderRoot] = MakeUnique<IpcResourceUpdateQueue>(
-          mWriter.WrBridge(), aRenderRoot, mWriter.ChunkSize());
-    }
-    return *mSubQueues[aRenderRoot];
-  }
-
-  bool HasAnySubQueue() {
-    for (auto renderRoot : wr::kNonDefaultRenderRoots) {
-      if (mSubQueues[renderRoot]) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool HasSubQueue(wr::RenderRoot aRenderRoot) {
-    return aRenderRoot == wr::RenderRoot::Default || !!mSubQueues[aRenderRoot];
-  }
-
-  wr::RenderRoot GetRenderRoot() { return mRenderRoot; }
 
   IpcResourceUpdateQueue(IpcResourceUpdateQueue&& aOther) noexcept;
   IpcResourceUpdateQueue& operator=(IpcResourceUpdateQueue&& aOther) noexcept;
@@ -139,7 +107,10 @@ class IpcResourceUpdateQueue {
   bool AddBlobImage(wr::BlobImageKey aKey, const ImageDescriptor& aDescriptor,
                     Range<uint8_t> aBytes, ImageIntRect aVisibleRect);
 
-  void AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey);
+  void AddPrivateExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
+                               wr::ImageDescriptor aDesc);
+
+  void AddSharedExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey);
 
   void PushExternalImageForTexture(wr::ExternalImageId aExtId,
                                    wr::ImageKey aKey,
@@ -154,8 +125,11 @@ class IpcResourceUpdateQueue {
                        Range<uint8_t> aBytes, ImageIntRect aVisibleRect,
                        ImageIntRect aDirtyRect);
 
-  void UpdateExternalImage(ExternalImageId aExtID, ImageKey aKey,
-                           ImageIntRect aDirtyRect);
+  void UpdatePrivateExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
+                                  const wr::ImageDescriptor& aDesc,
+                                  ImageIntRect aDirtyRect);
+  void UpdateSharedExternalImage(ExternalImageId aExtID, ImageKey aKey,
+                                 ImageIntRect aDirtyRect);
 
   void SetBlobImageVisibleArea(BlobImageKey aKey, const ImageIntRect& aArea);
 
@@ -194,8 +168,6 @@ class IpcResourceUpdateQueue {
  protected:
   ShmSegmentsWriter mWriter;
   nsTArray<layers::OpUpdateResource> mUpdates;
-  wr::NonDefaultRenderRootArray<UniquePtr<IpcResourceUpdateQueue>> mSubQueues;
-  wr::RenderRoot mRenderRoot;
 };
 
 }  // namespace wr

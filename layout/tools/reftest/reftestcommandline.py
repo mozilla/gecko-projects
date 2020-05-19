@@ -2,6 +2,7 @@ from __future__ import absolute_import, print_function
 
 import argparse
 import os
+import sys
 from collections import OrderedDict
 from urlparse import urlparse
 import mozinfo
@@ -408,10 +409,17 @@ class DesktopArgumentsParser(ReftestArgumentsParser):
             self.error("No test files specified.")
 
         if options.app is None:
-            bin_dir = (self.build_obj.get_binary_path() if
-                       self.build_obj and self.build_obj.substs[
-                           'MOZ_BUILD_APP'] != 'mobile/android'
-                       else None)
+            if self.build_obj and self.build_obj.substs[
+                    'MOZ_BUILD_APP'] != 'mobile/android':
+                from mozbuild.base import BinaryNotFoundException
+
+                try:
+                    bin_dir = self.build_obj.get_binary_path()
+                except BinaryNotFoundException as e:
+                    print('{}\n\n{}\n'.format(e, e.help()), file=sys.stderr)
+                    sys.exit(1)
+            else:
+                bin_dir = None
 
             if bin_dir:
                 options.app = bin_dir
@@ -490,7 +498,10 @@ class RemoteArgumentsParser(ReftestArgumentsParser):
                           default=False,
                           help="Skip the installation of the APK.")
 
-    def validate_remote(self, options, automation):
+    def validate_remote(self, options):
+        DEFAULT_HTTP_PORT = 8888
+        DEFAULT_SSL_PORT = 4443
+
         if options.remoteWebServer is None:
             options.remoteWebServer = self.get_ip()
 
@@ -500,10 +511,10 @@ class RemoteArgumentsParser(ReftestArgumentsParser):
                        "Please provide the local ip in --remote-webserver")
 
         if not options.httpPort:
-            options.httpPort = automation.DEFAULT_HTTP_PORT
+            options.httpPort = DEFAULT_HTTP_PORT
 
         if not options.sslPort:
-            options.sslPort = automation.DEFAULT_SSL_PORT
+            options.sslPort = DEFAULT_SSL_PORT
 
         if options.xrePath is None:
             self.error(

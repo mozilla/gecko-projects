@@ -492,8 +492,8 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozInlineSpellChecker)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozInlineSpellChecker)
 
-NS_IMPL_CYCLE_COLLECTION(mozInlineSpellChecker, mTextEditor, mSpellCheck,
-                         mCurrentSelectionAnchorNode)
+NS_IMPL_CYCLE_COLLECTION_WEAK(mozInlineSpellChecker, mTextEditor, mSpellCheck,
+                              mCurrentSelectionAnchorNode)
 
 mozInlineSpellChecker::SpellCheckingState
     mozInlineSpellChecker::gCanEnableSpellChecking =
@@ -1430,7 +1430,7 @@ void mozInlineSpellChecker::CheckCurrentWordsNoSuggest(
   uint32_t token = mDisabledAsyncToken;
   mSpellCheck->CheckCurrentWordsNoSuggest(aWords)->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [self, spellCheckerSelection, aRanges,
+      [self, spellCheckerSelection, ranges = aRanges.Clone(),
        token](const nsTArray<bool>& aIsMisspelled) {
         if (token != self->mDisabledAsyncToken) {
           // This result is never used
@@ -1453,7 +1453,7 @@ void mozInlineSpellChecker::CheckCurrentWordsNoSuggest(
           }
 
           RefPtr<nsRange> wordRange =
-              mozInlineSpellWordUtil::MakeRange(aRanges[i]);
+              mozInlineSpellWordUtil::MakeRange(ranges[i]);
           // If we somehow can't make a range for this word, just ignore
           // it.
           if (wordRange) {
@@ -1605,8 +1605,9 @@ nsresult mozInlineSpellChecker::RemoveRange(Selection* aSpellCheckSelection,
   NS_ENSURE_ARG_POINTER(aRange);
 
   ErrorResult rv;
-  aSpellCheckSelection->RemoveRangeAndUnselectFramesAndNotifyListeners(*aRange,
-                                                                       rv);
+  RefPtr<nsRange> range{aRange};
+  RefPtr<Selection> selection{aSpellCheckSelection};
+  selection->RemoveRangeAndUnselectFramesAndNotifyListeners(*range, rv);
   if (!rv.Failed() && mNumWordsInSpellSelection) mNumWordsInSpellSelection--;
 
   return rv.StealNSResult();

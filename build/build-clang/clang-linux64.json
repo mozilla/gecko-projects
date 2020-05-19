@@ -1,5 +1,6 @@
 {
-    "stages": "3",
+    "stages": "4",
+    "pgo" : true,
     "build_libcxx": true,
     "build_wasm": true,
     "build_type": "Release",
@@ -16,6 +17,12 @@
       "rename_gcov_flush.patch",
       "critical_section_on_gcov_flush-rG02ce9d8ef5a8.patch",
       "rG7e18aeba5062.patch",
-      "android-mangling-error.patch"
+      "llvmorg-11-init-4265-g2dcbdba8540.patch",
+      "android-mangling-error.patch",
+      "unpoison-thread-stacks.patch",
+      "downgrade-mangling-error.patch",
+      "tsan-hang-be41a98ac222.patch",
+      "llvmorg-11-init-14017-g02b303321d3-libclang.patch",
+      "loosen-msvc-detection.patch"
     ]
 }

@@ -12,6 +12,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/StaticMutex.h"
+#include "nsTArray.h"
 #include "TimelineMarkerEnums.h"  // for MarkerTracingType
 
 class nsDocShell;
@@ -122,7 +123,7 @@ class TimelineConsumers : public nsIObserver {
   LinkedList<MarkersStorage> mMarkersStores;
 
   // Protects this class's data structures.
-  static StaticMutexNotRecorded sMutex;
+  static StaticMutex sMutex;
 };
 
 }  // namespace mozilla

@@ -62,6 +62,11 @@ class nsStringStats {
       return;
     }
 
+    // Only print the stats if we detect a leak.
+    if (mAllocCount <= mFreeCount && mAdoptCount <= mAdoptFreeCount) {
+      return;
+    }
+
     printf("nsStringStats\n");
     printf(" => mAllocCount:     % 10d\n", int(mAllocCount));
     printf(" => mReallocCount:   % 10d\n", int(mReallocCount));
@@ -83,9 +88,7 @@ class nsStringStats {
            uintptr_t(getpid()), uintptr_t(pthread_self()));
   }
 
-  typedef Atomic<int32_t, mozilla::SequentiallyConsistent,
-                 mozilla::recordreplay::Behavior::DontPreserve>
-      AtomicInt;
+  typedef Atomic<int32_t, mozilla::SequentiallyConsistent> AtomicInt;
 
   AtomicInt mAllocCount;
   AtomicInt mReallocCount;

@@ -26,9 +26,8 @@ class DOMLocalization : public intl::Localization {
   explicit DOMLocalization(nsIGlobalObject* aGlobal);
 
   static already_AddRefed<DOMLocalization> Constructor(
-      const GlobalObject& aGlobal,
-      const Optional<Sequence<nsString>>& aResourceIds,
-      const Optional<OwningNonNull<GenerateMessages>>& aGenerateMessages,
+      const GlobalObject& aGlobal, const Sequence<nsString>& aResourceIds,
+      const bool aSync, const BundleGenerator& aBundleGenerator,
       ErrorResult& aRv);
 
   virtual JSObject* WrapObject(JSContext* aCx,
@@ -85,10 +84,23 @@ class DOMLocalization : public intl::Localization {
    *
    * If `aProto` gets passed, it'll be used to cache
    * the localized elements.
+   *
+   * Result is `true` if all translations were applied
+   * successfully, and `false` otherwise.
    */
-  void ApplyTranslations(nsTArray<nsCOMPtr<Element>>& aElements,
-                         nsTArray<L10nMessage>& aTranslations,
+  bool ApplyTranslations(nsTArray<nsCOMPtr<Element>>& aElements,
+                         nsTArray<Nullable<L10nMessage>>& aTranslations,
                          nsXULPrototypeDocument* aProto, ErrorResult& aRv);
+
+  bool SubtreeRootInRoots(nsINode* aSubtreeRoot) {
+    for (auto iter = mRoots.Iter(); !iter.Done(); iter.Next()) {
+      nsINode* subtreeRoot = iter.Get()->GetKey()->SubtreeRoot();
+      if (subtreeRoot == aSubtreeRoot) {
+        return true;
+      }
+    }
+    return false;
+  }
 
  protected:
   virtual ~DOMLocalization();

@@ -12,12 +12,6 @@
 # being used for anything, and recent changes to the CSS loader have
 # made it fail to link.  Further changes are planned which should make
 # it buildable again.
-#
-# TestCSSPropertyLookup.cpp needs the internal XPCOM APIs and so cannot
-# be built with libxul enabled.
-#
-#CPP_UNIT_TESTS = TestCSSPropertyLookup.cpp
-#LIBS += ../nsCSSKeywords.$(OBJ_SUFFIX) ../nsCSSProps.$(OBJ_SUFFIX) $(XPCOM_LIBS)
 
 DIRS += ['gtest']
 
@@ -149,5 +143,4 @@ if CONFIG['COMPILE_ENVIRONMENT']:
         'css_properties_like_longhand.js',
         '!host_ListCSSProperties%s' % CONFIG['HOST_BIN_SUFFIX'],
     ]
-    GENERATED_FILES['css_properties.js'].py2 = True
     TEST_HARNESS_FILES.testing.mochitest.tests.layout.style.test += ['!css_properties.js']

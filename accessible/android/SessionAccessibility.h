@@ -6,8 +6,7 @@
 #ifndef mozilla_a11y_SessionAccessibility_h_
 #define mozilla_a11y_SessionAccessibility_h_
 
-#include "GeneratedJNINatives.h"
-#include "GeneratedJNIWrappers.h"
+#include "mozilla/java/SessionAccessibilityNatives.h"
 #include "nsAppShell.h"
 #include "nsThreadUtils.h"
 #include "nsWindow.h"
@@ -80,7 +79,7 @@ class SessionAccessibility final
                             int32_t aStart, uint32_t aLen, bool aIsInsert,
                             bool aFromUser);
   void SendSelectedEvent(AccessibleWrap* aAccessible, bool aSelected);
-  void SendClickedEvent(AccessibleWrap* aAccessible, bool aChecked);
+  void SendClickedEvent(AccessibleWrap* aAccessible, uint32_t aFlags);
   void SendWindowContentChangedEvent();
   void SendWindowStateChangedEvent(AccessibleWrap* aAccessible);
   void SendAnnouncementEvent(AccessibleWrap* aAccessible,

@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
+ 
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
 		module.exports = factory(require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"), require("devtools/client/shared/vendor/react"), require("Services"), require("devtools/client/shared/vendor/react-redux"));
@@ -1816,29 +1816,6 @@ function nodeHasEntries(item) {
   return value.class === "Map" || value.class === "Set" || value.class === "WeakMap" || value.class === "WeakSet" || value.class === "Storage";
 }
 
-function nodeHasAllEntriesInPreview(item) {
-  const {
-    preview
-  } = getValue(item) || {};
-
-  if (!preview) {
-    return false;
-  }
-
-  const {
-    entries,
-    items,
-    length,
-    size
-  } = preview;
-
-  if (!entries && !items) {
-    return false;
-  }
-
-  return entries ? entries.length === size : items.length === length;
-}
-
 function nodeNeedsNumericalBuckets(item) {
   return nodeSupportsNumericalBucketing(item) && getNumericalPropertiesCount(item) > MAX_NUMERICAL_PROPERTIES;
 }
@@ -1922,46 +1899,6 @@ function makeNodesForProxyProperties(loadedProps, item) {
 
 function makeNodesForEntries(item) {
   const nodeName = "<entries>";
-  const entriesPath = "<entries>";
-
-  if (nodeHasAllEntriesInPreview(item)) {
-    let entriesNodes = [];
-    const {
-      preview
-    } = getValue(item);
-
-    if (preview.entries) {
-      entriesNodes = preview.entries.map(([key, value], index) => {
-        return createNode({
-          parent: item,
-          name: index,
-          path: createPath(entriesPath, index),
-          contents: {
-            value: GripMapEntryRep.createGripMapEntry(key, value)
-          }
-        });
-      });
-    } else if (preview.items) {
-      entriesNodes = preview.items.map((value, index) => {
-        return createNode({
-          parent: item,
-          name: index,
-          path: createPath(entriesPath, index),
-          contents: {
-            value
-          }
-        });
-      });
-    }
-
-    return createNode({
-      parent: item,
-      name: nodeName,
-      contents: entriesNodes,
-      type: NODE_TYPES.ENTRIES
-    });
-  }
-
   return createNode({
     parent: item,
     name: nodeName,
@@ -2554,7 +2491,6 @@ module.exports = {
   makeNodesForProperties,
   makeNumericalBuckets,
   nodeHasAccessors,
-  nodeHasAllEntriesInPreview,
   nodeHasChildren,
   nodeHasEntries,
   nodeHasProperties,
@@ -2602,7 +2538,6 @@ function initialState(overrides) {
     expandedPaths: new Set(),
     loadedProperties: new Map(),
     evaluations: new Map(),
-    actors: new Set(),
     watchpoints: new Map(),
     ...overrides
   };
@@ -2662,13 +2597,8 @@ function reducer(state = initialState(), action = {}) {
 
   if (type === "NODE_PROPERTIES_LOADED") {
     return cloneState({
-      actors: data.actor ? new Set(state.actors || []).add(data.actor) : state.actors,
       loadedProperties: new Map(state.loadedProperties).set(data.node.path, action.data.properties)
     });
-  }
-
-  if (type === "RELEASED_ACTORS") {
-    return onReleasedActorsAction(state, action);
   }
 
   if (type === "ROOTS_CHANGED") {
@@ -2677,7 +2607,6 @@ function reducer(state = initialState(), action = {}) {
 
   if (type === "GETTER_INVOKED") {
     return cloneState({
-      actors: data.actor ? new Set(state.actors || []).add(data.result.from) : state.actors,
       evaluations: new Map(state.evaluations).set(data.node.path, {
         getterValue: data.result && data.result.value && (data.result.value.throw || data.result.value.return)
       })
@@ -2693,28 +2622,6 @@ function reducer(state = initialState(), action = {}) {
   }
 
   return state;
-}
-/**
- * Reducer function for the "RELEASED_ACTORS" action.
- */
-
-
-function onReleasedActorsAction(state, action) {
-  const {
-    data
-  } = action;
-
-  if (state.actors && state.actors.size > 0 && data.actors.length > 0) {
-    return state;
-  }
-
-  for (const actor of data.actors) {
-    state.actors.delete(actor);
-  }
-
-  return { ...state,
-    actors: new Set(state.actors || [])
-  };
 }
 
 function updateObject(obj, property, watchpoint) {
@@ -2739,10 +2646,6 @@ function getExpandedPathKeys(state) {
   return [...getExpandedPaths(state).keys()];
 }
 
-function getActors(state) {
-  return getObjectInspectorState(state).actors;
-}
-
 function getWatchpoints(state) {
   return getObjectInspectorState(state).watchpoints;
 }
@@ -2760,7 +2663,6 @@ function getEvaluations(state) {
 }
 
 const selectors = {
-  getActors,
   getWatchpoints,
   getEvaluations,
   getExpandedPathKeys,
@@ -2806,14 +2708,14 @@ const {
   }
 } = __webpack_require__(24);
 
-function shouldRenderRootsInReps(roots) {
+function shouldRenderRootsInReps(roots, props = {}) {
   if (roots.length !== 1) {
     return false;
   }
 
   const root = roots[0];
   const name = root && root.name;
-  return (name === null || typeof name === "undefined") && (nodeIsPrimitive(root) || nodeIsError(root));
+  return (name === null || typeof name === "undefined") && (nodeIsPrimitive(root) || nodeIsError(root) && (props === null || props === void 0 ? void 0 : props.customFormat) === true);
 }
 
 function renderRep(item, props) {
@@ -2955,7 +2857,7 @@ function FunctionRep(props) {
     // appearing in the wrong direction
     dir: "ltr"
   };
-  const parameterNames = (grip.parameterNames || []).filter(param => param);
+  const parameterNames = (grip.parameterNames || []).filter(Boolean);
 
   if (grip.isClassConstructor) {
     return span(elProps, getClassTitle(grip, props), getFunctionName(grip, props), ...getClassBody(parameterNames, props), jumpToDefinitionButton);
@@ -3197,11 +3099,30 @@ ErrorRep.propTypes = {
   // An optional function that will be used to render the Error stacktrace.
   renderStacktrace: PropTypes.func
 };
+/**
+ * Render an Error object.
+ * The customFormat prop allows to print a simplified view of the object, with only the
+ * message and the stacktrace, e.g.:
+ *      Error: "blah"
+ *          <anonymous> debugger eval code:1
+ *
+ * The customFormat prop will only be taken into account if the mode isn't tiny and the
+ * depth is 0. This is because we don't want error in previews or in object to be
+ * displayed unlike other objects:
+ *      - Object { err: Error }
+ *      - ▼ {
+ *            err: Error: "blah"
+ *        }
+ */
 
 function ErrorRep(props) {
-  const object = props.object;
+  const {
+    object,
+    mode,
+    depth
+  } = props;
   const preview = object.preview;
-  const mode = props.mode;
+  const customFormat = props.customFormat && mode !== MODE.TINY && !depth;
   let name;
 
   if (preview && preview.name && typeof preview.name === "string" && preview.kind) {
@@ -3221,23 +3142,42 @@ function ErrorRep(props) {
     name = "Error";
   }
 
+  const errorTitle = mode === MODE.TINY ? name : `${name}: `;
   const content = [];
 
-  if (mode === MODE.TINY || typeof preview.message !== "string") {
-    content.push(name);
+  if (customFormat) {
+    content.push(errorTitle);
   } else {
-    content.push(`${name}: "${preview.message}"`);
+    content.push(span({
+      className: "objectTitle",
+      key: "title"
+    }, errorTitle));
   }
 
-  if (preview.stack && mode !== MODE.TINY && mode !== MODE.SHORT) {
+  if (mode !== MODE.TINY) {
+    const {
+      Rep
+    } = __webpack_require__(24);
+
+    content.push(Rep({ ...props,
+      key: "message",
+      object: preview.message,
+      mode: props.mode || MODE.TINY,
+      useQuotes: false
+    }));
+  }
+
+  const renderStack = preview.stack && customFormat;
+
+  if (renderStack) {
     const stacktrace = props.renderStacktrace ? props.renderStacktrace(parseStackString(preview.stack)) : getStacktraceElements(props, preview);
     content.push(stacktrace);
   }
 
   return span({
     "data-link-actor-id": object.actor,
-    className: "objectBox-stackTrace"
-  }, content);
+    className: `objectBox-stackTrace ${customFormat ? "reps-custom-format" : ""}`
+  }, ...content);
 }
 /**
  * Returns a React element reprensenting the Error stacktrace, i.e.
@@ -4036,7 +3976,6 @@ const {
   getFront,
   getValue,
   nodeHasAccessors,
-  nodeHasAllEntriesInPreview,
   nodeHasProperties,
   nodeIsBucket,
   nodeIsDefaultProperties,
@@ -4148,7 +4087,7 @@ function shouldLoadItemNonIndexedProperties(item, loadedProperties = new Map()) 
 function shouldLoadItemEntries(item, loadedProperties = new Map()) {
   const gripItem = getClosestGripNode(item);
   const value = getValue(gripItem);
-  return value && nodeIsEntries(getClosestNonBucketNode(item)) && !nodeHasAllEntriesInPreview(gripItem) && !loadedProperties.has(item.path) && !nodeNeedsNumericalBuckets(item);
+  return value && nodeIsEntries(getClosestNonBucketNode(item)) && !loadedProperties.has(item.path) && !nodeNeedsNumericalBuckets(item);
 }
 
 function shouldLoadItemPrototype(item, loadedProperties = new Map()) {
@@ -7750,7 +7689,7 @@ class ObjectInspector extends Component {
       this.activeItem = nextProps.activeItem;
 
       if (this.props.rootsChanged) {
-        this.props.rootsChanged();
+        this.props.rootsChanged(this.roots);
       }
     }
   }
@@ -7798,7 +7737,7 @@ class ObjectInspector extends Component {
   }
 
   componentWillUnmount() {
-    this.props.closeObjectInspector();
+    this.props.closeObjectInspector(this.props.roots);
   }
 
   getItemChildren(item) {
@@ -7983,7 +7922,7 @@ module.exports = props => {
     return null;
   }
 
-  if (shouldRenderRootsInReps(roots)) {
+  if (shouldRenderRootsInReps(roots, props)) {
     return renderRep(roots[0], props);
   }
 
@@ -8014,12 +7953,12 @@ const {
   getParentFront,
   getParentGripValue,
   getValue,
-  nodeIsBucket
+  nodeIsBucket,
+  getFront
 } = __webpack_require__(114);
 
 const {
   getLoadedProperties,
-  getActors,
   getWatchpoints
 } = __webpack_require__(115);
 
@@ -8169,12 +8108,21 @@ function removeWatchpoint(item) {
   };
 }
 
-function closeObjectInspector() {
+function getActorIDs(roots) {
+  return (roots || []).reduce((ids, root) => {
+    const front = getFront(root);
+    return front ? ids.concat(front.actorID) : ids;
+  }, []);
+}
+
+function closeObjectInspector(roots) {
   return ({
     dispatch,
     getState,
     client
-  }) => releaseActors(getState(), client, dispatch);
+  }) => {
+    releaseActors(roots, client, dispatch);
+  };
 }
 /*
  * This action is dispatched when the `roots` prop, provided by a consumer of
@@ -8186,33 +8134,27 @@ function closeObjectInspector() {
  */
 
 
-function rootsChanged(props) {
+function rootsChanged(roots) {
   return ({
     dispatch,
     client,
     getState
   }) => {
-    releaseActors(getState(), client, dispatch);
+    releaseActors(roots, client, dispatch);
     dispatch({
       type: "ROOTS_CHANGED",
-      data: props
+      data: roots
     });
   };
 }
 
-async function releaseActors(state, client, dispatch) {
-  const actors = getActors(state);
-
-  if (!client || !client.releaseActor || actors.size === 0) {
+async function releaseActors(roots, client, dispatch) {
+  if (!client || !client.releaseActor) {
     return;
   }
 
-  dispatch({
-    type: "RELEASED_ACTORS",
-    data: {
-      actors
-    }
-  });
+  const actors = getActorIDs(roots);
+  await Promise.all(actors.map(client.releaseActor));
 }
 
 function invokeGetter(node, receiverId) {

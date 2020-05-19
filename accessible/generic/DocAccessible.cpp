@@ -12,6 +12,7 @@
 #include "nsAccCache.h"
 #include "nsAccessiblePivot.h"
 #include "nsAccUtils.h"
+#include "nsDeckFrame.h"
 #include "nsEventShell.h"
 #include "nsTextEquivUtils.h"
 #include "Role.h"
@@ -41,6 +42,7 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/TextEditor.h"
+#include "mozilla/dom/AncestorIterator.h"
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/Element.h"
@@ -119,7 +121,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(DocAccessible, Accessible)
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(
             cb, "content of dependent ids hash entry of document accessible");
 
-        AttrRelProvider* provider = (*providers)[provIdx];
+        const auto& provider = (*providers)[provIdx];
         cb.NoteXPCOMChild(provider->mContent);
       }
     }
@@ -145,6 +147,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(DocAccessible, Accessible)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAccessibleCache)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnchorJumpElm)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mInvalidationList)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
   tmp->mARIAOwnsHash.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -669,9 +672,11 @@ void DocAccessible::AttributeWillChange(dom::Element* aElement,
     return;
   }
 
-  if (aAttribute == nsGkAtoms::aria_disabled ||
-      aAttribute == nsGkAtoms::disabled)
-    mStateBitWasOn = accessible->Unavailable();
+  if (aAttribute == nsGkAtoms::aria_disabled || aAttribute == nsGkAtoms::href ||
+      aAttribute == nsGkAtoms::disabled || aAttribute == nsGkAtoms::tabindex ||
+      aAttribute == nsGkAtoms::contenteditable) {
+    mPrevStateBits = accessible->State();
+  }
 }
 
 void DocAccessible::NativeAnonymousChildListChange(nsIContent* aContent,
@@ -728,7 +733,7 @@ void DocAccessible::AttributeChanged(dom::Element* aElement,
 
   // Fire accessible events iff there's an accessible, otherwise we consider
   // the accessible state wasn't changed, i.e. its state is initial state.
-  AttributeChangedImpl(accessible, aNameSpaceID, aAttribute);
+  AttributeChangedImpl(accessible, aNameSpaceID, aAttribute, aModType);
 
   // Update dependent IDs cache. Take care of accessible elements because no
   // accessible element means either the element is not accessible at all or
@@ -744,7 +749,7 @@ void DocAccessible::AttributeChanged(dom::Element* aElement,
 // DocAccessible protected member
 void DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
                                          int32_t aNameSpaceID,
-                                         nsAtom* aAttribute) {
+                                         nsAtom* aAttribute, int32_t aModType) {
   // Fire accessible event after short timer, because we need to wait for
   // DOM attribute & resulting layout to actually change. Otherwise,
   // assistive technology will retrieve the wrong state/value/selection info.
@@ -770,17 +775,33 @@ void DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
   // ARIA's aria-disabled does not affect the disabled state bit.
   if (aAttribute == nsGkAtoms::disabled ||
       aAttribute == nsGkAtoms::aria_disabled) {
+    // disabled can affect focusable state
+    aAccessible->MaybeFireFocusableStateChange(
+        (mPrevStateBits & states::FOCUSABLE) != 0);
+
     // Do nothing if state wasn't changed (like @aria-disabled was removed but
     // @disabled is still presented).
-    if (aAccessible->Unavailable() == mStateBitWasOn) return;
+    uint64_t unavailableState = (aAccessible->State() & states::UNAVAILABLE);
+    if ((mPrevStateBits & states::UNAVAILABLE) == unavailableState) {
+      return;
+    }
 
-    RefPtr<AccEvent> enabledChangeEvent =
-        new AccStateChangeEvent(aAccessible, states::ENABLED, mStateBitWasOn);
+    RefPtr<AccEvent> enabledChangeEvent = new AccStateChangeEvent(
+        aAccessible, states::ENABLED, !unavailableState);
     FireDelayedEvent(enabledChangeEvent);
 
-    RefPtr<AccEvent> sensitiveChangeEvent =
-        new AccStateChangeEvent(aAccessible, states::SENSITIVE, mStateBitWasOn);
+    RefPtr<AccEvent> sensitiveChangeEvent = new AccStateChangeEvent(
+        aAccessible, states::SENSITIVE, !unavailableState);
     FireDelayedEvent(sensitiveChangeEvent);
+
+    return;
+  }
+
+  if (aAttribute == nsGkAtoms::tabindex) {
+    // Fire a focusable state change event if the previous state was different.
+    // It may be the same if tabindex is on a redundantly focusable element.
+    aAccessible->MaybeFireFocusableStateChange(
+        (mPrevStateBits & states::FOCUSABLE));
     return;
   }
 
@@ -890,12 +911,34 @@ void DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
     RefPtr<AccEvent> editableChangeEvent =
         new AccStateChangeEvent(aAccessible, states::EDITABLE);
     FireDelayedEvent(editableChangeEvent);
+    // Fire a focusable state change event if the previous state was different.
+    // It may be the same if contenteditable is set on a node that doesn't
+    // support it. Like an <input>.
+    aAccessible->MaybeFireFocusableStateChange(
+        (mPrevStateBits & states::FOCUSABLE));
     return;
   }
 
   if (aAttribute == nsGkAtoms::value) {
     if (aAccessible->IsProgress())
       FireDelayedEvent(nsIAccessibleEvent::EVENT_VALUE_CHANGE, aAccessible);
+    return;
+  }
+
+  if (aModType == dom::MutationEvent_Binding::REMOVAL ||
+      aModType == dom::MutationEvent_Binding::ADDITION) {
+    if (aAttribute == nsGkAtoms::href) {
+      if (aAccessible->IsHTMLLink() &&
+          !nsCoreUtils::HasClickListener(aAccessible->GetContent())) {
+        RefPtr<AccEvent> linkedChangeEvent =
+            new AccStateChangeEvent(aAccessible, states::LINKED);
+        FireDelayedEvent(linkedChangeEvent);
+        // Fire a focusable state change event if the previous state was
+        // different. It may be the same if there is tabindex on this link.
+        aAccessible->MaybeFireFocusableStateChange(
+            (mPrevStateBits & states::FOCUSABLE));
+      }
+    }
   }
 }
 
@@ -1000,6 +1043,13 @@ void DocAccessible::ARIAAttributeChanged(Accessible* aAccessible,
     return;
   }
 
+  if (aAttribute == nsGkAtoms::aria_haspopup) {
+    RefPtr<AccEvent> event =
+        new AccStateChangeEvent(aAccessible, states::HASPOPUP);
+    FireDelayedEvent(event);
+    return;
+  }
+
   if (aAttribute == nsGkAtoms::aria_owns) {
     mNotificationController->ScheduleRelocation(aAccessible);
   }
@@ -1068,6 +1118,12 @@ void DocAccessible::ContentStateChanged(dom::Document* aDocument,
   if (aStateMask.HasState(NS_EVENT_STATE_INVALID)) {
     RefPtr<AccEvent> event =
         new AccStateChangeEvent(accessible, states::INVALID, true);
+    FireDelayedEvent(event);
+  }
+
+  if (aStateMask.HasState(NS_EVENT_STATE_REQUIRED)) {
+    RefPtr<AccEvent> event =
+        new AccStateChangeEvent(accessible, states::REQUIRED);
     FireDelayedEvent(event);
   }
 
@@ -1154,24 +1210,20 @@ Accessible* DocAccessible::GetAccessibleOrContainer(
     return nullptr;
   }
 
-  nsINode* currNode = nullptr;
-  if (aNode->IsShadowRoot()) {
+  nsINode* start = aNode;
+  if (auto* shadowRoot = dom::ShadowRoot::FromNode(aNode)) {
     // This can happen, for example, when called within
     // SelectionManager::ProcessSelectionChanged due to focusing a direct
     // child of a shadow root.
     // GetFlattenedTreeParent works on children of a shadow root, but not the
     // shadow root itself.
-    const dom::ShadowRoot* shadowRoot = dom::ShadowRoot::FromNode(aNode);
-    currNode = shadowRoot->GetHost();
-    if (!currNode) {
+    start = shadowRoot->GetHost();
+    if (!start) {
       return nullptr;
     }
-  } else {
-    currNode = aNode;
   }
 
-  MOZ_ASSERT(currNode);
-  for (; currNode; currNode = currNode->GetFlattenedTreeParentNode()) {
+  for (nsINode* currNode : dom::InclusiveFlatTreeAncestors(*start)) {
     // No container if is inside of aria-hidden subtree.
     if (aNoContainerIfPruned && currNode->IsElement() &&
         aria::HasDefinedARIAHidden(currNode->AsElement())) {
@@ -1246,7 +1298,7 @@ void DocAccessible::BindToDocument(Accessible* aAccessible,
     mNodeToAccessibleMap.Put(aAccessible->GetNode(), aAccessible);
 
   // Put into unique ID cache.
-  mAccessibleCache.Put(aAccessible->UniqueID(), aAccessible);
+  mAccessibleCache.Put(aAccessible->UniqueID(), RefPtr{aAccessible});
 
   aAccessible->SetRoleMapEntry(aRoleMapEntry);
 
@@ -1729,10 +1781,10 @@ void DocAccessible::RemoveDependentIDsFor(Accessible* aRelProvider,
       AttrRelProviders* providers = GetRelProviders(relProviderElm, id);
       if (providers) {
         for (uint32_t jdx = 0; jdx < providers->Length();) {
-          AttrRelProvider* provider = (*providers)[jdx];
+          const auto& provider = (*providers)[jdx];
           if (provider->mRelAttr == relAttr &&
               provider->mContent == relProviderElm)
-            providers->RemoveElement(provider);
+            providers->RemoveElementAt(jdx);
           else
             jdx++;
         }
@@ -1765,17 +1817,6 @@ bool DocAccessible::UpdateAccessibleOnAttrChange(dom::Element* aElement,
     // a different sets of interfaces (COM restriction).
     RecreateAccessible(aElement);
 
-    return true;
-  }
-
-  if (aAttribute == nsGkAtoms::href) {
-    // Not worth the expense to ensure which namespace these are in. It doesn't
-    // kill use to recreate the accessible even if the attribute was used in
-    // the wrong namespace or an element that doesn't support it.
-
-    // Make sure the accessible is recreated asynchronously to allow the content
-    // to handle the attribute change.
-    RecreateAccessible(aElement);
     return true;
   }
 
@@ -2531,11 +2572,18 @@ void DocAccessible::DispatchScrollingEvent(nsINode* aTarget,
     return;
   }
 
+  nsIFrame* frame = acc->GetFrame();
+  if (!frame) {
+    // Although the accessible had a frame at scroll time, it may now be gone
+    // because of display: contents.
+    return;
+  }
+
   LayoutDevicePoint scrollPoint;
   LayoutDeviceRect scrollRange;
   nsIScrollableFrame* sf = acc == this
                                ? mPresShell->GetRootScrollFrameAsScrollable()
-                               : acc->GetFrame()->GetScrollTargetFrame();
+                               : frame->GetScrollTargetFrame();
 
   // If there is no scrollable frame, it's likely a scroll in a popup, like
   // <select>. Just send an event with no scroll info. The scroll info

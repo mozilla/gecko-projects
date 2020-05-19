@@ -102,7 +102,8 @@ nsresult SessionStorageManager::GetSessionStorageCacheHelper(
     SessionStorageCache* aCloneFrom, RefPtr<SessionStorageCache>* aRetVal) {
   nsAutoCString originKey;
   nsAutoCString originAttributes;
-  nsresult rv = GenerateOriginKey(aPrincipal, originAttributes, originKey);
+  nsresult rv = aPrincipal->GetStorageOriginKey(originKey);
+  aPrincipal->OriginAttributesRef().CreateSuffix(originAttributes);
   if (NS_FAILED(rv)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -169,9 +170,9 @@ SessionStorageManager::CreateStorage(mozIDOMWindow* aWindow,
 
   nsCOMPtr<nsPIDOMWindowInner> inner = nsPIDOMWindowInner::From(aWindow);
 
-  // No StoragePrincipal for sessionStorage.
-  RefPtr<SessionStorage> storage = new SessionStorage(
-      inner, aPrincipal, cache, this, aDocumentURI, aPrivate);
+  RefPtr<SessionStorage> storage =
+      new SessionStorage(inner, aPrincipal, aStoragePrincipal, cache, this,
+                         aDocumentURI, aPrivate);
 
   storage.forget(aRetval);
   return NS_OK;
@@ -193,8 +194,9 @@ SessionStorageManager::GetStorage(mozIDOMWindow* aWindow,
 
   nsCOMPtr<nsPIDOMWindowInner> inner = nsPIDOMWindowInner::From(aWindow);
 
-  RefPtr<SessionStorage> storage = new SessionStorage(
-      inner, aStoragePrincipal, cache, this, EmptyString(), aPrivate);
+  RefPtr<SessionStorage> storage =
+      new SessionStorage(inner, aPrincipal, aStoragePrincipal, cache, this,
+                         EmptyString(), aPrivate);
 
   storage.forget(aRetval);
   return NS_OK;
@@ -246,7 +248,8 @@ SessionStorageManager::CheckStorage(nsIPrincipal* aPrincipal, Storage* aStorage,
     return NS_OK;
   }
 
-  if (!StorageUtils::PrincipalsEqual(aStorage->Principal(), aPrincipal)) {
+  if (!StorageUtils::PrincipalsEqual(aStorage->StoragePrincipal(),
+                                     aPrincipal)) {
     return NS_OK;
   }
 
@@ -301,7 +304,8 @@ void SessionStorageManager::SendSessionStorageDataToContentProcess(
     ContentParent* const aActor, nsIPrincipal* const aPrincipal) {
   nsAutoCString originAttrs;
   nsAutoCString originKey;
-  auto rv = GenerateOriginKey(aPrincipal, originAttrs, originKey);
+  nsresult rv = aPrincipal->GetStorageOriginKey(originKey);
+  aPrincipal->OriginAttributesRef().CreateSuffix(originAttrs);
   if (NS_FAILED(rv)) {
     return;
   }

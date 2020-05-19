@@ -57,7 +57,7 @@
 #  include "mozilla/widget/GtkCompositorWidget.h"
 #endif
 #if MOZ_WIDGET_ANDROID
-#  include "GeneratedJNIWrappers.h"
+#  include "mozilla/java/GeckoSurfaceTextureWrappers.h"
 #endif
 
 #include "GeckoProfiler.h"
@@ -396,7 +396,8 @@ bool CompositorOGL::Initialize(nsCString* const out_failureReason) {
   mGLContext->fEnable(LOCAL_GL_BLEND);
 
   // initialise a common shader to check that we can actually compile a shader
-  RefPtr<EffectSolidColor> effect = new EffectSolidColor(Color(0, 0, 0, 0));
+  RefPtr<EffectSolidColor> effect =
+      new EffectSolidColor(DeviceColor(0, 0, 0, 0));
   ShaderConfigOGL config = GetShaderConfigFor(effect);
   if (!GetShaderProgramFor(config)) {
     *out_failureReason = "FEATURE_FAILURE_OPENGL_COMPILE_SHADER";
@@ -599,18 +600,12 @@ void CompositorOGL::PrepareViewport(CompositingRenderTargetOGL* aRenderTarget) {
     viewMatrix.PreScale(1.0f, -1.0f);
 
     MOZ_ASSERT(mCurrentRenderTarget, "No destination");
-    // If we're drawing directly to the window then we want to offset
-    // drawing by the render offset.
-    if (!mTarget && mCurrentRenderTarget->IsWindow()) {
-      viewMatrix.PreTranslate(mRenderOffset.x, mRenderOffset.y);
-    }
 
     Matrix4x4 matrix3d = Matrix4x4::From2D(viewMatrix);
     matrix3d._33 = 0.0f;
     mProjMatrix = matrix3d;
     mGLContext->fDepthRange(0.0f, 1.0f);
   } else {
-    // XXX take into account mRenderOffset
     bool depthEnable;
     float zNear, zFar;
     aRenderTarget->GetProjection(mProjMatrix, depthEnable, zNear, zFar);
@@ -944,7 +939,8 @@ void CompositorOGL::EndRenderingToNativeLayer() {
     float g = float(rand()) / float(RAND_MAX);
     float b = float(rand()) / float(RAND_MAX);
     EffectChain effectChain;
-    effectChain.mPrimaryEffect = new EffectSolidColor(Color(r, g, b, 0.2f));
+    effectChain.mPrimaryEffect =
+        new EffectSolidColor(DeviceColor(r, g, b, 0.2f));
     // If we're clipping the render target to the invalid rect, then the
     // current render target is still clipped, so just fill the bounds.
     IntRect rect = mCurrentRenderTarget->GetRect();
@@ -1240,7 +1236,11 @@ ShaderConfigOGL CompositorOGL::GetShaderConfigFor(Effect* aEffect,
     }
     case EffectTypes::NV12:
       config.SetNV12(true);
-      config.SetTextureTarget(LOCAL_GL_TEXTURE_RECTANGLE_ARB);
+      if (gl()->IsExtensionSupported(gl::GLContext::ARB_texture_rectangle)) {
+        config.SetTextureTarget(LOCAL_GL_TEXTURE_RECTANGLE_ARB);
+      } else {
+        config.SetTextureTarget(LOCAL_GL_TEXTURE_2D);
+      }
       break;
     case EffectTypes::COMPONENT_ALPHA: {
       config.SetComponentAlpha(true);
@@ -1463,13 +1463,8 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
   IntPoint offset = mCurrentRenderTarget->GetOrigin();
   clipRect -= offset;
 
-  // clipRect is in destination coordinate space (after all
-  // transforms and offsets have been applied) so if our
-  // drawing is going to be shifted by mRenderOffset then we need
-  // to shift the clip rect by the same amount.
   if (!mTarget && mCurrentRenderTarget->IsWindow()) {
-    clipRect.MoveBy(mRenderOffset.x + mSurfaceOrigin.x,
-                    mRenderOffset.y - mSurfaceOrigin.y);
+    clipRect.MoveBy(mSurfaceOrigin.x, -mSurfaceOrigin.y);
   }
 
   ScopedGLState scopedScissorTestState(mGLContext, LOCAL_GL_SCISSOR_TEST, true);
@@ -1498,7 +1493,7 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
   // Determine the color if this is a color shader and fold the opacity into
   // the color since color shaders don't have an opacity uniform.
-  Color color;
+  DeviceColor color;
   if (aEffectChain.mPrimaryEffect->mType == EffectTypes::SOLID_COLOR) {
     EffectSolidColor* effectSolidColor =
         static_cast<EffectSolidColor*>(aEffectChain.mPrimaryEffect.get());
@@ -2152,9 +2147,6 @@ void CompositorOGL::CopyToTarget(DrawTarget* aTarget,
 void CompositorOGL::Pause() {
 #ifdef MOZ_WIDGET_ANDROID
   if (!gl() || gl()->IsDestroyed()) return;
-  gl()->MakeCurrent();
-  java::GeckoSurfaceTexture::DestroyUnused((int64_t)mGLContext.get());
-  java::GeckoSurfaceTexture::DetachAllFromGLContext((int64_t)mGLContext.get());
   // ReleaseSurface internally calls MakeCurrent
   gl()->ReleaseSurface();
 #elif defined(MOZ_WAYLAND)

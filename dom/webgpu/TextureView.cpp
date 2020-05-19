@@ -13,7 +13,24 @@ namespace webgpu {
 GPU_IMPL_CYCLE_COLLECTION(TextureView, mParent)
 GPU_IMPL_JS_WRAP(TextureView)
 
-TextureView::~TextureView() = default;
+TextureView::TextureView(Texture* const aParent, RawId aId)
+    : ChildOf(aParent), mId(aId) {}
+
+TextureView::~TextureView() { Cleanup(); }
+
+dom::HTMLCanvasElement* TextureView::GetTargetCanvasElement() const {
+  return mParent->mTargetCanvasElement;
+}  // namespace webgpu
+
+void TextureView::Cleanup() {
+  if (mValid && mParent && mParent->GetParentDevice()) {
+    mValid = false;
+    auto bridge = mParent->GetParentDevice()->GetBridge();
+    if (bridge && bridge->IsOpen()) {
+      bridge->SendTextureViewDestroy(mId);
+    }
+  }
+}
 
 }  // namespace webgpu
 }  // namespace mozilla

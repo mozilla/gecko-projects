@@ -229,11 +229,11 @@ class nsUrlClassifierDBService::FeatureHolder final {
 
   ~FeatureHolder() {
     for (FeatureData& featureData : mFeatureData) {
-      NS_ReleaseOnMainThreadSystemGroup("FeatureHolder:mFeatureData",
-                                        featureData.mFeature.forget());
+      NS_ReleaseOnMainThread("FeatureHolder:mFeatureData",
+                             featureData.mFeature.forget());
     }
 
-    NS_ReleaseOnMainThreadSystemGroup("FeatureHolder:mURI", mURI.forget());
+    NS_ReleaseOnMainThread("FeatureHolder:mURI", mURI.forget());
   }
 
   TableData* GetOrCreateTableData(const nsACString& aTable) {
@@ -1023,7 +1023,7 @@ nsresult nsUrlClassifierDBServiceWorker::CacheCompletions(
 
   rv = mClassifier->ApplyFullHashes(updates);
   if (NS_SUCCEEDED(rv)) {
-    mLastResults = aResults;
+    mLastResults = aResults.Clone();
   }
   return rv;
 }
@@ -1188,8 +1188,8 @@ NS_IMPL_ISUPPORTS(nsUrlClassifierLookupCallback, nsIUrlClassifierLookupCallback,
 
 nsUrlClassifierLookupCallback::~nsUrlClassifierLookupCallback() {
   if (mCallback) {
-    NS_ReleaseOnMainThreadSystemGroup(
-        "nsUrlClassifierLookupCallback::mCallback", mCallback.forget());
+    NS_ReleaseOnMainThread("nsUrlClassifierLookupCallback::mCallback",
+                           mCallback.forget());
   }
 }
 
@@ -1355,8 +1355,9 @@ nsresult nsUrlClassifierLookupCallback::ProcessComplete(
     RefPtr<CacheResult> aCacheResult) {
   NS_ENSURE_ARG_POINTER(mResults);
 
-  // OK if this fails, we just won't cache the item.
-  mCacheResults.AppendElement(aCacheResult, fallible);
+  if (!mCacheResults.AppendElement(aCacheResult, fallible)) {
+    // OK if this failed, we just won't cache the item.
+  }
 
   // Check if this matched any of our results.
   for (const auto& result : *mResults) {
@@ -1495,7 +1496,7 @@ class nsUrlClassifierClassifyCallback final
     nsresult errorCode;
   };
 
-  ~nsUrlClassifierClassifyCallback(){};
+  ~nsUrlClassifierClassifyCallback() = default;
 
   nsCOMPtr<nsIURIClassifierCallback> mCallback;
   nsTArray<ClassifyMatchedInfo> mMatchedArray;
@@ -1720,14 +1721,8 @@ nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
 
     if (aEventTarget) {
       content->SetEventTargetForActor(actor, aEventTarget);
-    } else {
-      // In the case null event target we should use systemgroup event target
-      NS_WARNING(
-          ("Null event target, we should use SystemGroup to do labelling"));
-      nsCOMPtr<nsIEventTarget> systemGroupEventTarget =
-          mozilla::SystemGroup::EventTargetFor(mozilla::TaskCategory::Other);
-      content->SetEventTargetForActor(actor, systemGroupEventTarget);
     }
+
     if (!content->SendPURLClassifierConstructor(
             actor, IPC::Principal(aPrincipal), aResult)) {
       *aResult = false;
@@ -1765,7 +1760,9 @@ nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
   }
 
   nsCOMPtr<nsIURI> uri;
-  rv = aPrincipal->GetURI(getter_AddRefs(uri));
+  // Casting to BasePrincipal, as we can't get InnerMost URI otherwise
+  auto* basePrincipal = BasePrincipal::Cast(aPrincipal);
+  rv = basePrincipal->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE);
 
@@ -1981,7 +1978,7 @@ nsUrlClassifierDBService::SendThreatHitReport(nsIChannel* aChannel,
                      nsContentUtils::GetSystemPrincipal(),
                      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                      nsIContentPolicy::TYPE_OTHER,
-                     nullptr,  // nsICookieSettings
+                     nullptr,  // nsICookieJarSettings
                      nullptr,  // aPerformanceStorage
                      nullptr,  // aLoadGroup
                      nullptr, loadFlags);
@@ -2037,7 +2034,9 @@ nsUrlClassifierDBService::Lookup(nsIPrincipal* aPrincipal,
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIURI> uri;
-  rv = aPrincipal->GetURI(getter_AddRefs(uri));
+  // Casting to BasePrincipal, as we can't get InnerMost URI otherwise
+  auto* basePrincipal = BasePrincipal::Cast(aPrincipal);
+  rv = basePrincipal->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE);
 
@@ -2441,14 +2440,6 @@ nsUrlClassifierDBService::AsyncClassifyLocalWithFeatures(
 
     auto actor = new URLClassifierLocalChild();
 
-    // TODO: Bug 1353701 - Supports custom event target for labelling.
-    nsCOMPtr<nsIEventTarget> systemGroupEventTarget =
-        mozilla::SystemGroup::EventTargetFor(mozilla::TaskCategory::Other);
-    content->SetEventTargetForActor(actor, systemGroupEventTarget);
-
-    URIParams uri;
-    SerializeURI(aURI, uri);
-
     nsTArray<IPCURLClassifierFeature> ipcFeatures;
     for (nsIUrlClassifierFeature* feature : aFeatures) {
       nsAutoCString name;
@@ -2464,16 +2455,19 @@ nsUrlClassifierDBService::AsyncClassifyLocalWithFeatures(
       }
 
       nsAutoCString skipHostList;
-      rv = feature->GetSkipHostList(skipHostList);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        continue;
+      if (aListType == nsIUrlClassifierFeature::blacklist) {
+        rv = feature->GetSkipHostList(skipHostList);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          continue;
+        }
       }
 
       ipcFeatures.AppendElement(
           IPCURLClassifierFeature(name, tables, skipHostList));
     }
 
-    if (!content->SendPURLClassifierLocalConstructor(actor, uri, ipcFeatures)) {
+    if (!content->SendPURLClassifierLocalConstructor(actor, aURI,
+                                                     ipcFeatures)) {
       return NS_ERROR_FAILURE;
     }
 
@@ -2566,7 +2560,9 @@ bool nsUrlClassifierDBService::AsyncClassifyLocalWithFeaturesUsingPreferences(
   nsCOMPtr<nsIUrlClassifierFeatureCallback> callback(aCallback);
   nsCOMPtr<nsIRunnable> cbRunnable = NS_NewRunnableFunction(
       "nsUrlClassifierDBService::AsyncClassifyLocalWithFeatures",
-      [callback, results]() { callback->OnClassifyComplete(results); });
+      [callback, results = std::move(results)]() {
+        callback->OnClassifyComplete(results);
+      });
 
   NS_DispatchToMainThread(cbRunnable);
   return true;

@@ -168,17 +168,97 @@ Browsertime youtube
 ^^^^^^^^^^^^^^^^^^^
 Desktop page-load performance test for youtube using Browsertime.
 
+Live
+----
+A set of test pages that are run as live sites instead of recorded versions. These tests are available on all browsers, on all platforms.
+
 Mobile
 ------
 Page-load performance test suite on Android.
+
+Browsertime allrecipes
+^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for allrecipes using Browsertime.
 
 Browsertime amazon
 ^^^^^^^^^^^^^^^^^^
 Android page-load performance test for amazon using Browsertime.
 
-raptor-tp6m-aframeio-animation
+Browsertime amazon-search
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for amazon-search using Browsertime.
+
+Browsertime bbc
+^^^^^^^^^^^^^^^
+Android page-load performance test for bbc using Browsertime.
+
+Browsertime bing
+^^^^^^^^^^^^^^^^
+Android page-load performance test for bing using Browsertime.
+
+Browsertime bing-search-restaurants
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for bing-search-restaurants using Browsertime.
+
+Browsertime booking
+^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for booking using Browsertime.
+
+Browsertime cnn
+^^^^^^^^^^^^^^^
+Android page-load performance test for cnn using Browsertime.
+
+Browsertime cnn-ampstories
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for cnn-ampstories using Browsertime.
+
+Browsertime ebay-kleinanzeigen
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Cold and warm android page-load performance test for aframeio-animation on geckoview, refbrow, fenix, and fennec68 using WebExtension.
+Android page-load performance test for ebay-kleinanzeigen using Browsertime.
+
+Browsertime ebay-kleinanzeigen-search
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for ebay-kleinanzeigen-search using Browsertime.
+
+Browsertime espn
+^^^^^^^^^^^^^^^^
+Android page-load performance test for espn using Browsertime.
+
+Browsertime facebook
+^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for facebook using Browsertime.
+
+Browsertime facebook-cristiano
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for facebook-cristiano using Browsertime.
+
+Browsertime google
+^^^^^^^^^^^^^^^^^^
+Android page-load performance test for google using Browsertime.
+
+Browsertime google-maps
+^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for google-maps using Browsertime.
+
+Browsertime google-search-restaurants
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for google-search-restaurants using Browsertime.
+
+Browsertime imdb
+^^^^^^^^^^^^^^^^
+Android page-load performance test for imdb using Browsertime.
+
+Browsertime instagram
+^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for instagram using Browsertime.
+
+Browsertime jianshu
+^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for jianshu using Browsertime.
+
+Browsertime microsoft-support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for microsoft-support using Browsertime.
 
 raptor-tp6m-allrecipes
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -284,9 +364,29 @@ raptor-tp6m-youtube-watch
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Cold and warm android page-load performance test for youtube-watch on geckoview, refbrow, fenix, and fennec68 using WebExtension.
 
+Browsertime reddit
+^^^^^^^^^^^^^^^^^^
+Android page-load performance test for reddit using Browsertime.
+
+Browsertime stackoverflow
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for stackoverflow using Browsertime.
+
+Browsertime web-de
+^^^^^^^^^^^^^^^^^^
+Android page-load performance test for web-de using Browsertime.
+
+Browsertime wikipedia
+^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for wikipedia using Browsertime.
+
 Browsertime youtube
 ^^^^^^^^^^^^^^^^^^^
 Android page-load performance test for youtube using Browsertime.
+
+Browsertime youtube-watch
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Android page-load performance test for youtube-watch using Browsertime.
 
 Scenario
 --------

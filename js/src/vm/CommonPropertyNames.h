@@ -120,10 +120,13 @@
   MACRO(do, do_, "do")                                                         \
   MACRO(domNode, domNode, "domNode")                                           \
   MACRO(done, done, "done")                                                    \
+  MACRO(dotAll, dotAll, "dotAll")                                              \
   MACRO(dotGenerator, dotGenerator, ".generator")                              \
   MACRO(dotThis, dotThis, ".this")                                             \
   MACRO(dotInitializers, dotInitializers, ".initializers")                     \
   MACRO(dotFieldKeys, dotFieldKeys, ".fieldKeys")                              \
+  MACRO(dotStaticInitializers, dotStaticInitializers, ".staticInitializers")   \
+  MACRO(dotStaticFieldKeys, dotStaticFieldKeys, ".staticFieldKeys")            \
   MACRO(each, each, "each")                                                    \
   MACRO(element, element, "element")                                           \
   MACRO(elementType, elementType, "elementType")                               \
@@ -428,6 +431,7 @@
   MACRO(toISOString, toISOString, "toISOString")                               \
   MACRO(toJSON, toJSON, "toJSON")                                              \
   MACRO(toLocaleString, toLocaleString, "toLocaleString")                      \
+  MACRO(ToNumeric, ToNumeric, "ToNumeric")                                     \
   MACRO(toSource, toSource, "toSource")                                        \
   MACRO(toString, toString, "toString")                                        \
   MACRO(toUTCString, toUTCString, "toUTCString")                               \

@@ -21,12 +21,17 @@
 #include <windows.h>
 #endif
 
+#if defined(DARWIN)
+#include <TargetConditionals.h>
+#endif
+
 static PRCallOnceType coFreeblInit;
 
 /* State variables. */
 static PRBool aesni_support_ = PR_FALSE;
 static PRBool clmul_support_ = PR_FALSE;
 static PRBool avx_support_ = PR_FALSE;
+static PRBool avx2_support_ = PR_FALSE;
 static PRBool ssse3_support_ = PR_FALSE;
 static PRBool sse4_1_support_ = PR_FALSE;
 static PRBool sse4_2_support_ = PR_FALSE;
@@ -75,28 +80,43 @@ check_xcr0_ymm()
 #define ECX_XSAVE (1 << 26)
 #define ECX_OSXSAVE (1 << 27)
 #define ECX_AVX (1 << 28)
+#define EBX_AVX2 (1 << 5)
+#define EBX_BMI1 (1 << 3)
+#define EBX_BMI2 (1 << 8)
+#define ECX_FMA (1 << 12)
+#define ECX_MOVBE (1 << 22)
 #define ECX_SSSE3 (1 << 9)
 #define ECX_SSE4_1 (1 << 19)
 #define ECX_SSE4_2 (1 << 20)
 #define AVX_BITS (ECX_XSAVE | ECX_OSXSAVE | ECX_AVX)
+#define AVX2_EBX_BITS (EBX_AVX2 | EBX_BMI1 | EBX_BMI2)
+#define AVX2_ECX_BITS (ECX_FMA | ECX_MOVBE)
 
 void
 CheckX86CPUSupport()
 {
     unsigned long eax, ebx, ecx, edx;
+    unsigned long eax7, ebx7, ecx7, edx7;
     char *disable_hw_aes = PR_GetEnvSecure("NSS_DISABLE_HW_AES");
     char *disable_pclmul = PR_GetEnvSecure("NSS_DISABLE_PCLMUL");
     char *disable_avx = PR_GetEnvSecure("NSS_DISABLE_AVX");
+    char *disable_avx2 = PR_GetEnvSecure("NSS_DISABLE_AVX2");
     char *disable_ssse3 = PR_GetEnvSecure("NSS_DISABLE_SSSE3");
     char *disable_sse4_1 = PR_GetEnvSecure("NSS_DISABLE_SSE4_1");
     char *disable_sse4_2 = PR_GetEnvSecure("NSS_DISABLE_SSE4_2");
     freebl_cpuid(1, &eax, &ebx, &ecx, &edx);
+    freebl_cpuid(7, &eax7, &ebx7, &ecx7, &edx7);
     aesni_support_ = (PRBool)((ecx & ECX_AESNI) != 0 && disable_hw_aes == NULL);
     clmul_support_ = (PRBool)((ecx & ECX_CLMUL) != 0 && disable_pclmul == NULL);
     /* For AVX we check AVX, OSXSAVE, and XSAVE
      * as well as XMM and YMM state. */
     avx_support_ = (PRBool)((ecx & AVX_BITS) == AVX_BITS) && check_xcr0_ymm() &&
                    disable_avx == NULL;
+    /* For AVX2 we check AVX2, BMI1, BMI2, FMA, MOVBE.
+     * We do not check for AVX above. */
+    avx2_support_ = (PRBool)((ebx7 & AVX2_EBX_BITS) == AVX2_EBX_BITS &&
+                             (ecx & AVX2_ECX_BITS) == AVX2_ECX_BITS &&
+                             disable_avx2 == NULL);
     ssse3_support_ = (PRBool)((ecx & ECX_SSSE3) != 0 &&
                               disable_ssse3 == NULL);
     sse4_1_support_ = (PRBool)((ecx & ECX_SSE4_1) != 0 &&
@@ -107,7 +127,7 @@ CheckX86CPUSupport()
 #endif /* NSS_X86_OR_X64 */
 
 /* clang-format off */
-#if defined(__aarch64__) || defined(__arm__)
+#if (defined(__aarch64__) || defined(__arm__)) && !defined(TARGET_OS_IPHONE)
 #ifndef __has_include
 #define __has_include(x) 0
 #endif
@@ -118,7 +138,7 @@ CheckX86CPUSupport()
 #include <sys/auxv.h>
 #endif
 extern unsigned long getauxval(unsigned long type) __attribute__((weak));
-#else
+#elif defined(__arm__) || !defined(__OpenBSD__)
 static unsigned long (*getauxval)(unsigned long) = NULL;
 #endif /* defined(__GNUC__) && __GNUC__ >= 2 && defined(__ELF__)*/
 
@@ -384,6 +404,11 @@ avx_support()
     return avx_support_;
 }
 PRBool
+avx2_support()
+{
+    return avx2_support_;
+}
+PRBool
 ssse3_support()
 {
     return ssse3_support_;
@@ -431,8 +456,15 @@ ppc_crypto_support()
 
 #if defined(__powerpc__)
 
+#ifndef __has_include
+#define __has_include(x) 0
+#endif
+
+/* clang-format off */
 #if defined(__linux__) || (defined(__FreeBSD__) && __FreeBSD__ >= 12)
+#if __has_include(<sys/auxv.h>)
 #include <sys/auxv.h>
+#endif
 #elif (defined(__FreeBSD__) && __FreeBSD__ < 12)
 #include <sys/sysctl.h>
 #endif
@@ -449,10 +481,14 @@ CheckPPCSupport()
 
     unsigned long hwcaps = 0;
 #if defined(__linux__)
+#if __has_include(<sys/auxv.h>)
     hwcaps = getauxval(AT_HWCAP2);
+#endif
 #elif defined(__FreeBSD__)
 #if __FreeBSD__ >= 12
+#if __has_include(<sys/auxv.h>)
     elf_aux_info(AT_HWCAP2, &hwcaps, sizeof(hwcaps));
+#endif
 #else
     size_t len = sizeof(hwcaps);
     sysctlbyname("hw.cpu_features2", &hwcaps, &len, NULL, 0);
@@ -461,6 +497,7 @@ CheckPPCSupport()
 
     ppc_crypto_support_ = hwcaps & PPC_FEATURE2_VEC_CRYPTO && disable_hw_crypto == NULL;
 }
+/* clang-format on */
 
 #endif /* __powerpc__ */
 

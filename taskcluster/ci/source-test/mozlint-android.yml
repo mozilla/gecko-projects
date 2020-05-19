@@ -8,6 +8,7 @@
 # clone and somewhat expensive compilation of the Android
 # intermediates just once.
 lints:
+    always-target: true
     attributes:
         build_platform: android
         build_type: opt
@@ -18,7 +19,7 @@ lints:
         symbol: A(lints)
         kind: test
         tier: 1
-    worker-type: t-linux-xlarge
+    worker-type: t-linux-xlarge-source
     worker:
         docker-image: {in-tree: android-build}
         env:

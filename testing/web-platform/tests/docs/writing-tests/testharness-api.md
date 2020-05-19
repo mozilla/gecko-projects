@@ -206,7 +206,7 @@ promise_rejects_exactly(test_object, value, promise, description)
 
 The `code`, `constructor`, and `value` arguments are equivalent to the same
 argument to the `assert_throws_dom`, `assert_throws_js`, and
-`assert_throws_exactly` functions.
+`assert_throws_exactly` functions.  The `promise_rejects_dom` function can also be called with a DOMException constructor argument between the `code` and `promise` arguments, just like `assert_throws_dom`, when we want to assert that the DOMException comes from a non-default global.
 
 Here's an example where the `bar()` function returns a Promise that rejects
 with a TypeError:
@@ -313,40 +313,44 @@ NOTE: All asserts must be located in a `test()` or a step of an
 these places won't be detected correctly by the harness and may cause
 unexpected exceptions that will lead to an error in the harness.
 
-## Preconditions ##
+## Optional Features ##
 
-When a test would be invalid unless certain conditions are met, but yet
-doesn't explicitly depend on those preconditions, `assert_precondition` can be
-used. For example:
+If a test depends on a specification or specification feature that is OPTIONAL
+(in the [RFC 2119 sense](https://tools.ietf.org/html/rfc2119)),
+`assert_implements_optional` can be used to indicate that failing the test does
+not mean violating a web standard. For example:
 
 ```js
 async_test((t) => {
   const video = document.createElement("video");
-  assert_precondition(video.canPlayType("video/webm"));
+  assert_implements_optional(video.canPlayType("video/webm"));
   video.src = "multitrack.webm";
   // test something specific to multiple audio tracks in a WebM container
   t.done();
 }, "WebM with multiple audio tracks");
 ```
 
-A failing `assert_precondition` call is reported as a status of
-`PRECONDITION_FAILED` for the subtest.
+A failing `assert_implements_optional` call is reported as a status of
+`PRECONDITION_FAILED` for the subtest. This unusual status code is a legacy
+leftover from the deprecated `assert_precondition`; see the [RFC that renamed
+it](https://github.com/web-platform-tests/rfcs/pull/48).
 
-`assert_precondition` can also be used during test setup. For example:
+`assert_implements_optional` can also be used during test setup. For example:
 
 ```js
 setup(() => {
-  assert_precondition("onfoo" in document.body, "'foo' event supported");
+  assert_implements_optional("optionalfeature" in document.body,
+                             "'optionalfeature' event supported");
 });
-async_test(() => { /* test #1 waiting for "foo" event */ });
-async_test(() => { /* test #2 waiting for "foo" event */ });
+async_test(() => { /* test #1 waiting for "optionalfeature" event */ });
+async_test(() => { /* test #2 waiting for "optionalfeature" event */ });
 ```
 
-A failing `assert_precondition` during setup is reported as a status of
+A failing `assert_implements_optional` during setup is reported as a status of
 `PRECONDITION_FAILED` for the test, and the subtests will not run.
 
-See also the `.optional` [file name convention](file-names.md), which is
-appropriate when the precondition is explicitly optional behavior.
+See also the `.optional` [file name convention](file-names.md), which may be
+preferable if the entire test is optional.
 
 ## Cleanup ##
 
@@ -772,10 +776,6 @@ workers and want to ensure they run in series:
 
 ## List of Assertions ##
 
-### `assert_precondition(condition, description)`
-asserts that `condition` is truthy.
-See [preconditions](#preconditions) for usage.
-
 ### `assert_true(actual, description)`
 asserts that `actual` is strictly true
 
@@ -858,7 +858,7 @@ attribute attribute_name following the conditions specified by WebIDL
 ### `assert_readonly(object, property_name, description)`
 assert that property `property_name` on object is readonly
 
-### `assert_throws_dom(code, func, description)`
+### `assert_throws_dom(code, func, description)` or `assert_throws_dom(code, constructor, func, description)`
 `code` - the expected exception. This can take several forms:
 
   * string - asserts that the thrown exception must be a DOMException
@@ -870,6 +870,8 @@ assert that property `property_name` on object is readonly
              with the fiven code value (e.g. DOMException.TIMEOUT_ERR).
 
 `func` - a function that should throw
+
+`constructor` - The DOMException constructor that the resulting DOMException should have as its `.constructor`.  This should be used when a DOMException from a non-default global is expected to be thrown.
 
 ### `assert_throws_js(constructor, func, description)`
 `constructor` - the expected exception. This is the constructor object
@@ -883,6 +885,13 @@ that the exception should have as its .constructor.  For example,
 
 `func` - a function that should throw
 
+### `assert_implements(condition, description)`
+asserts that a feature is supported, by checking if `condition` is truthy.
+
+### `assert_implements_optional(condition, description)`
+asserts that an optional feature is supported, by checking if `condition` is truthy.
+See [Optional Features](#optional-features) for usage.
+
 ### `assert_unreached(description)`
 asserts if called. Used to ensure that some codepath is *not* taken e.g.
 an event does not fire.
@@ -894,6 +903,9 @@ asserts that one `assert_func(actual, expected_array_N, extra_arg1, ..., extra_a
   with multiple allowed pass conditions are bad practice unless the spec specifically
   allows multiple behaviours. Test authors should not use this method simply to hide
   UA bugs.
+
+### **DEPRECATED** `assert_precondition(condition, description)`
+Use `assert_implements` or `assert_implements_optional` instead.
 
 ## Utility functions ##
 

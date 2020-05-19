@@ -52,6 +52,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
+  ExtensionPreferencesManager:
+    "resource://gre/modules/ExtensionPreferencesManager.jsm",
   ExtensionProcessScript: "resource://gre/modules/ExtensionProcessScript.jsm",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
   ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.jsm",
@@ -59,7 +61,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
-  Localization: "resource://gre/modules/Localization.jsm",
   Log: "resource://gre/modules/Log.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
@@ -135,6 +136,17 @@ XPCOMUtils.defineLazyGetter(
   () => ExtensionCommon.LocaleData
 );
 
+XPCOMUtils.defineLazyGetter(this, "LAZY_NO_PROMPT_PERMISSIONS", async () => {
+  // Wait until all extension API schemas have been loaded and parsed.
+  await Management.lazyInit();
+  return new Set(
+    Schemas.getPermissionNames([
+      "PermissionNoPrompt",
+      "OptionalPermissionNoPrompt",
+    ])
+  );
+});
+
 const { sharedData } = Services.ppmm;
 
 const PRIVATE_ALLOWED_PERMISSION = "internal:privateBrowsingAllowed";
@@ -154,6 +166,7 @@ const PRIVILEGED_PERMS = new Set([
   "geckoViewAddons",
   "telemetry",
   "urlbar",
+  "nativeMessagingFromContent",
   "normandyAddonStudy",
   "networkStatus",
 ]);
@@ -583,6 +596,31 @@ class ExtensionData {
   }
 
   /**
+   * Given an array of host and permissions, generate a structured permissions object
+   * that contains seperate host origins and permissions arrays.
+   *
+   * @param {Array} permissionsArray
+   * @returns {Object} permissions object
+   */
+  permissionsObject(permissionsArray) {
+    let permissions = new Set();
+    let origins = new Set();
+    let { restrictSchemes, isPrivileged } = this;
+    for (let perm of permissionsArray || []) {
+      let type = classifyPermission(perm, restrictSchemes, isPrivileged);
+      if (type.origin) {
+        origins.add(perm);
+      } else if (type.permission) {
+        permissions.add(perm);
+      }
+    }
+    return {
+      permissions,
+      origins,
+    };
+  }
+
+  /**
    * Returns an object representing any capabilities that the extension
    * has access to based on fixed properties in the manifest.  The result
    * includes the contents of the "permissions" property as well as other
@@ -594,19 +632,14 @@ class ExtensionData {
       return null;
     }
 
-    let permissions = new Set();
-    let origins = new Set();
-    let { restrictSchemes, isPrivileged } = this;
-    for (let perm of this.manifest.permissions || []) {
-      let type = classifyPermission(perm, restrictSchemes, isPrivileged);
-      if (type.origin) {
-        origins.add(perm);
-      } else if (type.permission) {
-        permissions.add(perm);
-      }
-    }
+    let { permissions, origins } = this.permissionsObject(
+      this.manifest.permissions
+    );
 
-    if (this.manifest.devtools_page) {
+    if (
+      this.manifest.devtools_page &&
+      !this.manifest.optional_permissions.includes("devtools")
+    ) {
       permissions.add("devtools");
     }
 
@@ -616,6 +649,20 @@ class ExtensionData {
       }
     }
 
+    return {
+      permissions: Array.from(permissions),
+      origins: Array.from(origins),
+    };
+  }
+
+  get manifestOptionalPermissions() {
+    if (this.type !== "extension") {
+      return null;
+    }
+
+    let { permissions, origins } = this.permissionsObject(
+      this.manifest.optional_permissions
+    );
     return {
       permissions: Array.from(permissions),
       origins: Array.from(origins),
@@ -648,6 +695,11 @@ class ExtensionData {
     return result;
   }
 
+  // Returns whether the front end should prompt for this permission
+  static async shouldPromptFor(permission) {
+    return !(await LAZY_NO_PROMPT_PERMISSIONS).has(permission);
+  }
+
   // Compute the difference between two sets of permissions, suitable
   // for presenting to the user.
   static comparePermissions(oldPermissions, newPermissions) {
@@ -666,6 +718,73 @@ class ExtensionData {
         perm => !oldPermissions.permissions.includes(perm)
       ),
     };
+  }
+
+  // Return those permissions in oldPermissions that also exist in newPermissions.
+  static intersectPermissions(oldPermissions, newPermissions) {
+    let matcher = new MatchPatternSet(newPermissions.origins, {
+      restrictSchemes: false,
+    });
+
+    return {
+      origins: oldPermissions.origins.filter(perm =>
+        matcher.subsumesDomain(
+          new MatchPattern(perm, { restrictSchemes: false })
+        )
+      ),
+      permissions: oldPermissions.permissions.filter(perm =>
+        newPermissions.permissions.includes(perm)
+      ),
+    };
+  }
+
+  /**
+   * When updating the addon, find and migrate permissions that have moved from required
+   * to optional.  This also handles any updates required for permission removal.
+   *
+   * @param {string} id The id of the addon being updated
+   * @param {Object} oldPermissions
+   * @param {Object} oldOptionalPermissions
+   * @param {Object} newPermissions
+   * @param {Object} newOptionalPermissions
+   */
+  static async migratePermissions(
+    id,
+    oldPermissions,
+    oldOptionalPermissions,
+    newPermissions,
+    newOptionalPermissions
+  ) {
+    let migrated = ExtensionData.intersectPermissions(
+      oldPermissions,
+      newOptionalPermissions
+    );
+    // If a permission is optional in this version and was mandatory in the previous
+    // version, it was already accepted by the user at install time so add it to the
+    // list of granted optional permissions now.
+    await ExtensionPermissions.add(id, migrated);
+
+    // Now we need to update ExtensionPreferencesManager, removing any settings
+    // for old permissions that no longer exist.
+    let permSet = new Set(
+      newPermissions.permissions.concat(newOptionalPermissions.permissions)
+    );
+    let oldPerms = oldPermissions.permissions.concat(
+      oldOptionalPermissions.permissions
+    );
+
+    let removed = oldPerms.filter(x => !permSet.has(x));
+    // Force the removal here to ensure the settings are removed prior
+    // to startup.  This will remove both required or optional permissions,
+    // whereas the call from within ExtensionPermissions would only result
+    // in a removal for optional permissions that were removed.
+    await ExtensionPreferencesManager.removeSettingsForPermissions(id, removed);
+
+    // Remove any optional permissions that have been removed from the manifest.
+    await ExtensionPermissions.remove(id, {
+      permissions: removed,
+      origins: [],
+    });
   }
 
   canUseExperiment(manifest) {
@@ -1322,6 +1441,10 @@ class ExtensionData {
    *                 in computed strings as needed.
    * @param {nsIStringBundle} bundle
    *                          The string bundle to use for l10n.
+   * @param {object} options
+   * @param {boolean} options.collapseOrigins
+   *                  Wether to limit the number of displayed host permissions.
+   *                  Default is false.
    *
    * @returns {object} An object with properties containing localized strings
    *                   for various elements of a permission dialog. The "header"
@@ -1329,7 +1452,11 @@ class ExtensionData {
    *                   and it has the string "<>" as a placeholder for the
    *                   addon name.
    */
-  static formatPermissionStrings(info, bundle) {
+  static formatPermissionStrings(
+    info,
+    bundle,
+    { collapseOrigins = false } = {}
+  ) {
     let result = {};
 
     let perms = info.permissions || { origins: [], permissions: [] };
@@ -1379,7 +1506,7 @@ class ExtensionData {
             ...items.map(item => bundle.formatStringFromName(itemKey, [item]))
           );
         }
-        if (list.length < 5) {
+        if (list.length < 5 || !collapseOrigins) {
           formatItems(list);
         } else {
           formatItems(list.slice(0, 3));
@@ -1541,7 +1668,22 @@ class BootstrapScope {
     return null;
   }
 
-  update(data, reason) {
+  async update(data, reason) {
+    // Retain any previously granted permissions that may have migrated
+    // into the optional list.
+    if (data.oldPermissions !== null) {
+      // New permissions may be null, ensure we have an empty
+      // permission set in that case.
+      let emptyPermissions = { permissions: [], origins: [] };
+      await ExtensionData.migratePermissions(
+        data.id,
+        data.oldPermissions,
+        data.oldOptionalPermissions,
+        data.userPermissions || emptyPermissions,
+        data.optionalPermissions || emptyPermissions
+      );
+    }
+
     return Management.emit("update", {
       id: data.id,
       resourceURI: data.resourceURI,
@@ -1721,6 +1863,7 @@ class Extension extends ExtensionData {
       this.policy.allowedOrigins = this.whiteListedHosts;
 
       this.cachePermissions();
+      this.updatePermissions();
     });
 
     this.on("remove-permissions", (ignoreEvent, permissions) => {
@@ -1742,6 +1885,7 @@ class Extension extends ExtensionData {
       this.policy.allowedOrigins = this.whiteListedHosts;
 
       this.cachePermissions();
+      this.updatePermissions();
     });
     /* eslint-enable mozilla/balanced-listeners */
   }
@@ -2113,6 +2257,13 @@ class Extension extends ExtensionData {
     return super.initLocale(locale);
   }
 
+  /**
+   * Update site permissions as necessary.
+   *
+   * @param {string|undefined} reason
+   *        If provided, this is a BOOTSTRAP_REASON string.  If reason is undefined,
+   *        addon permissions are being added or removed that may effect the site permissions.
+   */
   updatePermissions(reason) {
     const { principal } = this;
 
@@ -2288,6 +2439,18 @@ class Extension extends ExtensionData {
         }
       }
 
+      // Ensure devtools permission is set
+      if (
+        this.manifest.devtools_page &&
+        !this.manifest.optional_permissions.includes("devtools")
+      ) {
+        ExtensionPermissions.add(this.id, {
+          permissions: ["devtools"],
+          origins: [],
+        });
+        this.permissions.add("devtools");
+      }
+
       GlobalManager.init(this);
 
       this.initSharedData();
@@ -2412,9 +2575,7 @@ class Extension extends ExtensionData {
         await ExtensionStorageIDB.selectedBackendPromises.get(this);
       } catch (err) {
         Cu.reportError(
-          `Error while waiting for extension data migration on shutdown: ${
-            this.policy.debugName
-          } - ${err.message}::${err.stack}`
+          `Error while waiting for extension data migration on shutdown: ${this.policy.debugName} - ${err.message}::${err.stack}`
         );
       }
       this.state = "Shutdown: Storage complete";
@@ -2473,9 +2634,7 @@ class Extension extends ExtensionData {
     this.state = `Shutdown: Emitted shutdown: ${result === TIMED_OUT}`;
     if (result === TIMED_OUT) {
       Cu.reportError(
-        `Timeout while waiting for extension child to shutdown: ${
-          this.policy.debugName
-        }`
+        `Timeout while waiting for extension child to shutdown: ${this.policy.debugName}`
       );
     }
 

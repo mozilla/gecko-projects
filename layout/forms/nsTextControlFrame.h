@@ -257,23 +257,6 @@ class nsTextControlFrame : public nsContainerFrame,
     nsTextControlFrame* mFrame;
   };
 
-  class ScrollOnFocusEvent;
-  friend class ScrollOnFocusEvent;
-
-  class ScrollOnFocusEvent : public mozilla::Runnable {
-   public:
-    explicit ScrollOnFocusEvent(nsTextControlFrame* aFrame)
-        : mozilla::Runnable("nsTextControlFrame::ScrollOnFocusEvent"),
-          mFrame(aFrame) {}
-
-    NS_DECL_NSIRUNNABLE
-
-    void Revoke() { mFrame = nullptr; }
-
-   private:
-    nsTextControlFrame* mFrame;
-  };
-
   nsresult OffsetToDOMPoint(uint32_t aOffset, nsINode** aResult,
                             uint32_t* aPosition);
 
@@ -284,13 +267,6 @@ class nsTextControlFrame : public nsContainerFrame,
    */
   nsresult UpdateValueDisplay(bool aNotify, bool aBeforeEditorInit = false,
                               const nsAString* aValue = nullptr);
-
-  /**
-   * Get the maxlength attribute
-   * @param aMaxLength the value of the max length attr
-   * @returns false if attr not defined
-   */
-  bool GetMaxLength(int32_t* aMaxLength);
 
   /**
    * Find out whether an attribute exists on the content or not.
@@ -314,7 +290,7 @@ class nsTextControlFrame : public nsContainerFrame,
                                          mozilla::WritingMode aWM,
                                          float aFontSizeInflation) const;
 
-  nsresult ScrollSelectionIntoView() override;
+  void ScrollSelectionIntoViewAsync();
 
  private:
   // helper methods
@@ -334,8 +310,8 @@ class nsTextControlFrame : public nsContainerFrame,
 
   void CacheValue(const nsAString& aValue) { mCachedValue.Assign(aValue); }
 
-  MOZ_MUST_USE bool CacheValue(const nsAString& aValue,
-                               const mozilla::fallible_t& aFallible) {
+  [[nodiscard]] bool CacheValue(const nsAString& aValue,
+                                const mozilla::fallible_t& aFallible) {
     if (!mCachedValue.Assign(aValue, aFallible)) {
       ClearCachedValue();
       return false;
@@ -349,15 +325,10 @@ class nsTextControlFrame : public nsContainerFrame,
   nsresult CreateRootNode();
   void CreatePlaceholderIfNeeded();
   void CreatePreviewIfNeeded();
-  enum class AnonymousDivType {
-    Root,
-    Placeholder,
-    Preview,
-  };
   already_AddRefed<mozilla::dom::Element> CreateEmptyAnonymousDiv(
-      AnonymousDivType) const;
+      mozilla::PseudoStyleType) const;
   already_AddRefed<mozilla::dom::Element> CreateEmptyAnonymousDivWithTextNode(
-      AnonymousDivType) const;
+      mozilla::PseudoStyleType) const;
 
   bool ShouldInitializeEagerly() const;
   void InitializeEagerlyIfNeeded();
@@ -388,8 +359,6 @@ class nsTextControlFrame : public nsContainerFrame,
   bool mInEditorInitialization;
   friend class EditorInitializerEntryTracker;
 #endif
-
-  nsRevocableEventPtr<ScrollOnFocusEvent> mScrollEvent;
 };
 
 #endif

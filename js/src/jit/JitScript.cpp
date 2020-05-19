@@ -14,6 +14,7 @@
 
 #include "jit/BaselineIC.h"
 #include "jit/BytecodeAnalysis.h"
+#include "jit/IonScript.h"
 #include "util/Memory.h"
 #include "vm/BytecodeIterator.h"
 #include "vm/BytecodeLocation.h"
@@ -54,19 +55,17 @@ size_t JitScript::NumTypeSets(JSScript* script) {
   return num;
 }
 
-JitScript::JitScript(JSScript* script, uint32_t typeSetOffset,
-                     uint32_t bytecodeTypeMapOffset, uint32_t allocBytes,
+JitScript::JitScript(JSScript* script, Offset typeSetOffset,
+                     Offset bytecodeTypeMapOffset, Offset endOffset,
                      const char* profileString)
     : profileString_(profileString),
       typeSetOffset_(typeSetOffset),
       bytecodeTypeMapOffset_(bytecodeTypeMapOffset),
-      allocBytes_(allocBytes) {
+      endOffset_(endOffset) {
   setTypesGeneration(script->zone()->types.generation);
 
   if (IsTypeInferenceEnabled()) {
-    uint8_t* base = reinterpret_cast<uint8_t*>(this);
-    DefaultInitializeElements<StackTypeSet>(base + typeSetOffset,
-                                            numTypeSets());
+    initElements<StackTypeSet>(typeSetOffset, numTypeSets());
   }
 
   // Initialize the warm-up count from the count stored in the script.
@@ -164,7 +163,7 @@ bool JSScript::createJitScript(JSContext* cx) {
   warmUpData_.initJitScript(jitScript.release());
   AddCellMemory(this, allocSize.value(), MemoryUse::JitScript);
 
-  // We have a JitScript so we can set the script's jitCodeRaw_ pointer to the
+  // We have a JitScript so we can set the script's jitCodeRaw pointer to the
   // Baseline Interpreter code.
   updateJitCodeRaw(cx->runtime());
 

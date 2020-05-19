@@ -147,8 +147,8 @@ bool ExtensionPolicyService::RegisterExtension(WebExtensionPolicy& aPolicy) {
     return false;
   }
 
-  mExtensions.Put(aPolicy.Id(), &aPolicy);
-  mExtensionHosts.Put(aPolicy.MozExtensionHostname(), &aPolicy);
+  mExtensions.Put(aPolicy.Id(), RefPtr{&aPolicy});
+  mExtensionHosts.Put(aPolicy.MozExtensionHostname(), RefPtr{&aPolicy});
   return true;
 }
 
@@ -171,7 +171,7 @@ bool ExtensionPolicyService::RegisterObserver(DocumentObserver& aObserver) {
     return false;
   }
 
-  mObservers.Put(&aObserver, &aObserver);
+  mObservers.Put(&aObserver, RefPtr{&aObserver});
   return true;
 }
 
@@ -487,6 +487,8 @@ void ExtensionPolicyService::CheckContentScripts(const DocInfo& aDocInfo,
     win = aDocInfo.GetWindow()->GetCurrentInnerWindow();
   }
 
+  nsTArray<RefPtr<WebExtensionContentScript>> scriptsToLoad;
+
   for (auto iter = mExtensions.Iter(); !iter.Done(); iter.Next()) {
     RefPtr<WebExtensionPolicy> policy = iter.Data();
 
@@ -495,15 +497,26 @@ void ExtensionPolicyService::CheckContentScripts(const DocInfo& aDocInfo,
         if (aIsPreload) {
           ProcessScript().PreloadContentScript(script);
         } else {
-          if (!win->IsCurrentInnerWindow()) {
-            break;
-          }
-          RefPtr<Promise> promise;
-          ProcessScript().LoadContentScript(script, win,
-                                            getter_AddRefs(promise));
+          // Collect the content scripts to load instead of loading them
+          // right away (to prevent a loaded content script from being
+          // able to invalidate the iterator by triggering a call to
+          // policy->UnregisterContentScript while we are still iterating
+          // over all its content scripts). See Bug 1593240.
+          scriptsToLoad.AppendElement(script);
         }
       }
     }
+
+    for (auto& script : scriptsToLoad) {
+      if (!win->IsCurrentInnerWindow()) {
+        break;
+      }
+
+      RefPtr<Promise> promise;
+      ProcessScript().LoadContentScript(script, win, getter_AddRefs(promise));
+    }
+
+    scriptsToLoad.ClearAndRetainStorage();
   }
 
   for (auto iter = mObservers.Iter(); !iter.Done(); iter.Next()) {

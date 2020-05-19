@@ -16,18 +16,18 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 #include "mozilla/TextUtils.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Utf8.h"
 #include "mozilla/Vector.h"
 
 #include <algorithm>    // std::{all_of,copy_n,enable_if,is_const,move}
-#include <type_traits>  // std::is_unsigned
+#include <type_traits>  // std::is_same, std::is_unsigned
 
 #include "jsfriendapi.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "gc/Marking.h"
+#include "gc/MaybeRooted.h"
 #include "gc/Nursery.h"
 #include "js/CharacterEncoding.h"
 #include "js/StableStringChars.h"
@@ -50,7 +50,6 @@ using mozilla::AssertedCast;
 using mozilla::AsWritableChars;
 using mozilla::ConvertLatin1toUtf16;
 using mozilla::IsAsciiDigit;
-using mozilla::IsSame;
 using mozilla::IsUtf16Latin1;
 using mozilla::LossyConvertUtf16toLatin1;
 using mozilla::MakeSpan;
@@ -120,7 +119,7 @@ JS::ubi::Node::Size JS::ubi::Concrete<JSString>::size(
   }
 
   if (IsInsideNursery(&str)) {
-    size += Nursery::stringHeaderSize();
+    size += Nursery::nurseryCellHeaderSize();
   }
 
   size += str.sizeOfExcludingThis(mallocSizeOf);
@@ -357,10 +356,10 @@ void JSString::dumpRepresentationHeader(js::GenericPrinter& out,
   if (flags & LINEAR_BIT) out.put(" LINEAR");
   if (flags & DEPENDENT_BIT) out.put(" DEPENDENT");
   if (flags & INLINE_CHARS_BIT) out.put(" INLINE_CHARS");
-  if (flags & NON_ATOM_BIT)
-    out.put(" NON_ATOM");
+  if (flags & ATOM_BIT)
+    out.put(" ATOM");
   else
-    out.put(" (ATOM)");
+    out.put(" (NON ATOM)");
   if (isPermanentAtom()) out.put(" PERMANENT");
   if (flags & LATIN1_CHARS_BIT) out.put(" LATIN1");
   if (flags & INDEX_VALUE_BIT) out.printf(" INDEX_VALUE(%u)", getIndexValue());
@@ -642,7 +641,7 @@ JSLinearString* JSRope::flattenInternal(JSContext* maybecx) {
     JSExtensibleString& left = leftMostRope->leftChild()->asExtensible();
     size_t capacity = left.capacity();
     if (capacity >= wholeLength &&
-        left.hasTwoByteChars() == IsSame<CharT, char16_t>::value) {
+        left.hasTwoByteChars() == std::is_same_v<CharT, char16_t>) {
       wholeChars = const_cast<CharT*>(left.nonInlineChars<CharT>(nogc));
       wholeCapacity = capacity;
 
@@ -653,7 +652,8 @@ JSLinearString* JSRope::flattenInternal(JSContext* maybecx) {
       if (!inTenured && left.isTenured()) {
         // tenured leftmost child is giving its chars buffer to the
         // nursery-allocated root node.
-        if (!nursery.registerMallocedBuffer(wholeChars)) {
+        if (!nursery.registerMallocedBuffer(wholeChars,
+                                            wholeCapacity * sizeof(CharT))) {
           if (maybecx) {
             ReportOutOfMemory(maybecx);
           }
@@ -664,7 +664,7 @@ JSLinearString* JSRope::flattenInternal(JSContext* maybecx) {
       } else if (inTenured && !left.isTenured()) {
         // leftmost child is giving its nursery-held chars buffer to a
         // tenured string.
-        nursery.removeMallocedBuffer(wholeChars);
+        nursery.removeMallocedBuffer(wholeChars, wholeCapacity * sizeof(CharT));
       }
 
       /*
@@ -698,7 +698,7 @@ JSLinearString* JSRope::flattenInternal(JSContext* maybecx) {
         RemoveCellMemory(&left, left.allocSize(), MemoryUse::StringContents);
       }
 
-      if (IsSame<CharT, char16_t>::value) {
+      if constexpr (std::is_same_v<CharT, char16_t>) {
         left.setLengthAndFlags(left_len, INIT_DEPENDENT_FLAGS);
       } else {
         left.setLengthAndFlags(left_len,
@@ -718,7 +718,8 @@ JSLinearString* JSRope::flattenInternal(JSContext* maybecx) {
 
   if (!isTenured()) {
     Nursery& nursery = runtimeFromMainThread()->gc.nursery();
-    if (!nursery.registerMallocedBuffer(wholeChars)) {
+    if (!nursery.registerMallocedBuffer(wholeChars,
+                                        wholeCapacity * sizeof(CharT))) {
       js_free(wholeChars);
       if (maybecx) {
         ReportOutOfMemory(maybecx);
@@ -760,7 +761,7 @@ visit_right_child : {
 finish_node : {
   if (str == this) {
     MOZ_ASSERT(pos == wholeChars + wholeLength);
-    if (IsSame<CharT, char16_t>::value) {
+    if constexpr (std::is_same_v<CharT, char16_t>) {
       str->setLengthAndFlags(wholeLength, EXTENSIBLE_FLAGS);
     } else {
       str->setLengthAndFlags(wholeLength, EXTENSIBLE_FLAGS | LATIN1_CHARS_BIT);
@@ -777,7 +778,7 @@ finish_node : {
   }
   uintptr_t flattenData;
   uint32_t len = pos - str->nonInlineCharsRaw<CharT>();
-  if (IsSame<CharT, char16_t>::value) {
+  if constexpr (std::is_same_v<CharT, char16_t>) {
     flattenData = str->unsetFlattenData(len, INIT_DEPENDENT_FLAGS);
   } else {
     flattenData =
@@ -1606,7 +1607,7 @@ template <typename CharT>
 JSLinearString* js::NewString(JSContext* cx,
                               UniquePtr<CharT[], JS::FreePolicy> chars,
                               size_t length) {
-  if constexpr (IsSame<CharT, char16_t>::value) {
+  if constexpr (std::is_same_v<CharT, char16_t>) {
     if (CanStoreCharsAsLatin1(chars.get(), length)) {
       // Deflating copies from |chars.get()| and lets |chars| be freed on
       // return.
@@ -1655,7 +1656,7 @@ template <AllowGC allowGC, typename CharT>
 JSLinearString* js::NewString(JSContext* cx,
                               UniquePtr<CharT[], JS::FreePolicy> chars,
                               size_t length) {
-  if constexpr (IsSame<CharT, char16_t>::value) {
+  if constexpr (std::is_same_v<CharT, char16_t>) {
     if (CanStoreCharsAsLatin1(chars.get(), length)) {
       return NewStringDeflated<allowGC>(cx, chars.get(), length);
     }
@@ -1754,7 +1755,7 @@ JSLinearString* NewLatin1StringZ(JSContext* cx, UniqueChars chars) {
 
 template <AllowGC allowGC, typename CharT>
 JSLinearString* NewStringCopyN(JSContext* cx, const CharT* s, size_t n) {
-  if constexpr (IsSame<CharT, char16_t>::value) {
+  if constexpr (std::is_same_v<CharT, char16_t>) {
     if (CanStoreCharsAsLatin1(s, n)) {
       return NewStringDeflated<allowGC>(cx, s, n);
     }
@@ -2028,7 +2029,7 @@ static bool FillWithRepresentatives(JSContext* cx, HandleArrayObject array,
 
   // External. Note that we currently only support TwoByte external strings.
   RootedString external1(cx), external2(cx);
-  if (IsSame<CharT, char16_t>::value) {
+  if constexpr (std::is_same_v<CharT, char16_t>) {
     external1 = JS_NewExternalString(cx, (const char16_t*)chars, len,
                                      &RepresentativeExternalStringCallbacks);
     if (!external1 || !AppendString(cx, array, index, external1)) {

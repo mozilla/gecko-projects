@@ -30,7 +30,7 @@ void gfxVars::SetValuesForInitialize(
     }
   } else {
     // Save the values for Initialize call
-    gGfxVarInitUpdates = new nsTArray<GfxVarUpdate>(aInitUpdates);
+    gGfxVarInitUpdates = new nsTArray<GfxVarUpdate>(aInitUpdates.Clone());
   }
 }
 
@@ -65,7 +65,7 @@ void gfxVars::Initialize() {
   }
 }
 
-gfxVars::gfxVars() {}
+gfxVars::gfxVars() = default;
 
 void gfxVars::Shutdown() {
   sInstance = nullptr;

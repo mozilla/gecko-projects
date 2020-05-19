@@ -56,6 +56,7 @@ using namespace mozilla::layers;
 nsWebBrowser::nsWebBrowser(int aItemType)
     : mContentType(aItemType),
       mShouldEnableHistory(true),
+      mWillChangeProcess(false),
       mParentNativeWindow(nullptr),
       mProgressListener(nullptr),
       mWidgetListenerDelegate(this),
@@ -96,10 +97,8 @@ nsIWidget* nsWebBrowser::EnsureWidget() {
 /* static */
 already_AddRefed<nsWebBrowser> nsWebBrowser::Create(
     nsIWebBrowserChrome* aContainerWindow, nsIWidget* aParentWidget,
-    const OriginAttributes& aOriginAttributes,
     dom::BrowsingContext* aBrowsingContext,
-    dom::WindowGlobalChild* aInitialWindowChild,
-    bool aDisableHistory /* = false */) {
+    dom::WindowGlobalChild* aInitialWindowChild) {
   MOZ_ASSERT_IF(aInitialWindowChild,
                 aInitialWindowChild->BrowsingContext() == aBrowsingContext);
 
@@ -123,7 +122,6 @@ already_AddRefed<nsWebBrowser> nsWebBrowser::Create(
   if (NS_WARN_IF(!docShell)) {
     return nullptr;
   }
-  docShell->SetOriginAttributes(aOriginAttributes);
   browser->SetDocShell(docShell);
 
   // get the system default window background colour
@@ -157,13 +155,6 @@ already_AddRefed<nsWebBrowser> nsWebBrowser::Create(
   // event.
 
   docShell->InitSessionHistory();
-
-  if (XRE_IsParentProcess() && !aDisableHistory) {
-    // Hook up global history. Do not fail if we can't - just warn.
-    DebugOnly<nsresult> rv =
-        browser->EnableGlobalHistory(browser->mShouldEnableHistory);
-    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "EnableGlobalHistory() failed");
-  }
 
   NS_ENSURE_SUCCESS(docShellAsWin->Create(), nullptr);
 
@@ -209,8 +200,8 @@ nsWebBrowser::InternalDestroy() {
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsWebBrowser)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsWebBrowser)
 
-NS_IMPL_CYCLE_COLLECTION(nsWebBrowser, mDocShell, mDocShellAsReq,
-                         mDocShellAsWin, mDocShellAsNav, mWebProgress)
+NS_IMPL_CYCLE_COLLECTION_WEAK(nsWebBrowser, mDocShell, mDocShellAsReq,
+                              mDocShellAsWin, mDocShellAsNav, mWebProgress)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsWebBrowser)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIWebBrowser)
@@ -263,13 +254,6 @@ nsWebBrowser::GetInterface(const nsIID& aIID, void** aSink) {
 //*****************************************************************************
 // nsWebBrowser::nsIWebBrowser
 //*****************************************************************************
-
-NS_IMETHODIMP
-nsWebBrowser::EnableGlobalHistory(bool aEnable) {
-  NS_ENSURE_STATE(mDocShell);
-
-  return mDocShell->SetUseGlobalHistory(aEnable);
-}
 
 NS_IMETHODIMP
 nsWebBrowser::GetContainerWindow(nsIWebBrowserChrome** aTopWindow) {
@@ -524,13 +508,6 @@ nsWebBrowser::LoadURIFromScript(const nsAString& aURI,
     return NS_ERROR_INVALID_ARG;
   }
   return LoadURI(aURI, loadURIOptions);
-}
-
-NS_IMETHODIMP
-nsWebBrowser::SetOriginAttributesBeforeLoading(
-    JS::Handle<JS::Value> aOriginAttributes, JSContext* aCx) {
-  return mDocShellAsNav->SetOriginAttributesBeforeLoading(aOriginAttributes,
-                                                          aCx);
 }
 
 NS_IMETHODIMP
@@ -1135,7 +1112,7 @@ nsWebBrowser::SetFocus() {
   nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow();
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
   return fm ? fm->SetFocusedWindow(window) : NS_OK;
 }
 
@@ -1192,6 +1169,9 @@ nsWebBrowser::SetDocShell(nsIDocShell* aDocShell) {
     }
     if (mDocShellAsWin) {
       mDocShellAsWin->Destroy();
+    }
+    if (!mWillChangeProcess && mDocShell) {
+      mDocShell->GetBrowsingContext()->Detach(/* aFromIPC */ true);
     }
 
     mDocShell = nullptr;
@@ -1271,7 +1251,7 @@ bool nsWebBrowser::PaintWindow(nsIWidget* aWidget,
 }
 
 void nsWebBrowser::FocusActivate() {
-  nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
   nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow();
   if (fm && window) {
     fm->WindowRaised(window);
@@ -1279,10 +1259,17 @@ void nsWebBrowser::FocusActivate() {
 }
 
 void nsWebBrowser::FocusDeactivate() {
-  nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
   nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow();
   if (fm && window) {
     fm->WindowLowered(window);
+  }
+}
+
+void nsWebBrowser::SetWillChangeProcess() {
+  mWillChangeProcess = true;
+  if (mDocShell) {
+    nsDocShell::Cast(mDocShell)->SetWillChangeProcess();
   }
 }
 

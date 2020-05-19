@@ -98,8 +98,9 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
         abs_dirs = super(AndroidProfileRun, self).query_abs_dirs()
         dirs = {}
 
+        dirs['abs_src_dir'] = os.environ['GECKO_PATH']
         dirs['abs_test_install_dir'] = os.path.join(
-            os.environ['GECKO_PATH'], 'testing')
+            dirs['abs_src_dir'], 'testing')
         dirs['abs_xre_dir'] = os.path.join(
             abs_dirs['abs_work_dir'], 'hostutils')
         dirs['abs_blob_upload_dir'] = '/builds/worker/artifacts/blobber_upload_dir'
@@ -124,7 +125,7 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
         dirs = self.query_abs_dirs()
         self.register_virtualenv_module(
             'marionette',
-            os.path.join(dirs['abs_work_dir'], 'src', 'testing', 'marionette', 'client')
+            os.path.join(dirs['abs_test_install_dir'], 'marionette', 'client')
         )
 
     def download(self):
@@ -163,7 +164,7 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
         }
 
         dirs = self.query_abs_dirs()
-        topsrcdir = os.path.join(dirs['abs_work_dir'], 'src')
+        topsrcdir = dirs['abs_src_dir']
         adb = self.query_exe('adb')
 
         path_mappings = {
@@ -206,8 +207,33 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
         env["MOZ_JAR_LOG_FILE"] = jarlog
         env["LLVM_PROFILE_FILE"] = profdata
 
+        if self.query_minidump_stackwalk():
+            os.environ['MINIDUMP_STACKWALK'] = self.minidump_stackwalk_path
+        os.environ['MINIDUMP_SAVE_PATH'] = self.query_abs_dirs()['abs_blob_upload_dir']
+        if not self.symbols_path:
+            self.symbols_path = os.environ.get("MOZ_FETCHES_DIR")
+
+        # Force test_root to be on the sdcard for android pgo
+        # builds which fail for Android 4.3 when profiles are located
+        # in /data/local/tmp/tests with
+        # E AndroidRuntime: FATAL EXCEPTION: Gecko
+        # E AndroidRuntime: java.lang.IllegalArgumentException: \
+        #    Profile directory must be writable if specified: /data/local/tmp/tests/profile
+        # This occurs when .can-write-sentinel is written to
+        # the profile in
+        # mobile/android/geckoview/src/main/java/org/mozilla/gecko/GeckoProfile.java.
+        # This is not a problem on later versions of Android. This
+        # over-ride of test_root should be removed when Android 4.3 is no
+        # longer supported.
+        sdcard_test_root = '/sdcard/tests'
         adbdevice = ADBDevice(adb=adb,
-                              device='emulator-5554')
+                              device='emulator-5554',
+                              test_root=sdcard_test_root)
+        if adbdevice.test_root != sdcard_test_root:
+            # If the test_root was previously set and shared
+            # the initializer will not have updated the shared
+            # value. Force it to match the sdcard_test_root.
+            adbdevice.test_root = sdcard_test_root
         adbdevice.mkdir(outputdir)
 
         try:
@@ -221,6 +247,7 @@ class AndroidProfileRun(TestingMixin, BaseScript, MozbaseMixin,
                 connect_to_running_emulator=True,
                 startup_timeout=1000,
                 env=env,
+                symbols_path=self.symbols_path,
             )
             driver.start_session()
 

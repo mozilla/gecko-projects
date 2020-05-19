@@ -134,10 +134,7 @@ class nsPipeInputStream final : public nsIAsyncInputStream,
                                 public nsIBufferedInputStream,
                                 public nsIInputStreamPriority {
  public:
-  // Pipe input streams preserve their refcount changes when record/replaying,
-  // as otherwise the thread which destroys the stream may vary between
-  // recording and replaying.
-  NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIINPUTSTREAM
   NS_DECL_NSIASYNCINPUTSTREAM
   NS_DECL_NSITELLABLESTREAM
@@ -251,8 +248,7 @@ class nsPipeOutputStream : public nsIAsyncOutputStream, public nsIClassInfo {
   nsPipe* mPipe;
 
   // separate refcnt so that we know when to close the producer
-  ThreadSafeAutoRefCntWithRecording<recordreplay::Behavior::Preserve>
-      mWriterRefCnt;
+  ThreadSafeAutoRefCnt mWriterRefCnt;
   int64_t mLogicalOffset;
   bool mBlocking;
 
@@ -271,9 +267,7 @@ class nsPipe final : public nsIPipe {
   friend class nsPipeOutputStream;
   friend class AutoReadSegment;
 
-  // As for nsPipeInputStream, preserve refcount changes when recording or
-  // replaying.
-  NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIPIPE
 
   // nsPipe methods:
@@ -945,7 +939,7 @@ void nsPipe::OnPipeException(nsresult aReason, bool aOutputOnly) {
 
     // OnInputException() can drain the stream and remove it from
     // mInputList.  So iterate over a temp list instead.
-    nsTArray<nsPipeInputStream*> list(mInputList);
+    nsTArray<nsPipeInputStream*> list = mInputList.Clone();
     for (uint32_t i = 0; i < list.Length(); ++i) {
       // an output-only exception applies to the input end if the pipe has
       // zero bytes available.

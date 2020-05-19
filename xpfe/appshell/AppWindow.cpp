@@ -32,6 +32,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIIOService.h"
 #include "nsIObserverService.h"
+#include "nsIOpenWindowInfo.h"
 #include "nsIWindowMediator.h"
 #include "nsIScreenManager.h"
 #include "nsIScreen.h"
@@ -126,7 +127,6 @@ AppWindow::AppWindow(uint32_t aChromeFlags)
       mPersistentAttributesDirty(0),
       mPersistentAttributesMask(0),
       mChromeFlags(aChromeFlags),
-      mNextRemoteTabId(0),
       mSPTimerLock("AppWindow.mSPTimerLock"),
       mWidgetListenerDelegate(this) {}
 
@@ -156,10 +156,8 @@ NS_INTERFACE_MAP_BEGIN(AppWindow)
 NS_INTERFACE_MAP_END
 
 nsresult AppWindow::Initialize(nsIAppWindow* aParent, nsIAppWindow* aOpener,
-                               nsIURI* aUrl, int32_t aInitialWidth,
-                               int32_t aInitialHeight, bool aIsHiddenWindow,
-                               nsIRemoteTab* aOpeningTab,
-                               mozIDOMWindowProxy* aOpenerWindow,
+                               int32_t aInitialWidth, int32_t aInitialHeight,
+                               bool aIsHiddenWindow,
                                nsWidgetInitData& widgetInitData) {
   nsresult rv;
   nsCOMPtr<nsIWidget> parentWidget;
@@ -231,21 +229,15 @@ nsresult AppWindow::Initialize(nsIAppWindow* aParent, nsIAppWindow* aOpener,
   // since we no longer use content child widgets.
   mWindow->SetBackgroundColor(NS_RGB(255, 255, 255));
 
-  // Create web shell
-  RefPtr<BrowsingContext> openerContext =
-      aOpenerWindow
-          ? nsPIDOMWindowOuter::From(aOpenerWindow)->GetBrowsingContext()
-          : nullptr;
+  // All Chrome BCs exist within the same BrowsingContextGroup, so we don't need
+  // to pass in the opener window here. The opener is set later, if needed, by
+  // nsWindowWatcher.
   RefPtr<BrowsingContext> browsingContext =
-      BrowsingContext::Create(/* aParent */ nullptr, openerContext,
-                              EmptyString(), BrowsingContext::Type::Chrome);
+      BrowsingContext::CreateIndependent(BrowsingContext::Type::Chrome);
+
+  // Create web shell
   mDocShell = nsDocShell::Create(browsingContext);
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
-
-  // XXX(nika): This is used to handle propagating opener across remote tab
-  // creation. We should come up with a better system for doing this (probably
-  // based on BrowsingContext).
-  mDocShell->SetOpener(aOpeningTab);
 
   // Make sure to set the item type on the docshell _before_ calling
   // Create() so it knows what type it is.
@@ -267,57 +259,6 @@ nsresult AppWindow::Initialize(nsIAppWindow* aParent, nsIAppWindow* aOpener,
   if (webProgress) {
     webProgress->AddProgressListener(this,
                                      nsIWebProgress::NOTIFY_STATE_NETWORK);
-  }
-
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-  if (aOpenerWindow) {
-    BrowsingContext* bc = mDocShell->GetBrowsingContext();
-    BrowsingContext* openerBC =
-        nsPIDOMWindowOuter::From(aOpenerWindow)->GetBrowsingContext();
-    MOZ_DIAGNOSTIC_ASSERT(bc->GetOpenerId() == openerBC->Id());
-    MOZ_DIAGNOSTIC_ASSERT(bc->HadOriginalOpener());
-  }
-#endif
-
-  // Eagerly create an about:blank content viewer with the right principal here,
-  // rather than letting it happening in the upcoming call to
-  // SetInitialPrincipalToSubject. This avoids creating the about:blank document
-  // and then blowing it away with a second one, which can cause problems for
-  // the top-level chrome window case. See bug 789773. Note that we don't accept
-  // expanded principals here, similar to SetInitialPrincipalToSubject.
-  if (nsContentUtils::IsInitialized()) {  // Sometimes this happens really early
-                                          // See bug 793370.
-    MOZ_ASSERT(mDocShell->ItemType() == nsIDocShellTreeItem::typeChrome);
-    nsCOMPtr<nsIPrincipal> principal =
-        nsContentUtils::SubjectPrincipalOrSystemIfNativeCaller();
-    if (nsContentUtils::IsExpandedPrincipal(principal)) {
-      principal = nullptr;
-    }
-    // Use the subject (or system) principal as the storage principal too until
-    // the new window finishes navigating and gets a real storage principal.
-    rv = mDocShell->CreateAboutBlankContentViewer(principal, principal,
-                                                  /* aCsp = */ nullptr);
-    NS_ENSURE_SUCCESS(rv, rv);
-    RefPtr<Document> doc = mDocShell->GetDocument();
-    NS_ENSURE_TRUE(!!doc, NS_ERROR_FAILURE);
-    doc->SetIsInitialDocument(true);
-  }
-
-  if (nullptr != aUrl) {
-    nsCString tmpStr;
-
-    rv = aUrl->GetSpec(tmpStr);
-    if (NS_FAILED(rv)) return rv;
-
-    NS_ConvertUTF8toUTF16 urlString(tmpStr);
-    nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(mDocShell));
-    NS_ENSURE_TRUE(webNav, NS_ERROR_FAILURE);
-
-    LoadURIOptions loadURIOptions;
-    loadURIOptions.mTriggeringPrincipal = nsContentUtils::GetSystemPrincipal();
-
-    rv = webNav->LoadURI(urlString, loadURIOptions);
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   return rv;
@@ -600,13 +541,14 @@ NS_IMETHODIMP AppWindow::Create() {
 }
 
 NS_IMETHODIMP AppWindow::Destroy() {
+  nsCOMPtr<nsIAppWindow> kungFuDeathGrip(this);
+
   nsresult rv;
   nsCOMPtr<nsIWebProgress> webProgress(do_GetInterface(mDocShell, &rv));
   if (webProgress) {
     webProgress->RemoveProgressListener(this);
   }
 
-  nsCOMPtr<nsIAppWindow> kungFuDeathGrip(this);
   {
     MutexAutoLock lock(mSPTimerLock);
     if (mSPTimer) {
@@ -632,16 +574,6 @@ NS_IMETHODIMP AppWindow::Destroy() {
 
   nsCOMPtr<nsIAppWindow> parentWindow(do_QueryReferent(mParentWindow));
   if (parentWindow) parentWindow->RemoveChildWindow(this);
-
-  // let's make sure the window doesn't get deleted out from under us
-  // while we are trying to close....this can happen if the docshell
-  // we close ends up being the last owning reference to this AppWindow
-
-  // XXXTAB This shouldn't be an issue anymore because the ownership model
-  // only goes in one direction.  When webshell container is fully removed
-  // try removing this...
-
-  nsCOMPtr<nsIAppWindow> placeHolder = this;
 
   // Remove modality (if any) and hide while destroying. More than
   // a convenience, the hide prevents user interaction with the partially
@@ -1677,7 +1609,7 @@ void AppWindow::StaggerPosition(int32_t& aRequestedX, int32_t& aRequestedY,
           break;
         }
       }
-    } while (1);
+    } while (true);
   } while (keepTrying);
 }
 
@@ -1733,12 +1665,6 @@ void AppWindow::SyncAttributesToWidget() {
   // "toggletoolbar" attribute
   windowElement->GetAttribute(NS_LITERAL_STRING("toggletoolbar"), attr);
   mWindow->SetShowsToolbarButton(attr.LowerCaseEqualsLiteral("true"));
-
-  NS_ENSURE_TRUE_VOID(mWindow);
-
-  // "fullscreenbutton" attribute
-  windowElement->GetAttribute(NS_LITERAL_STRING("fullscreenbutton"), attr);
-  mWindow->SetShowsFullScreenButton(attr.LowerCaseEqualsLiteral("true"));
 
   NS_ENSURE_TRUE_VOID(mWindow);
 
@@ -2156,26 +2082,21 @@ NS_IMETHODIMP AppWindow::ExitModalLoop(nsresult aStatus) {
 
 // top-level function to create a new window
 NS_IMETHODIMP AppWindow::CreateNewWindow(int32_t aChromeFlags,
-                                         nsIRemoteTab* aOpeningTab,
-                                         mozIDOMWindowProxy* aOpener,
-                                         uint64_t aNextRemoteTabId,
+                                         nsIOpenWindowInfo* aOpenWindowInfo,
                                          nsIAppWindow** _retval) {
   NS_ENSURE_ARG_POINTER(_retval);
 
   if (aChromeFlags & nsIWebBrowserChrome::CHROME_OPENAS_CHROME) {
     MOZ_RELEASE_ASSERT(
-        aNextRemoteTabId == 0,
-        "Unexpected next remote tab ID, should never have a non-zero "
-        "aNextRemoteTabId when creating a new chrome window");
-    return CreateNewChromeWindow(aChromeFlags, aOpeningTab, aOpener, _retval);
+        !aOpenWindowInfo,
+        "Unexpected nsOpenWindowInfo when creating a new chrome window");
+    return CreateNewChromeWindow(aChromeFlags, _retval);
   }
-  return CreateNewContentWindow(aChromeFlags, aOpeningTab, aOpener,
-                                aNextRemoteTabId, _retval);
+
+  return CreateNewContentWindow(aChromeFlags, aOpenWindowInfo, _retval);
 }
 
 NS_IMETHODIMP AppWindow::CreateNewChromeWindow(int32_t aChromeFlags,
-                                               nsIRemoteTab* aOpeningTab,
-                                               mozIDOMWindowProxy* aOpener,
                                                nsIAppWindow** _retval) {
   nsCOMPtr<nsIAppShellService> appShell(
       do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
@@ -2185,22 +2106,18 @@ NS_IMETHODIMP AppWindow::CreateNewChromeWindow(int32_t aChromeFlags,
   nsCOMPtr<nsIAppWindow> newWindow;
   appShell->CreateTopLevelWindow(
       this, nullptr, aChromeFlags, nsIAppShellService::SIZE_TO_CONTENT,
-      nsIAppShellService::SIZE_TO_CONTENT, aOpeningTab, aOpener,
-      getter_AddRefs(newWindow));
+      nsIAppShellService::SIZE_TO_CONTENT, getter_AddRefs(newWindow));
 
   NS_ENSURE_TRUE(newWindow, NS_ERROR_FAILURE);
 
-  *_retval = newWindow;
-  NS_ADDREF(*_retval);
+  newWindow.forget(_retval);
 
   return NS_OK;
 }
 
-NS_IMETHODIMP AppWindow::CreateNewContentWindow(int32_t aChromeFlags,
-                                                nsIRemoteTab* aOpeningTab,
-                                                mozIDOMWindowProxy* aOpener,
-                                                uint64_t aNextRemoteTabId,
-                                                nsIAppWindow** _retval) {
+NS_IMETHODIMP AppWindow::CreateNewContentWindow(
+    int32_t aChromeFlags, nsIOpenWindowInfo* aOpenWindowInfo,
+    nsIAppWindow** _retval) {
   nsCOMPtr<nsIAppShellService> appShell(
       do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
   NS_ENSURE_TRUE(appShell, NS_ERROR_FAILURE);
@@ -2227,34 +2144,20 @@ NS_IMETHODIMP AppWindow::CreateNewContentWindow(int32_t aChromeFlags,
   nsCOMPtr<nsIAppWindow> newWindow;
   {
     AutoNoJSAPI nojsapi;
-    // We actually want this toplevel window which we are creating to have a
-    // null opener, as we will be creating the content xul:browser window inside
-    // of it, so we pass nullptr as our aOpener.
     appShell->CreateTopLevelWindow(this, uri, aChromeFlags, 615, 480,
-                                   aOpeningTab, nullptr,
                                    getter_AddRefs(newWindow));
     NS_ENSURE_TRUE(newWindow, NS_ERROR_FAILURE);
   }
 
-  // Specify that we want the window to remain locked until the chrome has
-  // loaded.
   AppWindow* appWin =
       static_cast<AppWindow*>(static_cast<nsIAppWindow*>(newWindow));
 
-  if (aNextRemoteTabId) {
-    appWin->mNextRemoteTabId = aNextRemoteTabId;
-  }
+  // Specify which flags should be used by browser.xhtml to create the initial
+  // content browser window.
+  appWin->mInitialOpenWindowInfo = aOpenWindowInfo;
 
-  if (aOpener) {
-    nsCOMPtr<nsIDocShell> docShell;
-    appWin->GetDocShell(getter_AddRefs(docShell));
-    MOZ_ASSERT(docShell);
-    nsCOMPtr<nsPIDOMWindowOuter> window = docShell->GetWindow();
-    MOZ_ASSERT(window);
-    window->SetOpenerForInitialContentBrowser(
-        nsPIDOMWindowOuter::From(aOpener)->GetBrowsingContext());
-  }
-
+  // Specify that we want the window to remain locked until the chrome has
+  // loaded.
   appWin->LockUntilChromeLoad();
 
   {
@@ -2264,10 +2167,10 @@ NS_IMETHODIMP AppWindow::CreateNewContentWindow(int32_t aChromeFlags,
 
   NS_ENSURE_STATE(appWin->mPrimaryContentShell ||
                   appWin->mPrimaryBrowserParent);
-  MOZ_ASSERT_IF(appWin->mPrimaryContentShell, aNextRemoteTabId == 0);
+  MOZ_ASSERT_IF(appWin->mPrimaryContentShell,
+                !aOpenWindowInfo->GetNextRemoteBrowser());
 
-  *_retval = newWindow;
-  NS_ADDREF(*_retval);
+  newWindow.forget(_retval);
 
   return NS_OK;
 }
@@ -2663,9 +2566,10 @@ nsresult AppWindow::GetTabCount(uint32_t* aResult) {
   return NS_OK;
 }
 
-nsresult AppWindow::GetNextRemoteTabId(uint64_t* aNextRemoteTabId) {
-  NS_ENSURE_ARG_POINTER(aNextRemoteTabId);
-  *aNextRemoteTabId = mNextRemoteTabId;
+nsresult AppWindow::GetInitialOpenWindowInfo(
+    nsIOpenWindowInfo** aOpenWindowInfo) {
+  NS_ENSURE_ARG_POINTER(aOpenWindowInfo);
+  *aOpenWindowInfo = do_AddRef(mInitialOpenWindowInfo).take();
   return NS_OK;
 }
 

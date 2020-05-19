@@ -18,7 +18,6 @@ const TEST_URI = `data:text/html;charset=utf-8,
 
 add_task(async function() {
   const toolbox = await openNewTabAndToolbox(TEST_URI, "inspector");
-  await registerTestActor(toolbox.target.client);
   const testActor = await getTestActor(toolbox);
   await selectNodeWithPicker(toolbox, testActor, "h1");
 
@@ -31,22 +30,19 @@ add_task(async function() {
   const { autocompletePopup } = jsterm;
 
   await setInputValueForAutocompletion(hud, "$0.");
-  is(
-    getAutocompletePopupLabels(autocompletePopup).includes("attributes"),
-    true,
+  ok(
+    hasPopupLabel(autocompletePopup, "attributes"),
     "autocomplete popup has expected items"
   );
   is(autocompletePopup.isOpen, true, "autocomplete popup is open");
 
   await setInputValueForAutocompletion(hud, "$0.attributes.");
   is(autocompletePopup.isOpen, true, "autocomplete popup is open");
-  is(
-    getAutocompletePopupLabels(autocompletePopup).includes("getNamedItem"),
-    true,
+  ok(
+    hasPopupLabel(autocompletePopup, "getNamedItem"),
     "autocomplete popup has expected items"
   );
-});
 
-function getAutocompletePopupLabels(autocompletePopup) {
-  return autocompletePopup.items.map(i => i.label);
-}
+  info("Close autocomplete popup");
+  await closeAutocompletePopup(hud);
+});

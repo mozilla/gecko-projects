@@ -25,6 +25,17 @@ class SccacheInstall(object):
         self.install_toolchain_artifact(state_dir, checkout_root, sccache.LINUX_SCCACHE)
 
 
+class FixStacksInstall(object):
+    def __init__(self, **kwargs):
+        pass
+
+    def ensure_fix_stacks_packages(self, state_dir, checkout_root):
+        from mozboot import fix_stacks
+
+        self.install_toolchain_artifact(state_dir, checkout_root,
+                                        fix_stacks.LINUX_FIX_STACKS)
+
+
 class LucetcInstall(object):
     def __init__(self, **kwargs):
         pass
@@ -104,3 +115,14 @@ class ClangStaticAnalysisInstall(object):
         from mozboot import static_analysis
         self.install_toolchain_static_analysis(
             state_dir, checkout_root, static_analysis.LINUX_CLANG_TIDY)
+
+
+class MinidumpStackwalkInstall(object):
+    def __init__(self, **kwargs):
+        pass
+
+    def ensure_minidump_stackwalk_packages(self, state_dir, checkout_root):
+        from mozboot import minidump_stackwalk
+
+        self.install_toolchain_artifact(state_dir, checkout_root,
+                                        minidump_stackwalk.LINUX_MINIDUMP_STACKWALK)

@@ -314,7 +314,6 @@ class BuildOptionParser(object):
         'aarch64-debug': 'builds/releng_sub_%s_configs/%s_aarch64_debug.py',
         'android-geckoview-docs': 'builds/releng_sub_%s_configs/%s_geckoview_docs.py',
         'valgrind': 'builds/releng_sub_%s_configs/%s_valgrind.py',
-        'tup': 'builds/releng_sub_%s_configs/%s_tup.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
 
@@ -838,6 +837,7 @@ items from that key's value."
 
         dirs = self.query_abs_dirs()
         base_work_dir = dirs['base_work_dir']
+        work_dir = dirs['abs_work_dir']
         objdir = dirs['abs_obj_dir']
         branch = self.branch
 
@@ -851,11 +851,12 @@ items from that key's value."
             dirs['abs_src_dir'],
             'testing/mozharness/scripts/multil10n.py',
         )
-        base_work_dir = os.path.join(base_work_dir, 'workspace')
 
         cmd = [
             sys.executable,
             multil10n_path,
+            '--work-dir',
+            work_dir,
             '--config-file',
             'multi_locale/android-mozharness-build.json',
             '--pull-locale-source',

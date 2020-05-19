@@ -16,6 +16,7 @@
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/Compositor.h"         // for Compositor
 #include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
+#include "mozilla/layers/ImageBridgeParent.h"  // for ImageBridgeParent
 #include "mozilla/layers/LayersSurfaces.h"     // for SurfaceDescriptor, etc
 #include "mozilla/layers/TextureHostBasic.h"
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
@@ -26,6 +27,7 @@
 #endif
 #include "mozilla/layers/GPUVideoTextureHost.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
+#include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/webrender/RenderBufferTextureHost.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -391,6 +393,8 @@ TextureHost::~TextureHost() {
 }
 
 void TextureHost::Finalize() {
+  MaybeDestroyRenderTexture();
+
   if (!(GetFlags() & TextureFlags::DEALLOCATE_CLIENT)) {
     DeallocateSharedData();
     DeallocateDeviceData();
@@ -452,6 +456,28 @@ void TextureHost::CallNotifyNotUsed() {
   static_cast<TextureParent*>(mActor)->NotifyNotUsed(mFwdTransactionId);
 }
 
+void TextureHost::MaybeDestroyRenderTexture() {
+  if (mExternalImageId.isNothing()) {
+    // RenderTextureHost was not created
+    return;
+  }
+  // When TextureHost created RenderTextureHost, delete it here.
+  TextureHost::DestroyRenderTexture(mExternalImageId.ref());
+}
+
+void TextureHost::DestroyRenderTexture(
+    const wr::ExternalImageId& aExternalImageId) {
+  wr::RenderThread::Get()->UnregisterExternalImage(
+      wr::AsUint64(aExternalImageId));
+}
+
+void TextureHost::EnsureRenderTexture(
+    const wr::ExternalImageId& aExternalImageId) {
+  MOZ_ASSERT(mExternalImageId.isNothing());
+  mExternalImageId = Some(aExternalImageId);
+  CreateRenderTexture(aExternalImageId);
+}
+
 void TextureHost::PrintInfo(std::stringstream& aStream, const char* aPrefix) {
   aStream << aPrefix;
   aStream << nsPrintfCString("%s (0x%p)", Name(), this).get();
@@ -484,7 +510,7 @@ void TextureHost::Updated(const nsIntRegion* aRegion) {
 
 TextureSource::TextureSource() : mCompositableCount(0) {}
 
-TextureSource::~TextureSource() {}
+TextureSource::~TextureSource() = default;
 BufferTextureHost::BufferTextureHost(const BufferDescriptor& aDesc,
                                      TextureFlags aFlags)
     : TextureHost(aFlags),
@@ -520,7 +546,7 @@ BufferTextureHost::BufferTextureHost(const BufferDescriptor& aDesc,
   }
 }
 
-BufferTextureHost::~BufferTextureHost() {}
+BufferTextureHost::~BufferTextureHost() = default;
 
 void BufferTextureHost::UpdatedInternal(const nsIntRegion* aRegion) {
   ++mUpdateSerial;
@@ -613,8 +639,7 @@ uint32_t BufferTextureHost::NumSubTextures() {
 
 void BufferTextureHost::PushResourceUpdates(
     wr::TransactionBuilder& aResources, ResourceUpdateOp aOp,
-    const Range<wr::ImageKey>& aImageKeys, const wr::ExternalImageId& aExtID,
-    const bool aPreferCompositorSurface) {
+    const Range<wr::ImageKey>& aImageKeys, const wr::ExternalImageId& aExtID) {
   auto method = aOp == TextureHost::ADD_IMAGE
                     ? &wr::TransactionBuilder::AddExternalImage
                     : &wr::TransactionBuilder::UpdateExternalImage;
@@ -626,7 +651,7 @@ void BufferTextureHost::PushResourceUpdates(
     wr::ImageDescriptor descriptor(
         GetSize(),
         ImageDataSerializer::ComputeRGBStride(GetFormat(), GetSize().width),
-        GetFormat(), aPreferCompositorSurface);
+        GetFormat());
     (aResources.*method)(aImageKeys[0], descriptor, aExtID, imageType, 0);
   } else {
     MOZ_ASSERT(aImageKeys.length() == 3);
@@ -634,34 +659,37 @@ void BufferTextureHost::PushResourceUpdates(
     const layers::YCbCrDescriptor& desc = mDescriptor.get_YCbCrDescriptor();
     wr::ImageDescriptor yDescriptor(
         desc.ySize(), desc.yStride(),
-        SurfaceFormatForColorDepth(desc.colorDepth()),
-        aPreferCompositorSurface);
+        SurfaceFormatForColorDepth(desc.colorDepth()));
     wr::ImageDescriptor cbcrDescriptor(
         desc.cbCrSize(), desc.cbCrStride(),
-        SurfaceFormatForColorDepth(desc.colorDepth()),
-        aPreferCompositorSurface);
+        SurfaceFormatForColorDepth(desc.colorDepth()));
     (aResources.*method)(aImageKeys[0], yDescriptor, aExtID, imageType, 0);
     (aResources.*method)(aImageKeys[1], cbcrDescriptor, aExtID, imageType, 1);
     (aResources.*method)(aImageKeys[2], cbcrDescriptor, aExtID, imageType, 2);
   }
 }
 
-void BufferTextureHost::PushDisplayItems(
-    wr::DisplayListBuilder& aBuilder, const wr::LayoutRect& aBounds,
-    const wr::LayoutRect& aClip, wr::ImageRendering aFilter,
-    const Range<wr::ImageKey>& aImageKeys) {
+void BufferTextureHost::PushDisplayItems(wr::DisplayListBuilder& aBuilder,
+                                         const wr::LayoutRect& aBounds,
+                                         const wr::LayoutRect& aClip,
+                                         wr::ImageRendering aFilter,
+                                         const Range<wr::ImageKey>& aImageKeys,
+                                         const bool aPreferCompositorSurface) {
   if (GetFormat() != gfx::SurfaceFormat::YUV) {
     MOZ_ASSERT(aImageKeys.length() == 1);
     aBuilder.PushImage(aBounds, aClip, true, aFilter, aImageKeys[0],
-                       !(mFlags & TextureFlags::NON_PREMULTIPLIED));
+                       !(mFlags & TextureFlags::NON_PREMULTIPLIED),
+                       wr::ColorF{1.0f, 1.0f, 1.0f, 1.0f},
+                       aPreferCompositorSurface);
   } else {
     MOZ_ASSERT(aImageKeys.length() == 3);
     const YCbCrDescriptor& desc = mDescriptor.get_YCbCrDescriptor();
-    aBuilder.PushYCbCrPlanarImage(
-        aBounds, aClip, true, aImageKeys[0], aImageKeys[1], aImageKeys[2],
-        wr::ToWrColorDepth(desc.colorDepth()),
-        wr::ToWrYuvColorSpace(desc.yUVColorSpace()),
-        wr::ToWrColorRange(desc.colorRange()), aFilter);
+    aBuilder.PushYCbCrPlanarImage(aBounds, aClip, true, aImageKeys[0],
+                                  aImageKeys[1], aImageKeys[2],
+                                  wr::ToWrColorDepth(desc.colorDepth()),
+                                  wr::ToWrYuvColorSpace(desc.yUVColorSpace()),
+                                  wr::ToWrColorRange(desc.colorRange()),
+                                  aFilter, aPreferCompositorSurface);
   }
 }
 

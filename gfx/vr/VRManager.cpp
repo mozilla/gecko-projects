@@ -40,6 +40,7 @@
 #  include <string.h>
 #  include <pthread.h>
 #  include "GeckoVRManager.h"
+#  include "mozilla/java/GeckoSurfaceTextureWrappers.h"
 #  include "mozilla/layers/CompositorThread.h"
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
@@ -309,7 +310,7 @@ void VRManager::StartTasks() {
   if (!mTaskTimer) {
     mTaskInterval = GetOptimalTaskInterval();
     mTaskTimer = NS_NewTimer();
-    mTaskTimer->SetTarget(CompositorThreadHolder::Loop()->SerialEventTarget());
+    mTaskTimer->SetTarget(CompositorThread());
     mTaskTimer->InitWithNamedFuncCallback(
         TaskTimerCallback, this, mTaskInterval,
         nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP,
@@ -818,7 +819,8 @@ void VRManager::ProcessManagerState_DetectRuntimes() {
     mState = VRManagerState::Stopping;
     mRuntimeSupportFlags = mDisplayInfo.mDisplayState.capabilityFlags &
                            (VRDisplayCapabilityFlags::Cap_ImmersiveVR |
-                            VRDisplayCapabilityFlags::Cap_ImmersiveAR);
+                            VRDisplayCapabilityFlags::Cap_ImmersiveAR |
+                            VRDisplayCapabilityFlags::Cap_Inline);
     mRuntimeDetectionCompleted = true;
     DispatchRuntimeCapabilitiesUpdate();
   }
@@ -1379,7 +1381,7 @@ void VRManager::SubmitFrame(VRLayerParent* aLayer,
     mSubmitThread->Start();
     mSubmitThread->PostTask(task.forget());
 #else
-    CompositorThreadHolder::Loop()->PostTask(task.forget());
+    CompositorThread()->Dispatch(task.forget());
 #endif  // defined(MOZ_WIDGET_ANDROID)
   }
 }
@@ -1513,10 +1515,8 @@ void VRManager::SubmitFrameInternal(const layers::SurfaceDescriptor& aTexture,
    * frames to continue at a lower refresh rate until frame submission
    * succeeds again.
    */
-  MessageLoop* loop = CompositorThreadHolder::Loop();
-
-  loop->PostTask(NewRunnableMethod("gfx::VRManager::StartFrame", this,
-                                   &VRManager::StartFrame));
+  CompositorThread()->Dispatch(NewRunnableMethod("gfx::VRManager::StartFrame",
+                                                 this, &VRManager::StartFrame));
 #elif defined(MOZ_WIDGET_ANDROID)
   // We are already in the CompositorThreadHolder event loop on Android.
   StartFrame();

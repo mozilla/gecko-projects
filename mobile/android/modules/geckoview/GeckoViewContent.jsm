@@ -114,7 +114,7 @@ class GeckoViewContent extends GeckoViewModule {
         break;
       }
       case "GeckoView:ZoomToInput":
-        this.messageManager.sendAsyncMessage(aEvent);
+        this.messageManager.sendAsyncMessage(aEvent, aData);
         break;
       case "GeckoView:ScrollBy":
         this.messageManager.sendAsyncMessage(aEvent, aData);
@@ -128,11 +128,9 @@ class GeckoViewContent extends GeckoViewModule {
         } else {
           this.browser.docShellIsActive = false;
         }
-        var msgData = {
+        this.messageManager.sendAsyncMessage("GeckoView:SetActive", {
           active: aData.active,
-          suspendMedia: this.settings.suspendMediaWhenInactive,
-        };
-        this.messageManager.sendAsyncMessage("GeckoView:SetActive", msgData);
+        });
         break;
       case "GeckoView:SetFocused":
         if (aData.focused) {

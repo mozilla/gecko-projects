@@ -12,6 +12,7 @@
 #include "mozilla/Char16.h"
 #include "mozilla/fallible.h"
 #include "nsStringFlags.h"
+#include "nsStringIterator.h"
 #include "nsCharTraits.h"
 
 template <typename T>
@@ -197,9 +198,7 @@ class nsTStringRepr {
   size_type NS_FASTCALL CountChar(char_type) const;
   int32_t NS_FASTCALL FindChar(char_type, index_type aOffset = 0) const;
 
-  inline bool Contains(char_type aChar) const {
-    return FindChar(aChar) != kNotFound;
-  }
+  bool Contains(char_type aChar) const;
 
   // Equality.
   bool NS_FASTCALL Equals(const self_type&) const;
@@ -351,6 +350,16 @@ int NS_FASTCALL
 Compare(const mozilla::detail::nsTStringRepr<T>& aLhs,
         const mozilla::detail::nsTStringRepr<T>& aRhs,
         const nsTStringComparator<T>& = nsTDefaultStringComparator<T>());
+
+extern template int NS_FASTCALL
+Compare<char>(const mozilla::detail::nsTStringRepr<char>&,
+              const mozilla::detail::nsTStringRepr<char>&,
+              const nsTStringComparator<char>&);
+
+extern template int NS_FASTCALL
+Compare<char16_t>(const mozilla::detail::nsTStringRepr<char16_t>&,
+                  const mozilla::detail::nsTStringRepr<char16_t>&,
+                  const nsTStringComparator<char16_t>&);
 
 template <typename T>
 inline constexpr bool operator!=(

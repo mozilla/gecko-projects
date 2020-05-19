@@ -9,7 +9,9 @@ import platform
 from mozboot.base import BaseBootstrapper
 from mozboot.linux_common import (
     ClangStaticAnalysisInstall,
+    FixStacksInstall,
     LucetcInstall,
+    MinidumpStackwalkInstall,
     NasmInstall,
     NodeInstall,
     SccacheInstall,
@@ -19,9 +21,17 @@ from mozboot.linux_common import (
 
 
 class CentOSFedoraBootstrapper(
-        NasmInstall, NodeInstall, StyloInstall, SccacheInstall,
-        ClangStaticAnalysisInstall, LucetcInstall, WasiSysrootInstall,
+        ClangStaticAnalysisInstall,
+        FixStacksInstall,
+        LucetcInstall,
+        MinidumpStackwalkInstall,
+        NasmInstall,
+        NodeInstall,
+        SccacheInstall,
+        StyloInstall,
+        WasiSysrootInstall,
         BaseBootstrapper):
+
     def __init__(self, distro, version, dist_id, **kwargs):
         BaseBootstrapper.__init__(self, **kwargs)
 

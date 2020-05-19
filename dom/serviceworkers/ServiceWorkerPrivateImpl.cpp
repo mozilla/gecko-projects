@@ -16,6 +16,7 @@
 #include "nsIChannel.h"
 #include "nsINetworkInterceptController.h"
 #include "nsIObserverService.h"
+#include "nsIScriptError.h"
 #include "nsIURI.h"
 #include "nsThreadUtils.h"
 
@@ -27,7 +28,6 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/SystemGroup.h"
 #include "mozilla/Unused.h"
 #include "mozilla/dom/ClientIPCTypes.h"
 #include "mozilla/dom/DOMTypes.h"
@@ -98,7 +98,8 @@ nsresult ServiceWorkerPrivateImpl::Initialize() {
   nsCOMPtr<nsIPrincipal> principal = mOuter->mInfo->Principal();
 
   nsCOMPtr<nsIURI> uri;
-  nsresult rv = principal->GetURI(getter_AddRefs(uri));
+  auto* basePrin = BasePrincipal::Cast(principal);
+  nsresult rv = basePrin->GetURI(getter_AddRefs(uri));
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -138,12 +139,12 @@ nsresult ServiceWorkerPrivateImpl::Initialize() {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
 
-  nsCOMPtr<nsICookieSettings> cookieSettings =
-      mozilla::net::CookieSettings::Create();
-  MOZ_ASSERT(cookieSettings);
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
+      mozilla::net::CookieJarSettings::Create();
+  MOZ_ASSERT(cookieJarSettings);
 
   StorageAccess storageAccess =
-      StorageAllowedForServiceWorker(principal, cookieSettings);
+      StorageAllowedForServiceWorker(principal, cookieJarSettings);
 
   ServiceWorkerData serviceWorkerData;
   serviceWorkerData.cacheName() = mOuter->mInfo->CacheName();
@@ -791,8 +792,8 @@ void ServiceWorkerPrivateImpl::ErrorReceived(const ErrorValue& aError) {
 
   swm->HandleError(nullptr, info->Principal(), info->Scope(),
                    NS_ConvertUTF8toUTF16(info->ScriptSpec()), EmptyString(),
-                   EmptyString(), EmptyString(), 0, 0, JSREPORT_ERROR,
-                   JSEXN_ERR);
+                   EmptyString(), EmptyString(), 0, 0,
+                   nsIScriptError::errorFlag, JSEXN_ERR);
 }
 
 void ServiceWorkerPrivateImpl::Terminated() {

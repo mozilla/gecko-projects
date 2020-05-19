@@ -18,6 +18,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 const SEARCH_COUNTS_HISTOGRAM_KEY = "SEARCH_COUNTS";
 const SEARCH_WITH_ADS_SCALAR = "browser.search.with_ads";
 const SEARCH_AD_CLICKS_SCALAR = "browser.search.ad_clicks";
+const SEARCH_DATA_TRANSFERRED_SCALAR = "browser.search.data_transferred";
+const SEARCH_TELEMETRY_PRIVATE_BROWSING_KEY_SUFFIX = "pb";
 
 /**
  * Used to identify various parameters used with partner search providers. This
@@ -149,6 +151,7 @@ class TelemetryHandler {
       browserInfoByURL: this._browserInfoByURL,
       findBrowserItemForURL: (...args) => this._findBrowserItemForURL(...args),
       getProviderInfoForURL: (...args) => this._getProviderInfoForURL(...args),
+      checkURLForSerpMatch: (...args) => this._checkURLForSerpMatch(...args),
     });
   }
 
@@ -222,6 +225,10 @@ class TelemetryHandler {
     this._contentHandler.overrideSearchTelemetryForTests(
       this.__searchProviderInfo
     );
+  }
+
+  reportPageWithAds(info) {
+    this._contentHandler._reportPageWithAds(info);
   }
 
   /**
@@ -408,7 +415,6 @@ class TelemetryHandler {
    * @param {object} win The window to register.
    */
   _registerWindow(win) {
-    this._contentHandler.registerWindow(win);
     win.gBrowser.tabContainer.addEventListener("TabClose", this);
   }
 
@@ -423,7 +429,6 @@ class TelemetryHandler {
       this.stopTrackingBrowser(tab);
     }
 
-    this._contentHandler.unregisterWindow(win);
     win.gBrowser.tabContainer.removeEventListener("TabClose", this);
   }
 
@@ -583,6 +588,7 @@ class ContentHandler {
     this._browserInfoByURL = options.browserInfoByURL;
     this._findBrowserItemForURL = options.findBrowserItemForURL;
     this._getProviderInfoForURL = options.getProviderInfoForURL;
+    this._checkURLForSerpMatch = options.checkURLForSerpMatch;
   }
 
   /**
@@ -598,6 +604,8 @@ class ContentHandler {
     Cc["@mozilla.org/network/http-activity-distributor;1"]
       .getService(Ci.nsIHttpActivityDistributor)
       .addObserver(this);
+
+    Services.obs.addObserver(this, "http-on-stop-request");
   }
 
   /**
@@ -607,20 +615,8 @@ class ContentHandler {
     Cc["@mozilla.org/network/http-activity-distributor;1"]
       .getService(Ci.nsIHttpActivityDistributor)
       .removeObserver(this);
-  }
 
-  /**
-   * Receives a message from the SearchTelemetryChild actor.
-   *
-   * @param {object} msg
-   */
-  receiveMessage(msg) {
-    if (msg.name != "SearchTelemetry:PageInfo") {
-      LOG("Received unexpected message: " + msg.name);
-      return;
-    }
-
-    this._reportPageWithAds(msg.data);
+    Services.obs.removeObserver(this, "http-on-stop-request");
   }
 
   /**
@@ -631,6 +627,89 @@ class ContentHandler {
    */
   overrideSearchTelemetryForTests(providerInfo) {
     Services.ppmm.sharedData.set("SearchTelemetry:ProviderInfo", providerInfo);
+  }
+
+  /**
+   * Reports bandwidth used by the given channel if it is used by search requests.
+   *
+   * @param {object} aChannel The channel that generated the activity.
+   */
+  _reportChannelBandwidth(aChannel) {
+    if (!(aChannel instanceof Ci.nsIChannel)) {
+      return;
+    }
+    let wrappedChannel = ChannelWrapper.get(aChannel);
+
+    let getTopURL = channel => {
+      // top-level document
+      if (
+        channel.loadInfo &&
+        channel.loadInfo.externalContentPolicyType ==
+          Ci.nsIContentPolicy.TYPE_DOCUMENT
+      ) {
+        return channel.finalURL;
+      }
+
+      // iframe
+      let frameAncestors;
+      try {
+        frameAncestors = channel.frameAncestors;
+      } catch (e) {
+        frameAncestors = null;
+      }
+      if (frameAncestors) {
+        let ancestor = frameAncestors.find(obj => obj.frameId == 0);
+        if (ancestor) {
+          return ancestor.url;
+        }
+      }
+
+      // top-level resource
+      if (
+        channel.loadInfo &&
+        channel.loadInfo.loadingPrincipal &&
+        channel.loadInfo.loadingPrincipal.URI
+      ) {
+        return channel.loadInfo.loadingPrincipal.URI.spec;
+      }
+
+      return null;
+    };
+
+    let topUrl = getTopURL(wrappedChannel);
+    if (!topUrl) {
+      return;
+    }
+
+    let info = this._checkURLForSerpMatch(topUrl);
+    if (!info) {
+      return;
+    }
+
+    let bytesTransferred =
+      wrappedChannel.requestSize + wrappedChannel.responseSize;
+    let { provider } = info;
+
+    let isPrivate =
+      wrappedChannel.loadInfo &&
+      wrappedChannel.loadInfo.originAttributes.privateBrowsingId > 0;
+    if (isPrivate) {
+      provider += `-${SEARCH_TELEMETRY_PRIVATE_BROWSING_KEY_SUFFIX}`;
+    }
+
+    Services.telemetry.keyedScalarAdd(
+      SEARCH_DATA_TRANSFERRED_SCALAR,
+      provider,
+      bytesTransferred
+    );
+  }
+
+  observe(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "http-on-stop-request":
+        this._reportChannelBandwidth(aSubject);
+        break;
+    }
   }
 
   /**
@@ -707,25 +786,6 @@ class ContentHandler {
   }
 
   /**
-   * Adds a message listener for the window being registered to receive messages
-   * from SearchTelemetryChild.
-   *
-   * @param {object} win The window to register.
-   */
-  registerWindow(win) {
-    win.messageManager.addMessageListener("SearchTelemetry:PageInfo", this);
-  }
-
-  /**
-   * Removes the message listener for the window.
-   *
-   * @param {object} win The window to unregister.
-   */
-  unregisterWindow(win) {
-    win.messageManager.removeMessageListener("SearchTelemetry:PageInfo", this);
-  }
-
-  /**
    * Logs telemetry for a page with adverts, if it is one of the partner search
    * provider pages that we're tracking.
    *
@@ -737,9 +797,7 @@ class ContentHandler {
     let item = this._findBrowserItemForURL(info.url);
     if (!item) {
       LOG(
-        `Expected to report URI for ${
-          info.url
-        } with ads but couldn't find the information`
+        `Expected to report URI for ${info.url} with ads but couldn't find the information`
       );
       return;
     }
@@ -760,7 +818,7 @@ class ContentHandler {
  */
 function LOG(msg) {
   if (loggingEnabled) {
-    dump(`*** SearchTelemetry: ${msg}\n"`);
+    dump(`*** SearchTelemetry: ${msg}\n`);
     Services.console.logStringMessage(msg);
   }
 }

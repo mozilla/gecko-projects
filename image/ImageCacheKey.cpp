@@ -7,7 +7,7 @@
 
 #include <utility>
 
-#include "mozilla/AntiTrackingCommon.h"
+#include "mozilla/ContentBlocking.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/Unused.h"
@@ -44,7 +44,7 @@ ImageCacheKey::ImageCacheKey(nsIURI* aURI, const OriginAttributes& aAttrs,
                              Document* aDocument)
     : mURI(aURI),
       mOriginAttributes(aAttrs),
-      mControlledDocument(GetSpecialCaseDocumentToken(aDocument, aURI)),
+      mControlledDocument(GetSpecialCaseDocumentToken(aDocument)),
       mTopLevelBaseDomain(GetTopLevelBaseDomain(aDocument, aURI)),
       mIsChrome(false) {
   if (mURI->SchemeIs("blob")) {
@@ -144,8 +144,7 @@ void ImageCacheKey::EnsureHash() const {
 }
 
 /* static */
-void* ImageCacheKey::GetSpecialCaseDocumentToken(Document* aDocument,
-                                                 nsIURI* aURI) {
+void* ImageCacheKey::GetSpecialCaseDocumentToken(Document* aDocument) {
   // Cookie-averse documents can never have storage granted to them.  Since they
   // may not have inner windows, they would require special handling below, so
   // just bail out early here.
@@ -172,8 +171,8 @@ nsCString ImageCacheKey::GetTopLevelBaseDomain(Document* aDocument,
 
   // If the window is 3rd party resource, let's see if first-party storage
   // access is granted for this image.
-  if (nsContentUtils::IsThirdPartyTrackingResourceWindow(
-          aDocument->GetInnerWindow())) {
+  if (nsContentUtils::IsThirdPartyWindowOrChannel(aDocument->GetInnerWindow(),
+                                                  nullptr, nullptr)) {
     return StorageDisabledByAntiTracking(aDocument, aURI)
                ? aDocument->GetBaseDomain()
                : EmptyCString();
@@ -185,7 +184,7 @@ nsCString ImageCacheKey::GetTopLevelBaseDomain(Document* aDocument,
   // this point.  The best approach here is to be conservative: if we are sure
   // that the permission is granted, let's return 0. Otherwise, let's make a
   // unique image cache per the top-level document eTLD+1.
-  if (!AntiTrackingCommon::MaybeIsFirstPartyStorageAccessGrantedFor(
+  if (!ContentBlocking::ApproximateAllowAccessForWithoutChannel(
           aDocument->GetInnerWindow(), aURI)) {
     nsPIDOMWindowOuter* top =
         aDocument->GetInnerWindow()->GetInProcessScriptableTop();

@@ -1,11 +1,9 @@
-# Stylesheets
-category agent-style-sheets browser-content-stylesheet chrome://geckoview/skin/content.css
-
 # GeckoViewStartup.js
 component {8e993c34-fdd6-432c-967e-f995d888777f} GeckoViewStartup.js
 contract @mozilla.org/geckoview/startup;1 {8e993c34-fdd6-432c-967e-f995d888777f}
 category app-startup GeckoViewStartup service,@mozilla.org/geckoview/startup;1
 category profile-after-change GeckoViewStartup @mozilla.org/geckoview/startup;1 process=main
+category browser-idle-startup-tasks-finished GeckoViewStartup @mozilla.org/geckoview/startup;1 process=main
 
 # GeckoViewPermission.js
 component {42f3c238-e8e8-4015-9ca2-148723a8afcf} GeckoViewPermission.js
@@ -31,10 +29,6 @@ contract @mozilla.org/sharepicker;1 {1201d357-8417-4926-a694-e6408fbedcf8} proce
 # GeckoViewPrompt.js LoginStorageDelegate
 component {3d765750-1c3d-11ea-aaef-0800200c9a66} GeckoViewPrompt.js process=main
 contract @mozilla.org/login-manager/prompter;1 {3d765750-1c3d-11ea-aaef-0800200c9a66} process=main
-
-# GeckoViewExternalAppService.js
-component {a89eeec6-6608-42ee-a4f8-04d425992f45} GeckoViewExternalAppService.js
-contract @mozilla.org/uriloader/external-helper-app-service;1 {a89eeec6-6608-42ee-a4f8-04d425992f45}
 
 # GeckoViewPush.js
 component {a54d84d7-98a4-4fec-b664-e42e512ae9cc} GeckoViewPush.js

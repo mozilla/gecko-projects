@@ -58,7 +58,7 @@ nsImageControlFrame::nsImageControlFrame(ComputedStyle* aStyle,
                                          nsPresContext* aPresContext)
     : nsImageFrame(aStyle, aPresContext, kClassID) {}
 
-nsImageControlFrame::~nsImageControlFrame() {}
+nsImageControlFrame::~nsImageControlFrame() = default;
 
 void nsImageControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
                                       PostDestroyData& aPostDestroyData) {
@@ -140,7 +140,8 @@ nsresult nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
         mContent->GetProperty(nsGkAtoms::imageClickedPoint));
     if (lastClickPoint) {
       // normally lastClickedPoint is not null, as it's allocated in Init()
-      nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this);
+      nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(
+          aEvent, RelativeTo{this});
       TranslateEventCoords(pt, *lastClickPoint);
     }
   }
@@ -150,7 +151,7 @@ nsresult nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
 void nsImageControlFrame::SetFocus(bool aOn, bool aRepaint) {}
 
 Maybe<nsIFrame::Cursor> nsImageControlFrame::GetCursor(const nsPoint&) {
-  StyleCursorKind kind = StyleUI()->mCursor;
+  StyleCursorKind kind = StyleUI()->mCursor.keyword;
   if (kind == StyleCursorKind::Auto) {
     kind = StyleCursorKind::Pointer;
   }

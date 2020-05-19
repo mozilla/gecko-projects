@@ -5,10 +5,7 @@
 
 "use strict";
 
-let TEST_BASE_URL = "example.com/";
-if (UrlbarPrefs.get("update1.view.stripHttps")) {
-  TEST_BASE_URL = "http://" + TEST_BASE_URL;
-}
+let TEST_BASE_URL = "http://example.com/";
 
 add_task(async function init() {
   await PlacesUtils.history.clear();
@@ -33,6 +30,7 @@ add_task(async function urlToTip() {
           text: "This is a test tip.",
           buttonText: "OK",
           helpUrl: "http://example.com/",
+          type: "test",
         }
       ),
     ],
@@ -134,6 +132,7 @@ add_task(async function tipToURL() {
           text: "This is a test tip.",
           buttonText: "OK",
           helpUrl: "http://example.com/",
+          type: "test",
         }
       ),
     ],

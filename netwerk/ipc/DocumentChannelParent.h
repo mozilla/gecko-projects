@@ -11,6 +11,9 @@
 #include "mozilla/net/DocumentLoadListener.h"
 
 namespace mozilla {
+namespace dom {
+class CanonicalBrowsingContext;
+}
 namespace net {
 
 /**
@@ -23,11 +26,9 @@ class DocumentChannelParent final : public ADocumentChannelBridge,
  public:
   NS_INLINE_DECL_REFCOUNTING(DocumentChannelParent, override);
 
-  explicit DocumentChannelParent(dom::BrowserParent* aBrowser,
-                                 nsILoadContext* aLoadContext,
-                                 PBOverrideStatus aOverrideStatus);
+  explicit DocumentChannelParent();
 
-  bool Init(dom::BrowserParent* aBrowser,
+  bool Init(dom::CanonicalBrowsingContext* aContext,
             const DocumentChannelCreationArgs& aArgs);
 
   // PDocumentChannelParent
@@ -60,22 +61,15 @@ class DocumentChannelParent final : public ADocumentChannelBridge,
     }
   }
 
-  RefPtr<PDocumentChannelParent::ConfirmRedirectPromise> ConfirmRedirect(
-      const LoadInfoArgs& aLoadInfo, nsIURI* aNewURI) override {
-    return SendConfirmRedirect(aLoadInfo, aNewURI);
-  }
-
-  virtual ProcessId OtherPid() const override { return IProtocol::OtherPid(); }
-
-  virtual bool AttachStreamFilter(
-      Endpoint<mozilla::extensions::PStreamFilterParent>&& aEndpoint) override {
-    return SendAttachStreamFilter(std::move(aEndpoint));
-  }
+  ProcessId OtherPid() const override { return IProtocol::OtherPid(); }
 
   RefPtr<PDocumentChannelParent::RedirectToRealChannelPromise>
-  RedirectToRealChannel(uint32_t aRedirectFlags, uint32_t aLoadFlags) override;
+  RedirectToRealChannel(
+      nsTArray<ipc::Endpoint<extensions::PStreamFilterParent>>&&
+          aStreamFilterEndpoints,
+      uint32_t aRedirectFlags, uint32_t aLoadFlags) override;
 
-  ~DocumentChannelParent();
+  virtual ~DocumentChannelParent();
 
   RefPtr<DocumentLoadListener> mParent;
 };

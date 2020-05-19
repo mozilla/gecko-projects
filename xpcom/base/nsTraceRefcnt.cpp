@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsTraceRefcnt.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Path.h"
@@ -12,8 +13,10 @@
 #include "nsXPCOMPrivate.h"
 #include "nscore.h"
 #include "nsClassHashtable.h"
+#include "nsContentUtils.h"
 #include "nsISupports.h"
 #include "nsHashKeys.h"
+#include "nsPrintfCString.h"
 #include "nsTArray.h"
 #include "nsTHashtable.h"
 #include "prenv.h"
@@ -87,6 +90,11 @@ struct MOZ_STACK_CLASS AutoTraceLogLock final {
 
 class BloatEntry;
 struct SerialNumberRecord;
+
+using mozilla::AutoRestore;
+using mozilla::CodeAddressService;
+using mozilla::CycleCollectedJSContext;
+using mozilla::StaticAutoPtr;
 
 using BloatHash = nsClassHashtable<nsDepCharHashKey, BloatEntry>;
 using CharPtrSet = nsTHashtable<nsCharPtrHashKey>;
@@ -163,7 +171,7 @@ struct SerialNumberRecord {
                                              /*showLocals=*/false,
                                              /*showThisProps=*/false);
     size_t len = strlen(chars.get());
-    jsStack = MakeUnique<char[]>(len + 1);
+    jsStack = mozilla::MakeUnique<char[]>(len + 1);
     memcpy(jsStack.get(), chars.get(), len + 1);
   }
 };
@@ -187,10 +195,6 @@ static const char kStaticCtorDtorWarning[] =
     "XPCOM objects created/destroyed from static ctor/dtor";
 
 static void AssertActivityIsLegal() {
-  if (recordreplay::IsRecordingOrReplaying()) {
-    // Avoid recorded events in the TLS accesses below.
-    return;
-  }
   if (gActivityTLS == BAD_TLS_INDEX || PR_GetThreadPrivate(gActivityTLS)) {
     if (PR_GetEnv("MOZ_FATAL_STATIC_XPCOM_CTORS_DTORS")) {
       MOZ_CRASH_UNSAFE(kStaticCtorDtorWarning);
@@ -335,8 +339,7 @@ static void DumpSerialNumbers(const SerialHash::Iterator& aHashEntry, FILE* aFd,
     // This output will be wrong if the nsStringBuffer was used to
     // store a char16_t string.
     auto* buffer = static_cast<const nsStringBuffer*>(aHashEntry.Key());
-    nsDependentCString bufferString(static_cast<char*>(buffer->Data()),
-                                    buffer->StorageSize() - 1);
+    nsDependentCString bufferString(static_cast<char*>(buffer->Data()));
     fprintf(outputFile,
             "Contents of leaked nsStringBuffer with storage size %d as a "
             "char*: %s\n",
@@ -562,12 +565,6 @@ static void DoInitTraceLog(const char* aProcType) {
 #else
 #  define ENVVAR(x) x
 #endif
-
-  // Don't trace refcounts while recording or replaying, these are not
-  // required to match up between the two executions.
-  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-    return;
-  }
 
   bool defined = InitLog(ENVVAR("XPCOM_MEM_BLOAT_LOG"), "bloat/leaks",
                          &gBloatLog, aProcType);

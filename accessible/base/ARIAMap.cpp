@@ -139,6 +139,15 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     eARIACheckableMixed,
     eARIAReadonly
   },
+  { // code
+    nsGkAtoms::code,
+    roles::CODE,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+  },
   { // columnheader
     nsGkAtoms::columnheader,
     roles::COLUMNHEADER,
@@ -163,6 +172,15 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     eARIAAutoComplete,
     eARIAReadonly,
     eARIAOrientation
+  },
+  { // comment
+    nsGkAtoms::comment,
+    roles::COMMENT,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
   },
   { // complementary
     nsGkAtoms::complementary,
@@ -814,6 +832,15 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     eLandmark,
     kNoReqStates
   },
+  { // mark
+    nsGkAtoms::mark,
+    roles::MARK,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+  },
   { // marquee
     nsGkAtoms::marquee,
     roles::ANIMATION,
@@ -1108,6 +1135,15 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     kGenericAccType,
     kNoReqStates
   },
+  { // suggestion
+    nsGkAtoms::suggestion,
+    roles::SUGGESTION,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+  },
   { // switch
     nsGkAtoms::svgSwitch,
     roles::SWITCH,
@@ -1266,8 +1302,8 @@ static const nsRoleMapEntry sLandmarkRoleMap = {
     eNoAction,         eNoLiveAttr,    kGenericAccType, kNoReqStates};
 
 nsRoleMapEntry aria::gEmptyRoleMap = {
-    nsGkAtoms::_empty, roles::NOTHING, kUseMapRole,     eNoValue,
-    eNoAction,         eNoLiveAttr,    kGenericAccType, kNoReqStates};
+    nsGkAtoms::_empty, roles::TEXT_CONTAINER, kUseMapRole,     eNoValue,
+    eNoAction,         eNoLiveAttr,           kGenericAccType, kNoReqStates};
 
 /**
  * Universal (Global) states:

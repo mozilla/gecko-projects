@@ -7,7 +7,7 @@
 const { BrowserToolboxLauncher } = ChromeUtils.import(
   "resource://devtools/client/framework/browser-toolbox/Launcher.jsm"
 );
-const { DevToolsClient } = require("devtools/shared/client/devtools-client");
+const { DevToolsClient } = require("devtools/client/devtools-client");
 
 /**
  * Open up a browser toolbox and return a ToolboxTask object for interacting
@@ -84,7 +84,8 @@ async function initBrowserToolboxTask({
 
   ok(true, "Connected");
 
-  const target = await client.mainRoot.getMainProcess();
+  const descriptorFront = await client.mainRoot.getMainProcess();
+  const target = await descriptorFront.getTarget();
   const consoleFront = await target.getFront("console");
   const preferenceFront = await client.mainRoot.getFront("preference");
 

@@ -13,6 +13,21 @@
 
 namespace mozilla {
 
+#ifdef MOZ_WAYLAND_USE_VAAPI
+class VAAPIFrameHolder {
+ public:
+  VAAPIFrameHolder(FFmpegLibWrapper* aLib, AVBufferRef* aVAAPIDeviceContext,
+                   AVBufferRef* aAVHWFramesContext, AVBufferRef* aHWFrame);
+  ~VAAPIFrameHolder();
+
+ private:
+  FFmpegLibWrapper* mLib;
+  AVBufferRef* mVAAPIDeviceContext;
+  AVBufferRef* mAVHWFramesContext;
+  AVBufferRef* mHWFrame;
+};
+#endif
+
 template <int V>
 class FFmpegVideoDecoder : public FFmpegDataDecoder<V> {};
 
@@ -33,7 +48,8 @@ class FFmpegVideoDecoder<LIBAV_VER>
  public:
   FFmpegVideoDecoder(FFmpegLibWrapper* aLib, TaskQueue* aTaskQueue,
                      const VideoInfo& aConfig, KnowsCompositor* aAllocator,
-                     ImageContainer* aImageContainer, bool aLowLatency);
+                     ImageContainer* aImageContainer, bool aLowLatency,
+                     bool aDisableHardwareDecoding);
 
   RefPtr<InitPromise> Init() override;
   void InitCodecContext() override;
@@ -52,6 +68,7 @@ class FFmpegVideoDecoder<LIBAV_VER>
 
  private:
   RefPtr<FlushPromise> ProcessFlush() override;
+  void ProcessShutdown() override;
   MediaResult DoDecode(MediaRawData* aSample, uint8_t* aData, int aSize,
                        bool* aGotFrame, DecodedData& aResults) override;
   void OutputDelayedFrames();
@@ -66,9 +83,21 @@ class FFmpegVideoDecoder<LIBAV_VER>
         mCodecID == AV_CODEC_ID_VP8;
 #endif
   }
+  gfx::YUVColorSpace GetFrameColorSpace();
 
   MediaResult CreateImage(int64_t aOffset, int64_t aPts, int64_t aDuration,
                           MediaDataDecoder::DecodedData& aResults);
+
+#ifdef MOZ_WAYLAND_USE_VAAPI
+  MediaResult InitVAAPIDecoder();
+  bool CreateVAAPIDeviceContext();
+  void InitVAAPICodecContext();
+  AVCodec* FindVAAPICodec();
+  bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
+
+  MediaResult CreateImageVAAPI(int64_t aOffset, int64_t aPts, int64_t aDuration,
+                               MediaDataDecoder::DecodedData& aResults);
+#endif
 
   /**
    * This method allocates a buffer for FFmpeg's decoder, wrapped in an Image.
@@ -79,6 +108,11 @@ class FFmpegVideoDecoder<LIBAV_VER>
   int AllocateYUV420PVideoBuffer(AVCodecContext* aCodecContext,
                                  AVFrame* aFrame);
 
+#ifdef MOZ_WAYLAND_USE_VAAPI
+  AVBufferRef* mVAAPIDeviceContext;
+  const bool mDisableHardwareDecoding;
+  VADisplay mDisplay;
+#endif
   RefPtr<KnowsCompositor> mImageAllocator;
   RefPtr<ImageContainer> mImageContainer;
   VideoInfo mInfo;

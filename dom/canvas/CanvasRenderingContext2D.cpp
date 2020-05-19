@@ -8,7 +8,6 @@
 #include "mozilla/gfx/Helpers.h"
 #include "nsXULElement.h"
 
-#include "nsAutoPtr.h"
 #include "nsMathUtils.h"
 #include "SVGImageContext.h"
 
@@ -18,6 +17,7 @@
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
+#include "mozilla/dom/GeneratePlaceholderCanvasData.h"
 #include "SVGObserverUtils.h"
 #include "nsPresContext.h"
 
@@ -234,7 +234,7 @@ bool CanvasRenderingContext2D::PatternIsOpaque(
       // TODO: for gradient patterns we could check that all stops are opaque
       // colors.
       // it's a color pattern.
-      opaque = Color::FromABGR(state.colorStyles[aStyle]).a >= 1.0;
+      opaque = sRGBColor::FromABGR(state.colorStyles[aStyle]).a >= 1.0;
       color = true;
     }
   }
@@ -524,7 +524,7 @@ class AdjustedTargetForShadow {
 
     mFinalTarget->DrawSurfaceWithShadow(
         snapshot, mTempRect.TopLeft(),
-        Color::FromABGR(mCtx->CurrentState().shadowColor),
+        ToDeviceColor(mCtx->CurrentState().shadowColor),
         mCtx->CurrentState().shadowOffset, mSigma, mCompositionOp);
   }
 
@@ -730,7 +730,7 @@ void CanvasGradient::AddColorStop(float aOffset, const nsACString& aColorstr,
   GradientStop newStop;
 
   newStop.offset = aOffset;
-  newStop.color = Color::FromABGR(color);
+  newStop.color = ToDeviceColor(color);
 
   mRawStops.AppendElement(newStop);
 }
@@ -926,7 +926,7 @@ CanvasRenderingContext2D::ContextState::ContextState(const ContextState& aOther)
       miterLimit(aOther.miterLimit),
       globalAlpha(aOther.globalAlpha),
       shadowBlur(aOther.shadowBlur),
-      dash(aOther.dash),
+      dash(aOther.dash.Clone()),
       dashOffset(aOther.dashOffset),
       op(aOther.op),
       fillRule(aOther.fillRule),
@@ -936,7 +936,7 @@ CanvasRenderingContext2D::ContextState::ContextState(const ContextState& aOther)
       filterChain(aOther.filterChain),
       autoSVGFiltersObserver(aOther.autoSVGFiltersObserver),
       filter(aOther.filter),
-      filterAdditionalImages(aOther.filterAdditionalImages),
+      filterAdditionalImages(aOther.filterAdditionalImages.Clone()),
       filterSourceGraphicTainted(aOther.filterSourceGraphicTainted),
       imageSmoothingEnabled(aOther.imageSmoothingEnabled),
       fontExplicitLanguage(aOther.fontExplicitLanguage) {}
@@ -1296,7 +1296,7 @@ bool CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
       RestoreClipsAndTransformToTarget();
     }
 
-    if (mTarget) {
+    if (mTarget && mTarget->IsValid()) {
       return true;
     }
   }
@@ -2088,8 +2088,13 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
     element = canvas;
 
     nsIntSize size = canvas->GetSize();
-    if (size.width == 0 || size.height == 0) {
-      aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    if (size.width == 0) {
+      aError.ThrowInvalidStateError("Passed-in canvas has width 0");
+      return nullptr;
+    }
+
+    if (size.height == 0) {
+      aError.ThrowInvalidStateError("Passed-in canvas has height 0");
       return nullptr;
     }
 
@@ -2117,18 +2122,9 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
     }
   } else if (aSource.IsHTMLImageElement()) {
     HTMLImageElement* img = &aSource.GetAsHTMLImageElement();
-    if (img->IntrinsicState().HasState(NS_EVENT_STATE_BROKEN)) {
-      return nullptr;
-    }
-
     element = img;
   } else if (aSource.IsSVGImageElement()) {
     SVGImageElement* img = &aSource.GetAsSVGImageElement();
-    if (img->IntrinsicState().HasState(NS_EVENT_STATE_BROKEN)) {
-      aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-      return nullptr;
-    }
-
     element = img;
   } else if (aSource.IsHTMLVideoElement()) {
     auto& video = aSource.GetAsHTMLVideoElement();
@@ -2145,13 +2141,8 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
     }
     RefPtr<SourceSurface> srcSurf = imgBitmap.PrepareForDrawTarget(mTarget);
     if (!srcSurf) {
-      JSContext* context = nsContentUtils::GetCurrentJSContext();
-      if (context) {
-        JS::WarnASCII(context,
-                      "CanvasRenderingContext2D.createPattern() failed to "
-                      "prepare source ImageBitmap.");
-      }
-      aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      aError.ThrowInvalidStateError(
+          "Passed-in ImageBitmap has been transferred");
       return nullptr;
     }
 
@@ -2175,6 +2166,25 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
   nsLayoutUtils::SurfaceFromElementResult res =
       nsLayoutUtils::SurfaceFromElement(
           element, nsLayoutUtils::SFE_WANT_FIRST_FRAME_IF_IMAGE, mTarget);
+
+  // Per spec, we should throw here for the HTMLImageElement and SVGImageElement
+  // cases if the image request state is "broken".  In terms of the infromation
+  // in "res", the "broken" state corresponds to not having a size and not being
+  // still-loading (so there is no size forthcoming).
+  if (aSource.IsHTMLImageElement() || aSource.IsSVGImageElement()) {
+    if (!res.mIsStillLoading && !res.mHasSize) {
+      aError.ThrowInvalidStateError(
+          "Passed-in image's current request's state is \"broken\"");
+      return nullptr;
+    }
+
+    if (res.mSize.width == 0 || res.mSize.height == 0) {
+      return nullptr;
+    }
+
+    // Is the "fully decodable" check already done in SurfaceFromElement?  It's
+    // not clear how to do it from here, exactly.
+  }
 
   RefPtr<SourceSurface> surface = res.GetSourceSurface();
   if (!surface) {
@@ -2397,6 +2407,7 @@ class CanvasUserSpaceMetrics : public UserSpaceMetricsWithSize {
     params.language = mFontLanguage;
     params.explicitLanguage = mExplicitLanguage;
     params.textPerf = mPresContext->GetTextPerfMetrics();
+    params.fontStats = mPresContext->GetFontMatchingStats();
     params.featureValueLookup = mPresContext->GetFontFeatureValuesLookup();
     RefPtr<nsFontMetrics> fontMetrics = dc->GetMetricsFor(mFont, params);
     return NSAppUnitsToFloatPixels(fontMetrics->XHeight(),
@@ -2413,6 +2424,18 @@ class CanvasUserSpaceMetrics : public UserSpaceMetricsWithSize {
   nsPresContext* mPresContext;
 };
 
+// The filter might reference an SVG filter that is declared inside this
+// document. Flush frames so that we'll have an nsSVGFilterFrame to work
+// with.
+static bool FiltersNeedFrameFlush(Span<const StyleFilter> aFilters) {
+  for (const auto& filter : aFilters) {
+    if (filter.IsUrl()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void CanvasRenderingContext2D::UpdateFilter() {
   RefPtr<PresShell> presShell = GetPresShell();
   if (!presShell || presShell->IsDestroying()) {
@@ -2420,21 +2443,21 @@ void CanvasRenderingContext2D::UpdateFilter() {
     // reflect the current "taint" status of the canvas
     CurrentState().filter = FilterDescription();
     CurrentState().filterSourceGraphicTainted =
-        (mCanvasElement && mCanvasElement->IsWriteOnly());
+        mCanvasElement && mCanvasElement->IsWriteOnly();
     return;
   }
 
-  // The filter might reference an SVG filter that is declared inside this
-  // document. Flush frames so that we'll have an nsSVGFilterFrame to work
-  // with.
-  presShell->FlushPendingNotifications(FlushType::Frames);
+  if (FiltersNeedFrameFlush(CurrentState().filterChain.AsSpan())) {
+    presShell->FlushPendingNotifications(FlushType::Frames);
+  }
+
   MOZ_RELEASE_ASSERT(!mStyleStack.IsEmpty());
   if (MOZ_UNLIKELY(presShell->IsDestroying())) {
     return;
   }
 
-  bool sourceGraphicIsTainted =
-      (mCanvasElement && mCanvasElement->IsWriteOnly());
+  const bool sourceGraphicIsTainted =
+      mCanvasElement && mCanvasElement->IsWriteOnly();
 
   CurrentState().filter = nsFilterInstance::GetFilterDescription(
       mCanvasElement, CurrentState().filterChain.AsSpan(),
@@ -2894,27 +2917,18 @@ void CanvasRenderingContext2D::DrawFocusIfNeeded(
   }
 }
 
-bool CanvasRenderingContext2D::DrawCustomFocusRing(
-    mozilla::dom::Element& aElement) {
-  EnsureUserSpacePath();
+bool CanvasRenderingContext2D::DrawCustomFocusRing(Element& aElement) {
+  if (!aElement.State().HasState(NS_EVENT_STATE_FOCUSRING)) {
+    return false;
+  }
 
   HTMLCanvasElement* canvas = GetCanvas();
-
   if (!canvas || !aElement.IsInclusiveDescendantOf(canvas)) {
     return false;
   }
 
-  nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (fm) {
-    // check that the element is focused
-    if (&aElement == fm->GetFocusedElement()) {
-      if (nsPIDOMWindowOuter* window = aElement.OwnerDoc()->GetWindow()) {
-        return window->ShouldShowFocusRing();
-      }
-    }
-  }
-
-  return false;
+  EnsureUserSpacePath();
+  return true;
 }
 
 void CanvasRenderingContext2D::Clip(const CanvasWindingRule& aWinding) {
@@ -3245,6 +3259,7 @@ bool CanvasRenderingContext2D::SetFontInternal(const nsAString& aFont,
   params.explicitLanguage = fontStyle->mExplicitLanguage;
   params.userFontSet = c->GetUserFontSet();
   params.textPerf = c->GetTextPerfMetrics();
+  params.fontStats = c->GetFontMatchingStats();
   RefPtr<nsFontMetrics> metrics =
       c->DeviceContext()->GetMetricsFor(resizedFont, params);
 
@@ -3475,7 +3490,7 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
         mTextRunFlags(),
         mDoMeasureBoundingBox(false) {
     if (Preferences::GetBool(GFX_MISSING_FONTS_NOTIFY_PREF)) {
-      mMissingFonts = new gfxMissingFontRecorder();
+      mMissingFonts = MakeUnique<gfxMissingFontRecorder>();
     }
   }
 
@@ -3501,7 +3516,7 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
     mTextRun = mFontgrp->MakeTextRun(
         aText, aLength, mDrawTarget, mAppUnitsPerDevPixel, flags,
         nsTextFrameUtils::Flags::DontSkipDrawingForPendingUserFonts,
-        mMissingFonts);
+        mMissingFonts.get());
   }
 
   virtual nscoord GetWidth() override {
@@ -3632,7 +3647,7 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
     if (state->StyleIsColor(style)) {  // Color
       nscolor fontColor = state->colorStyles[style];
       if (style == Style::FILL) {
-        params.context->SetColor(Color::FromABGR(fontColor));
+        params.context->SetColor(sRGBColor::FromABGR(fontColor));
       } else {
         params.textStrokeColor = fontColor;
       }
@@ -3696,7 +3711,7 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
 
   // to record any unsupported characters found in the text,
   // and notify front-end if it is interested
-  nsAutoPtr<gfxMissingFontRecorder> mMissingFonts;
+  UniquePtr<gfxMissingFontRecorder> mMissingFonts;
 
   // dev pixel conversion factor
   int32_t mAppUnitsPerDevPixel;
@@ -4020,15 +4035,17 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
       gfxFontStyle style;
       style.size = kDefaultFontSize;
       gfxTextPerfMetrics* tp = nullptr;
+      FontMatchingStats* fontStats = nullptr;
       if (presShell && !presShell->IsDestroying()) {
         tp = presShell->GetPresContext()->GetTextPerfMetrics();
+        fontStats = presShell->GetPresContext()->GetFontMatchingStats();
       }
       int32_t perDevPixel, perCSSPixel;
       GetAppUnitsValues(&perDevPixel, &perCSSPixel);
       gfxFloat devToCssSize = gfxFloat(perDevPixel) / gfxFloat(perCSSPixel);
       CurrentState().fontGroup = gfxPlatform::GetPlatform()->CreateFontGroup(
           FontFamilyList(StyleGenericFontFamily::SansSerif), &style, tp,
-          nullptr, devToCssSize);
+          fontStats, nullptr, devToCssSize);
       if (CurrentState().fontGroup) {
         CurrentState().font = kDefaultFontStyle;
       } else {
@@ -4643,6 +4660,8 @@ void CanvasRenderingContext2D::DrawDirectlyToCanvas(
           .PreScale(1.0 / contextScale.width, 1.0 / contextScale.height)
           .PreTranslate(aDest.x - aSrc.x, aDest.y - aSrc.y));
 
+  context->SetOp(UsedOperation());
+
   // FLAG_CLAMP is added for increased performance, since we never tile here.
   uint32_t modifiedFlags = aImage.mDrawingFlags | imgIContainer::FLAG_CLAMP;
 
@@ -5069,20 +5088,27 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
   }
 
   do {
+    uint8_t* randomData;
+    if (usePlaceholder) {
+      // Since we cannot call any GC-able functions (like requesting the RNG
+      // service) after we call JS_GetUint8ClampedArrayData, we will
+      // pre-generate the randomness required for GeneratePlaceholderCanvasData.
+      randomData = TryToGenerateRandomDataForPlaceholderCanvasData();
+    }
+
     JS::AutoCheckCannotGC nogc;
     bool isShared;
     uint8_t* data = JS_GetUint8ClampedArrayData(darray, &isShared, nogc);
     MOZ_ASSERT(!isShared);  // Should not happen, data was created above
 
+    if (usePlaceholder) {
+      FillPlaceholderCanvas(randomData, len.value(), data);
+      break;
+    }
+
     uint32_t srcStride = rawData.mStride;
     uint8_t* src =
         rawData.mData + srcReadRect.y * srcStride + srcReadRect.x * 4;
-
-    // Return all-white, opaque pixel data if no permission.
-    if (usePlaceholder) {
-      memset(data, 0xFF, len.value());
-      break;
-    }
 
     uint8_t* dst = data + dstWriteRect.y * (aWidth * 4) + dstWriteRect.x * 4;
 

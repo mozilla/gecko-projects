@@ -55,6 +55,26 @@ graph_config_schema = Schema({
             Optional('partial-updates'): bool,
         }},
     },
+    Required('merge-automation'): {
+        Required('behaviors'): {text_type: {
+            Optional('from-branch'): text_type,
+            Required('to-branch'): text_type,
+            Optional('from-repo'): text_type,
+            Required('to-repo'): text_type,
+            Required('version-files'): [
+                {
+                    Required('filename'): text_type,
+                    Optional('new-suffix'): text_type,
+                    Optional('version-bump'): Any('major', 'minor'),
+                }
+            ],
+            Required('replacements'): [[text_type]],
+            Required('merge-old-head'): bool,
+            Optional('base-tag'): text_type,
+            Optional('end-tag'): text_type,
+            Optional('fetch-version-from'): text_type,
+        }},
+    },
     Required('scriptworker'): {
         # Prefix to add to scopes controlling scriptworkers
         Required('scope-prefix'): text_type,
@@ -88,7 +108,7 @@ graph_config_schema = Schema({
     },
     Required('mac-notarization'): {
         Required('mac-behavior'):
-            optionally_keyed_by('project',
+            optionally_keyed_by('project', 'shippable',
                                 Any('mac_notarize', 'mac_geckodriver', 'mac_sign',
                                     'mac_sign_and_pkg')),
         Required('mac-entitlements'):
@@ -119,10 +139,16 @@ class GraphConfig(object):
         Add the project's taskgraph directory to the python path, and register
         any extensions present.
         """
+        modify_path = os.path.dirname(self.root_dir)
         if GraphConfig._PATH_MODIFIED:
+            if GraphConfig._PATH_MODIFIED == modify_path:
+                # Already modified path with the same root_dir.
+                # We currently need to do this to enable actions to call
+                # taskgraph_decision, e.g. relpro.
+                return
             raise Exception("Can't register multiple directories on python path.")
-        GraphConfig._PATH_MODIFIED = True
-        sys.path.insert(0, os.path.dirname(self.root_dir))
+        GraphConfig._PATH_MODIFIED = modify_path
+        sys.path.insert(0, modify_path)
         register_path = self['taskgraph'].get('register')
         if register_path:
             find_object(register_path)(self)

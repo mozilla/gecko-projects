@@ -21,16 +21,15 @@ use crate::media_queries::Device;
 use crate::properties;
 use crate::properties::{ComputedValues, LonghandId, StyleBuilder};
 use crate::rule_cache::RuleCacheConditions;
-use crate::Atom;
-#[cfg(feature = "servo")]
-use crate::Prefix;
+use crate::{ArcSlice, Atom};
 use euclid::default::Size2D;
+use servo_arc::Arc;
 use std::cell::RefCell;
 use std::cmp;
 use std::f32;
 
 #[cfg(feature = "gecko")]
-pub use self::align::{AlignContent, AlignItems, JustifyContent, JustifyItems, SelfAlignment};
+pub use self::align::{AlignContent, AlignItems, AlignTracks, JustifyContent, JustifyItems, JustifyTracks, SelfAlignment};
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignSelf, JustifySelf};
 pub use self::angle::Angle;
@@ -69,7 +68,7 @@ pub use self::list::Quotes;
 pub use self::motion::{OffsetPath, OffsetRotate};
 pub use self::outline::OutlineStyle;
 pub use self::percentage::{NonNegativePercentage, Percentage};
-pub use self::position::{GridAutoFlow, GridTemplateAreas, Position, PositionOrAuto, ZIndex};
+pub use self::position::{GridAutoFlow, GridTemplateAreas, MasonryAutoFlow, Position, PositionOrAuto, ZIndex};
 pub use self::rect::NonNegativeLengthOrNumberRect;
 pub use self::resolution::Resolution;
 pub use self::svg::MozContextProperties;
@@ -78,7 +77,7 @@ pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
 pub use self::text::TextUnderlinePosition;
 pub use self::text::{InitialLetter, LetterSpacing, LineBreak, LineHeight};
 pub use self::text::{OverflowWrap, TextOverflow, WordBreak, WordSpacing};
-pub use self::text::{TextAlign, TextEmphasisPosition, TextEmphasisStyle};
+pub use self::text::{TextAlign, TextAlignLast, TextEmphasisPosition, TextEmphasisStyle};
 pub use self::text::{TextDecorationLength, TextDecorationSkipInk};
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, Transform, TransformOperation};
@@ -224,8 +223,8 @@ impl<'a> Context<'a> {
     pub fn maybe_zoom_text(&self, size: CSSPixelLength) -> CSSPixelLength {
         // We disable zoom for <svg:text> by unsetting the
         // -x-text-zoom property, which leads to a false value
-        // in mAllowZoom
-        if self.style().get_font().gecko.mAllowZoom {
+        // in mAllowZoomAndMinSize
+        if self.style().get_font().gecko.mAllowZoomAndMinSize {
             self.device().zoom_text(Au::from(size)).into()
         } else {
             size
@@ -450,6 +449,46 @@ where
     }
 }
 
+// NOTE(emilio): This is implementable more generically, but it's unlikely
+// what you want there, as it forces you to have an extra allocation.
+//
+// We could do that if needed, ideally with specialization for the case where
+// ComputedValue = T. But we don't need it for now.
+impl<T> ToComputedValue for Arc<T>
+where
+    T: ToComputedValue<ComputedValue = T>,
+{
+    type ComputedValue = Self;
+
+    #[inline]
+    fn to_computed_value(&self, _: &Context) -> Self {
+        self.clone()
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Self) -> Self {
+        computed.clone()
+    }
+}
+
+// Same caveat as above applies.
+impl<T> ToComputedValue for ArcSlice<T>
+where
+    T: ToComputedValue<ComputedValue = T>,
+{
+    type ComputedValue = Self;
+
+    #[inline]
+    fn to_computed_value(&self, _: &Context) -> Self {
+        self.clone()
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Self) -> Self {
+        computed.clone()
+    }
+}
+
 trivial_to_computed_value!(());
 trivial_to_computed_value!(bool);
 trivial_to_computed_value!(f32);
@@ -460,10 +499,13 @@ trivial_to_computed_value!(u32);
 trivial_to_computed_value!(usize);
 trivial_to_computed_value!(Atom);
 #[cfg(feature = "servo")]
-trivial_to_computed_value!(Prefix);
+trivial_to_computed_value!(html5ever::Namespace);
+#[cfg(feature = "servo")]
+trivial_to_computed_value!(html5ever::Prefix);
 trivial_to_computed_value!(String);
 trivial_to_computed_value!(Box<str>);
 trivial_to_computed_value!(crate::OwnedStr);
+trivial_to_computed_value!(style_traits::values::specified::AllowedNumericType);
 
 #[allow(missing_docs)]
 #[derive(

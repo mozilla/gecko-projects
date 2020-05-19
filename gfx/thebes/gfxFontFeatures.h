@@ -37,7 +37,7 @@ class gfxFontFeatureValueSet final {
 
   struct ValueList {
     ValueList(const nsAString& aName, const nsTArray<uint32_t>& aSelectors)
-        : name(aName), featureSelectors(aSelectors) {}
+        : name(aName), featureSelectors(aSelectors.Clone()) {}
     nsString name;
     nsTArray<uint32_t> featureSelectors;
   };
@@ -59,7 +59,7 @@ class gfxFontFeatureValueSet final {
 
  private:
   // Private destructor, to discourage deletion outside of Release():
-  ~gfxFontFeatureValueSet() {}
+  ~gfxFontFeatureValueSet() = default;
 
   struct FeatureValueHashKey {
     nsCString mFamily;
@@ -70,8 +70,7 @@ class gfxFontFeatureValueSet final {
     FeatureValueHashKey(const nsACString& aFamily, uint32_t aPropVal,
                         nsAtom* aName)
         : mFamily(aFamily), mPropVal(aPropVal), mName(aName) {}
-    FeatureValueHashKey(const FeatureValueHashKey& aKey)
-        : mFamily(aKey.mFamily), mPropVal(aKey.mPropVal), mName(aKey.mName) {}
+    FeatureValueHashKey(const FeatureValueHashKey& aKey) = default;
   };
 
   class FeatureValueHashEntry : public PLDHashEntryHdr {
@@ -86,7 +85,7 @@ class gfxFontFeatureValueSet final {
           mValues(std::move(other.mValues)) {
       NS_ERROR("Should not be called");
     }
-    ~FeatureValueHashEntry() {}
+    ~FeatureValueHashEntry() = default;
 
     bool KeyEquals(const KeyTypePointer aKey) const;
     static KeyTypePointer KeyToPointer(KeyType aKey) { return &aKey; }

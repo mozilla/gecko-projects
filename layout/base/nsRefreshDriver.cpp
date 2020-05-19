@@ -178,7 +178,7 @@ namespace mozilla {
  */
 class RefreshDriverTimer {
  public:
-  RefreshDriverTimer() {}
+  RefreshDriverTimer() = default;
 
   NS_INLINE_DECL_REFCOUNTING(RefreshDriverTimer)
 
@@ -341,8 +341,7 @@ class RefreshDriverTimer {
       return;
     }
 
-    nsTArray<RefPtr<nsRefreshDriver>> drivers(aDrivers);
-    for (nsRefreshDriver* driver : drivers) {
+    for (nsRefreshDriver* driver : aDrivers.Clone()) {
       // don't poke this driver if it's in test mode
       if (driver->IsTestControllingRefreshesEnabled()) {
         continue;
@@ -467,6 +466,9 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
     mVsyncRate = mVsyncChild->GetVsyncRate();
   }
 
+  // Constructor for when we have a local vsync source. As it is local, we do
+  // not have to worry about it being re-inited by gfxPlatform on frame rate
+  // change on the global source.
   explicit VsyncRefreshDriverTimer(const RefPtr<gfx::VsyncSource>& aVsyncSource)
       : mVsyncChild(nullptr) {
     MOZ_ASSERT(XRE_IsParentProcess());
@@ -545,7 +547,7 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
       }
 
      private:
-      ~ParentProcessVsyncNotifier() {}
+      ~ParentProcessVsyncNotifier() = default;
       RefPtr<RefreshDriverVsyncObserver> mObserver;
       static mozilla::Atomic<bool> sHighPriorityEnabled;
     };
@@ -580,8 +582,7 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
           }
           mPendingParentProcessVsync = true;
         }
-        nsCOMPtr<nsIRunnable> vsyncEvent =
-            new ParentProcessVsyncNotifier(this);
+        nsCOMPtr<nsIRunnable> vsyncEvent = new ParentProcessVsyncNotifier(this);
         NS_DispatchToMainThread(vsyncEvent);
       } else {
         mRecentVsync = aVsync.mTime;
@@ -651,13 +652,10 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
       mVsyncRefreshDriverTimer = nullptr;
     }
 
-    void OnTimerStart() {
-      mLastTick = TimeStamp::Now();
-    }
+    void OnTimerStart() { mLastTick = TimeStamp::Now(); }
 
     void NormalPriorityNotify() {
-      if (mLastProcessedTick.IsNull() ||
-          mRecentVsync > mLastProcessedTick) {
+      if (mLastProcessedTick.IsNull() || mRecentVsync > mLastProcessedTick) {
         // mBlockUntil is for high priority vsync notifications only.
         mBlockUntil = TimeStamp();
         TickRefreshDriver(mRecentVsyncId, mRecentVsync);
@@ -681,8 +679,7 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
             Telemetry::FX_REFRESH_DRIVER_SYNC_SCROLL_FRAME_DELAY_MS, sample);
         RecordJank(sample);
       } else if (mVsyncRate != TimeDuration::Forever()) {
-        TimeDuration contentDelay =
-            (TimeStamp::Now() - mLastTick) - mVsyncRate;
+        TimeDuration contentDelay = (TimeStamp::Now() - mLastTick) - mVsyncRate;
         if (contentDelay.ToMilliseconds() < 0) {
           // Vsyncs are noisy and some can come at a rate quicker than
           // the reported hardware rate. In those cases, consider that we have 0
@@ -743,7 +740,7 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
       // before use.
       if (mVsyncRefreshDriverTimer) {
         timeForOutsideTick = TimeDuration::FromMilliseconds(
-            mVsyncRefreshDriverTimer->GetTimerRate().ToMilliseconds() / 10.0f);
+            mVsyncRefreshDriverTimer->GetTimerRate().ToMilliseconds() / 100.0f);
         RefPtr<VsyncRefreshDriverTimer> timer = mVsyncRefreshDriverTimer;
         timer->RunRefreshDrivers(aId, aVsyncTimestamp);
         // Note: mVsyncRefreshDriverTimer might be null now.
@@ -830,8 +827,10 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
     Tick(aId, aTimeStamp);
   }
 
-  // Used to hold external vsync sources alive. Must be destroyed *after*
-  // mVsyncDispatcher.
+  // When using local vsync source, we keep a strong ref to it here to ensure
+  // that the weak ref in the vsync dispatcher does not end up dangling.
+  // As this is a local vsync source, it is not affected by gfxPlatform vsync
+  // source reinit.
   RefPtr<gfx::VsyncSource> mVsyncSource;
   RefPtr<RefreshDriverVsyncObserver> mVsyncObserver;
   // Used for parent process.
@@ -979,7 +978,7 @@ class InactiveRefreshDriverTimer final
 
     mLastFireTime = now;
 
-    nsTArray<RefPtr<nsRefreshDriver>> drivers(mContentRefreshDrivers);
+    nsTArray<RefPtr<nsRefreshDriver>> drivers(mContentRefreshDrivers.Clone());
     drivers.AppendElements(mRootRefreshDrivers);
     size_t index = mNextDriverIndex;
 
@@ -1040,7 +1039,13 @@ void nsRefreshDriver::CreateVsyncRefreshTimer() {
   }
 
   // If available, we fetch the widget-specific vsync source.
-  nsIWidget* widget = GetPresContext()->GetRootWidget();
+  //
+  // NOTE(heycam): If we are initializing an nsRefreshDriver under
+  // nsPresContext::Init, then this GetRootWidget() call will fail, as the
+  // pres context does not yet have a pres shell. For now, null check the
+  // pres shell to avoid a console warning.
+  nsPresContext* pc = GetPresContext();
+  nsIWidget* widget = pc->GetPresShell() ? pc->GetRootWidget() : nullptr;
   if (widget) {
     RefPtr<gfx::VsyncSource> localVsyncSource = widget->GetVsyncSource();
     if (localVsyncSource) {
@@ -1597,29 +1602,27 @@ static void GetProfileTimelineSubDocShells(nsDocShell* aRootDocShell,
     return;
   }
 
-  nsTArray<RefPtr<nsIDocShell>> docShells;
-  nsresult rv = aRootDocShell->GetAllDocShellsInSubtree(
-      nsIDocShellTreeItem::typeAll, nsIDocShell::ENUMERATE_BACKWARDS,
-      docShells);
-
-  if (NS_FAILED(rv)) {
+  RefPtr<BrowsingContext> bc = aRootDocShell->GetBrowsingContext();
+  if (!bc) {
     return;
   }
 
-  for (const auto& curItem : docShells) {
-    if (!curItem->GetRecordProfileTimelineMarkers()) {
-      continue;
+  bc->PostOrderWalk([&](BrowsingContext* aContext) {
+    nsDocShell* shell = nsDocShell::Cast(aContext->GetDocShell());
+    if (!shell || !shell->GetRecordProfileTimelineMarkers()) {
+      // This process isn't painting OOP iframes so we ignore
+      // docshells that are OOP.
+      return;
     }
 
-    nsDocShell* shell = static_cast<nsDocShell*>(curItem.get());
     bool isVisible = false;
     shell->GetVisibility(&isVisible);
     if (!isVisible) {
-      continue;
+      return;
     }
 
     aShells.AppendElement(shell);
-  }
+  });
 }
 
 static void TakeFrameRequestCallbacksFrom(
@@ -1755,8 +1758,8 @@ void nsRefreshDriver::RunFrameRequestCallbacks(TimeStamp aNowTime) {
           // it's currently only clamping for RFP mode. RFP mode gives a much
           // lower time precision, so we accept the security leak here for now
           if (!perf->IsSystemPrincipal()) {
-            timeStamp = nsRFPService::ReduceTimePrecisionAsMSecs(
-                timeStamp, 0, TimerPrecisionType::RFPOnly);
+            timeStamp =
+                nsRFPService::ReduceTimePrecisionAsMSecsRFPOnly(timeStamp, 0);
           }
         }
         // else window is partially torn down already
@@ -1822,12 +1825,13 @@ void nsRefreshDriver::CancelIdleRunnable(nsIRunnable* aRunnable) {
   }
 }
 
-static CallState ReduceAnimations(Document& aDocument, void* aData) {
-  if (aDocument.GetPresContext() &&
-      aDocument.GetPresContext()->EffectCompositor()->NeedsReducing()) {
-    aDocument.GetPresContext()->EffectCompositor()->ReduceAnimations();
+static CallState ReduceAnimations(Document& aDocument) {
+  if (nsPresContext* pc = aDocument.GetPresContext()) {
+    if (pc->EffectCompositor()->NeedsReducing()) {
+      pc->EffectCompositor()->ReduceAnimations();
+    }
   }
-  aDocument.EnumerateSubDocuments(ReduceAnimations, nullptr);
+  aDocument.EnumerateSubDocuments(ReduceAnimations);
   return CallState::Continue;
 }
 
@@ -1961,7 +1965,13 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
     if (!mResizeEventFlushObservers.RemoveElement(presShell)) {
       continue;
     }
-    presShell->FireResizeEvent();
+    // MOZ_KnownLive because 'observers' is guaranteed to
+    // keep it alive.
+    //
+    // Fixing https://bugzilla.mozilla.org/show_bug.cgi?id=1620312 on its own
+    // won't help here, because 'observers' is non-const and we have the
+    // Reversed() going on too...
+    MOZ_KnownLive(presShell)->FireResizeEvent();
   }
   DispatchVisualViewportResizeEvents();
 
@@ -2001,7 +2011,7 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
     // https://drafts.csswg.org/web-animations-1/#update-animations-and-send-events
     if (i == 1) {
       nsAutoMicroTask mt;
-      ReduceAnimations(*mPresContext->Document(), nullptr);
+      ReduceAnimations(*mPresContext->Document());
     }
 
     // Check if running the microtask checkpoint caused the pres context to

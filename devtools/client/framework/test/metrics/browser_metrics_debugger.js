@@ -13,6 +13,9 @@ const TEST_URL =
   "data:text/html;charset=UTF-8,<div>Debugger modules load test</div>";
 
 add_task(async function() {
+  // Disable randomly spawning processes during tests
+  await pushPref("dom.ipc.processPrelaunch.enabled", false);
+
   const toolbox = await openNewTabAndToolbox(TEST_URL, "jsdebugger");
   const toolboxBrowserLoader = toolbox.win.getBrowserLoaderForWindow();
 
@@ -40,6 +43,9 @@ add_task(async function() {
     "resource://devtools/client/shared/vendor/redux.js",
     "resource://devtools/client/debugger/src/workers/parser/index.js",
     "resource://devtools/client/shared/source-map/index.js",
+    "resource://devtools/client/shared/components/menu/MenuButton.js",
+    "resource://devtools/client/shared/components/menu/MenuItem.js",
+    "resource://devtools/client/shared/components/menu/MenuList.js",
   ];
   runDuplicatedModulesTest(loaders, whitelist);
 

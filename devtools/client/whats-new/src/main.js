@@ -25,43 +25,43 @@ const aside = {
   header: "Instantly Send Tabs to Mobile",
   content: `Test your site on mobile and other devices without having to copy, paste, or leave the browser.`,
   cta: "Learn More About Send Tabs",
-  href: `https://support.mozilla.org/kb/send-tab-firefox-other-devices?${utmParams}`,
+  href: `https://play.google.com/store/apps/details?id=org.mozilla.fennec_aurora&referrer=utm_source%3Dmozilla%26utm_medium%3DReferral%26utm_campaign%3Dmozilla-org${utmParams}`,
 };
 
 const release = {
-  title: "What’s New in DevTools (Firefox 72 & 71)",
+  title: "What’s New in DevTools (Firefox 76)",
   linkText: "Read more",
-  linkUrl: `https://developer.mozilla.org/docs/Mozilla/Firefox/Releases/72?${utmParams}`,
+  linkUrl: `https://developer.mozilla.org/docs/Mozilla/Firefox/Releases/76?${utmParams}`,
   features: [
     {
-      header: `Debug Variables with Watchpoints`,
-      description: `Debugger’s new Watchpoint feature lets you pause when properties get read or write. Right-click object properties in the Scopes pane when paused to use the new “Break on…” menu.`,
-      href: `https://wiki.developer.mozilla.org/docs/Tools/Debugger/How_to/Set_a_watchpoint_on_a_property?${utmParams}`,
+      header: `Ignore entire folders in Debugger`,
+      description: `Filter out the noise of extraneous groups of sources with a new “Blackbox” context menu in Debugger’s sources list. Ignoring can be limited to files inside or outside of the selected folder. Combine with “Set directory root” for a laser-focused debugging experience.`,
+      href: `https://wiki.developer.mozilla.org/en-US/docs/Tools/Debugger/UI_Tour?${utmParams}#Source_list_pane`,
     },
     {
-      header: `Improvements to VS Code’s Debugger for Firefox`,
-      description: `A new source map integration makes debugging faster and also integrates with VSCode’s new column breakpoints UI for fine-grained control. The new Watchpoints can be used via VSCode’s Data Points.`,
-      href: `https://marketplace.visualstudio.com/items?itemName=firefox-devtools.vscode-firefox-debug`,
+      header: `Console collapses multi-line code snippets`,
+      description: `Console’s multi-line editor mode just got better to iterate on long snippets with less clutter. Multiple lines are neatly collapsed and can be expanded on demand.`,
+      href: `https://developer.mozilla.org/en-US/docs/Tools/Web_Console/The_command_line_interpreter?${utmParams}#Multi-line_mode`,
     },
     {
-      header: `Async Stacks for Console traces`,
-      description: `Stack Traces in the Console include the full chain of asynchronous promises and callbacks over time, including timeouts and events.`,
-      href: `https://developer.mozilla.org/en-US/docs/Tools/Web_Console/Console_messages?${utmParams}`,
+      header: `Formatted Action Cable WebSocket messages`,
+      description: `The JSON embedded in Action Cable messages are now broken out to be more readable, adding to a growing set of supported WebSocket protocol formats.`,
+      href: `https://developer.mozilla.org/en-US/docs/Tools/Network_Monitor/Inspecting_web_sockets?${utmParams}`,
     },
     {
-      header: `New in 71: New WebSocket Messages Inspector`,
-      description: `The Network panel has a new Messages tab for inspecting WebSocket frames sent and received through the selected connection.`,
-      href: `https://hacks.mozilla.org/2019/10/firefoxs-new-websocket-inspector/?${utmParams}`,
+      header: `Cleaner WebSocket output`,
+      description: `WebSocket control frames are now hidden by default to let you focus on the content actual send and received messages.`,
+      href: `https://developer.mozilla.org/en-US/docs/Tools/Network_Monitor/Inspecting_web_sockets?${utmParams}`,
     },
     {
-      header: `New in 71: Block URLs in the Network panel`,
-      description: `Test how a page loads without specific files, like CSS or JavaScript. Right-click network requests and select “Block URL” or use the new Request Blocking pane.`,
-      href: `https://developer.mozilla.org/docs/Tools/Network_Monitor/request_list?${utmParams}#Block_a_specific_URL`,
+      header: `Resize Network table columns to fit to content`,
+      description: `Expanding longer content in the Network panel no longer requires countless dragging and resizing. Like modern data tables, just double-tap the table’s resize handles to fit the column size to its content.`,
+      href: `https://developer.mozilla.org/en-US/docs/Tools/Network_Monitor/request_list?${utmParams}`,
     },
     {
-      header: `New in 71: Log on Events`,
-      description: `Enabling logging for Event Listener Breakpoints in the Debugger lets you observe which event handlers are being executed without the overhead of pausing.`,
-      href: `https://developer.mozilla.org/docs/Tools/Debugger/Set_event_listener_breakpoints?${utmParams}`,
+      header: `Improve Network response details`,
+      description: `Response data is now much easier to navigate and copy out of the Network details. More work is coming in this area to make various kinds of Network analysis easier.`,
+      href: `https://developer.mozilla.org/en-US/docs/Tools/Network_Monitor/request_details?${utmParams}`,
     },
   ],
 };
@@ -72,19 +72,9 @@ const dev = {
   linkText: "Get DevEdition",
   features: [
     {
-      header: `Asynchronous Stacks in Debugger`,
-      description: `Asynchronous call stacks in the Debugger let you examine the event-driven function calls at previous points in time.`,
+      header: `Full Asynchronous Stacks in Debugger`,
+      description: `Step through event, timeout and promise-based function calls over time with the full-featured async stacks in Debugger.`,
       href: `https://developer.mozilla.org/en-US/docs/Tools/Debugger/UI_Tour?${utmParams}`,
-    },
-    {
-      header: `Correct Meta Viewport in Responsive Design Mode`,
-      description: `RDM with touch simulation enabled will now correctly simulate the meta viewport rendering of a mobile device.`,
-      href: `https://developer.mozilla.org/docs/Tools/Responsive_Design_Mode?${utmParams}`,
-    },
-    {
-      header: `CSP Style Directives No Longer Prevent CSS Edits`,
-      description: `Editing an element’s inline style from Inspector’s rule-view now works even if style-src is blocked by CSP.`,
-      href: `https://developer.mozilla.org/en-US/docs/Tools/Page_Inspector/How_to/Examine_and_edit_CSS?${utmParams}`,
     },
   ],
 };

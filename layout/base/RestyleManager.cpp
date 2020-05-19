@@ -34,6 +34,7 @@
 #include "nsContentUtils.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSRendering.h"
+#include "nsDocShell.h"
 #include "nsIFrame.h"
 #include "nsIFrameInlines.h"
 #include "nsImageFrame.h"
@@ -507,9 +508,8 @@ static nsChangeHint ChangeForContentStateChange(const Element& aElement,
     auto* disp = primaryFrame->StyleDisplay();
     if (disp->HasAppearance()) {
       nsPresContext* pc = primaryFrame->PresContext();
-      nsITheme* theme = pc->GetTheme();
-      if (theme &&
-          theme->ThemeSupportsWidget(pc, primaryFrame, disp->mAppearance)) {
+      nsITheme* theme = pc->Theme();
+      if (theme->ThemeSupportsWidget(pc, primaryFrame, disp->mAppearance)) {
         bool repaint = false;
         theme->WidgetStateChanged(primaryFrame, disp->mAppearance, nullptr,
                                   &repaint, nullptr);
@@ -746,7 +746,7 @@ static bool RecomputePosition(nsIFrame* aFrame) {
         nsIFrame* cb = cont->GetContainingBlock();
         nsMargin newOffsets;
         WritingMode wm = cb->GetWritingMode();
-        const LogicalSize size(wm, cb->GetContentRectRelativeToSelf().Size());
+        const LogicalSize size = cb->ContentSize();
 
         ReflowInput::ComputeRelativeOffsets(wm, cont, size, newOffsets);
         NS_ASSERTION(newOffsets.left == -newOffsets.right &&
@@ -922,9 +922,8 @@ static bool ContainingBlockChangeAffectsDescendants(
   // All fixed-pos containing blocks should also be abs-pos containing blocks.
   MOZ_ASSERT_IF(aIsFixedPosContainingBlock, aIsAbsPosContainingBlock);
 
-  for (nsIFrame::ChildListIterator lists(aFrame); !lists.IsDone();
-       lists.Next()) {
-    for (nsIFrame* f : lists.CurrentList()) {
+  for (const auto& childList : aFrame->GetChildLists()) {
+    for (nsIFrame* f : childList.mList) {
       if (f->IsPlaceholderFrame()) {
         nsIFrame* outOfFlow = nsPlaceholderFrame::GetRealFrameForPlaceholder(f);
         // If SVG text frames could appear here, they could confuse us since
@@ -1103,9 +1102,8 @@ static void SyncViewsAndInvalidateDescendants(nsIFrame* aFrame,
 
   aFrame->SyncFrameViewProperties();
 
-  nsIFrame::ChildListIterator lists(aFrame);
-  for (; !lists.IsDone(); lists.Next()) {
-    for (nsIFrame* child : lists.CurrentList()) {
+  for (const auto& [list, listID] : aFrame->GetChildLists()) {
+    for (nsIFrame* child : list) {
       if (!(child->GetStateBits() & NS_FRAME_OUT_OF_FLOW)) {
         // only do frames that don't have placeholders
         if (child->IsPlaceholderFrame()) {
@@ -1113,7 +1111,7 @@ static void SyncViewsAndInvalidateDescendants(nsIFrame* aFrame,
           nsIFrame* outOfFlowFrame =
               nsPlaceholderFrame::GetRealFrameForPlaceholder(child);
           DoApplyRenderingChangeToTree(outOfFlowFrame, aChange);
-        } else if (lists.CurrentID() == nsIFrame::kPopupList) {
+        } else if (listID == nsIFrame::kPopupList) {
           DoApplyRenderingChangeToTree(child, aChange);
         } else {  // regular frame
           SyncViewsAndInvalidateDescendants(child, aChange);
@@ -1121,40 +1119,6 @@ static void SyncViewsAndInvalidateDescendants(nsIFrame* aFrame,
       }
     }
   }
-}
-
-static bool IsPrimaryFrameOfRootOrBodyElement(nsIFrame* aFrame) {
-  nsIContent* content = aFrame->GetContent();
-  if (!content) {
-    return false;
-  }
-
-  Document* document = content->OwnerDoc();
-  Element* root = document->GetRootElement();
-  if (!root) {
-    return false;
-  }
-  nsIFrame* rootFrame = root->GetPrimaryFrame();
-  if (!rootFrame) {
-    return false;
-  }
-  if (aFrame == rootFrame) {
-    return true;
-  }
-
-  Element* body = document->GetBodyElement();
-  if (!body) {
-    return false;
-  }
-  nsIFrame* bodyFrame = body->GetPrimaryFrame();
-  if (!bodyFrame) {
-    return false;
-  }
-  if (aFrame == bodyFrame) {
-    return true;
-  }
-
-  return false;
 }
 
 static void ApplyRenderingChangeToTree(PresShell* aPresShell, nsIFrame* aFrame,
@@ -1186,7 +1150,7 @@ static void ApplyRenderingChangeToTree(PresShell* aPresShell, nsIFrame* aFrame,
     // the html element, we propagate the repaint change hint to the
     // viewport. This is necessary for background and scrollbar colors
     // propagation.
-    if (IsPrimaryFrameOfRootOrBodyElement(aFrame)) {
+    if (aFrame->IsPrimaryFrameOfRootOrBodyElement()) {
       nsIFrame* rootFrame = aPresShell->GetRootFrame();
       MOZ_ASSERT(rootFrame, "No root frame?");
       DoApplyRenderingChangeToTree(rootFrame, nsChangeHint_RepaintFrame);
@@ -1208,9 +1172,8 @@ static void AddSubtreeToOverflowTracker(
     aOverflowChangedTracker.AddFrame(aFrame,
                                      OverflowChangedTracker::CHILDREN_CHANGED);
   }
-  nsIFrame::ChildListIterator lists(aFrame);
-  for (; !lists.IsDone(); lists.Next()) {
-    for (nsIFrame* child : lists.CurrentList()) {
+  for (const auto& childList : aFrame->GetChildLists()) {
+    for (nsIFrame* child : childList.mList) {
       AddSubtreeToOverflowTracker(child, aOverflowChangedTracker);
     }
   }
@@ -1534,27 +1497,11 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
 
       if (!(frame->GetStateBits() & NS_FRAME_MAY_BE_TRANSFORMED)) {
         // Frame can not be transformed, and thus a change in transform will
-        // have no effect and we should not use the
-        // nsChangeHint_UpdatePostTransformOverflow hint.
-        hint &= ~nsChangeHint_UpdatePostTransformOverflow;
-      }
-
-      if ((hint & nsChangeHint_UpdateTransformLayer) &&
-          !(frame->GetStateBits() & NS_FRAME_MAY_BE_TRANSFORMED) &&
-          frame->HasAnimationOfTransform()) {
-        // If we have an nsChangeHint_UpdateTransformLayer hint but no
-        // corresponding frame bit, we most likely have a transform animation
-        // that was added or updated after this frame was created (otherwise
-        // we would have set the frame bit when we initialized the frame)
-        // and which sets the transform to 'none' (otherwise we would have set
-        // the frame bit when we got the nsChangeHint_AddOrRemoveTransform
-        // hint).
-        //
-        // In that case we should set the frame bit.
-        for (nsIFrame* cont = frame; cont;
-             cont = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(cont)) {
-          cont->AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
-        }
+        // have no effect and we should not use either
+        // nsChangeHint_UpdatePostTransformOverflow or
+        // nsChangeHint_UpdateTransformLayerhint.
+        hint &= ~(nsChangeHint_UpdatePostTransformOverflow |
+                  nsChangeHint_UpdateTransformLayer);
       }
 
       if (hint & nsChangeHint_AddOrRemoveTransform) {
@@ -2023,6 +1970,25 @@ static const nsIFrame* ExpectedOwnerForChild(const nsIFrame* aFrame) {
   return parent;
 }
 
+// FIXME(emilio, bug 1633685): We should ideally figure out how to properly
+// restyle replicated fixed pos frames... We seem to assume everywhere that they
+// can't get restyled at the moment...
+static bool IsInReplicatedFixedPosTree(const nsIFrame* aFrame) {
+  if (!aFrame->PresContext()->IsPaginated()) {
+    return false;
+  }
+
+  for (; aFrame; aFrame = aFrame->GetParent()) {
+    if (aFrame->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
+        !aFrame->FirstContinuation()->IsPrimaryFrame() &&
+        nsLayoutUtils::IsReallyFixedPos(aFrame)) {
+      return true;
+    }
+  }
+
+  return true;
+}
+
 void ServoRestyleState::AssertOwner(const ServoRestyleState& aParent) const {
   MOZ_ASSERT(mOwner);
   MOZ_ASSERT(!mOwner->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW));
@@ -2033,7 +1999,7 @@ void ServoRestyleState::AssertOwner(const ServoRestyleState& aParent) const {
   // chains of ServoRestyleStates in some cases where it's just not worth it.
   if (aParent.mOwner) {
     const nsIFrame* owner = ExpectedOwnerForChild(mOwner);
-    if (owner != aParent.mOwner) {
+    if (owner != aParent.mOwner && !IsInReplicatedFixedPosTree(mOwner)) {
       MOZ_ASSERT(IsAnonBox(owner),
                  "Should only have expected owner weirdness when anon boxes "
                  "are involved");
@@ -2056,7 +2022,8 @@ nsChangeHint ServoRestyleState::ChangesHandledFor(
     return mChangesHandled;
   }
 
-  MOZ_ASSERT(mOwner == ExpectedOwnerForChild(aFrame),
+  MOZ_ASSERT(mOwner == ExpectedOwnerForChild(aFrame) ||
+                 IsInReplicatedFixedPosTree(aFrame),
              "Missed some frame in the hierarchy?");
   return mChangesHandled;
 }
@@ -2268,18 +2235,21 @@ void RestyleManager::PostRestyleEventForAnimations(Element* aElement,
 
 void RestyleManager::RebuildAllStyleData(nsChangeHint aExtraHint,
                                          RestyleHint aRestyleHint) {
-  // NOTE(emilio): GeckoRestlyeManager does a sync style flush, which seems not
-  // to be needed in my testing.
-  PostRebuildAllStyleDataEvent(aExtraHint, aRestyleHint);
-}
-
-void RestyleManager::PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
-                                                  RestyleHint aRestyleHint) {
   // NOTE(emilio): The semantics of these methods are quite funny, in the sense
   // that we're not supposed to need to rebuild the actual stylist data.
   //
   // That's handled as part of the MediumFeaturesChanged stuff, if needed.
-  StyleSet()->ClearCachedStyleData();
+  //
+  // Clear the cached style data only if we are guaranteed to process the whole
+  // DOM tree again.
+  //
+  // FIXME(emilio): Decouple this, probably. This probably just wants to reset
+  // the "uses viewport units / uses rem" bits, and _maybe_ clear cached anon
+  // box styles and such... But it doesn't really always need to clear the
+  // initial style of the document and similar...
+  if (aRestyleHint.DefinitelyRecascadesAllSubtree()) {
+    StyleSet()->ClearCachedStyleData();
+  }
 
   DocumentStyleRootIterator iter(mPresContext->Document());
   while (Element* root = iter.GetNextStyleRoot()) {
@@ -3373,9 +3343,9 @@ void RestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
     // See if we have appearance information for a theme.
     const nsStyleDisplay* disp = primaryFrame->StyleDisplay();
     if (disp->HasAppearance()) {
-      nsITheme* theme = PresContext()->GetTheme();
-      if (theme && theme->ThemeSupportsWidget(PresContext(), primaryFrame,
-                                              disp->mAppearance)) {
+      nsITheme* theme = PresContext()->Theme();
+      if (theme->ThemeSupportsWidget(PresContext(), primaryFrame,
+                                     disp->mAppearance)) {
         bool repaint = false;
         theme->WidgetStateChanged(primaryFrame, disp->mAppearance, aAttribute,
                                   &repaint, aOldValue);
@@ -3592,9 +3562,8 @@ void RestyleManager::ReparentFrameDescendants(nsIFrame* aFrame,
     // that is going to go away anyway in seconds.
     return;
   }
-  nsIFrame::ChildListIterator lists(aFrame);
-  for (; !lists.IsDone(); lists.Next()) {
-    for (nsIFrame* child : lists.CurrentList()) {
+  for (const auto& childList : aFrame->GetChildLists()) {
+    for (nsIFrame* child : childList.mList) {
       // only do frames that are in flow
       if (!(child->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
           child != aProviderChild) {

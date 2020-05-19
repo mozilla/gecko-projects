@@ -77,8 +77,14 @@ function matchRequest(channel, filters) {
     !flags.testing &&
     channel.loadInfo &&
     channel.loadInfo.loadingDocument === null &&
-    channel.loadInfo.loadingPrincipal ===
-      Services.scriptSecurityManager.getSystemPrincipal()
+    (channel.loadInfo.loadingPrincipal ===
+      Services.scriptSecurityManager.getSystemPrincipal() ||
+      // StyleEditor loads stylesheets with not the system principal but the content
+      // principal that same as of the document that loaded the stylesheet in order
+      // to take over the context of Private Browsing etc. Thus, in order to restrict
+      // the networking from StyleEditor, we check the loading policy.
+      channel.loadInfo.internalContentPolicyType ===
+        Ci.nsIContentPolicy.TYPE_INTERNAL_STYLESHEET)
   ) {
     return false;
   }
@@ -110,6 +116,13 @@ function matchRequest(channel, filters) {
         // outerWindowID getter from browser.js (non-remote <xul:browser>) may
         // throw when closing a tab while resources are still loading.
       }
+    } else if (
+      channel.loadInfo &&
+      channel.loadInfo.topOuterWindowID == filters.outerWindowID
+    ) {
+      // If we couldn't get the top frame outerWindowID from the loadContext,
+      // look to the channel.loadInfo.topOuterWindowID instead.
+      return true;
     }
   }
 
@@ -144,8 +157,8 @@ function NetworkObserver(filters, owner) {
   this.filters = filters;
   this.owner = owner;
 
-  this.openRequests = new Map();
-  this.openResponses = new Map();
+  this.openRequests = new WeakMap();
+  this.openResponses = new WeakMap();
 
   this.blockedURLs = [];
 
@@ -227,7 +240,7 @@ NetworkObserver.prototype = {
     this.responsePipeSegmentSize = Services.prefs.getIntPref(
       "network.buffer.cache.size"
     );
-    this.interceptedChannels = new Set();
+    this.interceptedChannels = new WeakSet();
 
     if (Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT) {
       gActivityDistributor.addObserver(this);
@@ -320,14 +333,37 @@ NetworkObserver.prototype = {
       return;
     }
 
-    const timedChannel = subject.QueryInterface(Ci.nsITimedChannel);
-    const httpActivity = this.createOrGetActivityObject(timedChannel);
+    const channel = subject.QueryInterface(Ci.nsIHttpChannel);
+    if (!matchRequest(channel, this.filters)) {
+      return;
+    }
 
-    // Try extracting server timings. Note that they will be sent to the client
-    // in the `_onTransactionClose` method together with network event timings.
-    const serverTimings = this._extractServerTimings(timedChannel);
+    let id;
+    let reason;
+
+    try {
+      const request = subject.QueryInterface(Ci.nsIHttpChannel);
+      const properties = request.QueryInterface(Ci.nsIPropertyBag);
+      reason = request.loadInfo.requestBlockingReason;
+      id = properties.getProperty("cancelledByExtension");
+    } catch (err) {
+      // "cancelledByExtension" doesn't have to be available.
+    }
+
+    const httpActivity = this.createOrGetActivityObject(channel);
+    const serverTimings = this._extractServerTimings(channel);
     if (httpActivity.owner) {
+      // Try extracting server timings. Note that they will be sent to the client
+      // in the `_onTransactionClose` method together with network event timings.
       httpActivity.owner.addSeverTimings(serverTimings);
+    } else {
+      // If the owner isn't set we need to create the network event and send
+      // it to the client. This happens in case where the request has been
+      // blocked (e.g. CORS) and "http-on-stop-request" is the first notification.
+      this._createNetworkEvent(subject, {
+        blockedReason: reason,
+        blockingExtension: id,
+      });
     }
   },
 
@@ -345,7 +381,6 @@ NetworkObserver.prototype = {
     // headers. The data retrieved is stored in openResponses. The
     // NetworkResponseListener is responsible with updating the httpActivity
     // object with the data from the new object in openResponses.
-
     if (
       !this.owner ||
       (topic != "http-on-examine-response" &&
@@ -409,8 +444,12 @@ NetworkObserver.prototype = {
 
       response.status = channel.responseStatus;
       response.statusText = channel.responseStatusText;
-      response.httpVersion =
-        "HTTP/" + httpVersionMaj.value + "." + httpVersionMin.value;
+      if (httpVersionMaj.value > 1) {
+        response.httpVersion = "HTTP/" + httpVersionMaj.value;
+      } else {
+        response.httpVersion =
+          "HTTP/" + httpVersionMaj.value + "." + httpVersionMin.value;
+      }
 
       this.openResponses.set(channel, response);
     }
@@ -624,7 +663,14 @@ NetworkObserver.prototype = {
    */
   _createNetworkEvent: function(
     channel,
-    { timestamp, extraStringData, fromCache, fromServiceWorker, blockedReason }
+    {
+      timestamp,
+      extraStringData,
+      fromCache,
+      fromServiceWorker,
+      blockedReason,
+      blockingExtension,
+    }
   ) {
     const httpActivity = this.createOrGetActivityObject(channel);
 
@@ -661,10 +707,12 @@ NetworkObserver.prototype = {
     // Only consider channels classified as level-1 to be trackers if our preferences
     // would not cause such channels to be blocked in strict content blocking mode.
     // Make sure the value produced here is a boolean.
-    event.isThirdPartyTrackingResource = !!(
-      channel.isThirdPartyTrackingResource() &&
-      (channel.thirdPartyClassificationFlags & tpFlagsMask) == 0
-    );
+    if (channel instanceof Ci.nsIClassifiedChannel) {
+      event.isThirdPartyTrackingResource = !!(
+        channel.isThirdPartyTrackingResource() &&
+        (channel.thirdPartyClassificationFlags & tpFlagsMask) == 0
+      );
+    }
     const referrerInfo = channel.referrerInfo;
     event.referrerPolicy = referrerInfo
       ? referrerInfo.getReferrerPolicyString()
@@ -683,7 +731,7 @@ NetworkObserver.prototype = {
     if (channel.loadInfo) {
       causeType = channel.loadInfo.externalContentPolicyType;
       const { loadingPrincipal } = channel.loadInfo;
-      if (loadingPrincipal && loadingPrincipal.URI) {
+      if (loadingPrincipal?.URI) {
         causeUri = loadingPrincipal.URI.spec;
       }
     }
@@ -704,7 +752,11 @@ NetworkObserver.prototype = {
     }
 
     event.cause = {
-      type: causeTypeToString(causeType),
+      type: causeTypeToString(
+        causeType,
+        channel.loadFlags,
+        channel.loadInfo.internalContentPolicyType
+      ),
       loadingDocumentUri: causeUri,
       stacktrace,
     };
@@ -759,6 +811,9 @@ NetworkObserver.prototype = {
       }
     } else {
       event.blockedReason = blockedReason;
+      if (blockingExtension) {
+        event.blockingExtension = blockingExtension;
+      }
     }
 
     httpActivity.owner = this.owner.onNetworkEvent(event);
@@ -1052,7 +1107,6 @@ NetworkObserver.prototype = {
         serverTimings
       );
     }
-    this.openRequests.delete(httpActivity.channel);
   },
 
   _getBlockedTiming: function(timings) {
@@ -1454,9 +1508,6 @@ NetworkObserver.prototype = {
       "service-worker-synthesized-response"
     );
 
-    this.interceptedChannels.clear();
-    this.openRequests.clear();
-    this.openResponses.clear();
     this.owner = null;
     this.filters = null;
     this._throttler = null;
@@ -1481,7 +1532,6 @@ const LOAD_CAUSE_STRINGS = {
   [Ci.nsIContentPolicy.TYPE_DOCUMENT]: "document",
   [Ci.nsIContentPolicy.TYPE_SUBDOCUMENT]: "subdocument",
   [Ci.nsIContentPolicy.TYPE_REFRESH]: "refresh",
-  [Ci.nsIContentPolicy.TYPE_XBL]: "xbl",
   [Ci.nsIContentPolicy.TYPE_PING]: "ping",
   [Ci.nsIContentPolicy.TYPE_XMLHTTPREQUEST]: "xhr",
   [Ci.nsIContentPolicy.TYPE_OBJECT_SUBREQUEST]: "objectSubdoc",
@@ -1497,8 +1547,17 @@ const LOAD_CAUSE_STRINGS = {
   [Ci.nsIContentPolicy.TYPE_WEB_MANIFEST]: "webManifest",
 };
 
-function causeTypeToString(causeType) {
-  return LOAD_CAUSE_STRINGS[causeType] || "unknown";
+function causeTypeToString(causeType, loadFlags, internalContentPolicyType) {
+  let prefix = "";
+  if (
+    (causeType == Ci.nsIContentPolicy.TYPE_IMAGESET ||
+      internalContentPolicyType == Ci.nsIContentPolicy.TYPE_INTERNAL_IMAGE) &&
+    loadFlags & Ci.nsIRequest.LOAD_BACKGROUND
+  ) {
+    prefix = "lazy-";
+  }
+
+  return prefix + LOAD_CAUSE_STRINGS[causeType] || "unknown";
 }
 
 function stringToCauseType(value) {

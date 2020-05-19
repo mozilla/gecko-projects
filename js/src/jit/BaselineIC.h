@@ -420,6 +420,8 @@ class ICStub {
   void updateCode(JitCode* stubCode);
   void trace(JSTracer* trc);
 
+  bool stubDataHasNurseryPointers(const CacheIRStubInfo* stubInfo);
+
   static const uint16_t EXPECTED_TRACE_MAGIC = 0b1100011;
 
   template <typename T, typename... Args>
@@ -1717,17 +1719,17 @@ class ICRest_Fallback : public ICFallbackStub {
 
 // UnaryArith
 //     JSOp::BitNot
+//     JSOp::Pos
 //     JSOp::Neg
 //     JSOp::Inc
 //     JSOp::Dec
+//     JSOp::ToNumeric
 
 class ICUnaryArith_Fallback : public ICFallbackStub {
   friend class ICStubSpace;
 
   explicit ICUnaryArith_Fallback(TrampolinePtr stubCode)
-      : ICFallbackStub(UnaryArith_Fallback, stubCode) {
-    extra_ = 0;
-  }
+      : ICFallbackStub(UnaryArith_Fallback, stubCode) {}
 
  public:
   bool sawDoubleResult() { return extra_; }
@@ -1752,7 +1754,7 @@ class ICCompare_Fallback : public ICFallbackStub {
 };
 
 // BinaryArith
-//      JSOp::Add, JSOp::Sub, JSOp::Mul, JOP_DIV, JSOp::Mod
+//      JSOp::Add, JSOp::Sub, JSOp::Mul, JSOp::Div, JSOp::Mod, JSOp::Pow,
 //      JSOp::BitAnd, JSOp::BitXor, JSOp::BitOr
 //      JSOp::Lsh, JSOp::Rsh, JSOp::Ursh
 
@@ -1760,9 +1762,7 @@ class ICBinaryArith_Fallback : public ICFallbackStub {
   friend class ICStubSpace;
 
   explicit ICBinaryArith_Fallback(TrampolinePtr stubCode)
-      : ICFallbackStub(BinaryArith_Fallback, stubCode) {
-    extra_ = 0;
-  }
+      : ICFallbackStub(BinaryArith_Fallback, stubCode) {}
 
   static const uint16_t SAW_DOUBLE_RESULT_BIT = 0x1;
 
@@ -1778,7 +1778,7 @@ class ICBinaryArith_Fallback : public ICFallbackStub {
 class ICNewArray_Fallback : public ICFallbackStub {
   friend class ICStubSpace;
 
-  GCPtrObject templateObject_;
+  GCPtrArrayObject templateObject_;
 
   // The group used for objects created here is always available, even if the
   // template object itself is not.
@@ -1790,9 +1790,9 @@ class ICNewArray_Fallback : public ICFallbackStub {
         templateGroup_(templateGroup) {}
 
  public:
-  GCPtrObject& templateObject() { return templateObject_; }
+  GCPtrArrayObject& templateObject() { return templateObject_; }
 
-  void setTemplateObject(JSObject* obj) {
+  void setTemplateObject(ArrayObject* obj) {
     MOZ_ASSERT(obj->group() == templateGroup());
     templateObject_ = obj;
   }

@@ -24,8 +24,8 @@
 #include "Units.h"
 #include "UnitTransforms.h"
 
-#define ZCC_LOG(...)
-// #define ZCC_LOG(...) printf_stderr("ZCC: " __VA_ARGS__)
+static mozilla::LazyLogModule sApzZoomLog("apz.zoom");
+#define ZCC_LOG(...) MOZ_LOG(sApzZoomLog, LogLevel::Debug, (__VA_ARGS__))
 
 NS_IMPL_ISUPPORTS(ZoomConstraintsClient, nsIDOMEventListener, nsIObserver)
 
@@ -42,7 +42,7 @@ using namespace mozilla::layers;
 ZoomConstraintsClient::ZoomConstraintsClient()
     : mDocument(nullptr), mPresShell(nullptr) {}
 
-ZoomConstraintsClient::~ZoomConstraintsClient() {}
+ZoomConstraintsClient::~ZoomConstraintsClient() = default;
 
 static nsIWidget* GetWidget(PresShell* aPresShell) {
   if (!aPresShell) {

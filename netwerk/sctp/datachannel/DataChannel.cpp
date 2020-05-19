@@ -447,6 +447,12 @@ bool DataChannelConnection::Init(const uint16_t aLocalPort,
       // See: https://tools.ietf.org/html/rfc6458#section-8.1.20
       usrsctp_sysctl_set_sctp_default_frag_interleave(2);
 
+      // Disabling authentication and dynamic address reconfiguration as neither
+      // of them are used for data channel and only result in additional code
+      // paths being used.
+      usrsctp_sysctl_set_sctp_asconf_enable(0);
+      usrsctp_sysctl_set_sctp_auth_enable(0);
+
       sctp_initialized = true;
 
       sDataChannelShutdown = new DataChannelShutdown();
@@ -715,6 +721,8 @@ void DataChannelConnection::SetSignals(const std::string& aTransportId) {
   mTransportId = aTransportId;
   mTransportHandler->SignalPacketReceived.connect(
       this, &DataChannelConnection::SctpDtlsInput);
+  mTransportHandler->SignalStateChange.connect(
+      this, &DataChannelConnection::TransportStateChange);
   // SignalStateChange() doesn't call you with the initial state
   if (mTransportHandler->GetState(mTransportId, false) ==
       TransportLayer::TS_OPEN) {
@@ -722,15 +730,21 @@ void DataChannelConnection::SetSignals(const std::string& aTransportId) {
     CompleteConnect();
   } else {
     DC_DEBUG(("Setting transport signals, dtls not open yet"));
-    mTransportHandler->SignalStateChange.connect(
-        this, &DataChannelConnection::TransportStateChange);
   }
 }
 
 void DataChannelConnection::TransportStateChange(
     const std::string& aTransportId, TransportLayer::State aState) {
-  if (aState == TransportLayer::TS_OPEN && aTransportId == mTransportId) {
-    CompleteConnect();
+  if (aTransportId == mTransportId) {
+    if (aState == TransportLayer::TS_OPEN) {
+      DC_DEBUG(("Transport is open!"));
+      CompleteConnect();
+    } else if (aState == TransportLayer::TS_CLOSED ||
+               aState == TransportLayer::TS_NONE ||
+               aState == TransportLayer::TS_ERROR) {
+      DC_DEBUG(("Transport is closed!"));
+      Stop();
+    }
   }
 }
 
@@ -844,7 +858,7 @@ void DataChannelConnection::ProcessQueuedOpens() {
 }
 
 void DataChannelConnection::SctpDtlsInput(const std::string& aTransportId,
-                                          MediaPacket& packet) {
+                                          const MediaPacket& packet) {
   if ((packet.type() != MediaPacket::SCTP) || (mTransportId != aTransportId)) {
     return;
   }
@@ -1206,10 +1220,10 @@ int DataChannelConnection::SendOpenRequestMessage(
   // careful - request struct include one char for the label
   const int req_size = sizeof(struct rtcweb_datachannel_open_request) - 1 +
                        label_len + proto_len;
-  struct rtcweb_datachannel_open_request* req =
-      (struct rtcweb_datachannel_open_request*)moz_xmalloc(req_size);
+  UniqueFreePtr<struct rtcweb_datachannel_open_request> req(
+      (struct rtcweb_datachannel_open_request*)moz_xmalloc(req_size));
 
-  memset(req, 0, req_size);
+  memset(req.get(), 0, req_size);
   req->msg_type = DATA_CHANNEL_OPEN_REQUEST;
   switch (prPolicy) {
     case SCTP_PR_SCTP_NONE:
@@ -1222,7 +1236,6 @@ int DataChannelConnection::SendOpenRequestMessage(
       req->channel_type = DATA_CHANNEL_PARTIAL_RELIABLE_REXMIT;
       break;
     default:
-      free(req);
       return EINVAL;
   }
   if (unordered) {
@@ -1239,9 +1252,7 @@ int DataChannelConnection::SendOpenRequestMessage(
   memcpy(&req->label[label_len], PromiseFlatCString(protocol).get(), proto_len);
 
   // TODO: req_size is an int... that looks hairy
-  int error = SendControlMessage((const uint8_t*)req, req_size, stream);
-
-  free(req);
+  int error = SendControlMessage((const uint8_t*)req.get(), req_size, stream);
   return error;
 }
 
@@ -2846,8 +2857,7 @@ void DataChannelConnection::ReadBlob(
     // Bug 966602:  Doesn't return an error to the caller via onerror.
     // We must release DataChannelConnection on MainThread to avoid issues (bug
     // 876167) aThis is now owned by the runnable; release it there
-    NS_ReleaseOnMainThreadSystemGroup("DataChannelBlobSendRunnable",
-                                      runnable.forget());
+    NS_ReleaseOnMainThread("DataChannelBlobSendRunnable", runnable.forget());
     return;
   }
   aBlob->Close();
@@ -3089,7 +3099,7 @@ void DataChannel::SendErrnoToErrorResult(int error, size_t aMessageSize,
     case EMSGSIZE: {
       nsPrintfCString err("Message size (%zu) exceeds maxMessageSize",
                           aMessageSize);
-      aRv.ThrowTypeError(NS_ConvertUTF8toUTF16(err));
+      aRv.ThrowTypeError(err);
       break;
     }
     default:

@@ -7,6 +7,7 @@
 #define __mozilla_widget_GfxDriverInfo_h__
 
 #include "nsString.h"
+#include "nsTArray.h"
 
 // Macros for adding a blocklist item to the static list. _EXT variants
 // allow one to specify all available parameters, including those available
@@ -128,6 +129,7 @@ enum class OperatingSystem : uint8_t {
   Windows8_1,
   Windows10,
   RecentWindows10,
+  NotRecentWindows10,
   Linux,
   OSX,
   OSX10_5,
@@ -165,7 +167,6 @@ enum class DeviceFamily : uint8_t {
   IntelAll,
   NvidiaAll,
   AtiAll,
-  AmdAll,
   MicrosoftAll,
   ParallelsAll,
   QualcommAll,
@@ -183,7 +184,7 @@ enum class DeviceFamily : uint8_t {
   IntelMobileHDGraphics,
   NvidiaBlockD3D9Layers,
   RadeonX1000,
-  AmdRadeonCaicos,
+  RadeonCaicos,
   Geforce7300GT,
   Nvidia310M,
   Nvidia8800GTS,
@@ -195,6 +196,7 @@ enum class DeviceFamily : uint8_t {
   NvidiaBlockWebRender,
   NvidiaRolloutWebRender,
   IntelRolloutWebRender,
+  IntelModernRolloutWebRender,
   AtiRolloutWebRender,
 
   Max
@@ -204,7 +206,6 @@ enum class DeviceVendor : uint8_t {
   All,  // There is an assumption that this is the first enum
   Intel,
   NVIDIA,
-  AMD,
   ATI,
   Microsoft,
   Parallels,
@@ -289,8 +290,8 @@ class GfxDeviceFamily final {
     int32_t mEnd;
   };
 
-  nsTArray<nsString> mIds;
-  nsTArray<DeviceRange> mRanges;
+  CopyableTArray<nsString> mIds;
+  CopyableTArray<DeviceRange> mRanges;
 };
 
 struct GfxDriverInfo {

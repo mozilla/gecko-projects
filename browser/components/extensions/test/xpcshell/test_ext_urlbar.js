@@ -212,6 +212,7 @@ add_task(async function test_onProviderResultsRequested() {
             payload: {
               title: "Test remote_tab-tabs result",
               url: "http://example.com/remote_tab-tabs",
+              device: "device",
             },
           },
           {
@@ -274,8 +275,8 @@ add_task(async function test_onProviderResultsRequested() {
 
   // Check the results.
   let expectedResults = [
-    // The first result should be a search result returned by the
-    // UnifiedComplete provider.
+    // The first result should be a search result returned by
+    // UrlbarProviderSearchSuggestions.
     {
       type: UrlbarUtils.RESULT_TYPE.SEARCH,
       source: UrlbarUtils.RESULT_SOURCE.SEARCH,
@@ -285,7 +286,9 @@ add_task(async function test_onProviderResultsRequested() {
         query: "test",
         engine: "Test engine",
         suggestion: undefined,
+        tail: undefined,
         keyword: undefined,
+        isSearchHistory: false,
         icon: "",
         keywordOffer: false,
       },
@@ -312,9 +315,8 @@ add_task(async function test_onProviderResultsRequested() {
       payload: {
         title: "Test remote_tab-tabs result",
         url: "http://example.com/remote_tab-tabs",
-        displayUrl:
-          (UrlbarPrefs.get("update1.view.stripHttps") ? "http://" : "") +
-          "example.com/remote_tab-tabs",
+        displayUrl: "http://example.com/remote_tab-tabs",
+        device: "device",
       },
     },
     {
@@ -325,9 +327,7 @@ add_task(async function test_onProviderResultsRequested() {
       payload: {
         title: "Test tab-tabs result",
         url: "http://example.com/tab-tabs",
-        displayUrl:
-          (UrlbarPrefs.get("update1.view.stripHttps") ? "http://" : "") +
-          "example.com/tab-tabs",
+        displayUrl: "http://example.com/tab-tabs",
       },
     },
     {
@@ -340,6 +340,7 @@ add_task(async function test_onProviderResultsRequested() {
         buttonText: "Test tip-local result button text",
         buttonUrl: "http://example.com/tip-button",
         helpUrl: "http://example.com/tip-help",
+        type: "extension",
       },
     },
     {
@@ -350,9 +351,7 @@ add_task(async function test_onProviderResultsRequested() {
       payload: {
         title: "Test url-history result",
         url: "http://example.com/url-history",
-        displayUrl:
-          (UrlbarPrefs.get("update1.view.stripHttps") ? "http://" : "") +
-          "example.com/url-history",
+        displayUrl: "http://example.com/url-history",
       },
     },
   ];

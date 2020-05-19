@@ -19,11 +19,10 @@
       versions: ["<{version.major_number}.0"]
       locales:
           - be
-          - cak
+          - cs
           - cy
-          - da
           - de
-          - dsb
+          - dab
           - en-CA
           - en-GB
           - en-US
@@ -32,20 +31,17 @@
           - fr
           - fy-NL
           - gn
-          - hsb
-          - hu
+          - hub
           - ia
           - id
           - it
-          - ka
-          - lt
-          - nb-NO
+          - kab
           - nl
           - nn-NO
+          - pa-IN
           - pl
           - pt-BR
-          - pt-PT
-          - ro
+          - sk
           - sq
           - sv-SE
           - tr

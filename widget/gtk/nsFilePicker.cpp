@@ -16,13 +16,15 @@
 #include "nsIURI.h"
 #include "nsIWidget.h"
 #include "nsIFile.h"
+#include "mozilla/StaticPrefs_widget.h"
 
 #include "nsArrayEnumerator.h"
 #include "nsMemory.h"
 #include "nsEnumeratorUtils.h"
 #include "nsNetUtil.h"
 #include "nsReadableUtils.h"
-#include "mozcontainer.h"
+#include "MozContainer.h"
+#include "gfxPlatformGtk.h"
 
 #include "nsFilePicker.h"
 
@@ -156,17 +158,18 @@ NS_IMPL_ISUPPORTS(nsFilePicker, nsIFilePicker)
 nsFilePicker::nsFilePicker()
     : mSelectedType(0),
       mRunning(false),
-      mAllowURLs(false)
-#ifdef MOZ_WIDGET_GTK
-      ,
-      mFileChooserDelegate(nullptr)
-#endif
-{
+      mAllowURLs(false),
+      mFileChooserDelegate(nullptr) {
   nsCOMPtr<nsIGIOService> giovfs = do_GetService(NS_GIOSERVICE_CONTRACTID);
-  giovfs->ShouldUseFlatpakPortal(&mUseNativeFileChooser);
+  // Due to Bug 1635718 always use portal for file dialog on Wayland.
+  if (gfxPlatformGtk::GetPlatform()->IsWaylandDisplay()) {
+    mUseNativeFileChooser = true;
+  } else {
+    giovfs->ShouldUseFlatpakPortal(&mUseNativeFileChooser);
+  }
 }
 
-nsFilePicker::~nsFilePicker() {}
+nsFilePicker::~nsFilePicker() = default;
 
 void ReadMultipleFiles(gpointer filename, gpointer array) {
   nsCOMPtr<nsIFile> localfile;
@@ -342,8 +345,7 @@ nsFilePicker::Open(nsIFilePickerShownCallback* aCallback) {
   // Can't show two dialogs concurrently with the same filepicker
   if (mRunning) return NS_ERROR_NOT_AVAILABLE;
 
-  nsCString title;
-  title.Adopt(ToNewUTF8String(mTitle));
+  NS_ConvertUTF16toUTF8 title(mTitle);
 
   GtkWindow* parent_widget =
       GTK_WINDOW(mParentWidget->GetNativeData(NS_NATIVE_SHELLWIDGET));
@@ -411,7 +413,6 @@ nsFilePicker::Open(nsIFilePickerShownCallback* aCallback) {
       nsAutoCString directory;
       defaultPath->GetNativePath(directory);
 
-#ifdef MOZ_WIDGET_GTK
       // Workaround for problematic refcounting in GTK3 before 3.16.
       // We need to keep a reference to the dialog's internal delegate.
       // Otherwise, if our dialog gets destroyed, we'll lose the dialog's
@@ -434,8 +435,6 @@ nsFilePicker::Open(nsIFilePickerShownCallback* aCallback) {
           g_object_ref(mFileChooserDelegate);
         }
       }
-#endif
-
       gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(file_chooser),
                                           directory.get());
     }
@@ -551,7 +550,6 @@ void nsFilePicker::Done(void* file_chooser, gint response) {
   // been released.
   GtkFileChooserDestroy(file_chooser);
 
-#ifdef MOZ_WIDGET_GTK
   if (mFileChooserDelegate) {
     // Properly deref our acquired reference. We call this after
     // gtk_widget_destroy() to try and ensure that pending file info
@@ -566,7 +564,6 @@ void nsFilePicker::Done(void* file_chooser, gint response) {
         mFileChooserDelegate);
     mFileChooserDelegate = nullptr;
   }
-#endif
 
   if (mCallback) {
     mCallback->Done(result);
@@ -605,7 +602,16 @@ void nsFilePicker::GtkFileChooserShow(void* file_chooser) {
   static auto sGtkNativeDialogShowPtr =
       (void (*)(void*))dlsym(RTLD_DEFAULT, "gtk_native_dialog_show");
   if (mUseNativeFileChooser && sGtkNativeDialogShowPtr != nullptr) {
+    const char* portalEnvString = g_getenv("GTK_USE_PORTAL");
+    bool setPortalEnv =
+        (portalEnvString && atoi(portalEnvString) == 0) || !portalEnvString;
+    if (setPortalEnv) {
+      setenv("GTK_USE_PORTAL", "1", true);
+    }
     (*sGtkNativeDialogShowPtr)(file_chooser);
+    if (setPortalEnv) {
+      unsetenv("GTK_USE_PORTAL");
+    }
   } else {
     g_signal_connect(file_chooser, "destroy", G_CALLBACK(OnDestroy), this);
     gtk_widget_show(GTK_WIDGET(file_chooser));

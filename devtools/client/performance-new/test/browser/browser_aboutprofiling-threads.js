@@ -6,7 +6,7 @@
 add_task(async function test() {
   info("Test that about:profiling can be loaded, and the threads changed.");
 
-  await openAboutProfiling(async document => {
+  await withAboutProfiling(async document => {
     const geckoMainLabel = await getElementFromDocumentByText(
       document,
       "GeckoMain"
@@ -35,10 +35,4 @@ add_task(async function test() {
       "The profiler was not started with the GeckoMain thread."
     );
   });
-
-  const { revertRecordingPreferences } = ChromeUtils.import(
-    "resource://devtools/client/performance-new/popup/background.jsm.js"
-  );
-
-  revertRecordingPreferences();
 });

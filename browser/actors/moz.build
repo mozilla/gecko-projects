@@ -7,6 +7,12 @@
 with Files("**"):
     BUG_COMPONENT = ("Firefox", "General")
 
+with Files("ContentSearch*.jsm"):
+    BUG_COMPONENT = ("Firefox", "Search")
+
+with Files("AboutReaderParent.jsm"):
+    BUG_COMPONENT = ("Toolkit", "Reader Mode")
+
 with Files("LightweightThemeChild.jsm"):
     BUG_COMPONENT = ("WebExtensions", "Themes")
 
@@ -23,7 +29,19 @@ with Files("WebRTCChild.jsm"):
     BUG_COMPONENT = ("Firefox", "Site Permissions")
 
 FINAL_TARGET_FILES.actors += [
+    'AboutNewInstallChild.jsm',
+    'AboutNewInstallParent.jsm',
+    'AboutNewTabChild.jsm',
+    'AboutPluginsChild.jsm',
+    'AboutPluginsParent.jsm',
+    'AboutPrivateBrowsingChild.jsm',
+    'AboutPrivateBrowsingParent.jsm',
+    'AboutProtectionsChild.jsm',
+    'AboutProtectionsParent.jsm',
     'AboutReaderChild.jsm',
+    'AboutReaderParent.jsm',
+    'AboutTabCrashedChild.jsm',
+    'AboutTabCrashedParent.jsm',
     'BlockedSiteChild.jsm',
     'BlockedSiteParent.jsm',
     'BrowserTabChild.jsm',
@@ -33,6 +51,7 @@ FINAL_TARGET_FILES.actors += [
     'ContentMetaChild.jsm',
     'ContentMetaParent.jsm',
     'ContentSearchChild.jsm',
+    'ContentSearchParent.jsm',
     'ContextMenuChild.jsm',
     'ContextMenuParent.jsm',
     'DOMFullscreenChild.jsm',
@@ -44,7 +63,6 @@ FINAL_TARGET_FILES.actors += [
     'LinkHandlerParent.jsm',
     'NetErrorChild.jsm',
     'NetErrorParent.jsm',
-    'OfflineAppsChild.jsm',
     'PageInfoChild.jsm',
     'PageStyleChild.jsm',
     'PageStyleParent.jsm',
@@ -54,6 +72,7 @@ FINAL_TARGET_FILES.actors += [
     'RFPHelperChild.jsm',
     'RFPHelperParent.jsm',
     'SearchTelemetryChild.jsm',
+    'SearchTelemetryParent.jsm',
     'SwitchDocumentDirectionChild.jsm',
     'URIFixupChild.jsm',
     'WebRTCChild.jsm',

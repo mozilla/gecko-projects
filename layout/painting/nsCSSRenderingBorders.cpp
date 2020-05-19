@@ -81,16 +81,16 @@ static void ComputeBorderCornerDimensions(const Float* aBorderWidths,
 
 // from the given base color and the background color, turn
 // color into a color for the given border pattern style
-static Color MakeBorderColor(nscolor aColor,
-                             BorderColorStyle aBorderColorStyle);
+static sRGBColor MakeBorderColor(nscolor aColor,
+                                 BorderColorStyle aBorderColorStyle);
 
 // Given a line index (an index starting from the outside of the
 // border going inwards) and an array of line styles, calculate the
 // color that that stripe of the border should be rendered in.
-static Color ComputeColorForLine(uint32_t aLineIndex,
-                                 const BorderColorStyle* aBorderColorStyle,
-                                 uint32_t aBorderColorStyleCount,
-                                 nscolor aBorderColor);
+static sRGBColor ComputeColorForLine(uint32_t aLineIndex,
+                                     const BorderColorStyle* aBorderColorStyle,
+                                     uint32_t aBorderColorStyleCount,
+                                     nscolor aBorderColor);
 
 // little helper function to check if the array of 4 floats given are
 // equal to the given value
@@ -1202,31 +1202,31 @@ void nsCSSBorderRenderer::FillSolidBorder(const Rect& aOuterRect,
   }
 }
 
-Color MakeBorderColor(nscolor aColor, BorderColorStyle aBorderColorStyle) {
+sRGBColor MakeBorderColor(nscolor aColor, BorderColorStyle aBorderColorStyle) {
   nscolor colors[2];
   int k = 0;
 
   switch (aBorderColorStyle) {
     case BorderColorStyleNone:
-      return Color(0.f, 0.f, 0.f, 0.f);  // transparent black
+      return sRGBColor(0.f, 0.f, 0.f, 0.f);  // transparent black
 
     case BorderColorStyleLight:
       k = 1;
       [[fallthrough]];
     case BorderColorStyleDark:
       NS_GetSpecial3DColors(colors, aColor);
-      return Color::FromABGR(colors[k]);
+      return sRGBColor::FromABGR(colors[k]);
 
     case BorderColorStyleSolid:
     default:
-      return Color::FromABGR(aColor);
+      return sRGBColor::FromABGR(aColor);
   }
 }
 
-Color ComputeColorForLine(uint32_t aLineIndex,
-                          const BorderColorStyle* aBorderColorStyle,
-                          uint32_t aBorderColorStyleCount,
-                          nscolor aBorderColor) {
+sRGBColor ComputeColorForLine(uint32_t aLineIndex,
+                              const BorderColorStyle* aBorderColorStyle,
+                              uint32_t aBorderColorStyleCount,
+                              nscolor aBorderColor) {
   NS_ASSERTION(aLineIndex < aBorderColorStyleCount, "Invalid lineIndex given");
 
   return MakeBorderColor(aBorderColor, aBorderColorStyle[aLineIndex]);
@@ -1509,8 +1509,8 @@ void nsCSSBorderRenderer::DrawBorderSides(mozilla::SideBits aSides) {
                           noMarginLeft ? 0 : borderWidths[i][3]));
 
     if (borderColorStyle[i] != BorderColorStyleNone) {
-      Color c = ComputeColorForLine(i, borderColorStyle, borderColorStyleCount,
-                                    borderRenderColor);
+      sRGBColor c = ComputeColorForLine(
+          i, borderColorStyle, borderColorStyleCount, borderRenderColor);
       ColorPattern color(ToDeviceColor(c));
 
       FillSolidBorder(soRect, siRect, radii, borderWidths[i], aSides, color);
@@ -2703,15 +2703,13 @@ static void ComputeCornerSkirtSize(Float aAlpha1, Float aAlpha2, Float aSlopeY,
 // Draws a border radius with possibly different sides.
 // A skirt is drawn underneath the corner intersection to hide possible
 // seams when anti-aliased drawing is used.
-static void DrawBorderRadius(DrawTarget* aDrawTarget, Corner c,
-                             const Point& aOuterCorner,
-                             const Point& aInnerCorner,
-                             const twoFloats& aCornerMultPrev,
-                             const twoFloats& aCornerMultNext,
-                             const Size& aCornerDims, const Size& aOuterRadius,
-                             const Size& aInnerRadius, const Color& aFirstColor,
-                             const Color& aSecondColor, Float aSkirtSize,
-                             Float aSkirtSlope) {
+static void DrawBorderRadius(
+    DrawTarget* aDrawTarget, Corner c, const Point& aOuterCorner,
+    const Point& aInnerCorner, const twoFloats& aCornerMultPrev,
+    const twoFloats& aCornerMultNext, const Size& aCornerDims,
+    const Size& aOuterRadius, const Size& aInnerRadius,
+    const DeviceColor& aFirstColor, const DeviceColor& aSecondColor,
+    Float aSkirtSize, Float aSkirtSlope) {
   // Connect edge to outer arc start point
   Point outerCornerStart = aOuterCorner + aCornerMultPrev * aCornerDims;
   // Connect edge to outer arc end point
@@ -2828,8 +2826,8 @@ static void DrawCorner(DrawTarget* aDrawTarget, const Point& aOuterCorner,
                        const Point& aInnerCorner,
                        const twoFloats& aCornerMultPrev,
                        const twoFloats& aCornerMultNext,
-                       const Size& aCornerDims, const Color& aFirstColor,
-                       const Color& aSecondColor, Float aSkirtSize,
+                       const Size& aCornerDims, const DeviceColor& aFirstColor,
+                       const DeviceColor& aSecondColor, Float aSkirtSize,
                        Float aSkirtSlope) {
   // Corner box start point
   Point cornerStart = aOuterCorner + aCornerMultPrev * aCornerDims;
@@ -2915,7 +2913,7 @@ void nsCSSBorderRenderer::DrawSolidBorder() {
     int i3 = (i + 3) % 4;
 
     Float sideWidth = 0.0f;
-    Color firstColor, secondColor;
+    DeviceColor firstColor, secondColor;
     if (IsVisible(mBorderStyles[i]) && mBorderWidths[i]) {
       // draw the side since it is visible
       sideWidth = mBorderWidths[i];
@@ -3216,7 +3214,7 @@ void nsCSSBorderRenderer::DrawBorders() {
       // the potentially expensive clip.
       if (simpleCornerStyle && IsZeroSize(mBorderRadii[corner]) &&
           IsSolidCornerStyle(mBorderStyles[sides[0]], corner)) {
-        Color color = MakeBorderColor(
+        sRGBColor color = MakeBorderColor(
             mBorderColors[sides[0]],
             BorderColorStyleForSolidCorner(mBorderStyles[sides[0]], corner));
         mDrawTarget->FillRect(GetCornerRect(corner),
@@ -3388,11 +3386,12 @@ nsCSSBorderImageRenderer::CreateBorderImageRenderer(
   }
 
   // We should always get here with the frame's border, but we may construct an
-  // nsStyleBorder from the stack to deal with :visited. We copy the border
-  // image and such from the non-visited one, so there's no need to do anything
-  // with it.
-  MOZ_ASSERT(&aStyleBorder == aForFrame->StyleBorder() ||
-             aForFrame->Style()->GetStyleIfVisited());
+  // nsStyleBorder om the stack to deal with :visited and other shenaningans.
+  //
+  // We always copy the border image and such from the non-visited one, so
+  // there's no need to do anything with it.
+  MOZ_ASSERT(aStyleBorder.GetBorderImageRequest() ==
+             aForFrame->StyleBorder()->GetBorderImageRequest());
 
   nsCSSBorderImageRenderer renderer(aForFrame, aBorderArea, aStyleBorder,
                                     aSkipSides, imgRenderer);
@@ -3663,18 +3662,21 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
         bool noVerticalBorders = widths[0] <= epsilon && widths[2] < epsilon;
         bool noHorizontalBorders = widths[1] <= epsilon && widths[3] < epsilon;
 
-        // Border image with no border. It's a little silly but WebRender currently does
-        // not handle this. We could fall back to a blob image but there are reftests that
-        // are sensible to the test going through a blob while the reference doesn't.
+        // Border image with no border. It's a little silly but WebRender
+        // currently does not handle this. We could fall back to a blob image
+        // but there are reftests that are sensible to the test going through a
+        // blob while the reference doesn't.
         if (noVerticalBorders && noHorizontalBorders) {
-          aBuilder.PushImage(dest, clip, !aItem->BackfaceIsHidden(), rendering, key.value());
+          aBuilder.PushImage(dest, clip, !aItem->BackfaceIsHidden(), rendering,
+                             key.value());
           break;
         }
 
         // Fall-back if we want to fill the middle area and opposite edges are
         // both empty.
         // TODO(bug 1609893): moving some of the repetition handling code out
-        // of the image shader will make it easier to handle these cases properly.
+        // of the image shader will make it easier to handle these cases
+        // properly.
         if (noHorizontalBorders || noVerticalBorders) {
           return ImgDrawResult::NOT_SUPPORTED;
         }
@@ -3704,8 +3706,11 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
       LayoutDevicePoint lineStart;
       LayoutDevicePoint lineEnd;
       LayoutDeviceSize gradientRadius;
+      LayoutDevicePoint gradientCenter;
+      float gradientAngle;
       renderer.BuildWebRenderParameters(1.0, extendMode, stops, lineStart,
-                                        lineEnd, gradientRadius);
+                                        lineEnd, gradientRadius, gradientCenter,
+                                        gradientAngle);
 
       if (gradient.IsLinear()) {
         LayoutDevicePoint startPoint =
@@ -3723,12 +3728,21 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
             extendMode,
             wr::ToLayoutSideOffsets(outset[0], outset[1], outset[2],
                                     outset[3]));
-      } else {
+      } else if (gradient.IsRadial()) {
         aBuilder.PushBorderRadialGradient(
             dest, clip, !aItem->BackfaceIsHidden(),
             wr::ToBorderWidths(widths[0], widths[1], widths[2], widths[3]),
             mFill, wr::ToLayoutPoint(lineStart),
             wr::ToLayoutSize(gradientRadius), stops, extendMode,
+            wr::ToLayoutSideOffsets(outset[0], outset[1], outset[2],
+                                    outset[3]));
+      } else {
+        MOZ_ASSERT(gradient.IsConic());
+        aBuilder.PushBorderConicGradient(
+            dest, clip, !aItem->BackfaceIsHidden(),
+            wr::ToBorderWidths(widths[0], widths[1], widths[2], widths[3]),
+            mFill, wr::ToLayoutPoint(gradientCenter), gradientAngle, stops,
+            extendMode,
             wr::ToLayoutSideOffsets(outset[0], outset[1], outset[2],
                                     outset[3]));
       }

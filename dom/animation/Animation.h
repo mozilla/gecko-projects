@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_Animation_h
 #define mozilla_dom_Animation_h
 
+#include "X11UndefineNone.h"
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/AnimationPerformanceWarning.h"
@@ -24,11 +25,6 @@
 #include "mozilla/dom/Promise.h"
 #include "nsCSSPropertyID.h"
 #include "nsIGlobalObject.h"
-
-// X11 has a #define for CurrentTime.
-#ifdef CurrentTime
-#  undef CurrentTime
-#endif
 
 struct JSContext;
 class nsCSSPropertyIDSet;
@@ -48,11 +44,19 @@ class Document;
 class Animation : public DOMEventTargetHelper,
                   public LinkedListElement<Animation> {
  protected:
-  virtual ~Animation() {}
+  virtual ~Animation() = default;
 
  public:
   explicit Animation(nsIGlobalObject* aGlobal)
       : DOMEventTargetHelper(aGlobal), mAnimationIndex(sNextAnimationIndex++) {}
+
+  // Constructs a copy of |aOther| with a new effect and timeline.
+  // This is only intended to be used while making a static clone of a document
+  // during printing, and does not assume that |aOther| is in the same document
+  // as any of the other arguments.
+  static already_AddRefed<Animation> ClonePausedAnimation(
+      nsIGlobalObject* aGlobal, const Animation& aOther,
+      AnimationEffect& aEffect, AnimationTimeline& aTimeline);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(Animation, DOMEventTargetHelper)
@@ -90,17 +94,18 @@ class Animation : public DOMEventTargetHelper,
   void SetId(const nsAString& aId);
 
   AnimationEffect* GetEffect() const { return mEffect; }
-  void SetEffect(AnimationEffect* aEffect);
+  virtual void SetEffect(AnimationEffect* aEffect);
   void SetEffectNoUpdate(AnimationEffect* aEffect);
 
   AnimationTimeline* GetTimeline() const { return mTimeline; }
+  // Animation.timeline setter is supported only on Nightly.
   void SetTimeline(AnimationTimeline* aTimeline);
   void SetTimelineNoUpdate(AnimationTimeline* aTimeline);
 
   Nullable<TimeDuration> GetStartTime() const { return mStartTime; }
   Nullable<double> GetStartTimeAsDouble() const;
   void SetStartTime(const Nullable<TimeDuration>& aNewStartTime);
-  void SetStartTimeAsDouble(const Nullable<double>& aStartTime);
+  virtual void SetStartTimeAsDouble(const Nullable<double>& aStartTime);
 
   // This is deliberately _not_ called GetCurrentTime since that would clash
   // with a macro defined in winbase.h
@@ -133,24 +138,19 @@ class Animation : public DOMEventTargetHelper,
 
   void Finish(ErrorResult& aRv);
 
-  virtual void Play(ErrorResult& aRv, LimitBehavior aLimitBehavior);
+  void Play(ErrorResult& aRv, LimitBehavior aLimitBehavior);
   virtual void PlayFromJS(ErrorResult& aRv) {
     Play(aRv, LimitBehavior::AutoRewind);
   }
 
-  virtual void Pause(ErrorResult& aRv);
-  /**
-   * PauseFromJS is currently only here for symmetry with PlayFromJS but
-   * in future we will likely have to flush style in
-   * CSSAnimation::PauseFromJS so we leave it for now.
-   */
-  void PauseFromJS(ErrorResult& aRv) { Pause(aRv); }
+  void Pause(ErrorResult& aRv);
+  virtual void PauseFromJS(ErrorResult& aRv) { Pause(aRv); }
 
   void UpdatePlaybackRate(double aPlaybackRate);
-  void Reverse(ErrorResult& aRv);
+  virtual void Reverse(ErrorResult& aRv);
 
   void Persist();
-  void CommitStyles(ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void CommitStyles(ErrorResult& aRv);
 
   bool IsRunningOnCompositor() const;
 

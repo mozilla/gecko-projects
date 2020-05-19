@@ -4,21 +4,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ProfileBufferEntry.h"
+
+#include <ostream>
+#include <type_traits>
+
+#include "mozilla/Logging.h"
+#include "mozilla/Sprintf.h"
+#include "mozilla/StackWalk.h"
+
 #include "BaseProfiler.h"
-
-#ifdef MOZ_BASE_PROFILER
-
-#  include "ProfileBufferEntry.h"
-
-#  include "BaseProfilerMarkerPayload.h"
-#  include "platform.h"
-#  include "ProfileBuffer.h"
-
-#  include "mozilla/Logging.h"
-#  include "mozilla/Sprintf.h"
-#  include "mozilla/StackWalk.h"
-
-#  include <ostream>
+#include "BaseProfilerMarkerPayload.h"
+#include "platform.h"
+#include "ProfileBuffer.h"
 
 namespace mozilla {
 namespace baseprofiler {
@@ -152,7 +150,7 @@ class MOZ_RAII AutoArraySchemaWriter {
 
   template <typename T>
   void IntElement(uint32_t aIndex, T aValue) {
-    static_assert(!IsSame<T, uint64_t>::value,
+    static_assert(!std::is_same_v<T, uint64_t>,
                   "Narrowing uint64 -> int64 conversion not allowed");
     FillUpTo(aIndex);
     mJSONWriter.IntElement(static_cast<int64_t>(aValue));
@@ -340,6 +338,9 @@ struct CStringWriteFunc : public JSONWriteFunc {
   explicit CStringWriteFunc(std::string& aBuffer) : mBuffer(aBuffer) {}
 
   void Write(const char* aStr) override { mBuffer += aStr; }
+  void Write(const char* aStr, size_t aLen) override {
+    mBuffer.append(aStr, 0, aLen);
+  }
 };
 
 struct ProfileSample {
@@ -370,10 +371,11 @@ static void WriteSample(SpliceableJSONWriter& aWriter,
 
 class EntryGetter {
  public:
-  explicit EntryGetter(BlocksRingBuffer::Reader& aReader,
+  explicit EntryGetter(ProfileChunkedBuffer::Reader& aReader,
                        uint64_t aInitialReadPos = 0)
-      : mBlockIt(aReader.At(
-            BlocksRingBuffer::BlockIndex::ConvertFromU64(aInitialReadPos))),
+      : mBlockIt(
+            aReader.At(ProfileBufferBlockIndex::CreateFromProfileBufferIndex(
+                aInitialReadPos))),
         mBlockItEnd(aReader.end()) {
     if (!ReadLegacyOrEnd()) {
       // Find and read the next non-legacy entry.
@@ -400,11 +402,13 @@ class EntryGetter {
     }
   }
 
-  ProfileBuffer::BlockIndex CurBlockIndex() const {
+  ProfileBufferBlockIndex CurBlockIndex() const {
     return mBlockIt.CurrentBlockIndex();
   }
 
-  uint64_t CurPos() const { return CurBlockIndex().ConvertToU64(); }
+  uint64_t CurPos() const {
+    return CurBlockIndex().ConvertToProfileBufferIndex();
+  }
 
  private:
   // Try to read the entry at the current `mBlockIt` position.
@@ -417,22 +421,28 @@ class EntryGetter {
     if (!Has()) {
       return true;
     }
-    BlocksRingBuffer::EntryReader aER = *mBlockIt;
+    // Read the entry "kind", which is always at the start of all entries.
+    ProfileBufferEntryReader aER = *mBlockIt;
     auto type = static_cast<ProfileBufferEntry::Kind>(
-        aER.PeekObject<ProfileBufferEntry::KindUnderlyingType>());
+        aER.ReadObject<ProfileBufferEntry::KindUnderlyingType>());
     MOZ_ASSERT(static_cast<ProfileBufferEntry::KindUnderlyingType>(type) <
                static_cast<ProfileBufferEntry::KindUnderlyingType>(
                    ProfileBufferEntry::Kind::MODERN_LIMIT));
     if (type >= ProfileBufferEntry::Kind::LEGACY_LIMIT) {
+      aER.SetRemainingBytes(0);
       return false;
     }
-    aER.Read(&mEntry, aER.RemainingBytes());
+    // Here, we have a legacy item, we need to read it from the start.
+    // Because the above `ReadObject` moved the reader, we ned to reset it to
+    // the start of the entry before reading the whole entry.
+    aER = *mBlockIt;
+    aER.ReadBytes(&mEntry, aER.RemainingBytes());
     return true;
   }
 
   ProfileBufferEntry mEntry;
-  BlocksRingBuffer::BlockIterator mBlockIt;
-  const BlocksRingBuffer::BlockIterator mBlockItEnd;
+  ProfileChunkedBuffer::BlockIterator mBlockIt;
+  const ProfileChunkedBuffer::BlockIterator mBlockItEnd;
 };
 
 // The following grammar shows legal sequences of profile buffer entries.
@@ -567,22 +577,22 @@ class EntryGetter {
 // Because this is a format entirely internal to the Profiler, any parsing
 // error indicates a bug in the ProfileBuffer writing or the parser itself,
 // or possibly flaky hardware.
-#  define ERROR_AND_CONTINUE(msg)                            \
-    {                                                        \
-      fprintf(stderr, "ProfileBuffer parse error: %s", msg); \
-      MOZ_ASSERT(false, msg);                                \
-      continue;                                              \
-    }
+#define ERROR_AND_CONTINUE(msg)                            \
+  {                                                        \
+    fprintf(stderr, "ProfileBuffer parse error: %s", msg); \
+    MOZ_ASSERT(false, msg);                                \
+    continue;                                              \
+  }
 
 void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter,
                                         int aThreadId, double aSinceTime,
                                         UniqueStacks& aUniqueStacks) const {
   UniquePtr<char[]> dynStrBuf = MakeUnique<char[]>(kMaxFrameKeyLength);
 
-  mEntries.Read([&](BlocksRingBuffer::Reader* aReader) {
-    MOZ_ASSERT(
-        aReader,
-        "BlocksRingBuffer cannot be out-of-session when sampler is running");
+  mEntries.Read([&](ProfileChunkedBuffer::Reader* aReader) {
+    MOZ_ASSERT(aReader,
+               "ProfileChunkedBuffer cannot be out-of-session when sampler is "
+               "running");
 
     EntryGetter e(*aReader);
 
@@ -806,7 +816,7 @@ void ProfileBuffer::StreamMarkersToJSON(SpliceableJSONWriter& aWriter,
                                         const TimeStamp& aProcessStartTime,
                                         double aSinceTime,
                                         UniqueStacks& aUniqueStacks) const {
-  mEntries.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+  mEntries.ReadEach([&](ProfileBufferEntryReader& aER) {
     auto type = static_cast<ProfileBufferEntry::Kind>(
         aER.ReadObject<ProfileBufferEntry::KindUnderlyingType>());
     MOZ_ASSERT(static_cast<ProfileBufferEntry::KindUnderlyingType>(type) <
@@ -824,7 +834,7 @@ void ProfileBuffer::StreamMarkersToJSON(SpliceableJSONWriter& aWriter,
             static_cast<ProfilingCategoryPair>(aER.ReadObject<uint32_t>()));
         auto payload = aER.ReadObject<UniquePtr<ProfilerMarkerPayload>>();
         double time = aER.ReadObject<double>();
-        MOZ_ASSERT(aER.IndexInEntry() == aER.EntryBytes());
+        MOZ_ASSERT(aER.RemainingBytes() == 0);
 
         aUniqueStacks.mUniqueStrings->WriteElement(aWriter, name.c_str());
         aWriter.DoubleElement(time);
@@ -836,6 +846,8 @@ void ProfileBuffer::StreamMarkersToJSON(SpliceableJSONWriter& aWriter,
         }
       }
       aWriter.EndArray();
+    } else {
+      aER.SetRemainingBytes(0);
     }
   });
 }
@@ -843,10 +855,10 @@ void ProfileBuffer::StreamMarkersToJSON(SpliceableJSONWriter& aWriter,
 void ProfileBuffer::StreamProfilerOverheadToJSON(
     SpliceableJSONWriter& aWriter, const TimeStamp& aProcessStartTime,
     double aSinceTime) const {
-  mEntries.Read([&](BlocksRingBuffer::Reader* aReader) {
-    MOZ_ASSERT(
-        aReader,
-        "BlocksRingBuffer cannot be out-of-session when sampler is running");
+  mEntries.Read([&](ProfileChunkedBuffer::Reader* aReader) {
+    MOZ_ASSERT(aReader,
+               "ProfileChunkedBuffer cannot be out-of-session when sampler is "
+               "running");
 
     EntryGetter e(*aReader);
 
@@ -947,17 +959,17 @@ void ProfileBuffer::StreamProfilerOverheadToJSON(
       aWriter.DoubleProperty("overheadDurations", overheads.sum);
       aWriter.DoubleProperty("overheadPercentage",
                              overheads.sum / (lastTime - firstTime));
-#  define PROFILER_STATS(name, var)                           \
-    aWriter.DoubleProperty("mean" name, (var).sum / (var).n); \
-    aWriter.DoubleProperty("min" name, (var).min);            \
-    aWriter.DoubleProperty("max" name, (var).max);
+#define PROFILER_STATS(name, var)                           \
+  aWriter.DoubleProperty("mean" name, (var).sum / (var).n); \
+  aWriter.DoubleProperty("min" name, (var).min);            \
+  aWriter.DoubleProperty("max" name, (var).max);
       PROFILER_STATS("Interval", intervals);
       PROFILER_STATS("Overhead", overheads);
       PROFILER_STATS("Lockings", lockings);
       PROFILER_STATS("Cleaning", cleanings);
       PROFILER_STATS("Counter", counters);
       PROFILER_STATS("Thread", threads);
-#  undef PROFILER_STATS
+#undef PROFILER_STATS
       aWriter.EndObject();  // statistics
     }
     aWriter.EndObject();  // profilerOverhead
@@ -994,10 +1006,10 @@ void ProfileBuffer::StreamCountersToJSON(SpliceableJSONWriter& aWriter,
   // error indicates a bug in the ProfileBuffer writing or the parser itself,
   // or possibly flaky hardware.
 
-  mEntries.Read([&](BlocksRingBuffer::Reader* aReader) {
-    MOZ_ASSERT(
-        aReader,
-        "BlocksRingBuffer cannot be out-of-session when sampler is running");
+  mEntries.Read([&](ProfileChunkedBuffer::Reader* aReader) {
+    MOZ_ASSERT(aReader,
+               "ProfileChunkedBuffer cannot be out-of-session when sampler is "
+               "running");
 
     EntryGetter e(*aReader);
 
@@ -1150,7 +1162,7 @@ void ProfileBuffer::StreamCountersToJSON(SpliceableJSONWriter& aWriter,
   });
 }
 
-#  undef ERROR_AND_CONTINUE
+#undef ERROR_AND_CONTINUE
 
 static void AddPausedRange(SpliceableJSONWriter& aWriter, const char* aReason,
                            const Maybe<double>& aStartTime,
@@ -1172,10 +1184,10 @@ static void AddPausedRange(SpliceableJSONWriter& aWriter, const char* aReason,
 
 void ProfileBuffer::StreamPausedRangesToJSON(SpliceableJSONWriter& aWriter,
                                              double aSinceTime) const {
-  mEntries.Read([&](BlocksRingBuffer::Reader* aReader) {
-    MOZ_ASSERT(
-        aReader,
-        "BlocksRingBuffer cannot be out-of-session when sampler is running");
+  mEntries.Read([&](ProfileChunkedBuffer::Reader* aReader) {
+    MOZ_ASSERT(aReader,
+               "ProfileChunkedBuffer cannot be out-of-session when sampler is "
+               "running");
 
     EntryGetter e(*aReader);
 
@@ -1217,13 +1229,16 @@ bool ProfileBuffer::DuplicateLastSample(int aThreadId,
     return false;
   }
 
-  BlocksRingBuffer tempBuffer(BlocksRingBuffer::ThreadSafety::WithoutMutex,
-                              mDuplicationBuffer.get(), DuplicationBufferBytes);
+  ProfileChunkedBuffer tempBuffer(
+      ProfileChunkedBuffer::ThreadSafety::WithoutMutex, mWorkerChunkManager);
 
-  const bool ok = mEntries.Read([&](BlocksRingBuffer::Reader* aReader) {
-    MOZ_ASSERT(
-        aReader,
-        "BlocksRingBuffer cannot be out-of-session when sampler is running");
+  auto retrieveWorkerChunk = MakeScopeExit(
+      [&]() { mWorkerChunkManager.Reset(tempBuffer.GetAllChunks()); });
+
+  const bool ok = mEntries.Read([&](ProfileChunkedBuffer::Reader* aReader) {
+    MOZ_ASSERT(aReader,
+               "ProfileChunkedBuffer cannot be out-of-session when sampler is "
+               "running");
 
     EntryGetter e(*aReader, *aLastSample);
 
@@ -1336,7 +1351,7 @@ bool ProfileBuffer::DuplicateLastSample(int aThreadId,
 
   aLastSample = Some(AddThreadIdEntry(aThreadId));
 
-  tempBuffer.Read([&](BlocksRingBuffer::Reader* aReader) {
+  tempBuffer.Read([&](ProfileChunkedBuffer::Reader* aReader) {
     MOZ_ASSERT(aReader, "tempBuffer cannot be out-of-session");
 
     EntryGetter e(*aReader);
@@ -1351,55 +1366,9 @@ bool ProfileBuffer::DuplicateLastSample(int aThreadId,
 }
 
 void ProfileBuffer::DiscardSamplesBeforeTime(double aTime) {
-  const BlockIndex firstBlockToKeep =
-      mEntries.Read([&](BlocksRingBuffer::Reader* aReader) {
-        MOZ_ASSERT(aReader,
-                   "BlocksRingBuffer cannot be out-of-session when sampler is "
-                   "running");
-
-        EntryGetter e(*aReader);
-
-        const BlockIndex bufferStartPos = e.CurBlockIndex();
-        for (;;) {
-          // This block skips entries until we find the start of the next
-          // sample. This is useful in three situations.
-          //
-          // - The circular buffer overwrites old entries, so when we start
-          //   parsing we might be in the middle of a sample, and we must skip
-          //   forward to the start of the next sample.
-          //
-          // - We skip samples that don't have an appropriate ThreadId or Time.
-          //
-          // - We skip range Pause, Resume, CollectionStart, Marker, and
-          //   CollectionEnd entries between samples.
-          while (e.Has()) {
-            if (e.Get().IsThreadId()) {
-              break;
-            }
-            e.Next();
-          }
-
-          if (!e.Has()) {
-            return bufferStartPos;
-          }
-
-          MOZ_RELEASE_ASSERT(e.Get().IsThreadId());
-          const BlockIndex sampleStartPos = e.CurBlockIndex();
-          e.Next();
-
-          if (e.Has() && e.Get().IsTime()) {
-            double sampleTime = e.Get().GetDouble();
-
-            if (sampleTime >= aTime) {
-              // This is the first sample within the window of time that we want
-              // to keep. Throw away all samples before sampleStartPos and
-              // return.
-              return sampleStartPos;
-            }
-          }
-        }
-      });
-  mEntries.ClearBefore(firstBlockToKeep);
+  // This function does nothing!
+  // The duration limit will be removed from Firefox, see bug 1632365.
+  Unused << aTime;
 }
 
 // END ProfileBuffer
@@ -1407,5 +1376,3 @@ void ProfileBuffer::DiscardSamplesBeforeTime(double aTime) {
 
 }  // namespace baseprofiler
 }  // namespace mozilla
-
-#endif  // MOZ_BASE_PROFILER

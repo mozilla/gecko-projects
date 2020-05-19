@@ -58,21 +58,21 @@ ScriptAndCounts::ScriptAndCounts(ScriptAndCounts&& sac)
 void SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
                              HandleScript script, JSObject* argsobj);
 
-inline void ScriptWarmUpData::initEnclosingScript(LazyScript* enclosingScript) {
+inline void ScriptWarmUpData::initEnclosingScript(BaseScript* enclosingScript) {
   MOZ_ASSERT(data_ == ResetState());
   setTaggedPtr<EnclosingScriptTag>(enclosingScript);
-  static_assert(std::is_base_of<gc::TenuredCell, LazyScript>::value,
-                "LazyScript must be TenuredCell to avoid post-barriers");
+  static_assert(std::is_base_of_v<gc::TenuredCell, BaseScript>,
+                "BaseScript must be TenuredCell to avoid post-barriers");
 }
 inline void ScriptWarmUpData::clearEnclosingScript() {
-  LazyScript::writeBarrierPre(toEnclosingScript());
+  BaseScript::writeBarrierPre(toEnclosingScript());
   data_ = ResetState();
 }
 
 inline void ScriptWarmUpData::initEnclosingScope(Scope* enclosingScope) {
   MOZ_ASSERT(data_ == ResetState());
   setTaggedPtr<EnclosingScopeTag>(enclosingScope);
-  static_assert(std::is_base_of<gc::TenuredCell, Scope>::value,
+  static_assert(std::is_base_of_v<gc::TenuredCell, Scope>,
                 "Scope must be TenuredCell to avoid post-barriers");
 }
 inline void ScriptWarmUpData::clearEnclosingScope() {
@@ -84,9 +84,14 @@ inline JSPrincipals* BaseScript::principals() const {
   return realm()->principals();
 }
 
+inline JSScript* BaseScript::asJSScript() {
+  MOZ_ASSERT(hasBytecode());
+  return static_cast<JSScript*>(this);
+}
+
 }  // namespace js
 
-inline JSFunction* JSScript::getFunction(size_t index) {
+inline JSFunction* JSScript::getFunction(size_t index) const {
   JSObject* obj = getObject(index);
   MOZ_RELEASE_ASSERT(obj->is<JSFunction>(), "Script object is not JSFunction");
   JSFunction* fun = &obj->as<JSFunction>();
@@ -94,18 +99,18 @@ inline JSFunction* JSScript::getFunction(size_t index) {
   return fun;
 }
 
-inline JSFunction* JSScript::getFunction(jsbytecode* pc) {
+inline JSFunction* JSScript::getFunction(jsbytecode* pc) const {
   return getFunction(GET_UINT32_INDEX(pc));
 }
 
-inline js::RegExpObject* JSScript::getRegExp(size_t index) {
+inline js::RegExpObject* JSScript::getRegExp(size_t index) const {
   JSObject* obj = getObject(index);
   MOZ_RELEASE_ASSERT(obj->is<js::RegExpObject>(),
                      "Script object is not RegExpObject");
   return &obj->as<js::RegExpObject>();
 }
 
-inline js::RegExpObject* JSScript::getRegExp(jsbytecode* pc) {
+inline js::RegExpObject* JSScript::getRegExp(jsbytecode* pc) const {
   JSObject* obj = getObject(pc);
   MOZ_RELEASE_ASSERT(obj->is<js::RegExpObject>(),
                      "Script object is not RegExpObject");
@@ -155,21 +160,21 @@ inline js::Shape* JSScript::initialEnvironmentShape() const {
 }
 
 inline bool JSScript::ensureHasAnalyzedArgsUsage(JSContext* cx) {
-  if (analyzedArgsUsage()) {
-    return true;
+  if (needsArgsAnalysis()) {
+    return js::jit::AnalyzeArgumentsUsage(cx, this);
   }
-  return js::jit::AnalyzeArgumentsUsage(cx, this);
+  return true;
 }
 
 inline bool JSScript::isDebuggee() const {
   return realm()->debuggerObservesAllExecution() || hasDebugScript();
 }
 
-inline bool JSScript::hasBaselineScript() const {
+inline bool js::BaseScript::hasBaselineScript() const {
   return hasJitScript() && jitScript()->hasBaselineScript();
 }
 
-inline bool JSScript::hasIonScript() const {
+inline bool js::BaseScript::hasIonScript() const {
   return hasJitScript() && jitScript()->hasIonScript();
 }
 

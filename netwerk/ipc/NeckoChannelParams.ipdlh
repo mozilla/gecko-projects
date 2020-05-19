@@ -28,7 +28,7 @@ namespace mozilla {
 namespace net {
 
 //-----------------------------------------------------------------------------
-// CookieSettings IPDL structs
+// CookieJarSettings IPDL structs
 //-----------------------------------------------------------------------------
 
 struct CookiePermissionData
@@ -37,12 +37,14 @@ struct CookiePermissionData
   uint32_t cookiePermission;
 };
 
-struct CookieSettingsArgs
+struct CookieJarSettingsArgs
 {
-  // Copy of the cookie behavior and permissions for the top-level document.
+  // Copy of the cookie jar settings for the top-level document.
   uint32_t cookieBehavior;
+  bool isOnContentBlockingAllowList;
   CookiePermissionData[] cookiePermissions;
   bool isFixed;
+  nsString firstPartyDomain;
 };
 
 //-----------------------------------------------------------------------------
@@ -98,6 +100,7 @@ struct LoadInfoArgs
   uint64_t                    frameBrowsingContextID;
   bool                        initialSecurityCheckDone;
   bool                        isInThirdPartyContext;
+  bool                        isThirdPartyContextToTopWindow;
   bool                        isFormSubmission;
   bool                        sendCSPViolationEvents;
   OriginAttributes            originAttributes;
@@ -144,10 +147,15 @@ struct LoadInfoArgs
   bool allowListFutureDocumentsCreatedFromThisRedirectChain;
   nsString                    cspNonce;
   bool                        skipContentSniffing;
+  uint32_t                    httpsOnlyStatus;
+  bool                        hasValidUserGestureActivation;
+  bool                        allowDeprecatedSystemRequests;
+  bool                        parserCreatedScript;
   bool                        isFromProcessingFrameAttributes;
-  CookieSettingsArgs cookieSettings;
+  CookieJarSettingsArgs       cookieJarSettings;
   uint32_t                    requestBlockingReason;
   CSPInfo?                    cspToInheritInfo;
+  bool                        hasStoragePermission;
 };
 
 /**
@@ -177,11 +185,27 @@ struct ParentLoadInfoForwarderArgs
   // tainting value.
   uint32_t tainting;
 
-
   // This flag is used for any browsing context where we should not sniff
   // the content type. E.g if an iframe has the XCTO nosniff header, then
   // that flag is set to true so we skip content sniffing for that browsing
   bool skipContentSniffing;
+
+  uint32_t httpsOnlyStatus;
+
+  // Returns true if at the time of the loadinfo construction the document
+  // that triggered this load has the bit hasValidTransientUserGestureActivation
+  // set or the load was triggered from External. (Mostly this bool is used
+  // in the context of Sec-Fetch-User.)
+  bool hasValidUserGestureActivation;
+
+  // The SystemPrincipal is disallowed to make requests to the public web
+  // and all requests will be cancelled. Setting this flag to true prevents
+  // the request from being cancelled.
+  bool allowDeprecatedSystemRequests;
+
+  // Only ever returns true if the loadinfo is of TYPE_SCRIPT and
+  // the script was created by the HTML parser.
+  bool parserCreatedScript;
 
   // We must also note that the tainting value was explicitly set
   // by the service worker.
@@ -191,9 +215,13 @@ struct ParentLoadInfoForwarderArgs
   bool documentHasLoaded;
   bool allowListFutureDocumentsCreatedFromThisRedirectChain;
 
-  CookieSettingsArgs? cookieSettings;
+  CookieJarSettingsArgs? cookieJarSettings;
 
   uint32_t requestBlockingReason;
+
+  bool hasStoragePermission;
+
+  bool isThirdPartyContextToTopWindow;
 
   // IMPORTANT: when you add new properites here you must also update
   // LoadInfoToParentLoadInfoForwarder and MergeParentLoadInfoForwarder
@@ -241,7 +269,6 @@ struct HttpChannelOpenArgs
   nsIReferrerInfo             referrerInfo;
   URIParams?                  apiRedirectTo;
   URIParams?                  topWindowURI;
-  nsIPrincipal?               contentBlockingAllowListPrincipal;
   uint32_t                    loadFlags;
   RequestHeaderTuples         requestHeaders;
   nsCString                   requestMethod;
@@ -343,6 +370,17 @@ struct HttpConnectionInfoCloneArgs
   ProxyInfoCloneArgs[] proxyInfo;
 };
 
+struct ConsoleReportCollected {
+  uint32_t errorFlags;
+  nsCString category;
+  uint32_t propertiesFile;
+  nsCString sourceFileURI;
+  uint32_t lineNumber;
+  uint32_t columnNumber;
+  nsCString messageName;
+  nsString[] stringParams;
+};
+
 //-----------------------------------------------------------------------------
 // FTP IPDL structs
 //-----------------------------------------------------------------------------
@@ -397,35 +435,17 @@ struct CookieStruct
 };
 
 struct DocumentChannelCreationArgs {
-  URIParams? topWindowURI;
   DocShellLoadStateInit loadState;
-  LoadInfoArgs loadInfo;
-  PrincipalInfo? contentBlockingAllowListPrincipal;
   TimeStamp asyncOpenTime;
-  nsString? initiatorType;
-  nsString customUserAgent;
   uint64_t channelId;
-  uint32_t loadFlags;
-  uint32_t loadType;
   uint32_t cacheKey;
-  uint32_t? documentOpenFlags;
-  bool isActive;
-  bool isTopLevelDoc;
-  bool hasNonEmptySandboxingFlags;
   bool pluginsAllowed;
   nsDOMNavigationTiming? timing;
-};
-
-struct DocumentChannelRedirect {
-  nsIURI uri;
-  uint32_t redirectFlags;
-  uint32_t responseStatus;
-  bool isPost;
-};
-
-struct LastVisitInfo {
-  nsIURI uri;
-  uint32_t previousFlags;
+  IPCClientInfo? initialClientInfo;
+  uint64_t outerWindowId;
+  bool hasValidTransientUserAction;
+  bool uriModified;
+  bool isXFOError;
 };
 
 struct RedirectToRealChannelArgs {
@@ -434,7 +454,6 @@ struct RedirectToRealChannelArgs {
   uint32_t newLoadFlags;
   ReplacementChannelConfigInit? init;
   LoadInfoArgs? loadInfo;
-  DocumentChannelRedirect[] redirects;
   uint64_t channelId;
   nsIURI originalURI;
   uint32_t redirectMode;
@@ -443,8 +462,8 @@ struct RedirectToRealChannelArgs {
   nsString? contentDispositionFilename;
   uint64_t redirectIdentifier;
   nsIPropertyBag2 properties;
-  LastVisitInfo lastVisitInfo;
   uint32_t loadStateLoadFlags;
+  uint32_t loadStateLoadType;
   nsDOMNavigationTiming? timing;
   nsString srcdocData;
   nsIURI baseUri;
@@ -504,6 +523,13 @@ struct TransactionObserverResult
   bool versionOk;
   bool authOk;
   nsresult closeReason;
+};
+
+struct SpeculativeConnectionOverriderArgs {
+  uint32_t parallelSpeculativeConnectLimit;
+  bool ignoreIdle;
+  bool isFromPredictor;
+  bool allow1918;
 };
 
 } // namespace net

@@ -25,6 +25,9 @@ var { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 var { AddonTestUtils } = ChromeUtils.import(
   "resource://testing-common/AddonTestUtils.jsm"
 );
+const { ExtensionTestUtils } = ChromeUtils.import(
+  "resource://testing-common/ExtensionXPCShellUtils.jsm"
+);
 
 const PREF_SEARCH_URL = "geoSpecificDefaults.url";
 const NS_APP_SEARCH_DIR = "SrchPlugns";
@@ -43,17 +46,6 @@ var XULRuntime = Cc["@mozilla.org/xre/runtime;1"].getService(Ci.nsIXULRuntime);
 // Expand the amount of information available in error logs
 Services.prefs.setBoolPref("browser.search.log", true);
 
-// The geo-specific search tests assume certain prefs are already setup, which
-// might not be true when run in comm-central etc.  So create them here.
-Services.prefs.setBoolPref("browser.search.geoSpecificDefaults", true);
-Services.prefs.setIntPref("browser.search.geoip.timeout", 3000);
-// But still disable geoip lookups - tests that need it will re-configure this.
-Services.prefs.setCharPref("browser.search.geoip.url", "");
-// Also disable region defaults - tests using it will also re-configure it.
-Services.prefs
-  .getDefaultBranch(SearchUtils.BROWSER_SEARCH_PREF)
-  .setCharPref("geoSpecificDefaults.url", "");
-
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
   "gModernConfig",
@@ -67,6 +59,12 @@ AddonTestUtils.createAppInfo(
   "XPCShell",
   "42",
   "42"
+);
+
+// Allow telemetry probes which may otherwise be disabled for some applications (e.g. Thunderbird)
+Services.prefs.setBoolPref(
+  "toolkit.telemetry.testing.overrideProductsCheck",
+  true
 );
 
 /**
@@ -96,19 +94,16 @@ async function useTestEngines(
     .QueryInterface(Ci.nsIResProtocolHandler);
   resProt.setSubstitution("search-extensions", Services.io.newURI(url));
   if (gModernConfig) {
+    const settings = await RemoteSettings(SearchUtils.SETTINGS_KEY);
     if (config) {
-      return sinon
-        .stub(SearchEngineSelector.prototype, "getEngineConfiguration")
-        .returns(config);
+      return sinon.stub(settings, "get").returns(config);
     }
     let chan = NetUtil.newChannel({
       uri: "resource://search-extensions/engines.json",
       loadUsingSystemPrincipal: true,
     });
     let json = parseJsonFromStream(chan.open());
-    return sinon
-      .stub(SearchEngineSelector.prototype, "getEngineConfiguration")
-      .returns(json.data);
+    return sinon.stub(settings, "get").returns(json.data);
   }
   return null;
 }
@@ -230,7 +225,7 @@ function getDefaultEngineName(isUS = false, privateMode = false) {
     isUS = Services.locale.requestedLocale == "en-US" && isUSTimezone();
   }
 
-  if (isUS && ("US" in searchSettings && settingName in searchSettings.US)) {
+  if (isUS && "US" in searchSettings && settingName in searchSettings.US) {
     defaultEngineName = searchSettings.US[settingName];
   }
   return defaultEngineName;
@@ -373,6 +368,7 @@ async function withGeoServer(
   testFn,
   {
     visibleDefaultEngines = null,
+    searchDefault = null,
     geoLookupData = null,
     preGeolookupPromise = Promise.resolve,
     cohort = null,
@@ -387,7 +383,7 @@ async function withGeoServer(
   srv.registerPathHandler("/lookup_defaults", (metadata, response) => {
     let data = {
       interval: intval200,
-      settings: { searchDefault: kTestEngineName },
+      settings: { searchDefault: searchDefault ?? kTestEngineName },
     };
     if (cohort) {
       data.cohort = cohort;
@@ -438,7 +434,7 @@ async function withGeoServer(
   let defaultBranch = Services.prefs.getDefaultBranch(
     SearchUtils.BROWSER_SEARCH_PREF
   );
-  let originalURL = defaultBranch.getCharPref(PREF_SEARCH_URL);
+  let originalURL = defaultBranch.getCharPref(PREF_SEARCH_URL, "");
   defaultBranch.setCharPref(PREF_SEARCH_URL, url);
   // Set a bogus user value so that running the test ensures we ignore it.
   Services.prefs.setCharPref(
@@ -449,7 +445,7 @@ async function withGeoServer(
   let geoLookupUrl = geoLookupData
     ? `http://localhost:${srv.identity.primaryPort}/lookup_geoip`
     : 'data:application/json,{"country_code": "FR"}';
-  Services.prefs.setCharPref("browser.search.geoip.url", geoLookupUrl);
+  Services.prefs.setCharPref("browser.region.network.url", geoLookupUrl);
 
   try {
     await testFn(gRequests);
@@ -459,7 +455,7 @@ async function withGeoServer(
     Services.prefs.clearUserPref(
       SearchUtils.BROWSER_SEARCH_PREF + PREF_SEARCH_URL
     );
-    Services.prefs.clearUserPref("browser.search.geoip.url");
+    Services.prefs.clearUserPref("browser.region.network.url");
   }
 }
 
@@ -552,7 +548,7 @@ async function asyncReInit({ awaitRegionFetch = false } = {}) {
 const TELEMETRY_RESULT_ENUM = {
   SUCCESS: 0,
   SUCCESS_WITHOUT_DATA: 1,
-  XHRTIMEOUT: 2,
+  TIMEOUT: 2,
   ERROR: 3,
 };
 
@@ -593,6 +589,31 @@ async function setupRemoteSettings() {
       _status: "synced",
     },
   ]);
+}
+
+/**
+ * Helper function that sets up a server and respnds to region
+ * fetch requests.
+ * @param {string} region
+ *   The region that the server will respond with.
+ * @param {Promise|null} waitToRespond
+ *   A promise that the server will await on to delay responding
+ *   to the request.
+ */
+function useCustomGeoServer(region, waitToRespond = Promise.resolve()) {
+  let srv = useHttpServer();
+  srv.registerPathHandler("/fetch_region", async (req, res) => {
+    res.processAsync();
+    await waitToRespond;
+    res.setStatusLine("1.1", 200, "OK");
+    res.write(JSON.stringify({ country_code: region }));
+    res.finish();
+  });
+
+  Services.prefs.setCharPref(
+    "browser.region.network.url",
+    `http://localhost:${srv.identity.primaryPort}/fetch_region`
+  );
 }
 
 /**

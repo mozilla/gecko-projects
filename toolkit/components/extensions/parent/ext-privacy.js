@@ -29,10 +29,16 @@ const cookieBehaviorValues = new Map([
   ["reject_all", cookieSvc.BEHAVIOR_REJECT],
   ["allow_visited", cookieSvc.BEHAVIOR_LIMIT_FOREIGN],
   ["reject_trackers", cookieSvc.BEHAVIOR_REJECT_TRACKER],
+  [
+    "reject_trackers_and_partition_foreign",
+    cookieSvc.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN,
+  ],
 ]);
 
 function isTLSMinVersionLowerOrEQThan(version) {
-  return Services.prefs.getIntPref(TLS_MIN_PREF) <= version;
+  return (
+    Services.prefs.getDefaultBranch("").getIntPref(TLS_MIN_PREF) <= version
+  );
 }
 
 const TLS_VERSIONS = [
@@ -44,6 +50,7 @@ const TLS_VERSIONS = [
 
 // Add settings objects for supported APIs to the preferences manager.
 ExtensionPreferencesManager.addSetting("network.networkPredictionEnabled", {
+  permission: "privacy",
   prefNames: [
     "network.predictor.enabled",
     "network.prefetch-next",
@@ -62,6 +69,7 @@ ExtensionPreferencesManager.addSetting("network.networkPredictionEnabled", {
 });
 
 ExtensionPreferencesManager.addSetting("network.peerConnectionEnabled", {
+  permission: "privacy",
   prefNames: ["media.peerconnection.enabled"],
 
   setCallback(value) {
@@ -70,6 +78,7 @@ ExtensionPreferencesManager.addSetting("network.peerConnectionEnabled", {
 });
 
 ExtensionPreferencesManager.addSetting("network.webRTCIPHandlingPolicy", {
+  permission: "privacy",
   prefNames: [
     "media.peerconnection.ice.default_address_only",
     "media.peerconnection.ice.no_host",
@@ -108,6 +117,7 @@ ExtensionPreferencesManager.addSetting("network.webRTCIPHandlingPolicy", {
 });
 
 ExtensionPreferencesManager.addSetting("services.passwordSavingEnabled", {
+  permission: "privacy",
   prefNames: ["signon.rememberSignons"],
 
   setCallback(value) {
@@ -116,6 +126,7 @@ ExtensionPreferencesManager.addSetting("services.passwordSavingEnabled", {
 });
 
 ExtensionPreferencesManager.addSetting("websites.cookieConfig", {
+  permission: "privacy",
   prefNames: ["network.cookie.cookieBehavior", "network.cookie.lifetimePolicy"],
 
   setCallback(value) {
@@ -129,6 +140,7 @@ ExtensionPreferencesManager.addSetting("websites.cookieConfig", {
 });
 
 ExtensionPreferencesManager.addSetting("websites.firstPartyIsolate", {
+  permission: "privacy",
   prefNames: ["privacy.firstparty.isolate"],
 
   setCallback(value) {
@@ -137,6 +149,7 @@ ExtensionPreferencesManager.addSetting("websites.firstPartyIsolate", {
 });
 
 ExtensionPreferencesManager.addSetting("websites.hyperlinkAuditingEnabled", {
+  permission: "privacy",
   prefNames: ["browser.send_pings"],
 
   setCallback(value) {
@@ -145,6 +158,7 @@ ExtensionPreferencesManager.addSetting("websites.hyperlinkAuditingEnabled", {
 });
 
 ExtensionPreferencesManager.addSetting("websites.referrersEnabled", {
+  permission: "privacy",
   prefNames: ["network.http.sendRefererHeader"],
 
   // Values for network.http.sendRefererHeader:
@@ -156,6 +170,7 @@ ExtensionPreferencesManager.addSetting("websites.referrersEnabled", {
 });
 
 ExtensionPreferencesManager.addSetting("websites.resistFingerprinting", {
+  permission: "privacy",
   prefNames: ["privacy.resistFingerprinting"],
 
   setCallback(value) {
@@ -164,6 +179,7 @@ ExtensionPreferencesManager.addSetting("websites.resistFingerprinting", {
 });
 
 ExtensionPreferencesManager.addSetting("websites.trackingProtectionMode", {
+  permission: "privacy",
   prefNames: [
     "privacy.trackingprotection.enabled",
     "privacy.trackingprotection.pbmode.enabled",
@@ -194,6 +210,7 @@ ExtensionPreferencesManager.addSetting("websites.trackingProtectionMode", {
 });
 
 ExtensionPreferencesManager.addSetting("network.tlsVersionRestriction", {
+  permission: "privacy",
   prefNames: [TLS_MIN_PREF, TLS_MAX_PREF],
 
   setCallback(value) {
@@ -203,22 +220,40 @@ ExtensionPreferencesManager.addSetting("network.tlsVersionRestriction", {
         return version.version;
       }
 
-      Services.console.logStringMessage(
+      throw new ExtensionError(
         `Setting TLS version ${string} is not allowed for security reasons.`
       );
-      return 0;
     }
 
-    const prefs = [];
+    const prefs = {};
 
-    const minimum = tlsStringToVersion(value.minimum);
-    if (minimum) {
-      prefs[TLS_MIN_PREF] = minimum;
+    if (value.minimum) {
+      prefs[TLS_MIN_PREF] = tlsStringToVersion(value.minimum);
     }
 
-    const maximum = tlsStringToVersion(value.maximum);
-    if (maximum) {
-      prefs[TLS_MAX_PREF] = maximum;
+    if (value.maximum) {
+      prefs[TLS_MAX_PREF] = tlsStringToVersion(value.maximum);
+    }
+
+    // If minimum has passed and it's greater than the max value.
+    if (prefs[TLS_MIN_PREF]) {
+      const max =
+        prefs[TLS_MAX_PREF] || Services.prefs.getIntPref(TLS_MAX_PREF);
+      if (max < prefs[TLS_MIN_PREF]) {
+        throw new ExtensionError(
+          `Setting TLS min version grater than the max version is not allowed.`
+        );
+      }
+    }
+
+    // If maximum has passed and it's lower than the min value.
+    else if (prefs[TLS_MAX_PREF]) {
+      const min = Services.prefs.getIntPref(TLS_MIN_PREF);
+      if (min > prefs[TLS_MAX_PREF]) {
+        throw new ExtensionError(
+          `Setting TLS max version lower than the min version is not allowed.`
+        );
+      }
     }
 
     return prefs;

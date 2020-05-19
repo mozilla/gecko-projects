@@ -16,7 +16,34 @@ function resendNetworkRequest(messageId) {
   };
 }
 
+function highlightDomElement(grip) {
+  return ({ hud }) => {
+    const highlighter = hud.getHighlighter();
+    if (highlighter) {
+      highlighter.highlight(grip);
+    }
+  };
+}
+
+function unHighlightDomElement(grip) {
+  return ({ hud }) => {
+    const highlighter = hud.getHighlighter();
+    if (highlighter) {
+      highlighter.unhighlight(grip);
+    }
+  };
+}
+
+function openNodeInInspector(actor) {
+  return ({ hud }) => {
+    hud.openNodeInInspector({ actor: actor });
+  };
+}
+
 module.exports = {
+  highlightDomElement,
+  unHighlightDomElement,
   openNetworkPanel,
   resendNetworkRequest,
+  openNodeInInspector,
 };

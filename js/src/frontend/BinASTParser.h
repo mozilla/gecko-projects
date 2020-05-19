@@ -65,11 +65,10 @@ class BinASTParser : public BinASTParserPerTokenizer<Tok> {
  public:
   BinASTParser(JSContext* cx, CompilationInfo& compilationInfo,
                const JS::ReadOnlyCompileOptions& options,
-               HandleScriptSourceObject sourceObject,
-               Handle<LazyScript*> lazyScript = nullptr)
+               Handle<BaseScript*> lazyScript = nullptr)
       : BinASTParserPerTokenizer<Tok>(cx, compilationInfo, options,
-                                      sourceObject, lazyScript) {}
-  ~BinASTParser() {}
+                                      lazyScript) {}
+  ~BinASTParser() = default;
 
  protected:
   // BinASTParserBase fields.
@@ -78,9 +77,9 @@ class BinASTParser : public BinASTParserPerTokenizer<Tok> {
   using Base::alloc_;
   using Base::usedNames_;
 
+  using Base::compilationInfo_;
   using Base::handler_;
   using Base::pc_;
-  using Base::sourceObject_;
 
  protected:
   // BinASTParserPerTokenizer types.

@@ -50,7 +50,7 @@ NS_INTERFACE_MAP_END
 LegacyMozTCPSocket::LegacyMozTCPSocket(nsPIDOMWindowInner* aWindow)
     : mGlobal(do_QueryInterface(aWindow)) {}
 
-LegacyMozTCPSocket::~LegacyMozTCPSocket() {}
+LegacyMozTCPSocket::~LegacyMozTCPSocket() = default;
 
 already_AddRefed<TCPSocket> LegacyMozTCPSocket::Open(
     const nsAString& aHost, uint16_t aPort, const SocketOptions& aOptions,
@@ -110,6 +110,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(TCPSocket, DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingDataAfterStartTLS)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSocketBridgeChild)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSocketBridgeParent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(TCPSocket, DOMEventTargetHelper)
@@ -312,7 +313,7 @@ class CopierCallbacks final : public nsIRequestObserver {
   NS_DECL_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
  private:
-  ~CopierCallbacks() {}
+  ~CopierCallbacks() = default;
 };
 
 NS_IMPL_ISUPPORTS(CopierCallbacks, nsIRequestObserver)

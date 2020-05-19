@@ -353,6 +353,7 @@ void MacroAssemblerCompat::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
       case Scalar::Uint8Clamped:
       case Scalar::BigInt64:
       case Scalar::BigUint64:
+      case Scalar::V128:
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected array type");
     }
@@ -412,6 +413,7 @@ void MacroAssemblerCompat::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
       case Scalar::Uint8Clamped:
       case Scalar::BigInt64:
       case Scalar::BigUint64:
+      case Scalar::V128:
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected array type");
     }
@@ -446,6 +448,10 @@ void MacroAssembler::flush() { Assembler::flush(); }
 // Stack manipulation functions.
 
 void MacroAssembler::PushRegsInMask(LiveRegisterSet set) {
+#ifdef ENABLE_WASM_SIMD
+#  error "Needs more careful logic if SIMD is enabled"
+#endif
+
   for (GeneralRegisterBackwardIterator iter(set.gprs()); iter.more();) {
     vixl::CPURegister src[4] = {vixl::NoCPUReg, vixl::NoCPUReg, vixl::NoCPUReg,
                                 vixl::NoCPUReg};
@@ -474,6 +480,10 @@ void MacroAssembler::PushRegsInMask(LiveRegisterSet set) {
 
 void MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest,
                                      Register scratch) {
+#ifdef ENABLE_WASM_SIMD
+#  error "Needs more careful logic if SIMD is enabled"
+#endif
+
   FloatRegisterSet fpuSet(set.fpus().reduceSetForPush());
   unsigned numFpu = fpuSet.size();
   int32_t diffF = fpuSet.getPushSizeInBytes();
@@ -510,6 +520,10 @@ void MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest,
 
 void MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set,
                                          LiveRegisterSet ignore) {
+#ifdef ENABLE_WASM_SIMD
+#  error "Needs more careful logic if SIMD is enabled"
+#endif
+
   // The offset of the data from the stack pointer.
   uint32_t offset = 0;
 
@@ -982,42 +996,11 @@ void MacroAssembler::branchValueIsNurseryCellImpl(Condition cond,
   MOZ_ASSERT(temp != ScratchReg &&
              temp != ScratchReg2);  // Both may be used internally.
 
-  Label done, checkAddress, checkObjectAddress, checkStringAddress;
-  bool testNursery = (cond == Assembler::Equal);
-  branchTestObject(Assembler::Equal, value, &checkObjectAddress);
-  branchTestString(Assembler::Equal, value, &checkStringAddress);
-  branchTestBigInt(Assembler::NotEqual, value, testNursery ? &done : label);
-
-  unboxBigInt(value, temp);
-  jump(&checkAddress);
-
-  bind(&checkStringAddress);
-  unboxString(value, temp);
-  jump(&checkAddress);
-
-  bind(&checkObjectAddress);
-  unboxObject(value, temp);
-
-  bind(&checkAddress);
-  orPtr(Imm32(gc::ChunkMask), temp);
-  branch32(cond, Address(temp, gc::ChunkLocationOffsetFromLastByte),
-           Imm32(int32_t(gc::ChunkLocation::Nursery)), label);
-
-  bind(&done);
-}
-
-void MacroAssembler::branchValueIsNurseryObject(Condition cond,
-                                                ValueOperand value,
-                                                Register temp, Label* label) {
-  MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-  MOZ_ASSERT(temp != ScratchReg &&
-             temp != ScratchReg2);  // Both may be used internally.
-
   Label done;
-  branchTestObject(Assembler::NotEqual, value,
-                   cond == Assembler::Equal ? &done : label);
+  branchTestGCThing(Assembler::NotEqual, value,
+                    cond == Assembler::Equal ? &done : label);
 
-  unboxObject(value, temp);
+  unboxGCThingForGCBarrier(value, temp);
   orPtr(Imm32(gc::ChunkMask), temp);
   branch32(cond, Address(temp, gc::ChunkLocationOffsetFromLastByte),
            Imm32(int32_t(gc::ChunkLocation::Nursery)), label);

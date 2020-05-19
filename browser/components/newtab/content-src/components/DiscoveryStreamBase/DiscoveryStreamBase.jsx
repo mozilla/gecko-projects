@@ -7,9 +7,9 @@ import { CardGrid } from "content-src/components/DiscoveryStreamComponents/CardG
 import { CollectionCardGrid } from "content-src/components/DiscoveryStreamComponents/CollectionCardGrid/CollectionCardGrid";
 import { CollapsibleSection } from "content-src/components/CollapsibleSection/CollapsibleSection";
 import { connect } from "react-redux";
-import { DSDismiss } from "content-src/components/DiscoveryStreamComponents/DSDismiss/DSDismiss";
 import { DSMessage } from "content-src/components/DiscoveryStreamComponents/DSMessage/DSMessage";
 import { DSPrivacyModal } from "content-src/components/DiscoveryStreamComponents/DSPrivacyModal/DSPrivacyModal";
+import { DSSignup } from "content-src/components/DiscoveryStreamComponents/DSSignup/DSSignup";
 import { DSTextPromo } from "content-src/components/DiscoveryStreamComponents/DSTextPromo/DSTextPromo";
 import { Hero } from "content-src/components/DiscoveryStreamComponents/Hero/Hero";
 import { Highlights } from "content-src/components/DiscoveryStreamComponents/Highlights/Highlights";
@@ -138,55 +138,20 @@ export class _DiscoveryStreamBase extends React.PureComponent {
           />
         );
       case "TextPromo":
-        if (
-          !component.data ||
-          !component.data.spocs ||
-          !component.data.spocs[0]
-        ) {
-          return null;
-        }
-        // Grab the first item in the array as we only have 1 spoc position.
-        const [spoc] = component.data.spocs;
-        const {
-          image_src,
-          raw_image_src,
-          alt_text,
-          title,
-          url,
-          context,
-          cta,
-          flight_id,
-          id,
-          shim,
-        } = spoc;
-
         return (
-          <DSDismiss
-            data={{
-              url: spoc.url,
-              guid: spoc.id,
-              shim: spoc.shim,
-            }}
+          <DSTextPromo
             dispatch={this.props.dispatch}
-            shouldSendImpressionStats={true}
-            extraClasses={`ds-dismiss-ds-text-promo`}
-          >
-            <DSTextPromo
-              dispatch={this.props.dispatch}
-              image={image_src}
-              raw_image_src={raw_image_src}
-              alt_text={alt_text || title}
-              header={title}
-              cta_text={cta}
-              cta_url={url}
-              subtitle={context}
-              flightId={flight_id}
-              id={id}
-              pos={0}
-              shim={shim}
-              type={component.type}
-            />
-          </DSDismiss>
+            type={component.type}
+            data={component.data}
+          />
+        );
+      case "Signup":
+        return (
+          <DSSignup
+            dispatch={this.props.dispatch}
+            type={component.type}
+            data={component.data}
+          />
         );
       case "Message":
         return (
@@ -209,38 +174,27 @@ export class _DiscoveryStreamBase extends React.PureComponent {
           />
         );
       case "CollectionCardGrid":
-        if (
-          !component.data ||
-          !component.data.spocs ||
-          !component.data.spocs[0] ||
-          // We only display complete collections.
-          component.data.spocs.length < 3
-        ) {
-          return null;
-        }
+        const { DiscoveryStream } = this.props;
         return (
-          <DSDismiss
+          <CollectionCardGrid
+            data={component.data}
+            feed={component.feed}
+            spocs={DiscoveryStream.spocs}
+            placement={component.placement}
+            border={component.properties.border}
+            type={component.type}
+            items={component.properties.items}
+            cta_variant={component.cta_variant}
+            display_engagement_labels={ENGAGEMENT_LABEL_ENABLED}
+            dismissible={this.props.DiscoveryStream.isCollectionDismissible}
             dispatch={this.props.dispatch}
-            shouldSendImpressionStats={true}
-            extraClasses={`ds-dismiss-ds-collection`}
-          >
-            <CollectionCardGrid
-              placement={component.placement}
-              data={component.data}
-              feed={component.feed}
-              border={component.properties.border}
-              type={component.type}
-              dispatch={this.props.dispatch}
-              items={component.properties.items}
-              cta_variant={component.cta_variant}
-              display_engagement_labels={ENGAGEMENT_LABEL_ENABLED}
-            />
-          </DSDismiss>
+          />
         );
       case "CardGrid":
         return (
           <CardGrid
             title={component.header && component.header.title}
+            display_variant={component.properties.display_variant}
             data={component.data}
             feed={component.feed}
             border={component.properties.border}
@@ -304,7 +258,7 @@ export class _DiscoveryStreamBase extends React.PureComponent {
       state: this.props.DiscoveryStream,
       prefs: this.props.Prefs.values,
       rollCache,
-      lang: this.props.document.documentElement.lang,
+      locale: this.props.locale,
     });
     const { config, spocs, feeds } = this.props.DiscoveryStream;
 
@@ -354,6 +308,7 @@ export class _DiscoveryStreamBase extends React.PureComponent {
 
     // Extract TopSites to render before the rest and Message to use for header
     const topSites = extractComponent("TopSites");
+    const sponsoredCollection = extractComponent("CollectionCardGrid");
     const message = extractComponent("Message") || {
       header: {
         link_text: topStories.learnMore.link.message,
@@ -373,6 +328,13 @@ export class _DiscoveryStreamBase extends React.PureComponent {
             {
               width: 12,
               components: [topSites],
+            },
+          ])}
+        {sponsoredCollection &&
+          this.renderLayout([
+            {
+              width: 12,
+              components: [sponsoredCollection],
             },
           ])}
         {!!layoutRender.length && (

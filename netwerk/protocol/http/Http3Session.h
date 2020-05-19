@@ -20,6 +20,7 @@
 namespace mozilla {
 namespace net {
 
+class HttpConnectionUDP;
 class Http3Stream;
 class QuicSocketControl;
 
@@ -34,47 +35,34 @@ class QuicSocketControl;
 class Http3Session final : public nsAHttpTransaction,
                            public nsAHttpConnection,
                            public nsAHttpSegmentReader,
-                           public nsAHttpSegmentWriter,
-                           public nsITimerCallback {
+                           public nsAHttpSegmentWriter {
  public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTP3SESSION_IID)
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
   NS_DECL_NSAHTTPCONNECTION(mConnection)
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
-  NS_DECL_NSITIMERCALLBACK
 
   Http3Session();
   nsresult Init(const nsACString& aOrigin, nsISocketTransport* aSocketTransport,
-                nsHttpConnection* readerWriter);
+                HttpConnectionUDP* readerWriter);
 
   bool IsConnected() const { return mState == CONNECTED; }
   bool IsClosing() const { return (mState == CLOSING || mState == CLOSED); }
-  nsresult GetError() const { return mError; }
-
-  nsresult Process();
+  bool IsClosed() const { return mState == CLOSED; }
 
   bool AddStream(nsAHttpTransaction* aHttpTransaction, int32_t aPriority,
                  nsIInterfaceRequestor* aCallbacks);
 
   bool CanReuse();
 
-  // TODO: use this.
-  bool RoomForMoreStreams() { return mQueuedStreams.GetSize() == 0; }
-
-  // We will let neqo-transport handle connection timeouts.
-  uint32_t ReadTimeoutTick(PRIntervalTime now) { return UINT32_MAX; }
-
   // overload of nsAHttpTransaction
-  MOZ_MUST_USE nsresult ReadSegmentsAgain(nsAHttpSegmentReader*, uint32_t,
-                                          uint32_t*, bool*) final;
-  MOZ_MUST_USE nsresult WriteSegmentsAgain(nsAHttpSegmentWriter*, uint32_t,
+  [[nodiscard]] nsresult ReadSegmentsAgain(nsAHttpSegmentReader*, uint32_t,
                                            uint32_t*, bool*) final;
-
-  bool ResponseTimeoutEnabled() const final { return true; }
-  PRIntervalTime ResponseTimeout() final;
+  [[nodiscard]] nsresult WriteSegmentsAgain(nsAHttpSegmentWriter*, uint32_t,
+                                            uint32_t*, bool*) final;
 
   // The folowing functions are used by Http3Stream:
   nsresult TryActivating(const nsACString& aMethod, const nsACString& aScheme,
@@ -89,26 +77,25 @@ class Http3Session final : public nsAHttpTransaction,
   nsresult ReadResponseData(uint64_t aStreamId, char* aBuf, uint32_t aCount,
                             uint32_t* aCountWritten, bool* aFin);
 
-  const static uint32_t kDefaultReadAmount = 2048;
-
   void CloseStream(Http3Stream* aStream, nsresult aResult);
 
   void SetCleanShutdown(bool aCleanShutdown) {
     mCleanShutdown = aCleanShutdown;
   }
 
-  PRIntervalTime IdleTime();
-
   bool TestJoinConnection(const nsACString& hostname, int32_t port);
   bool JoinConnection(const nsACString& hostname, int32_t port);
 
   void TransactionHasDataToWrite(nsAHttpTransaction* caller) override;
+  void TransactionHasDataToRecv(nsAHttpTransaction* caller) override;
 
   nsISocketTransport* SocketTransport() { return mSocketTransport; }
 
   // This function will be called by QuicSocketControl when the certificate
   // verification is done.
   void Authenticated(int32_t aError);
+
+  nsresult ProcessOutputAndEvents();
 
  private:
   ~Http3Session();
@@ -120,13 +107,21 @@ class Http3Session final : public nsAHttpTransaction,
                           bool justKidding);
 
   nsresult ProcessOutput();
-  nsresult ProcessInput();
-  nsresult ProcessEvents(uint32_t count, uint32_t* countWritten, bool* again);
-  nsresult ProcessOutputAndEvents();
+  nsresult ProcessInput(uint32_t* aCountRead);
+  nsresult ProcessEvents(uint32_t count);
+
+  nsresult ProcessSingleTransactionRead(Http3Stream* stream, uint32_t count,
+                                        uint32_t* countWritten);
+  nsresult ProcessTransactionRead(uint64_t stream_id, uint32_t count,
+                                  uint32_t* countWritten);
+  nsresult ProcessTransactionRead(Http3Stream* stream, uint32_t count,
+                                  uint32_t* countWritten);
+  nsresult ProcessSlowConsumers();
+  void ConnectSlowConsumer(Http3Stream* stream);
 
   void SetupTimer(uint64_t aTimeout);
 
-  void ResetRecvd(uint64_t aStreamId, Http3AppError aError);
+  void ResetRecvd(uint64_t aStreamId, uint64_t aError);
 
   void QueueStream(Http3Stream* stream);
   void RemoveStreamFromQueues(Http3Stream*);
@@ -135,6 +130,10 @@ class Http3Session final : public nsAHttpTransaction,
   void CallCertVerification();
   void SetSecInfo();
 
+  void MaybeResumeSend();
+
+  void CloseConnectionTelemetry(CloseError& aError, bool aClosing);
+
   RefPtr<NeqoHttp3Conn> mHttp3Connection;
   RefPtr<nsAHttpConnection> mConnection;
   nsRefPtrHashtable<nsUint64HashKey, Http3Stream> mStreamIdHash;
@@ -142,6 +141,8 @@ class Http3Session final : public nsAHttpTransaction,
       mStreamTransactionHash;
 
   nsDeque mReadyForWrite;
+  nsTArray<uint64_t> mReadyForWriteButBlocked;
+  nsTArray<RefPtr<Http3Stream>> mSlowConsumersReadyForRead;
   nsDeque mQueuedStreams;
 
   enum State { INITIALIZING, CONNECTED, CLOSING, CLOSED } mState;
@@ -151,13 +152,18 @@ class Http3Session final : public nsAHttpTransaction,
   bool mGoawayReceived;
   bool mShouldClose;
   bool mIsClosedByNeqo;
+  // mError is neqo error (a protocol error) and that may mean that we will
+  // send some packets after that.
   nsresult mError;
+  // This is a socket error, there is no poioint in sending anything on that
+  // socket.
+  nsresult mSocketError;
   bool mBeforeConnectedError;
   uint64_t mCurrentForegroundTabOuterContentWindowId;
 
   nsTArray<uint8_t> mPacketToSend;
 
-  RefPtr<nsHttpConnection> mSegmentReaderWriter;
+  RefPtr<HttpConnectionUDP> mSegmentReaderWriter;
 
   // The underlying socket transport object is needed to propogate some events
   RefPtr<nsISocketTransport> mSocketTransport;

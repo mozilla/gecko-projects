@@ -13,6 +13,7 @@ use crate::str::HTML_SPACE_CHARACTERS;
 use crate::values::computed::LengthPercentage as ComputedLengthPercentage;
 use crate::values::computed::{Context, Percentage, ToComputedValue};
 use crate::values::generics::position::Position as GenericPosition;
+use crate::values::generics::position::PositionComponent as GenericPositionComponent;
 use crate::values::generics::position::PositionOrAuto as GenericPositionOrAuto;
 use crate::values::generics::position::ZIndex as GenericZIndex;
 use crate::values::specified::{AllowQuirks, Integer, LengthPercentage};
@@ -262,6 +263,18 @@ impl<S: Parse> PositionComponent<S> {
     }
 }
 
+impl<S> GenericPositionComponent for PositionComponent<S> {
+    fn is_center(&self) -> bool {
+        match *self {
+            PositionComponent::Center => true,
+            PositionComponent::Length(LengthPercentage::Percentage(ref per)) => per.0 == 0.5,
+            // 50% from any side is still the center.
+            PositionComponent::Side(_, Some(LengthPercentage::Percentage(ref per))) => per.0 == 0.5,
+            _ => false,
+        }
+    }
+}
+
 impl<S> PositionComponent<S> {
     /// `0%`
     pub fn zero() -> Self {
@@ -295,10 +308,8 @@ impl<S: Side> ToComputedValue for PositionComponent<S> {
             },
             PositionComponent::Side(ref keyword, Some(ref length)) if !keyword.is_start() => {
                 let length = length.to_computed_value(context);
-                let p = Percentage(1. - length.percentage());
-                let l = -length.unclamped_length();
                 // We represent `<end-side> <length>` as `calc(100% - <length>)`.
-                ComputedLengthPercentage::new_calc(l, Some(p), AllowedNumericType::All)
+                ComputedLengthPercentage::hundred_percent_minus(length, AllowedNumericType::All)
             },
             PositionComponent::Side(_, Some(ref length)) |
             PositionComponent::Length(ref length) => length.to_computed_value(context),
@@ -369,6 +380,172 @@ bitflags! {
         const COLUMN = 1 << 1;
         /// 'dense'
         const DENSE = 1 << 2;
+    }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+/// Masonry auto-placement algorithm packing.
+pub enum MasonryPlacement {
+    /// Place the item in the track(s) with the smallest extent so far.
+    Pack,
+    /// Place the item after the last item, from start to end.
+    Next,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+/// Masonry auto-placement algorithm item sorting option.
+pub enum MasonryItemOrder {
+    /// Place all items with a definite placement before auto-placed items.
+    DefiniteFirst,
+    /// Place items in `order-modified document order`.
+    Ordered,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+/// Controls how the Masonry layout algorithm works
+/// specifying exactly how auto-placed items get flowed in the masonry axis.
+pub struct MasonryAutoFlow {
+    /// Specify how to pick a auto-placement track.
+    #[css(contextual_skip_if = "is_pack_with_non_default_order")]
+    pub placement: MasonryPlacement,
+    /// Specify how to pick an item to place.
+    #[css(skip_if = "is_item_order_definite_first")]
+    pub order: MasonryItemOrder,
+}
+
+#[inline]
+fn is_pack_with_non_default_order(placement: &MasonryPlacement, order: &MasonryItemOrder) -> bool {
+   *placement == MasonryPlacement::Pack &&
+        *order != MasonryItemOrder::DefiniteFirst
+}
+
+#[inline]
+fn is_item_order_definite_first(order: &MasonryItemOrder) -> bool {
+   *order == MasonryItemOrder::DefiniteFirst
+}
+
+impl MasonryAutoFlow {
+    #[inline]
+    /// Get initial `masonry-auto-flow` value.
+    pub fn initial() -> MasonryAutoFlow {
+        MasonryAutoFlow {
+            placement: MasonryPlacement::Pack,
+            order: MasonryItemOrder::DefiniteFirst,
+        }
+    }
+}
+
+impl Parse for MasonryAutoFlow {
+    /// [ definite-first | ordered ] || [ pack | next ]
+    fn parse<'i, 't>(
+        _context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<MasonryAutoFlow, ParseError<'i>> {
+        let mut value = MasonryAutoFlow::initial();
+        let mut got_placement = false;
+        let mut got_order = false;
+        while !input.is_exhausted() {
+            let location = input.current_source_location();
+            let ident = input.expect_ident()?;
+            let success = match_ignore_ascii_case! { &ident,
+                "pack" if !got_placement => {
+                    got_placement = true;
+                    true
+                },
+                "next" if !got_placement => {
+                    value.placement = MasonryPlacement::Next;
+                    got_placement = true;
+                    true
+                },
+                "definite-first" if !got_order => {
+                    got_order = true;
+                    true
+                },
+                "ordered" if !got_order => {
+                    value.order = MasonryItemOrder::Ordered;
+                    got_order = true;
+                    true
+                },
+                _ => false
+            };
+            if !success {
+                return Err(location
+                    .new_custom_error(SelectorParseErrorKind::UnexpectedIdent(ident.clone())));
+            }
+        }
+
+        if got_placement || got_order {
+            Ok(value)
+        } else {
+            Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
+        }
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl From<u8> for MasonryAutoFlow {
+    fn from(bits: u8) -> MasonryAutoFlow {
+        use crate::gecko_bindings::structs;
+        let mut value = MasonryAutoFlow::initial();
+        if bits & structs::NS_STYLE_MASONRY_PLACEMENT_PACK as u8 == 0 {
+            value.placement = MasonryPlacement::Next;
+        }
+        if bits & structs::NS_STYLE_MASONRY_ORDER_DEFINITE_FIRST as u8 == 0 {
+            value.order = MasonryItemOrder::Ordered;
+        }
+        value
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl From<MasonryAutoFlow> for u8 {
+    fn from(v: MasonryAutoFlow) -> u8 {
+        use crate::gecko_bindings::structs;
+
+        let mut result: u8 = 0;
+        if v.placement == MasonryPlacement::Pack {
+            result |= structs::NS_STYLE_MASONRY_PLACEMENT_PACK as u8;
+        }
+        if v.order == MasonryItemOrder::DefiniteFirst {
+            result |= structs::NS_STYLE_MASONRY_ORDER_DEFINITE_FIRST as u8;
+        }
+        result
     }
 }
 
@@ -541,7 +718,7 @@ impl TemplateAreas {
         Ok(TemplateAreas {
             areas: areas.into(),
             strings: strings.into(),
-            width: width,
+            width,
         })
     }
 }
@@ -591,7 +768,16 @@ impl Parse for TemplateAreasArc {
 /// A range of rows or columns. Using this instead of std::ops::Range for FFI
 /// purposes.
 #[repr(C)]
-#[derive(Clone, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToShmem)]
+#[derive(
+    Clone,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToResolvedValue,
+    ToShmem,
+)]
 pub struct UnsignedRange {
     /// The start of the range.
     pub start: u32,
@@ -599,7 +785,16 @@ pub struct UnsignedRange {
     pub end: u32,
 }
 
-#[derive(Clone, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToShmem)]
+#[derive(
+    Clone,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToResolvedValue,
+    ToShmem,
+)]
 #[repr(C)]
 /// Not associated with any particular grid item, but can be referenced from the
 /// grid-placement properties.

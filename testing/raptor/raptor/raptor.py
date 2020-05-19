@@ -75,7 +75,7 @@ def main(args=sys.argv[1:]):
 
     # ensure we have at least one valid test to run
     if len(raptor_test_list) == 0:
-        LOG.critical("this test is not targeted for {}".format(args.app))
+        LOG.critical("test '{}' could not be found for {}".format(args.test, args.app))
         sys.exit(1)
 
     LOG.info("raptor tests scheduled to run:")
@@ -122,6 +122,7 @@ def main(args=sys.argv[1:]):
             power_test=args.power_test,
             cpu_test=args.cpu_test,
             memory_test=args.memory_test,
+            live_sites=args.live_sites,
             is_release_build=args.is_release_build,
             debug_mode=args.debug_mode,
             post_startup_delay=args.post_startup_delay,
@@ -132,6 +133,10 @@ def main(args=sys.argv[1:]):
             extra_prefs=args.extra_prefs or {},
             device_name=args.device_name,
             no_conditioned_profile=args.no_conditioned_profile,
+            disable_perf_tuning=args.disable_perf_tuning,
+            conditioned_profile_scenario=args.conditioned_profile_scenario,
+            project=args.project,
+            verbose=args.verbose
         )
     except Exception:
         traceback.print_exc()
@@ -143,28 +148,31 @@ def main(args=sys.argv[1:]):
     success = raptor.run_tests(raptor_test_list, raptor_test_names)
 
     if not success:
-        # didn't get test results; test timed out or crashed, etc. we want job to fail
-        LOG.critical(
-            "TEST-UNEXPECTED-FAIL: no raptor test results were found for %s"
-            % ", ".join(raptor_test_names)
-        )
-        os.sys.exit(1)
+        # if we have results but one test page timed out (i.e. one tp6 test page didn't load
+        # but others did) we still dumped PERFHERDER_DATA for the successfull pages but we
+        # want the overall test job to marked as a failure
+        pages_that_timed_out = raptor.get_page_timeout_list()
+        if pages_that_timed_out:
+            for _page in pages_that_timed_out:
+                message = [
+                    ("TEST-UNEXPECTED-FAIL", "test '%s'" % _page["test_name"]),
+                    ("timed out loading test page", "waiting for pending metrics"),
+                ]
+                if _page.get("pending_metrics") is not None:
+                    LOG.warning("page cycle {} has pending metrics: {}".format(
+                        _page["page_cycle"],
+                        _page["pending_metrics"])
+                    )
 
-    # if we have results but one test page timed out (i.e. one tp6 test page didn't load
-    # but others did) we still dumped PERFHERDER_DATA for the successfull pages but we
-    # want the overall test job to marked as a failure
-    pages_that_timed_out = raptor.get_page_timeout_list()
-    if len(pages_that_timed_out) > 0:
-        for _page in pages_that_timed_out:
-            message = [
-                ("TEST-UNEXPECTED-FAIL", "test '%s'" % _page["test_name"]),
-                ("timed out loading test page", _page["url"]),
-            ]
-            if _page.get("pending_metrics") is not None:
-                message.append(("pending metrics", _page["pending_metrics"]))
-
+                LOG.critical(
+                    " ".join("%s: %s" % (subject, msg) for subject, msg in message)
+                )
+        else:
+            # we want the job to fail when we didn't get any test results
+            # (due to test timeout/crash/etc.)
             LOG.critical(
-                " ".join("%s: %s" % (subject, msg) for subject, msg in message)
+                "TEST-UNEXPECTED-FAIL: no raptor test results were found for %s"
+                % ", ".join(raptor_test_names)
             )
         os.sys.exit(1)
 

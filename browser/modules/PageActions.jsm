@@ -1130,8 +1130,7 @@ var gBuiltInActions = [
     id: ACTION_ID_BOOKMARK,
     urlbarIDOverride: "star-button-box",
     _urlbarNodeInMarkup: true,
-    // The title is set in browser-pageActions.js by calling
-    // BookmarkingUI.updateBookmarkPageMenuItem().
+    // The title is set by BookmarkingUI.updateBookmarkPageMenuItem().
     title: "",
     pinnedToUrlbar: true,
     onShowingInPanel(buttonNode) {
@@ -1269,7 +1268,7 @@ if (SiteSpecificBrowserService.isEnabled) {
   gBuiltInActions.push({
     id: "launchSSB",
     // Hardcoded for now. Localization tracked in bug 1602528.
-    title: "Launch Site Specific Browser",
+    title: "Use This Site in App Mode",
     onLocationChange(browserWindow) {
       browserPageActions(browserWindow).launchSSB.updateState();
     },

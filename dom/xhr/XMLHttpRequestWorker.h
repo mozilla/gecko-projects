@@ -9,6 +9,7 @@
 
 #include "XMLHttpRequest.h"
 #include "XMLHttpRequestString.h"
+#include "mozilla/dom/BodyExtractor.h"
 #include "mozilla/dom/TypedArray.h"
 
 namespace mozilla {
@@ -223,7 +224,8 @@ class XMLHttpRequestWorker final : public XMLHttpRequest {
   bool SendInProgress() const { return !!mWorkerRef; }
 
  private:
-  explicit XMLHttpRequestWorker(WorkerPrivate* aWorkerPrivate);
+  XMLHttpRequestWorker(WorkerPrivate* aWorkerPrivate,
+                       nsIGlobalObject* aGlobalObject);
   ~XMLHttpRequestWorker();
 
   enum ReleaseType { Default, XHRIsGoingAway, WorkerIsGoingAway };
@@ -240,7 +242,7 @@ class XMLHttpRequestWorker final : public XMLHttpRequest {
 
   void Send(JSContext* aCx, JS::Handle<JSObject*> aBody, ErrorResult& aRv);
 
-  void SendInternal(SendRunnable* aRunnable, ErrorResult& aRv);
+  void SendInternal(const BodyExtractorBase* aBody, ErrorResult& aRv);
 
   void ResetResponseData();
 };

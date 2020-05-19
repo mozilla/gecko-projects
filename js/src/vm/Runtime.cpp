@@ -36,7 +36,6 @@
 #include "js/Date.h"
 #include "js/MemoryMetrics.h"
 #include "js/SliceBudget.h"
-#include "js/StableStringChars.h"
 #include "js/Wrapper.h"
 #if JS_HAS_INTL_API
 #  include "unicode/uloc.h"
@@ -49,6 +48,7 @@
 #include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/TraceLogging.h"
 #include "vm/TraceLoggingGraph.h"
+#include "vm/Warnings.h"  // js::WarnNumberUC
 #include "wasm/WasmSignalHandlers.h"
 
 #include "debugger/DebugAPI-inl.h"
@@ -58,11 +58,9 @@
 
 using namespace js;
 
-using JS::AutoStableStringChars;
 using mozilla::Atomic;
 using mozilla::DebugOnly;
 using mozilla::NegativeInfinity;
-using mozilla::PodZero;
 using mozilla::PositiveInfinity;
 
 /* static */ MOZ_THREAD_LOCAL(JSContext*) js::TlsContext;
@@ -73,7 +71,7 @@ Atomic<JS::LargeAllocationFailureCallback> js::OnLargeAllocationFailure;
 JS::FilenameValidationCallback js::gFilenameValidationCallback = nullptr;
 
 namespace js {
-void (*HelperThreadTaskCallback)(js::RunnableTask*);
+void (*HelperThreadTaskCallback)(js::UniquePtr<RunnableTask>);
 
 bool gCanUseExtraThreads = true;
 }  // namespace js
@@ -150,6 +148,8 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       commonNames(nullptr),
       wellKnownSymbols(nullptr),
       liveSABs(0),
+      beforeWaitCallback(nullptr),
+      afterWaitCallback(nullptr),
       offthreadIonCompilationEnabled_(true),
       parallelParsingEnabled_(true),
 #ifdef DEBUG
@@ -323,6 +323,11 @@ void JSRuntime::setTelemetryCallback(
   rt->telemetryCallback = callback;
 }
 
+void JSRuntime::setElementCallback(JSRuntime* rt,
+                                   JSGetElementCallback callback) {
+  rt->getElementCallback = callback;
+}
+
 void JSRuntime::setUseCounter(JSObject* obj, JSUseCounter counter) {
   if (useCounterCallback) {
     (*useCounterCallback)(obj, counter);
@@ -401,13 +406,6 @@ void JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
 static bool HandleInterrupt(JSContext* cx, bool invokeCallback) {
   MOZ_ASSERT(!cx->zone()->isAtomsZone());
 
-  // Interrupts can occur at different points between recording and replay,
-  // so no recorded behaviors should occur while handling an interrupt.
-  // Additionally, returning false here will change subsequent behavior, so
-  // such an event cannot occur during recording or replay without
-  // invalidating the recording.
-  mozilla::recordreplay::AutoDisallowThreadEvents d;
-
   cx->runtime()->gc.gcIfRequested();
 
   // A worker thread may have requested an interrupt after finishing an Ion
@@ -441,8 +439,6 @@ static bool HandleInterrupt(JSContext* cx, bool invokeCallback) {
       if (!iter.done() && cx->compartment() == iter.compartment() &&
           DebugAPI::stepModeEnabled(iter.script())) {
         if (!DebugAPI::onSingleStep(cx)) {
-          mozilla::recordreplay::InvalidateRecording(
-              "Debugger single-step tried to change recorded behavior");
           return false;
         }
       }
@@ -469,11 +465,7 @@ static bool HandleInterrupt(JSContext* cx, bool invokeCallback) {
   } else {
     chars = u"(stack not available)";
   }
-  JS_ReportErrorFlagsAndNumberUC(cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
-                                 JSMSG_TERMINATED, chars);
-
-  mozilla::recordreplay::InvalidateRecording(
-      "Interrupt callback forced return");
+  WarnNumberUC(cx, JSMSG_TERMINATED, chars);
   return false;
 }
 

@@ -2,7 +2,7 @@ import hashlib
 import re
 import os
 from collections import deque
-from six import binary_type, PY3
+from six import binary_type, iteritems, text_type
 from six.moves.urllib.parse import urljoin
 from fnmatch import fnmatch
 
@@ -74,7 +74,6 @@ def read_script_metadata(f, regexp):
 
 
 _any_variants = {
-    b"default": {"longhand": {b"window", b"dedicatedworker"}},
     b"window": {"suffix": ".any.html"},
     b"serviceworker": {"force_https": True},
     b"sharedworker": {},
@@ -90,7 +89,6 @@ def get_any_variants(item):
     Returns a set of variants (bytestrings) defined by the given keyword.
     """
     assert isinstance(item, binary_type), item
-    assert not item.startswith(b"!"), item
 
     variant = _any_variants.get(item, None)
     if variant is None:
@@ -104,7 +102,7 @@ def get_default_any_variants():
     """
     Returns a set of variants (bytestrings) that will be used by default.
     """
-    return set(_any_variants[b"default"]["longhand"])
+    return set({b"window", b"dedicatedworker"})
 
 
 def parse_variants(value):
@@ -114,15 +112,13 @@ def parse_variants(value):
     """
     assert isinstance(value, binary_type), value
 
-    globals = get_default_any_variants()
+    if value == b"":
+        return get_default_any_variants()
 
+    globals = set()
     for item in value.split(b","):
         item = item.strip()
-        if item.startswith(b"!"):
-            globals -= get_any_variants(item[1:])
-        else:
-            globals |= get_any_variants(item)
-
+        globals |= get_any_variants(item)
     return globals
 
 
@@ -195,7 +191,7 @@ class SourceFile(object):
                          ("css", "common")}  # type: Set[Tuple[bytes, ...]]
 
     def __init__(self, tests_root, rel_path, url_base, hash=None, contents=None):
-        # type: (AnyStr, AnyStr, Text, Optional[bytes], Optional[bytes]) -> None
+        # type: (AnyStr, AnyStr, Text, Optional[Text], Optional[bytes]) -> None
         """Object representing a file in a source tree.
 
         :param tests_root: Path to the root of the source tree
@@ -242,9 +238,7 @@ class SourceFile(object):
 
         if "__cached_properties__" in rv:
             cached_properties = rv["__cached_properties__"]
-            for key in rv.keys():
-                if key in cached_properties:
-                    del rv[key]
+            rv = {key:value for key, value in iteritems(rv) if key not in cached_properties}
             del rv["__cached_properties__"]
         return rv
 
@@ -304,17 +298,13 @@ class SourceFile(object):
 
     @cached_property
     def hash(self):
-        # type: () -> bytes
+        # type: () -> Text
         if not self._hash:
             with self.open() as f:
                 content = f.read()
 
             data = b"".join((b"blob ", b"%d" % len(content), b"\0", content))
-            hash_str = hashlib.sha1(data).hexdigest()  # type: str
-            if PY3:
-                self._hash = hash_str.encode("ascii")
-            else:
-                self._hash = hash_str
+            self._hash = text_type(hashlib.sha1(data).hexdigest())
 
         return self._hash
 

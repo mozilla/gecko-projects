@@ -18,11 +18,11 @@ class nsIInterfaceRequestor;
 class nsIRequest;
 class nsIRequestContext;
 class nsITransportEventSink;
-enum HttpTrafficCategory : uint8_t;
 
 namespace mozilla {
 namespace net {
 
+enum HttpTrafficCategory : uint8_t;
 class Http2PushedStreamWrapper;
 class HttpTransactionParent;
 class nsHttpConnectionInfo;
@@ -48,9 +48,10 @@ class HttpTransactionShell : public nsISupports {
  public:
   NS_DECLARE_STATIC_IID_ACCESSOR(HTTPTRANSACTIONSHELL_IID)
 
-  using TransactionObserverFunc = std::function<void()>;
-  using OnPushCallback =
-      std::function<nsresult(uint32_t, const nsACString&, const nsACString&)>;
+  using TransactionObserverFunc =
+      std::function<void(TransactionObserverResult&&)>;
+  using OnPushCallback = std::function<nsresult(
+      uint32_t, const nsACString&, const nsACString&, HttpTransactionShell*)>;
 
   //
   // called to initialize the transaction
@@ -72,7 +73,7 @@ class HttpTransactionShell : public nsISupports {
   // @param topLevelOuterContentWindowId
   //        indicate the top level outer content window in which
   //        this transaction is being loaded.
-  MOZ_MUST_USE nsresult virtual Init(
+  [[nodiscard]] nsresult virtual Init(
       uint32_t caps, nsHttpConnectionInfo* connInfo,
       nsHttpRequestHead* reqHeaders, nsIInputStream* reqBody,
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
@@ -146,8 +147,7 @@ class HttpTransactionShell : public nsISupports {
   virtual bool ProxyConnectFailed() = 0;
   virtual int32_t GetProxyConnectResponseCode() = 0;
 
-  virtual void GetTransactionObserverResult(
-      TransactionObserverResult& aResult) = 0;
+  virtual bool DataAlreadySent() = 0;
 
   virtual nsHttpTransaction* AsHttpTransaction() = 0;
   virtual HttpTransactionParent* AsHttpTransactionParent() = 0;
@@ -202,8 +202,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(HttpTransactionShell, HTTPTRANSACTIONSHELL_IID)
   virtual void SetH2WSConnRefTaken() override;                                 \
   virtual bool ProxyConnectFailed() override;                                  \
   virtual int32_t GetProxyConnectResponseCode() override;                      \
-  virtual void GetTransactionObserverResult(                                   \
-      TransactionObserverResult& aResult) override;                            \
+  virtual bool DataAlreadySent() override;                                     \
   virtual nsHttpTransaction* AsHttpTransaction() override;                     \
   virtual HttpTransactionParent* AsHttpTransactionParent() override;
 }  // namespace net

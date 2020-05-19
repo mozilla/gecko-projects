@@ -563,11 +563,12 @@ const nsStaticAtom* const kAttributesSVG[] = {
     nsGkAtoms::text_anchor,        // text-anchor
     nsGkAtoms::text_decoration,    // text-decoration
     // textLength
-    nsGkAtoms::text_rendering,  // text-rendering
-    nsGkAtoms::title,           // title
-    nsGkAtoms::to,              // to
-    nsGkAtoms::transform,       // transform
-    nsGkAtoms::type,            // type
+    nsGkAtoms::text_rendering,    // text-rendering
+    nsGkAtoms::title,             // title
+    nsGkAtoms::to,                // to
+    nsGkAtoms::transform,         // transform
+    nsGkAtoms::transform_origin,  // transform-origin
+    nsGkAtoms::type,              // type
     // u1
     // u2
     // underline-position
@@ -1092,7 +1093,8 @@ void nsTreeSanitizer::SanitizeStyleSheet(const nsAString& aOriginal,
           css::SheetParsingMode::eAuthorSheetFeatures, extraData.get(),
           /* line_number_offset = */ 0, aDocument->GetCompatibilityMode(),
           /* reusable_sheets = */ nullptr,
-          /* use_counters = */ nullptr, sanitizationKind, &aSanitized)
+          /* use_counters = */ nullptr, StyleAllowImportRules::Yes,
+          sanitizationKind, &aSanitized)
           .Consume();
 
   if (mLogRemovals && aSanitized.Length() != aOriginal.Length()) {

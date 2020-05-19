@@ -13,7 +13,7 @@ const TEST_ORIGIN = "https://example.com";
 const TEST_HTTP_ORIGIN = "http://example.com";
 const TEST_SUB_ORIGIN = "https://test1.example.com";
 const REMOVE_DIALOG_URL =
-  "chrome://browser/content/preferences/siteDataRemoveSelected.xhtml";
+  "chrome://browser/content/preferences/dialogs/siteDataRemoveSelected.xhtml";
 const TEST_ORIGIN_CERT_ERROR = "https://expired.example.com";
 
 const TEST_PATH = getRootDirectory(gTestPath).replace(
@@ -115,25 +115,19 @@ add_task(async function test_image() {
 
   await TestUtils.waitForCondition(
     () => owner.value === "This website does not supply ownership information.",
-    `Value of owner should be should be "This website does not supply ownership information." instead got "${
-      owner.value
-    }".`
+    `Value of owner should be should be "This website does not supply ownership information." instead got "${owner.value}".`
   );
 
   await TestUtils.waitForCondition(
     () => verifier.value === "Mozilla Testing",
-    `Value of verifier should be "Mozilla Testing", instead got "${
-      verifier.value
-    }".`
+    `Value of verifier should be "Mozilla Testing", instead got "${verifier.value}".`
   );
 
   let browser = gBrowser.selectedBrowser;
 
   await TestUtils.waitForCondition(
     () => domain.value === browser.currentURI.displayHost,
-    `Value of domain should be ${
-      browser.currentURI.displayHost
-    }, instead got "${domain.value}".`
+    `Value of domain should be ${browser.currentURI.displayHost}, instead got "${domain.value}".`
   );
 
   pageInfo.close();
@@ -175,23 +169,17 @@ add_task(async function test_CertificateError() {
 
   await TestUtils.waitForCondition(
     () => owner.value === "This website does not supply ownership information.",
-    `Value of owner should be should be "This website does not supply ownership information." instead got "${
-      owner.value
-    }".`
+    `Value of owner should be should be "This website does not supply ownership information." instead got "${owner.value}".`
   );
 
   await TestUtils.waitForCondition(
     () => verifier.value === "Mozilla Testing",
-    `Value of verifier should be "Mozilla Testing", instead got "${
-      verifier.value
-    }".`
+    `Value of verifier should be "Mozilla Testing", instead got "${verifier.value}".`
   );
 
   await TestUtils.waitForCondition(
     () => domain.value === browser.currentURI.displayHost,
-    `Value of domain should be ${
-      browser.currentURI.displayHost
-    }, instead got "${domain.value}".`
+    `Value of domain should be ${browser.currentURI.displayHost}, instead got "${domain.value}".`
   );
 
   pageInfo.close();
@@ -217,23 +205,53 @@ add_task(async function test_SecurityHTTP() {
 
   await TestUtils.waitForCondition(
     () => owner.value === "This website does not supply ownership information.",
-    `Value of owner should be should be "This website does not supply ownership information." instead got "${
-      owner.value
-    }".`
+    `Value of owner should be should be "This website does not supply ownership information." instead got "${owner.value}".`
   );
 
   await TestUtils.waitForCondition(
     () => verifier.value === "Not specified",
-    `Value of verifier should be "Not specified", instead got "${
-      verifier.value
-    }".`
+    `Value of verifier should be "Not specified", instead got "${verifier.value}".`
   );
 
   await TestUtils.waitForCondition(
     () => domain.value === gBrowser.selectedBrowser.currentURI.displayHost,
-    `Value of domain should be ${
-      gBrowser.selectedBrowser.currentURI.displayHost
-    }, instead got "${domain.value}".`
+    `Value of domain should be ${gBrowser.selectedBrowser.currentURI.displayHost}, instead got "${domain.value}".`
+  );
+
+  pageInfo.close();
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+});
+
+// Test displaying valid certificate information in page info.
+add_task(async function test_ValidCert() {
+  await BrowserTestUtils.openNewForegroundTab(gBrowser, TEST_ORIGIN);
+
+  let pageInfo = BrowserPageInfo(TEST_ORIGIN, "securityTab");
+  await BrowserTestUtils.waitForEvent(pageInfo, "load");
+  let pageInfoDoc = pageInfo.document;
+  let securityTab = pageInfoDoc.getElementById("securityTab");
+  await TestUtils.waitForCondition(
+    () => BrowserTestUtils.is_visible(securityTab),
+    "Security tab should be visible."
+  );
+
+  let owner = pageInfoDoc.getElementById("security-identity-owner-value");
+  let verifier = pageInfoDoc.getElementById("security-identity-verifier-value");
+  let domain = pageInfoDoc.getElementById("security-identity-domain-value");
+
+  await TestUtils.waitForCondition(
+    () => owner.value === "This website does not supply ownership information.",
+    `Value of owner should be "This website does not supply ownership information.", got "${owner.value}".`
+  );
+
+  await TestUtils.waitForCondition(
+    () => verifier.value === "Mozilla Testing",
+    `Value of verifier should be "Mozilla Testing", got "${verifier.value}".`
+  );
+
+  await TestUtils.waitForCondition(
+    () => domain.value === gBrowser.selectedBrowser.currentURI.displayHost,
+    `Value of domain should be ${gBrowser.selectedBrowser.currentURI.displayHost}, instead got "${domain.value}".`
   );
 
   pageInfo.close();
@@ -261,7 +279,7 @@ add_task(async function test_SiteData() {
     // waiting for them to be filled in.
     // We only wait for the right unit to appear, since this number is intermittently
     // varying by slight amounts on infra machines.
-    await BrowserTestUtils.waitForCondition(
+    await TestUtils.waitForCondition(
       () => label.textContent.includes(size[1]),
       "Should show site data usage in the security section."
     );
@@ -281,7 +299,7 @@ add_task(async function test_SiteData() {
     totalUsage = await SiteDataTestUtils.getQuotaUsage(TEST_ORIGIN);
     is(totalUsage, 0, "The total usage should be 0");
 
-    await BrowserTestUtils.waitForCondition(
+    await TestUtils.waitForCondition(
       () => label.textContent == "No",
       "Should show no site data usage in the security section."
     );
@@ -308,7 +326,7 @@ add_task(async function test_Cookies() {
 
     // The usage details are filled asynchronously, so we assert that they're present by
     // waiting for them to be filled in.
-    await BrowserTestUtils.waitForCondition(
+    await TestUtils.waitForCondition(
       () => label.textContent.includes("cookies"),
       "Should show cookies in the security section."
     );
@@ -334,7 +352,7 @@ add_task(async function test_Cookies() {
       "Cookies from the base domain should be cleared"
     );
 
-    await BrowserTestUtils.waitForCondition(
+    await TestUtils.waitForCondition(
       () => label.textContent == "No",
       "Should show no cookies in the security section."
     );

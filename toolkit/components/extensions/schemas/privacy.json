@@ -7,7 +7,7 @@
     "namespace": "manifest",
     "types": [
       {
-        "$extend": "Permission",
+        "$extend": "OptionalPermission",
         "choices": [{
           "type": "string",
           "enum": [
@@ -118,7 +118,8 @@
               "reject_all",
               "reject_third_party",
               "allow_visited",
-              "reject_trackers"
+              "reject_trackers",
+              "reject_trackers_and_partition_foreign"
             ],
             "description": "The type of cookies to allow."
           },

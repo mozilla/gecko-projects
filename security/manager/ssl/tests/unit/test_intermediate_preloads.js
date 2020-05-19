@@ -94,7 +94,7 @@ async function syncAndDownload(filenames, options = {}) {
     clear = true,
   } = options;
 
-  const localDB = await IntermediatePreloadsClient.client.openCollection();
+  const localDB = await IntermediatePreloadsClient.client.db;
   if (clear) {
     await localDB.clear();
   }
@@ -164,7 +164,9 @@ add_task(
     // load the first root and end entity, ignore the initial intermediate
     addCertFromFile(certDB, "test_intermediate_preloads/ca.pem", "CTu,,");
 
-    let ee_cert = constructCertFromFile("test_intermediate_preloads/ee.pem");
+    let ee_cert = constructCertFromFile(
+      "test_intermediate_preloads/default-ee.pem"
+    );
     notEqual(ee_cert, null, "EE cert should have successfully loaded");
 
     equal(
@@ -261,7 +263,9 @@ add_task(
     // load the first root and end entity, ignore the initial intermediate
     addCertFromFile(certDB, "test_intermediate_preloads/ca.pem", "CTu,,");
 
-    let ee_cert = constructCertFromFile("test_intermediate_preloads/ee.pem");
+    let ee_cert = constructCertFromFile(
+      "test_intermediate_preloads/default-ee.pem"
+    );
     notEqual(ee_cert, null, "EE cert should have successfully loaded");
 
     // We should still have a missing intermediate.
@@ -316,7 +320,9 @@ add_task(
     // load the first root and end entity, ignore the initial intermediate
     addCertFromFile(certDB, "test_intermediate_preloads/ca.pem", "CTu,,");
 
-    let ee_cert = constructCertFromFile("test_intermediate_preloads/ee.pem");
+    let ee_cert = constructCertFromFile(
+      "test_intermediate_preloads/default-ee.pem"
+    );
     notEqual(ee_cert, null, "EE cert should have successfully loaded");
 
     // We should still have a missing intermediate.
@@ -344,7 +350,9 @@ add_task(
     // load the first root and end entity, ignore the initial intermediate
     addCertFromFile(certDB, "test_intermediate_preloads/ca.pem", "CTu,,");
 
-    let ee_cert = constructCertFromFile("test_intermediate_preloads/ee.pem");
+    let ee_cert = constructCertFromFile(
+      "test_intermediate_preloads/default-ee.pem"
+    );
     notEqual(ee_cert, null, "EE cert should have successfully loaded");
 
     // load the second end entity, ignore both intermediate and root
@@ -396,6 +404,32 @@ add_task(
 
     // check that ee cert 1 verifies now the update has happened and there is
     // an intermediate
+
+    // First verify by connecting to a server that uses that end-entity
+    // certificate but doesn't send the intermediate.
+    await asyncStartTLSTestServer(
+      "BadCertAndPinningServer",
+      "test_intermediate_preloads"
+    );
+    // This ensures the test server doesn't include the intermediate in the
+    // handshake.
+    let certDir = Services.dirsvc.get("CurWorkD", Ci.nsIFile);
+    certDir.append("test_intermediate_preloads");
+    Assert.ok(certDir.exists(), "test_intermediate_preloads should exist");
+    let args = ["-D", "-n", "int"];
+    // If the certdb is cached from a previous run, the intermediate will have
+    // already been deleted, so this may "fail".
+    run_certutil_on_directory(certDir.path, args, false);
+    let certsCachedPromise = TestUtils.topicObserved(
+      "psm:intermediate-certs-cached"
+    );
+    await asyncConnectTo("ee.example.com", PRErrorCodeSuccess);
+    let subjectAndData = await certsCachedPromise;
+    Assert.equal(subjectAndData.length, 2, "expecting [subject, data]");
+    // Since the intermediate is preloaded, we don't save it to the profile's
+    // certdb.
+    Assert.equal(subjectAndData[1], "0", `expecting "0" certs imported`);
+
     await checkCertErrorGeneric(
       certDB,
       ee_cert,
@@ -403,8 +437,8 @@ add_task(
       certificateUsageSSLServer
     );
 
-    let localDB = await IntermediatePreloadsClient.client.openCollection();
-    let { data } = await localDB.list();
+    let localDB = await IntermediatePreloadsClient.client.db;
+    let data = await localDB.list();
     ok(data.length > 0, "should have some entries");
     // simulate a sync (syncAndDownload doesn't actually... sync.)
     await IntermediatePreloadsClient.client.emit("sync", {
@@ -517,8 +551,8 @@ add_task(
       "There should have been 2 downloads"
     );
 
-    let localDB = await IntermediatePreloadsClient.client.openCollection();
-    let { data } = await localDB.list();
+    let localDB = await IntermediatePreloadsClient.client.db;
+    let data = await localDB.list();
     ok(data.length > 0, "should have some entries");
     let subject = data[0].subjectDN;
     let certStorage = Cc["@mozilla.org/security/certstorage;1"].getService(

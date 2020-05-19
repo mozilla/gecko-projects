@@ -32,20 +32,9 @@ namespace mozilla::safebrowsing {
 namespace {
 
 template <class T>
-static void EnsureSorted(T* aArray) {
-  typename T::elem_type* start = aArray->Elements();
-  typename T::elem_type* end = aArray->Elements() + aArray->Length();
-  typename T::elem_type* iter = start;
-  typename T::elem_type* previous = start;
-
-  while (iter != end) {
-    previous = iter;
-    ++iter;
-    if (iter != end) {
-      MOZ_ASSERT(*previous <= *iter);
-    }
-  }
-  return;
+void EnsureSorted(T* aArray) {
+  MOZ_ASSERT(std::is_sorted(aArray->Elements(),
+                            aArray->Elements() + aArray->Length()));
 }
 
 }  // namespace
@@ -248,7 +237,8 @@ nsresult VariableLengthPrefixSet::GetFixedLengthPrefixes(
       }
 
       for (uint32_t i = 0; i < count; i++) {
-        aCompletes->AppendElement(
+        // SetCapacity was just called, these cannot fail.
+        (void)aCompletes->AppendElement(
             Substring(*completes, i * COMPLETE_SIZE, COMPLETE_SIZE), fallible);
       }
     }

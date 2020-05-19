@@ -112,7 +112,7 @@ nsNativeThemeGTK::nsNativeThemeGTK() {
   ThemeChanged();
 }
 
-nsNativeThemeGTK::~nsNativeThemeGTK() {}
+nsNativeThemeGTK::~nsNativeThemeGTK() = default;
 
 NS_IMETHODIMP
 nsNativeThemeGTK::Observe(nsISupports* aSubject, const char* aTopic,
@@ -295,7 +295,7 @@ bool nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aAppearance,
                aAppearance == StyleAppearance::ToolbarbuttonDropdown ||
                aAppearance == StyleAppearance::Menulist ||
                aAppearance == StyleAppearance::MenulistButton ||
-               aAppearance == StyleAppearance::MozMenulistButton) {
+               aAppearance == StyleAppearance::MozMenulistArrowButton) {
       aState->active &= aState->inHover;
     } else if (aAppearance == StyleAppearance::Treetwisty ||
                aAppearance == StyleAppearance::Treetwistyopen) {
@@ -415,7 +415,7 @@ bool nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aAppearance,
           aAppearance == StyleAppearance::ToolbarbuttonDropdown ||
           aAppearance == StyleAppearance::Menulist ||
           aAppearance == StyleAppearance::MenulistButton ||
-          aAppearance == StyleAppearance::MozMenulistButton) {
+          aAppearance == StyleAppearance::MozMenulistArrowButton) {
         bool menuOpen = IsOpenButton(aFrame);
         aState->depressed = IsCheckedButton(aFrame) || menuOpen;
         // we must not highlight buttons with open drop down menus on hover.
@@ -425,7 +425,7 @@ bool nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aAppearance,
       // When the input field of the drop down button has focus, some themes
       // should draw focus for the drop down button as well.
       if ((aAppearance == StyleAppearance::MenulistButton ||
-           aAppearance == StyleAppearance::MozMenulistButton) &&
+           aAppearance == StyleAppearance::MozMenulistArrowButton) &&
           aWidgetFlags) {
         *aWidgetFlags = CheckBooleanAttr(aFrame, nsGkAtoms::parentfocused);
       }
@@ -572,11 +572,7 @@ bool nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aAppearance,
       aGtkWidgetType = MOZ_GTK_ENTRY;
       break;
     case StyleAppearance::Textarea:
-#ifdef MOZ_WIDGET_GTK
       aGtkWidgetType = MOZ_GTK_TEXT_VIEW;
-#else
-      aGtkWidgetType = MOZ_GTK_ENTRY;
-#endif
       break;
     case StyleAppearance::Listbox:
     case StyleAppearance::Treeview:
@@ -633,7 +629,7 @@ bool nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aAppearance,
     case StyleAppearance::MenulistTextfield:
       aGtkWidgetType = MOZ_GTK_DROPDOWN_ENTRY;
       break;
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
       aGtkWidgetType = MOZ_GTK_DROPDOWN_ARROW;
       break;
     case StyleAppearance::ToolbarbuttonDropdown:
@@ -1245,7 +1241,7 @@ bool nsNativeThemeGTK::CreateWebRenderCommandsForWidget(
     case StyleAppearance::Dialog:
       aBuilder.PushRect(
           bounds, bounds, true,
-          wr::ToColorF(Color::FromABGR(LookAndFeel::GetColor(
+          wr::ToColorF(ToDeviceColor(LookAndFeel::GetColor(
               LookAndFeel::ColorID::WindowBackground, NS_RGBA(0, 0, 0, 0)))));
       return true;
 
@@ -1265,6 +1261,21 @@ WidgetNodeType nsNativeThemeGTK::NativeThemeToGtkTheme(
     return MOZ_GTK_WINDOW;
   }
   return gtkWidgetType;
+}
+
+static void FixupForVerticalWritingMode(WritingMode aWritingMode,
+                                        LayoutDeviceIntMargin* aResult) {
+  if (aWritingMode.IsVertical()) {
+    bool rtl = aWritingMode.IsBidiRTL();
+    LogicalMargin logical(aWritingMode, aResult->top,
+                          rtl ? aResult->left : aResult->right, aResult->bottom,
+                          rtl ? aResult->right : aResult->left);
+    nsMargin physical = logical.GetPhysicalMargin(aWritingMode);
+    aResult->top = physical.top;
+    aResult->right = physical.right;
+    aResult->bottom = physical.bottom;
+    aResult->left = physical.left;
+  }
 }
 
 void nsNativeThemeGTK::GetCachedWidgetBorder(nsIFrame* aFrame,
@@ -1292,6 +1303,7 @@ void nsNativeThemeGTK::GetCachedWidgetBorder(nsIFrame* aFrame,
       }
     }
   }
+  FixupForVerticalWritingMode(aFrame->GetWritingMode(), aResult);
 }
 
 LayoutDeviceIntMargin nsNativeThemeGTK::GetWidgetBorder(
@@ -1390,7 +1402,7 @@ bool nsNativeThemeGTK::GetWidgetPadding(nsDeviceContext* aContext,
     case StyleAppearance::Dualbutton:
     case StyleAppearance::TabScrollArrowBack:
     case StyleAppearance::TabScrollArrowForward:
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
     case StyleAppearance::ToolbarbuttonDropdown:
     case StyleAppearance::ButtonArrowUp:
     case StyleAppearance::ButtonArrowDown:
@@ -1495,6 +1507,14 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       }
       *aIsOverridable = false;
     } break;
+    case StyleAppearance::ScrollbarNonDisappearing: {
+      const ScrollbarGTKMetrics* verticalMetrics =
+          GetActiveScrollbarMetrics(GTK_ORIENTATION_VERTICAL);
+      const ScrollbarGTKMetrics* horizontalMetrics =
+          GetActiveScrollbarMetrics(GTK_ORIENTATION_HORIZONTAL);
+      aResult->width = verticalMetrics->size.scrollbar.width;
+      aResult->height = horizontalMetrics->size.scrollbar.height;
+    } break;
     case StyleAppearance::ScrollbarHorizontal:
     case StyleAppearance::ScrollbarVertical: {
       /* While we enforce a minimum size for the thumb, this is ignored
@@ -1563,7 +1583,7 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       moz_gtk_get_tab_scroll_arrow_size(&aResult->width, &aResult->height);
       *aIsOverridable = false;
     } break;
-    case StyleAppearance::MozMenulistButton: {
+    case StyleAppearance::MozMenulistArrowButton: {
       moz_gtk_get_combo_box_entry_button_size(&aResult->width,
                                               &aResult->height);
       *aIsOverridable = false;
@@ -1640,13 +1660,13 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       aResult->width += border.left + border.right;
       aResult->height += border.top + border.bottom;
     } break;
-#ifdef MOZ_WIDGET_GTK
     case StyleAppearance::MenulistTextfield:
     case StyleAppearance::NumberInput:
     case StyleAppearance::Textfield: {
-      moz_gtk_get_entry_min_height(&aResult->height);
+      moz_gtk_get_entry_min_height(aFrame->GetWritingMode().IsVertical()
+                                       ? &aResult->width
+                                       : &aResult->height);
     } break;
-#endif
     case StyleAppearance::Separator: {
       gint separator_width;
 
@@ -1794,7 +1814,9 @@ NS_IMETHODIMP_(bool)
 nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
                                       nsIFrame* aFrame,
                                       StyleAppearance aAppearance) {
-  if (IsWidgetTypeDisabled(mDisabledWidgetTypes, aAppearance)) return false;
+  if (IsWidgetTypeDisabled(mDisabledWidgetTypes, aAppearance)) {
+    return false;
+  }
 
   if (IsWidgetScrollbarPart(aAppearance)) {
     ComputedStyle* cs = nsLayoutUtils::StyleForScrollbar(aFrame);
@@ -1870,6 +1892,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
     case StyleAppearance::ScrollbartrackVertical:
     case StyleAppearance::ScrollbarthumbHorizontal:
     case StyleAppearance::ScrollbarthumbVertical:
+    case StyleAppearance::ScrollbarNonDisappearing:
     case StyleAppearance::MenulistTextfield:
     case StyleAppearance::NumberInput:
     case StyleAppearance::Textfield:
@@ -1897,9 +1920,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
     case StyleAppearance::Splitter:
     case StyleAppearance::Window:
     case StyleAppearance::Dialog:
-#ifdef MOZ_WIDGET_GTK
     case StyleAppearance::MozGtkInfoBar:
-#endif
       return !IsWidgetStyled(aPresContext, aFrame, aAppearance);
 
     case StyleAppearance::MozWindowButtonBox:
@@ -1914,7 +1935,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
       return gtk_check_version(3, 10, 0) == nullptr &&
              !IsWidgetStyled(aPresContext, aFrame, aAppearance);
 
-    case StyleAppearance::MozMenulistButton:
+    case StyleAppearance::MozMenulistArrowButton:
       if (aFrame && aFrame->GetWritingMode().IsVertical()) {
         return false;
       }
@@ -1936,7 +1957,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
 NS_IMETHODIMP_(bool)
 nsNativeThemeGTK::WidgetIsContainer(StyleAppearance aAppearance) {
   // XXXdwh At some point flesh all of this out.
-  if (aAppearance == StyleAppearance::MozMenulistButton ||
+  if (aAppearance == StyleAppearance::MozMenulistArrowButton ||
       aAppearance == StyleAppearance::Radio ||
       aAppearance == StyleAppearance::RangeThumb ||
       aAppearance == StyleAppearance::Checkbox ||
@@ -1951,13 +1972,19 @@ nsNativeThemeGTK::WidgetIsContainer(StyleAppearance aAppearance) {
 }
 
 bool nsNativeThemeGTK::ThemeDrawsFocusForWidget(StyleAppearance aAppearance) {
-  if (aAppearance == StyleAppearance::Menulist ||
-      aAppearance == StyleAppearance::MenulistButton ||
-      aAppearance == StyleAppearance::Button ||
-      aAppearance == StyleAppearance::Treeheadercell)
-    return true;
-
-  return false;
+  switch (aAppearance) {
+    case StyleAppearance::Button:
+    case StyleAppearance::Menulist:
+    case StyleAppearance::MenulistButton:
+    case StyleAppearance::MenulistTextfield:
+    case StyleAppearance::Textarea:
+    case StyleAppearance::Textfield:
+    case StyleAppearance::Treeheadercell:
+    case StyleAppearance::NumberInput:
+      return true;
+    default:
+      return false;
+  }
 }
 
 bool nsNativeThemeGTK::ThemeNeedsComboboxDropmarker() { return false; }
@@ -1972,14 +1999,13 @@ nsITheme::Transparency nsNativeThemeGTK::GetWidgetTransparency(
       return eOpaque;
     case StyleAppearance::ScrollbarVertical:
     case StyleAppearance::ScrollbarHorizontal:
-#ifdef MOZ_WIDGET_GTK
       // Make scrollbar tracks opaque on the window's scroll frame to prevent
       // leaf layers from overlapping. See bug 1179780.
       if (!(CheckBooleanAttr(aFrame, nsGkAtoms::root_) &&
             aFrame->PresContext()->IsRootContentDocument() &&
-            IsFrameContentNodeInNamespace(aFrame, kNameSpaceID_XUL)))
+            IsFrameContentNodeInNamespace(aFrame, kNameSpaceID_XUL))) {
         return eTransparent;
-#endif
+      }
       return eOpaque;
     // Tooltips use gtk_paint_flat_box() on Gtk2
     // but are shaped on Gtk3
@@ -2009,15 +2035,12 @@ bool nsNativeThemeGTK::WidgetAppearanceDependsOnWindowFocus(
   }
 }
 
-already_AddRefed<nsITheme> do_GetNativeTheme() {
+already_AddRefed<nsITheme> do_GetNativeThemeDoNotUseDirectly() {
   static nsCOMPtr<nsITheme> inst;
 
   if (!inst) {
     if (gfxPlatform::IsHeadless()) {
       inst = new HeadlessThemeGTK();
-    } else if (XRE_IsContentProcess() &&
-               StaticPrefs::widget_disable_native_theme_for_content()) {
-      inst = new nsNativeBasicTheme();
     } else {
       inst = new nsNativeThemeGTK();
     }

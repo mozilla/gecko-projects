@@ -21,7 +21,7 @@ MaskOperation::MaskOperation(FrameBuilder* aBuilder) {}
 MaskOperation::MaskOperation(FrameBuilder* aBuilder, MLGTexture* aSource)
     : mTexture(aSource) {}
 
-MaskOperation::~MaskOperation() {}
+MaskOperation::~MaskOperation() = default;
 
 static gfx::Rect ComputeQuadForMaskLayer(Layer* aLayer, const IntSize& aSize) {
   const Matrix4x4& transform = aLayer->GetEffectiveTransform();
@@ -77,7 +77,7 @@ RefPtr<TextureSource> GetMaskLayerTexture(Layer* aLayer) {
 MaskCombineOperation::MaskCombineOperation(FrameBuilder* aBuilder)
     : MaskOperation(aBuilder), mBuilder(aBuilder) {}
 
-MaskCombineOperation::~MaskCombineOperation() {}
+MaskCombineOperation::~MaskCombineOperation() = default;
 
 void MaskCombineOperation::Init(const MaskTextureList& aTextures) {
   // All masks for a single layer exist in the same coordinate space. Find the
@@ -144,7 +144,7 @@ void MaskCombineOperation::Render() {
 
   // Since the mask operation is effectively an AND operation, we initialize
   // the entire r-channel to 1.
-  device->Clear(mTarget, Color(1, 0, 0, 1));
+  device->Clear(mTarget, DeviceColor(1, 0, 0, 1));
   device->SetScissorRect(Nothing());
   device->SetRenderTarget(mTarget);
   device->SetViewport(IntRect(IntPoint(0, 0), mTarget->GetSize()));

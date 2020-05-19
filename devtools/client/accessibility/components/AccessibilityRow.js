@@ -227,8 +227,8 @@ class AccessibilityRow extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
+    const accessibleWalkerFront = accessibleFront.getParent();
+    if (!accessibleWalkerFront) {
       return;
     }
 
@@ -238,7 +238,7 @@ class AccessibilityRow extends Component {
       await this.scrollNodeIntoViewIfNeeded(accessibleFront);
     }
 
-    accessibilityWalkerFront
+    accessibleWalkerFront
       .highlightAccessible(accessibleFront, options)
       .catch(error => console.warn(error));
   }
@@ -249,12 +249,12 @@ class AccessibilityRow extends Component {
       return;
     }
 
-    const accessibilityWalkerFront = accessibleFront.parent();
-    if (!accessibilityWalkerFront) {
+    const accessibleWalkerFront = accessibleFront.getParent();
+    if (!accessibleWalkerFront) {
       return;
     }
 
-    accessibilityWalkerFront.unhighlight().catch(error => console.warn(error));
+    accessibleWalkerFront.unhighlight().catch(error => console.warn(error));
   }
 
   async printToJSON() {
@@ -325,9 +325,6 @@ const mapStateToProps = ({
   scrollContentNodeIntoView,
 });
 
-module.exports = connect(
-  mapStateToProps,
-  null,
-  null,
-  { withRef: true }
-)(AccessibilityRow);
+module.exports = connect(mapStateToProps, null, null, { withRef: true })(
+  AccessibilityRow
+);

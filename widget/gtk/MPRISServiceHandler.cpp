@@ -15,6 +15,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/Sprintf.h"
 #include "nsIXULAppInfo.h"
+#include "nsServiceManagerUtils.h"
 
 // avoid redefined macro in unified build
 #undef LOG
@@ -266,13 +267,7 @@ static GVariant* HandleGetProperty(GDBusConnection* aConnection,
                   "Invalid Playback Status");
       return nullptr;
     case Property::eGetMetadata:
-      std::vector<struct MPRISMetadata> list = handler->GetDefaultMetadata();
-      GVariantBuilder builder;
-      g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
-      for (auto const& data : list) {
-        g_variant_builder_add(&builder, "{sv}", data.mKey, data.mValue);
-      }
-      return g_variant_builder_end(&builder);
+      return handler->GetMetadataAsGVariant();
   }
 
   MOZ_ASSERT_UNREACHABLE("Switch Statement incomplete");
@@ -408,7 +403,7 @@ void MPRISServiceHandler::OnBusAcquired(GDBusConnection* aConnection,
       &error);                 /* GError** */
 
   if (mPlayerRegistrationId == 0) {
-    LOG("Failed at object registration %s",
+    LOG("Failed at object registration: %s",
         error ? error->message : "Unknown Error");
     if (error) {
       g_error_free(error);
@@ -435,7 +430,7 @@ bool MPRISServiceHandler::Open() {
   mIntrospectionData = g_dbus_node_info_new_for_xml(introspection_xml, &error);
 
   if (!mIntrospectionData) {
-    LOG("Failed at parsing XML Interface definition %s",
+    LOG("Failed at parsing XML Interface definition: %s",
         error ? error->message : "Unknown Error");
     if (error) {
       g_error_free(error);
@@ -453,8 +448,7 @@ MPRISServiceHandler::~MPRISServiceHandler() {
 
 void MPRISServiceHandler::Close() {
   gchar serviceName[256];
-  SprintfLiteral(serviceName, DBUS_MRPIS_SERVICE_NAME ".instance%" PRId32,
-                 getpid());
+  SprintfLiteral(serviceName, DBUS_MRPIS_SERVICE_NAME ".instance%d", getpid());
 
   OnNameLost(mConnection, serviceName);
 
@@ -506,11 +500,7 @@ GVariant* MPRISServiceHandler::SupportedMimeTypes() {
   return g_variant_builder_end(&builder);
 }
 
-constexpr bool MPRISServiceHandler::CanRaise() { return false; }
-
-void MPRISServiceHandler::Raise() {
-  MOZ_ASSERT_UNREACHABLE("CanRaise is false, this method is not implemented");
-}
+constexpr bool MPRISServiceHandler::CanRaise() { return true; }
 
 constexpr bool MPRISServiceHandler::CanQuit() { return false; }
 
@@ -563,7 +553,8 @@ bool MPRISServiceHandler::SetRate(double aRate) {
   return true;
 }
 
-void MPRISServiceHandler::SetPlaybackState(dom::PlaybackState aState) {
+void MPRISServiceHandler::SetPlaybackState(
+    dom::MediaSessionPlaybackState aState) {
   LOG("SetPlaybackState");
   if (mPlaybackState == aState) {
     return;
@@ -583,20 +574,29 @@ void MPRISServiceHandler::SetPlaybackState(dom::PlaybackState aState) {
   GVariantBuilder builder;
   g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
   g_variant_builder_add(&builder, "{sv}", "PlaybackStatus", state);
-  g_dbus_connection_emit_signal(
-      mConnection, nullptr, DBUS_MPRIS_OBJECT_PATH,
-      "org.freedesktop.DBus.Properties", "PropertiesChanged",
-      g_variant_new("(sa{sv}as)", "org.mpris.MediaPlayer2", &builder, nullptr),
-      nullptr);
+
+  GVariant* parameters = g_variant_new(
+      "(sa{sv}as)", DBUS_MPRIS_PLAYER_INTERFACE, &builder, nullptr);
+  GError* error = nullptr;
+  if (!g_dbus_connection_emit_signal(mConnection, nullptr,
+                                     DBUS_MPRIS_OBJECT_PATH,
+                                     "org.freedesktop.DBus.Properties",
+                                     "PropertiesChanged", parameters, &error)) {
+    LOG("Failed at emitting MPRIS property changes for 'PlaybackStatus': %s",
+        error ? error->message : "Unknown Error");
+    if (error) {
+      g_error_free(error);
+    }
+  }
 }
 
 GVariant* MPRISServiceHandler::GetPlaybackStatus() const {
   switch (GetPlaybackState()) {
-    case dom::PlaybackState::ePlaying:
+    case dom::MediaSessionPlaybackState::Playing:
       return g_variant_new_string("Playing");
-    case dom::PlaybackState::ePaused:
+    case dom::MediaSessionPlaybackState::Paused:
       return g_variant_new_string("Paused");
-    case dom::PlaybackState::eStopped:
+    case dom::MediaSessionPlaybackState::None:
       return g_variant_new_string("Stopped");
     default:
       MOZ_ASSERT_UNREACHABLE("Invalid Playback State");
@@ -604,10 +604,72 @@ GVariant* MPRISServiceHandler::GetPlaybackStatus() const {
   }
 }
 
+void MPRISServiceHandler::SetMediaMetadata(
+    const dom::MediaMetadataBase& aMetadata) {
+  mMetadata = Some(aMetadata);
+  LOG("Set MediaMetadata: title - %s, Artist - %s, Album - %s",
+      NS_ConvertUTF16toUTF8(mMetadata->mTitle).get(),
+      NS_ConvertUTF16toUTF8(mMetadata->mArtist).get(),
+      NS_ConvertUTF16toUTF8(mMetadata->mAlbum).get());
+
+  if (!mConnection) {
+    LOG("No D-Bus Connection. Drop the update.");
+    return;
+  }
+
+  GVariantBuilder builder;
+  g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+  g_variant_builder_add(&builder, "{sv}", "Metadata", GetMetadataAsGVariant());
+
+  GVariant* parameters = g_variant_new(
+      "(sa{sv}as)", DBUS_MPRIS_PLAYER_INTERFACE, &builder, nullptr);
+  GError* error = nullptr;
+  if (!g_dbus_connection_emit_signal(mConnection, nullptr,
+                                     DBUS_MPRIS_OBJECT_PATH,
+                                     "org.freedesktop.DBus.Properties",
+                                     "PropertiesChanged", parameters, &error)) {
+    LOG("Failed at emitting MPRIS property changes for 'Metadata': %s:",
+        error ? error->message : "Unknown Error");
+    if (error) {
+      g_error_free(error);
+    }
+  }
+}
+
+GVariant* MPRISServiceHandler::GetMetadataAsGVariant() const {
+  GVariantBuilder builder;
+  g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+  g_variant_builder_add(&builder, "{sv}", "mpris:trackid",
+                        g_variant_new("o", DBUS_MPRIS_TRACK_PATH));
+
+  if (mMetadata.isSome()) {
+    LOG("Get Metadata: title - %s, Artist - %s, Album - %s",
+        NS_ConvertUTF16toUTF8(mMetadata->mTitle).get(),
+        NS_ConvertUTF16toUTF8(mMetadata->mArtist).get(),
+        NS_ConvertUTF16toUTF8(mMetadata->mAlbum).get());
+
+    g_variant_builder_add(
+        &builder, "{sv}", "xesam:title",
+        g_variant_new_string(NS_ConvertUTF16toUTF8(mMetadata->mTitle).get()));
+    GVariantBuilder artistBuilder;  // Artists is a list.
+    g_variant_builder_init(&artistBuilder, G_VARIANT_TYPE("as"));
+    g_variant_builder_add(&artistBuilder, "s",
+                          NS_ConvertUTF16toUTF8(mMetadata->mArtist).get());
+    g_variant_builder_add(&builder, "{sv}", "xesam:artist",
+                          g_variant_builder_end(&artistBuilder));
+  }
+  return g_variant_builder_end(&builder);
+}
+
 void MPRISServiceHandler::EmitEvent(mozilla::dom::MediaControlKeysEvent event) {
   for (auto& listener : mListeners) {
     listener->OnKeyPressed(event);
   }
+}
+
+void MPRISServiceHandler::Raise() {
+  LOG("Raise");
+  EmitEvent(mozilla::dom::MediaControlKeysEvent::eFocus);
 }
 
 void MPRISServiceHandler::Next() {
@@ -654,21 +716,6 @@ void MPRISServiceHandler::SetPosition(char* aTrackId, int64_t aPosition) {
 bool MPRISServiceHandler::OpenUri(char* aUri) {
   LOG("OpenUri(%s)", aUri);
   return false;
-}
-
-std::vector<struct MPRISMetadata> MPRISServiceHandler::GetDefaultMetadata() {
-  std::vector<struct MPRISMetadata> list;
-
-  list.push_back({"mpris:trackid", g_variant_new("o", "/valid/path")});
-  list.push_back({"xesam:title", g_variant_new_string("Firefox")});
-
-  GVariantBuilder artistBuilder;  // Artists is a list.
-  g_variant_builder_init(&artistBuilder, G_VARIANT_TYPE("as"));
-  g_variant_builder_add(&artistBuilder, "s", "Mozilla");
-  GVariant* artists = g_variant_builder_end(&artistBuilder);
-
-  list.push_back({"xesam:artist", artists});
-  return list;
 }
 
 }  // namespace widget

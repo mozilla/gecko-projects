@@ -15,7 +15,6 @@
 #include "mozilla/EnumeratedRange.h"
 #include "mozilla/Observer.h"
 #include "mozilla/Unused.h"
-#include "nsAutoPtr.h"
 #include "WindowIdentifier.h"
 
 using namespace mozilla;
@@ -37,21 +36,19 @@ static PHalChild* Hal() {
   return sHal;
 }
 
-void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
+void Vibrate(const nsTArray<uint32_t>& pattern, WindowIdentifier&& id) {
   HAL_LOG("Vibrate: Sending to parent process.");
 
-  AutoTArray<uint32_t, 8> p(pattern);
-
-  WindowIdentifier newID(id);
+  WindowIdentifier newID(std::move(id));
   newID.AppendProcessID();
-  Hal()->SendVibrate(p, newID.AsArray(),
+  Hal()->SendVibrate(pattern, newID.AsArray(),
                      BrowserChild::GetFrom(newID.GetWindow()));
 }
 
-void CancelVibrate(const WindowIdentifier& id) {
+void CancelVibrate(WindowIdentifier&& id) {
   HAL_LOG("CancelVibrate: Sending to parent process.");
 
-  WindowIdentifier newID(id);
+  WindowIdentifier newID(std::move(id));
   newID.AppendProcessID();
   Hal()->SendCancelVibrate(newID.AsArray(),
                            BrowserChild::GetFrom(newID.GetWindow()));
@@ -91,12 +88,7 @@ bool LockScreenOrientation(const hal::ScreenOrientation& aOrientation) {
   return allowed;
 }
 
-void UnlockScreenOrientation() {
-  // Don't send this message from both the middleman and recording processes.
-  if (!recordreplay::IsMiddleman()) {
-    Hal()->SendUnlockScreenOrientation();
-  }
-}
+void UnlockScreenOrientation() { Hal()->SendUnlockScreenOrientation(); }
 
 void EnableSensorNotifications(SensorType aSensor) {
   Hal()->SendEnableSensorNotifications(aSensor);
@@ -172,8 +164,7 @@ class HalParent : public PHalParent,
     nsCOMPtr<nsIDOMWindow> window =
       do_QueryInterface(browserParent->GetBrowserDOMWindow());
     */
-    WindowIdentifier newID(id, nullptr);
-    hal::Vibrate(pattern, newID);
+    hal::Vibrate(pattern, WindowIdentifier(std::move(id), nullptr));
     return IPC_OK();
   }
 
@@ -184,8 +175,7 @@ class HalParent : public PHalParent,
     nsCOMPtr<nsIDOMWindow> window =
       browserParent->GetBrowserDOMWindow();
     */
-    WindowIdentifier newID(id, nullptr);
-    hal::CancelVibrate(newID);
+    hal::CancelVibrate(WindowIdentifier(std::move(id), nullptr));
     return IPC_OK();
   }
 

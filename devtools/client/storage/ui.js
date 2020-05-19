@@ -279,10 +279,10 @@ class StorageUI {
     );
   }
 
-  async _onTargetAvailable({ type, targetFront, isTopLevel }) {
+  async _onTargetAvailable({ targetFront }) {
     // Only support top level target and navigation to new processes.
     // i.e. ignore additional targets created for remote <iframes>
-    if (!isTopLevel) {
+    if (!targetFront.isTopLevel) {
       return;
     }
 
@@ -324,10 +324,10 @@ class StorageUI {
     }
   }
 
-  _onTargetDestroyed({ type, targetFront, isTopLevel }) {
+  _onTargetDestroyed({ targetFront }) {
     // Only support top level target and navigation to new processes.
     // i.e. ignore additional targets created for remote <iframes>
-    if (!isTopLevel) {
+    if (!targetFront.isTopLevel) {
       return;
     }
 
@@ -893,7 +893,7 @@ class StorageUI {
     let value;
 
     // Get the string value (async action) and the update the UI synchronously.
-    if (item && item.name && item.valueActor) {
+    if (item?.name && item?.valueActor) {
       value = await item.valueActor.string();
     }
 
@@ -943,7 +943,7 @@ class StorageUI {
         );
         for (const prop of otherProps) {
           const column = this.table.columns.get(prop);
-          if (column && column.private) {
+          if (column?.private) {
             continue;
           }
 
@@ -958,7 +958,7 @@ class StorageUI {
       // Case when displaying IndexedDB db/object store properties.
       for (const key in item) {
         const column = this.table.columns.get(key);
-        if (column && column.private) {
+        if (column?.private) {
           continue;
         }
 

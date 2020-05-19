@@ -31,6 +31,7 @@
 #include "vm/FrameIter.h"  // js::FrameIter
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/Printer.h"
 #include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/Realm.h"
@@ -38,6 +39,7 @@
 #include "vm/WrapperObject.h"
 
 #include "gc/Nursery-inl.h"
+#include "vm/Compartment-inl.h"  // JS::Compartment::wrap
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
@@ -47,10 +49,12 @@ using namespace js;
 
 using mozilla::PodArrayZero;
 
-JS::RootingContext::RootingContext()
-    : autoGCRooters_(nullptr), realm_(nullptr), zone_(nullptr) {
-  for (auto& stackRootPtr : stackRoots_) {
-    stackRootPtr = nullptr;
+JS::RootingContext::RootingContext() : realm_(nullptr), zone_(nullptr) {
+  for (auto& listHead : stackRoots_) {
+    listHead = nullptr;
+  }
+  for (auto& listHead : autoGCRooters_) {
+    listHead = nullptr;
   }
 
   PodArrayZero(nativeStackLimit);
@@ -125,8 +129,7 @@ JS_FRIEND_API JSObject* JS_NewObjectWithUniqueType(JSContext* cx,
    * ObjectGroup attached to our proto with information about our object, since
    * we're not going to be using that ObjectGroup anyway.
    */
-  RootedObject obj(
-      cx, NewObjectWithGivenProto(cx, clasp, nullptr, SingletonObject));
+  RootedObject obj(cx, NewSingletonObjectWithGivenProto(cx, clasp, nullptr));
   if (!obj) {
     return nullptr;
   }
@@ -571,12 +574,89 @@ JS_FRIEND_API void JS_SetSetUseCounterCallback(
   cx->runtime()->setUseCounterCallback(cx->runtime(), callback);
 }
 
+static bool CopyProxyObject(JSContext* cx, Handle<ProxyObject*> from,
+                            Handle<ProxyObject*> to) {
+  MOZ_ASSERT(from->getClass() == to->getClass());
+
+  if (from->is<WrapperObject>() &&
+      (Wrapper::wrapperHandler(from)->flags() & Wrapper::CROSS_COMPARTMENT)) {
+    to->setCrossCompartmentPrivate(GetProxyPrivate(from));
+  } else {
+    RootedValue v(cx, GetProxyPrivate(from));
+    if (!cx->compartment()->wrap(cx, &v)) {
+      return false;
+    }
+    to->setSameCompartmentPrivate(v);
+  }
+
+  MOZ_ASSERT(from->numReservedSlots() == to->numReservedSlots());
+
+  RootedValue v(cx);
+  for (size_t n = 0; n < from->numReservedSlots(); n++) {
+    v = GetProxyReservedSlot(from, n);
+    if (!cx->compartment()->wrap(cx, &v)) {
+      return false;
+    }
+    SetProxyReservedSlot(to, n, v);
+  }
+
+  return true;
+}
+
 JS_FRIEND_API JSObject* JS_CloneObject(JSContext* cx, HandleObject obj,
-                                       HandleObject protoArg) {
+                                       HandleObject proto) {
   // |obj| might be in a different compartment.
-  cx->check(protoArg);
-  Rooted<TaggedProto> proto(cx, TaggedProto(protoArg.get()));
-  return CloneObject(cx, obj, proto);
+  cx->check(proto);
+
+  if (!obj->isNative() && !obj->is<ProxyObject>()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_CANT_CLONE_OBJECT);
+    return nullptr;
+  }
+
+  RootedObject clone(cx);
+  if (obj->isNative()) {
+    // JS_CloneObject is used to create the target object for JSObject::swap().
+    // swap() requires its arguments are tenured, so ensure tenure allocation.
+    clone = NewTenuredObjectWithGivenProto(cx, obj->getClass(), proto);
+    if (!clone) {
+      return nullptr;
+    }
+
+    if (clone->is<JSFunction>() &&
+        (obj->compartment() != clone->compartment())) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_CANT_CLONE_OBJECT);
+      return nullptr;
+    }
+
+    if (obj->as<NativeObject>().hasPrivate()) {
+      clone->as<NativeObject>().setPrivate(
+          obj->as<NativeObject>().getPrivate());
+    }
+  } else {
+    auto* handler = GetProxyHandler(obj);
+
+    // Same as above, require tenure allocation of the clone. This means for
+    // proxy objects we need to reject nursery allocatable proxies.
+    if (handler->canNurseryAllocate()) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_CANT_CLONE_OBJECT);
+      return nullptr;
+    }
+
+    clone = ProxyObject::New(cx, handler, JS::NullHandleValue,
+                             AsTaggedProto(proto), obj->getClass());
+    if (!clone) {
+      return nullptr;
+    }
+
+    if (!CopyProxyObject(cx, obj.as<ProxyObject>(), clone.as<ProxyObject>())) {
+      return nullptr;
+    }
+  }
+
+  return clone;
 }
 
 // We don't want jsfriendapi.h to depend on GenericPrinter,
@@ -800,7 +880,7 @@ static bool FormatFrame(JSContext* cx, const FrameIter& iter, Sprinter& sp,
           arg = MagicValue(JS_OPTIMIZED_OUT);
         }
       } else if (iter.hasUsableAbstractFramePtr()) {
-        if (script->analyzedArgsUsage() && script->argsObjAliasesFormals() &&
+        if (!script->needsArgsAnalysis() && script->argsObjAliasesFormals() &&
             iter.hasArgsObj()) {
           arg = iter.argsObj().arg(i);
         } else {
@@ -854,7 +934,7 @@ static bool FormatFrame(JSContext* cx, const FrameIter& iter, Sprinter& sp,
   }
 
   // print filename, line number and column
-  if (!sp.printf("%s [\"%s\":%d:%d]\n", fun ? ")" : "",
+  if (!sp.printf("%s [\"%s\":%u:%u]\n", fun ? ")" : "",
                  filename ? filename : "<unknown>", lineno, column)) {
     return false;
   }
@@ -966,7 +1046,7 @@ static bool FormatWasmFrame(JSContext* cx, const FrameIter& iter, Sprinter& sp,
     return false;
   }
 
-  if (!sp.printf(" [\"%s\":wasm-function[%d]:0x%x]\n",
+  if (!sp.printf(" [\"%s\":wasm-function[%u]:0x%x]\n",
                  iter.filename() ? iter.filename() : "<unknown>",
                  iter.wasmFuncIndex(), iter.wasmBytecodeOffset())) {
     return false;
@@ -1247,14 +1327,6 @@ JS_FRIEND_API void js::SetXrayJitInfo(XrayJitInfo* info) {
 
 XrayJitInfo* js::GetXrayJitInfo() { return gXrayJitInfo; }
 
-bool js::detail::IdMatchesAtom(jsid id, JSAtom* atom) {
-  return id == INTERNED_STRING_TO_JSID(nullptr, atom);
-}
-
-bool js::detail::IdMatchesAtom(jsid id, JSString* atom) {
-  return id == INTERNED_STRING_TO_JSID(nullptr, atom);
-}
-
 JS_FRIEND_API void js::PrepareScriptEnvironmentAndInvoke(
     JSContext* cx, HandleObject global,
     ScriptEnvironmentPreparer::Closure& closure) {
@@ -1459,12 +1531,8 @@ bool js::AddMozDateTimeFormatConstructor(JSContext* cx, JS::HandleObject intl) {
   return IntlNotEnabled(cx);
 }
 
-bool js::AddListFormatConstructor(JSContext* cx, JS::HandleObject intl) {
-  return IntlNotEnabled(cx);
-}
-
-bool js::AddLocaleConstructor(JSContext* cx, JS::HandleObject intl) {
-  return IntlNotEnabled(cx);
-}
-
 #endif  // !JS_HAS_INTL_API
+
+JS_FRIEND_API JS::Zone* js::GetObjectZoneFromAnyThread(const JSObject* obj) {
+  return MaybeForwarded(obj)->zoneFromAnyThread();
+}

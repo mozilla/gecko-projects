@@ -108,22 +108,25 @@ const clearIndexedDB = async function(options) {
           principal.schemeIs("https") ||
           principal.schemeIs("file")
         ) {
-          promises.push(
-            new Promise((resolve, reject) => {
-              let clearRequest = quotaManagerService.clearStoragesForPrincipal(
-                principal,
-                null,
-                "idb"
-              );
-              clearRequest.callback = () => {
-                if (clearRequest.resultCode == Cr.NS_OK) {
-                  resolve();
-                } else {
-                  reject({ message: "Clear indexedDB failed" });
-                }
-              };
-            })
-          );
+          let host = principal.hostPort;
+          if (!options.hostnames || options.hostnames.includes(host)) {
+            promises.push(
+              new Promise((resolve, reject) => {
+                let clearRequest = quotaManagerService.clearStoragesForPrincipal(
+                  principal,
+                  null,
+                  "idb"
+                );
+                clearRequest.callback = () => {
+                  if (clearRequest.resultCode == Cr.NS_OK) {
+                    resolve();
+                  } else {
+                    reject({ message: "Clear indexedDB failed" });
+                  }
+                };
+              })
+            );
+          }
         }
       }
 
@@ -184,7 +187,7 @@ const clearLocalStorage = async function(options) {
             principal.schemeIs("https") ||
             principal.schemeIs("file")
           ) {
-            let host = principal.URI.hostPort;
+            let host = principal.hostPort;
             if (!options.hostnames || options.hostnames.includes(host)) {
               promises.push(
                 new Promise((resolve, reject) => {
@@ -233,6 +236,18 @@ const clearPluginData = options => {
   return Sanitizer.items.pluginData.clear(makeRange(options));
 };
 
+const clearServiceWorkers = options => {
+  if (!options.hostnames) {
+    return ServiceWorkerCleanUp.removeAll();
+  }
+
+  return Promise.all(
+    options.hostnames.map(host => {
+      return ServiceWorkerCleanUp.removeFromHost(host);
+    })
+  );
+};
+
 const doRemoval = (options, dataToRemove, extension) => {
   if (
     options.originTypes &&
@@ -277,7 +292,7 @@ const doRemoval = (options, dataToRemove, extension) => {
           removalPromises.push(clearPluginData(options));
           break;
         case "serviceWorkers":
-          removalPromises.push(ServiceWorkerCleanUp.removeAll());
+          removalPromises.push(clearServiceWorkers(options));
           break;
         default:
           invalidDataTypes.push(dataType);

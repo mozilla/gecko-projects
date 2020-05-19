@@ -7,6 +7,8 @@
 #ifndef vm_EnvironmentObject_h
 #define vm_EnvironmentObject_h
 
+#include <type_traits>
+
 #include "builtin/ModuleObject.h"
 #include "frontend/NameAnalysisTypes.h"
 #include "gc/Barrier.h"
@@ -23,7 +25,7 @@
 namespace js {
 
 class ModuleObject;
-typedef Handle<ModuleObject*> HandleModuleObject;
+using HandleModuleObject = Handle<ModuleObject*>;
 
 /*
  * Return a shape representing the static scope containing the variable
@@ -445,10 +447,10 @@ class ModuleEnvironmentObject : public EnvironmentObject {
                            bool enumerableOnly);
 };
 
-typedef Rooted<ModuleEnvironmentObject*> RootedModuleEnvironmentObject;
-typedef Handle<ModuleEnvironmentObject*> HandleModuleEnvironmentObject;
-typedef MutableHandle<ModuleEnvironmentObject*>
-    MutableHandleModuleEnvironmentObject;
+using RootedModuleEnvironmentObject = Rooted<ModuleEnvironmentObject*>;
+using HandleModuleEnvironmentObject = Handle<ModuleEnvironmentObject*>;
+using MutableHandleModuleEnvironmentObject =
+    MutableHandle<ModuleEnvironmentObject*>;
 
 class WasmInstanceEnvironmentObject : public EnvironmentObject {
   // Currently WasmInstanceScopes do not use their scopes in a
@@ -823,7 +825,7 @@ class MissingEnvironmentKey {
   void updateFrame(AbstractFramePtr frame) { frame_ = frame; }
 
   // For use as hash policy.
-  typedef MissingEnvironmentKey Lookup;
+  using Lookup = MissingEnvironmentKey;
   static HashNumber hash(MissingEnvironmentKey sk);
   static bool match(MissingEnvironmentKey sk1, MissingEnvironmentKey sk2);
   bool operator!=(const MissingEnvironmentKey& other) const {
@@ -1032,7 +1034,6 @@ class DebugEnvironments {
   // have stack-allocated locals.
   static void onPopCall(JSContext* cx, AbstractFramePtr frame);
   static void onPopVar(JSContext* cx, const EnvironmentIter& ei);
-  static void onPopVar(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
   static void onPopLexical(JSContext* cx, const EnvironmentIter& ei);
   static void onPopLexical(JSContext* cx, AbstractFramePtr frame,
                            jsbytecode* pc);
@@ -1119,27 +1120,29 @@ inline bool IsFrameInitialEnvironment(AbstractFramePtr frame,
 
   // A function frame's CallObject, if present, is always the initial
   // environment.
-  if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+  if constexpr (std::is_same_v<SpecificEnvironment, CallObject>) {
     return true;
   }
 
   // For an eval frame, the VarEnvironmentObject, if present, is always the
   // initial environment.
-  if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value &&
-      frame.isEvalFrame()) {
-    return true;
+  if constexpr (std::is_same_v<SpecificEnvironment, VarEnvironmentObject>) {
+    if (frame.isEvalFrame()) {
+      return true;
+    }
   }
 
   // For named lambda frames without CallObjects (i.e., no binding in the
   // body of the function was closed over), the LexicalEnvironmentObject
   // corresponding to the named lambda scope is the initial environment.
-  if (mozilla::IsSame<SpecificEnvironment, NamedLambdaObject>::value &&
-      frame.isFunctionFrame() &&
-      frame.callee()->needsNamedLambdaEnvironment() &&
-      !frame.callee()->needsCallObject()) {
-    LexicalScope* namedLambdaScope = frame.script()->maybeNamedLambdaScope();
-    return &env.template as<LexicalEnvironmentObject>().scope() ==
-           namedLambdaScope;
+  if constexpr (std::is_same_v<SpecificEnvironment, NamedLambdaObject>) {
+    if (frame.isFunctionFrame() &&
+        frame.callee()->needsNamedLambdaEnvironment() &&
+        !frame.callee()->needsCallObject()) {
+      LexicalScope* namedLambdaScope = frame.script()->maybeNamedLambdaScope();
+      return &env.template as<LexicalEnvironmentObject>().scope() ==
+             namedLambdaScope;
+    }
   }
 
   return false;

@@ -1,5 +1,5 @@
 const { LoginAutoCompleteResult } = ChromeUtils.import(
-  "resource://gre/modules/LoginAutoCompleteResult.jsm"
+  "resource://gre/modules/LoginAutoComplete.jsm"
 );
 let nsLoginInfo = Components.Constructor(
   "@mozilla.org/login-manager/loginInfo;1",
@@ -104,7 +104,7 @@ add_task(async function test_all_patterns() {
     {
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -147,14 +147,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test", searchStartTimeMS: 0 },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins: [],
       items: [
         {
@@ -168,14 +168,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test", searchStartTimeMS: 1 },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -225,14 +225,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -275,14 +275,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: false,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -332,14 +332,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: true,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -382,14 +382,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -432,14 +432,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -482,14 +482,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: false,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -532,14 +532,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -582,14 +582,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -639,14 +639,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -689,14 +689,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: false,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -746,14 +746,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: true,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -796,28 +796,28 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins: [],
       items: [
         {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins: [],
       searchString: "foo",
       items: [
@@ -825,14 +825,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: false,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -875,14 +875,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -925,14 +925,14 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: false,
       isSecure: false,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -975,28 +975,28 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins: [],
       items: [
         {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
     {
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins: [],
       searchString: "foo",
       items: [],
@@ -1005,7 +1005,7 @@ add_task(async function test_all_patterns() {
       generatedPassword: "9ljgfd4shyktb45",
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins: [],
       items: [
         {
@@ -1021,7 +1021,7 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
@@ -1032,7 +1032,7 @@ add_task(async function test_all_patterns() {
       willAutoSaveGeneratedPassword: true,
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins: [],
       items: [
         {
@@ -1048,7 +1048,7 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
@@ -1058,7 +1058,7 @@ add_task(async function test_all_patterns() {
       generatedPassword: "9ljgfd4shyktb45",
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins: [],
       searchString: "9ljgfd4shyktb45",
       items: [
@@ -1075,7 +1075,7 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
@@ -1084,7 +1084,7 @@ add_task(async function test_all_patterns() {
       formOrigin: "https://sub.mochi.test:8888",
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -1127,7 +1127,7 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
@@ -1136,7 +1136,7 @@ add_task(async function test_all_patterns() {
       formOrigin: "https://sub.mochi.test:8888",
       insecureFieldWarningEnabled: true,
       isSecure: true,
-      isPasswordField: true,
+      hasBeenTypePassword: true,
       matchingLogins,
       items: [
         {
@@ -1179,7 +1179,7 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
@@ -1188,7 +1188,7 @@ add_task(async function test_all_patterns() {
       formOrigin: "https://mochi.test:8888",
       schemeUpgrades: false,
       isSecure: true,
-      isPasswordField: false,
+      hasBeenTypePassword: false,
       matchingLogins,
       items: [
         {
@@ -1231,7 +1231,7 @@ add_task(async function test_all_patterns() {
           value: "",
           label: "View Saved Logins",
           style: "loginsFooter",
-          comment: "mochi.test",
+          comment: { formHostname: "mochi.test" },
         },
       ],
     },
@@ -1261,7 +1261,8 @@ add_task(async function test_all_patterns() {
         generatedPassword: pattern.generatedPassword,
         willAutoSaveGeneratedPassword: !!pattern.willAutoSaveGeneratedPassword,
         isSecure: pattern.isSecure,
-        isPasswordField: pattern.isPasswordField,
+        hasBeenTypePassword: pattern.hasBeenTypePassword,
+        telemetryEventData: { searchStartTimeMS: testIndex },
       }
     );
     equal(
@@ -1312,7 +1313,7 @@ add_task(async function test_all_patterns() {
       );
 
       Assert.throws(
-        () => actual.removeValueAt(pattern.items.length, true),
+        () => actual.removeValueAt(pattern.items.length),
         /Index out of range\./
       );
     }

@@ -173,7 +173,11 @@ async function waitUntilPermission(url, name) {
 
 async function interactWithTracker() {
   await new Promise(resolve => {
-    onmessage = resolve;
+    let orionmessage = onmessage;
+    onmessage = _ => {
+      onmessage = orionmessage;
+      resolve();
+    };
 
     info("Let's interact with the tracker");
     window.open(
@@ -186,15 +190,9 @@ async function interactWithTracker() {
 }
 
 function isOnContentBlockingAllowList() {
-  let url = new URL(SpecialPowers.wrap(top).location.href);
-  let principal = createPrincipal("https://" + url.host);
-  let types = ["trackingprotection", "trackingprotection-pb"];
-  return types.some(type => {
-    return (
-      SpecialPowers.Services.perms.testPermissionFromPrincipal(
-        principal,
-        type
-      ) == SpecialPowers.Services.perms.ALLOW_ACTION
-    );
-  });
+  // We directly check the window.allowListed here instead of checking the
+  // permission. The allow list permission might not be available since it is
+  // not in the preload list.
+
+  return window.allowListed;
 }

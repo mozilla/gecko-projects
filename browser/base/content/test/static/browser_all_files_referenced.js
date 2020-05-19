@@ -49,6 +49,10 @@ var gExceptionPaths = [
   // Exclude all search-extensions because they aren't referenced by filename
   "resource://search-extensions/",
 
+  // Exclude all services-automation because they are used through webdriver
+  "resource://gre/modules/services-automation/",
+  "resource://services-automation/ServicesAutomation.jsm",
+
   // Bug 1550165 - Exclude localized App/Play store badges. These badges
   // are displayed in a promo area on the first load of about:logins.
   "chrome://browser/content/aboutlogins/third-party/app-store/",
@@ -170,21 +174,17 @@ var whitelist = [
     file: "chrome://browser/locale/taskbar.properties",
     platforms: ["linux", "macosx"],
   },
+  // Bug 1619090 to clean up platform-specific crypto
+  {
+    file: "resource://gre/modules/OSCrypto.jsm",
+    platforms: ["linux", "macosx"],
+  },
   // Bug 1356031 (only used by devtools)
   { file: "chrome://global/skin/icons/error-16.png" },
   // Bug 1344267
   { file: "chrome://marionette/content/test.xhtml" },
   { file: "chrome://marionette/content/test_dialog.properties" },
   { file: "chrome://marionette/content/test_dialog.xhtml" },
-  // Bug 1348533
-  {
-    file: "chrome://mozapps/skin/downloads/buttons.png",
-    platforms: ["macosx"],
-  },
-  {
-    file: "chrome://mozapps/skin/downloads/downloadButtons.png",
-    platforms: ["linux", "win"],
-  },
   // Bug 1348559
   { file: "chrome://pippki/content/resetpassword.xhtml" },
   // Bug 1337345
@@ -228,6 +228,9 @@ var whitelist = [
 
   // Referenced from the screenshots webextension
   { file: "resource://app/localization/en-US/browser/screenshots.ftl" },
+
+  // services/fxaccounts/RustFxAccount.js
+  { file: "resource://gre/modules/RustFxAccount.js" },
 ];
 
 if (AppConstants.NIGHTLY_BUILD && AppConstants.platform != "win") {
@@ -797,9 +800,9 @@ add_task(async function checkAllTheFiles() {
   // read the contents.  This will populate gExtensionRoots with all
   // embedded extension APIs, and return any manifest.json files that aren't
   // webextensions.
-  let nonWebextManifests = (await Promise.all(
-    jsonManifests.map(parseJsonManifest)
-  )).filter(uri => !!uri);
+  let nonWebextManifests = (
+    await Promise.all(jsonManifests.map(parseJsonManifest))
+  ).filter(uri => !!uri);
   uris.push(...nonWebextManifests);
 
   addActorModules();

@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/NameSpaceConstants.h"
 #include "mozilla/IdentifierMapEntry.h"
+#include "mozilla/RelativeTo.h"
 #include "nsClassHashtable.h"
 #include "nsContentListDeclarations.h"
 #include "nsTArray.h"
@@ -88,6 +89,8 @@ class DocumentOrShadowRoot {
 
   void GetAdoptedStyleSheets(nsTArray<RefPtr<StyleSheet>>&) const;
 
+  void RemoveStyleSheet(StyleSheet&);
+
   Element* GetElementById(const nsAString& aElementId);
 
   /**
@@ -133,7 +136,8 @@ class DocumentOrShadowRoot {
    */
   Element* ElementFromPointHelper(float aX, float aY,
                                   bool aIgnoreRootScrollFrame,
-                                  bool aFlushLayout);
+                                  bool aFlushLayout,
+                                  ViewportType aViewportType);
 
   void NodesFromRect(float aX, float aY, float aTopSize, float aRightSize,
                      float aBottomSize, float aLeftSize,
@@ -221,15 +225,44 @@ class DocumentOrShadowRoot {
 
   nsIContent* Retarget(nsIContent* aContent) const;
 
- protected:
-  // Returns the reference to the sheet, if found in mStyleSheets.
-  already_AddRefed<StyleSheet> RemoveSheet(StyleSheet& aSheet);
-  void InsertSheetAt(size_t aIndex, StyleSheet& aSheet);
-  void InsertAdoptedSheetAt(size_t aIndex, StyleSheet& aSheet);
-
-  void EnsureAdoptedSheetsAreValid(
+  void SetAdoptedStyleSheets(
       const Sequence<OwningNonNull<StyleSheet>>& aAdoptedStyleSheets,
       ErrorResult& aRv);
+
+  // This is needed because ServoStyleSet / ServoAuthorData don't deal with
+  // duplicate stylesheets (and it's unclear we'd want to support that as it'd
+  // be a bunch of duplicate work), while adopted stylesheets do need to deal
+  // with them.
+  template <typename Callback>
+  void EnumerateUniqueAdoptedStyleSheetsBackToFront(Callback aCallback) {
+    StyleSheetSet set(mAdoptedStyleSheets.Length());
+    for (StyleSheet* sheet : Reversed(mAdoptedStyleSheets)) {
+      if (MOZ_UNLIKELY(!set.EnsureInserted(sheet))) {
+        continue;
+      }
+      aCallback(*sheet);
+    }
+  }
+
+ protected:
+  // Cycle collection helper functions
+  void TraverseSheetRefInStylesIfApplicable(
+      StyleSheet&, nsCycleCollectionTraversalCallback&);
+  void TraverseStyleSheets(nsTArray<RefPtr<StyleSheet>>&, const char*,
+                           nsCycleCollectionTraversalCallback&);
+  void UnlinkStyleSheets(nsTArray<RefPtr<StyleSheet>>&);
+
+  using StyleSheetSet = nsTHashtable<nsPtrHashKey<const StyleSheet>>;
+  void RemoveSheetFromStylesIfApplicable(StyleSheet&);
+  void ClearAdoptedStyleSheets();
+
+  /**
+   * Clone's the argument's adopted style sheets into this.
+   * This should only be used when cloning a static document for printing.
+   */
+  void CloneAdoptedSheetsFrom(const DocumentOrShadowRoot&);
+
+  void InsertSheetAt(size_t aIndex, StyleSheet& aSheet);
 
   void AddSizeOfExcludingThis(nsWindowSizes&) const;
   void AddSizeOfOwnedSheetArrayExcludingThis(
@@ -245,8 +278,10 @@ class DocumentOrShadowRoot {
   nsTArray<RefPtr<StyleSheet>> mStyleSheets;
   RefPtr<StyleSheetList> mDOMStyleSheets;
 
-  // Style sheets that are adopted by assinging to the `adoptedStyleSheets`
-  // WebIDL atribute. These can only be constructed stylesheets.
+  /**
+   * Style sheets that are adopted by assinging to the `adoptedStyleSheets`
+   * WebIDL atribute. These can only be constructed stylesheets.
+   */
   nsTArray<RefPtr<StyleSheet>> mAdoptedStyleSheets;
 
   /*

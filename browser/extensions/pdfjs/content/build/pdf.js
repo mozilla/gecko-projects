@@ -123,8 +123,8 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-var pdfjsVersion = '2.4.375';
-var pdfjsBuild = 'e2b30e9e';
+var pdfjsVersion = '2.5.153';
+var pdfjsBuild = 'bf2ce760f';
 
 var pdfjsSharedUtil = __w_pdfjs_require__(1);
 
@@ -202,8 +202,6 @@ exports.isNum = isNum;
 exports.isString = isString;
 exports.isSameOrigin = isSameOrigin;
 exports.createValidAbsoluteUrl = createValidAbsoluteUrl;
-exports.isLittleEndian = isLittleEndian;
-exports.isEvalSupported = isEvalSupported;
 exports.removeNullCharacters = removeNullCharacters;
 exports.setVerbosityLevel = setVerbosityLevel;
 exports.shadow = shadow;
@@ -214,7 +212,7 @@ exports.stringToUTF8String = stringToUTF8String;
 exports.utf8StringToString = utf8StringToString;
 exports.warn = warn;
 exports.unreachable = unreachable;
-exports.createObjectURL = exports.FormatError = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationStateModelType = exports.AnnotationReviewState = exports.AnnotationReplyType = exports.AnnotationMarkedState = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = exports.BaseException = void 0;
+exports.IsEvalSupportedCached = exports.IsLittleEndianCached = exports.createObjectURL = exports.FormatError = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationStateModelType = exports.AnnotationReviewState = exports.AnnotationReplyType = exports.AnnotationMarkedState = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = exports.BaseException = void 0;
 
 __w_pdfjs_require__(2);
 
@@ -492,7 +490,19 @@ const UNSUPPORTED_FEATURES = {
   javaScript: "javaScript",
   smask: "smask",
   shadingPattern: "shadingPattern",
-  font: "font"
+  font: "font",
+  errorTilingPattern: "errorTilingPattern",
+  errorExtGState: "errorExtGState",
+  errorXObject: "errorXObject",
+  errorFontLoadType3: "errorFontLoadType3",
+  errorFontState: "errorFontState",
+  errorFontMissing: "errorFontMissing",
+  errorFontTranslate: "errorFontTranslate",
+  errorColorSpace: "errorColorSpace",
+  errorOperatorList: "errorOperatorList",
+  errorFontToUnicode: "errorFontToUnicode",
+  errorFontLoadNative: "errorFontLoadNative",
+  errorFontGetPath: "errorFontGetPath"
 };
 exports.UNSUPPORTED_FEATURES = UNSUPPORTED_FEATURES;
 const PasswordResponses = {
@@ -705,7 +715,7 @@ function arrayByteLength(arr) {
     return arr.length;
   }
 
-  assert(arr.byteLength !== undefined);
+  assert(arr.byteLength !== undefined, "arrayByteLength - invalid argument.");
   return arr.byteLength;
 }
 
@@ -755,6 +765,14 @@ function isLittleEndian() {
   return view32[0] === 1;
 }
 
+const IsLittleEndianCached = {
+  get value() {
+    return shadow(this, "value", isLittleEndian());
+  }
+
+};
+exports.IsLittleEndianCached = IsLittleEndianCached;
+
 function isEvalSupported() {
   try {
     new Function("");
@@ -764,6 +782,13 @@ function isEvalSupported() {
   }
 }
 
+const IsEvalSupportedCached = {
+  get value() {
+    return shadow(this, "value", isEvalSupported());
+  }
+
+};
+exports.IsEvalSupportedCached = IsEvalSupportedCached;
 const rgbBuf = ["rgb(", 0, ",", 0, ",", 0, ")"];
 
 class Util {
@@ -1103,6 +1128,7 @@ function getDocument(src) {
   params.rangeChunkSize = params.rangeChunkSize || DEFAULT_RANGE_CHUNK_SIZE;
   params.CMapReaderFactory = params.CMapReaderFactory || _display_utils.DOMCMapReaderFactory;
   params.ignoreErrors = params.stopAtErrors !== true;
+  params.fontExtraProperties = params.fontExtraProperties === true;
   params.pdfBug = params.pdfBug === true;
   const NativeImageDecoderValues = Object.values(_util.NativeImageDecoding);
 
@@ -1205,7 +1231,7 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
 
   return worker.messageHandler.sendWithPromise("GetDocRequest", {
     docId,
-    apiVersion: '2.4.375',
+    apiVersion: '2.5.153',
     source: {
       data: source.data,
       url: source.url,
@@ -1221,7 +1247,8 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
     docBaseUrl: source.docBaseUrl,
     nativeImageDecoderSupport: source.nativeImageDecoderSupport,
     ignoreErrors: source.ignoreErrors,
-    isEvalSupported: source.isEvalSupported
+    isEvalSupported: source.isEvalSupported,
+    fontExtraProperties: source.fontExtraProperties
   }).then(function (workerId) {
     if (worker.destroyed) {
       throw new Error("Worker was destroyed");
@@ -1262,10 +1289,6 @@ const PDFDocumentLoadingTask = function PDFDocumentLoadingTaskClosure() {
           this._worker = null;
         }
       });
-    }
-
-    then(onFulfilled, onRejected) {
-      throw new Error("Removed API method: " + "PDFDocumentLoadingTask.then, use the `promise` getter instead.");
     }
 
   }
@@ -1391,8 +1414,15 @@ class PDFDocumentProxy {
     return this._transport.getViewerPreferences();
   }
 
+  getOpenAction() {
+    return this._transport.getOpenAction();
+  }
+
   getOpenActionDestination() {
-    return this._transport.getOpenActionDestination();
+    (0, _display_utils.deprecated)("getOpenActionDestination, use getOpenAction instead.");
+    return this.getOpenAction().then(function (openAction) {
+      return openAction && openAction.dest ? openAction.dest : null;
+    });
   }
 
   getAttachments() {
@@ -1449,7 +1479,7 @@ exports.PDFDocumentProxy = PDFDocumentProxy;
 
 class PDFPageProxy {
   constructor(pageIndex, pageInfo, transport, pdfBug = false) {
-    this.pageIndex = pageIndex;
+    this._pageIndex = pageIndex;
     this._pageInfo = pageInfo;
     this._transport = transport;
     this._stats = pdfBug ? new _display_utils.StatTimer() : null;
@@ -1463,7 +1493,7 @@ class PDFPageProxy {
   }
 
   get pageNumber() {
-    return this.pageIndex + 1;
+    return this._pageIndex + 1;
   }
 
   get rotate() {
@@ -1503,7 +1533,7 @@ class PDFPageProxy {
     intent = null
   } = {}) {
     if (!this.annotationsPromise || this.annotationsIntent !== intent) {
-      this.annotationsPromise = this._transport.getAnnotations(this.pageIndex, intent);
+      this.annotationsPromise = this._transport.getAnnotations(this._pageIndex, intent);
       this.annotationsIntent = intent;
     }
 
@@ -1557,7 +1587,7 @@ class PDFPageProxy {
       }
 
       this._pumpOperatorList({
-        pageIndex: this.pageNumber - 1,
+        pageIndex: this._pageIndex,
         intent: renderingIntent,
         renderInteractiveForms: renderInteractiveForms === true
       });
@@ -1606,7 +1636,7 @@ class PDFPageProxy {
       objs: this.objs,
       commonObjs: this.commonObjs,
       operatorList: intentState.operatorList,
-      pageNumber: this.pageNumber,
+      pageIndex: this._pageIndex,
       canvasFactory: canvasFactoryInstance,
       webGLContext,
       useRequestAnimationFrame: renderingIntent !== "print",
@@ -1673,7 +1703,7 @@ class PDFPageProxy {
       }
 
       this._pumpOperatorList({
-        pageIndex: this.pageIndex,
+        pageIndex: this._pageIndex,
         intent: renderingIntent
       });
     }
@@ -1687,7 +1717,7 @@ class PDFPageProxy {
   } = {}) {
     const TEXT_CONTENT_CHUNK_SIZE = 100;
     return this._transport.messageHandler.sendWithStream("GetTextContent", {
-      pageIndex: this.pageNumber - 1,
+      pageIndex: this._pageIndex,
       normalizeWhitespace: normalizeWhitespace === true,
       combineTextItems: disableCombineTextItems !== true
     }, {
@@ -1730,7 +1760,7 @@ class PDFPageProxy {
 
   _destroy() {
     this.destroyed = true;
-    this._transport.pageCache[this.pageIndex] = null;
+    this._transport.pageCache[this._pageIndex] = null;
     const waitOn = [];
     Object.keys(this.intentStates).forEach(intent => {
       const intentState = this.intentStates[intent];
@@ -2378,7 +2408,7 @@ class WorkerTransport {
       loadingTask
     } = this;
     messageHandler.on("GetReader", (data, sink) => {
-      (0, _util.assert)(this._networkStream);
+      (0, _util.assert)(this._networkStream, "GetReader - no `IPDFStream` instance available.");
       this._fullReader = this._networkStream.getFullReader();
 
       this._fullReader.onProgress = evt => {
@@ -2398,7 +2428,7 @@ class WorkerTransport {
             return;
           }
 
-          (0, _util.assert)((0, _util.isArrayBuffer)(value));
+          (0, _util.assert)((0, _util.isArrayBuffer)(value), "GetReader - expected an ArrayBuffer.");
           sink.enqueue(new Uint8Array(value), 1, [value]);
         }).catch(reason => {
           sink.error(reason);
@@ -2437,7 +2467,7 @@ class WorkerTransport {
       return headersCapability.promise;
     });
     messageHandler.on("GetRangeReader", (data, sink) => {
-      (0, _util.assert)(this._networkStream);
+      (0, _util.assert)(this._networkStream, "GetRangeReader - no `IPDFStream` instance available.");
 
       const rangeReader = this._networkStream.getRangeReader(data.begin, data.end);
 
@@ -2456,7 +2486,7 @@ class WorkerTransport {
             return;
           }
 
-          (0, _util.assert)((0, _util.isArrayBuffer)(value));
+          (0, _util.assert)((0, _util.isArrayBuffer)(value), "GetRangeReader - expected an ArrayBuffer.");
           sink.enqueue(new Uint8Array(value), 1, [value]);
         }).catch(reason => {
           sink.error(reason);
@@ -2581,14 +2611,16 @@ class WorkerTransport {
             onUnsupportedFeature: this._onUnsupportedFeature.bind(this),
             fontRegistry
           });
-          this.fontLoader.bind(font).then(() => {
-            this.commonObjs.resolve(id, font);
-          }, reason => {
-            messageHandler.sendWithPromise("FontFallback", {
+          this.fontLoader.bind(font).catch(reason => {
+            return messageHandler.sendWithPromise("FontFallback", {
               id
-            }).finally(() => {
-              this.commonObjs.resolve(id, font);
             });
+          }).finally(() => {
+            if (!params.fontExtraProperties && font.data) {
+              font.data = null;
+            }
+
+            this.commonObjs.resolve(id, font);
           });
           break;
 
@@ -2661,7 +2693,7 @@ class WorkerTransport {
       }
     });
     messageHandler.on("UnsupportedFeature", this._onUnsupportedFeature.bind(this));
-    messageHandler.on("JpegDecode", data => {
+    messageHandler.on("JpegDecode", ([imageUrl, components]) => {
       if (this.destroyed) {
         return Promise.reject(new Error("Worker was destroyed"));
       }
@@ -2669,8 +2701,6 @@ class WorkerTransport {
       if (typeof document === "undefined") {
         return Promise.reject(new Error('"document" is not defined.'));
       }
-
-      const [imageUrl, components] = data;
 
       if (components !== 3 && components !== 1) {
         return Promise.reject(new Error("Only 3 components or 1 component can be returned"));
@@ -2837,8 +2867,8 @@ class WorkerTransport {
     return this.messageHandler.sendWithPromise("GetViewerPreferences", null);
   }
 
-  getOpenActionDestination() {
-    return this.messageHandler.sendWithPromise("GetOpenActionDestination", null);
+  getOpenAction() {
+    return this.messageHandler.sendWithPromise("GetOpenAction", null);
   }
 
   getAttachments() {
@@ -2978,10 +3008,6 @@ class RenderTask {
     this._internalRenderTask.cancel();
   }
 
-  then(onFulfilled, onRejected) {
-    throw new Error("Removed API method: " + "RenderTask.then, use the `promise` getter instead.");
-  }
-
 }
 
 const InternalRenderTask = function InternalRenderTaskClosure() {
@@ -2994,7 +3020,7 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
       objs,
       commonObjs,
       operatorList,
-      pageNumber,
+      pageIndex,
       canvasFactory,
       webGLContext,
       useRequestAnimationFrame = false,
@@ -3006,7 +3032,7 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
       this.commonObjs = commonObjs;
       this.operatorListIdx = null;
       this.operatorList = operatorList;
-      this.pageNumber = pageNumber;
+      this._pageIndex = pageIndex;
       this.canvasFactory = canvasFactory;
       this.webGLContext = webGLContext;
       this._pdfBug = pdfBug;
@@ -3037,7 +3063,7 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
       }
 
       if (this._pdfBug && globalThis.StepperManager && globalThis.StepperManager.enabled) {
-        this.stepper = globalThis.StepperManager.create(this.pageNumber - 1);
+        this.stepper = globalThis.StepperManager.create(this._pageIndex);
         this.stepper.init(this.operatorList);
         this.stepper.nextBreakPoint = this.stepper.getNextBreakPoint();
       }
@@ -3076,7 +3102,7 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
         canvasInRendering.delete(this._canvas);
       }
 
-      this.callback(error || new _display_utils.RenderingCancelledException(`Rendering cancelled, page ${this.pageNumber}`, "canvas"));
+      this.callback(error || new _display_utils.RenderingCancelledException(`Rendering cancelled, page ${this._pageIndex + 1}`, "canvas"));
     }
 
     operatorListChanged() {
@@ -3150,9 +3176,9 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
   return InternalRenderTask;
 }();
 
-const version = '2.4.375';
+const version = '2.5.153';
 exports.version = version;
-const build = 'e2b30e9e';
+const build = 'bf2ce760f';
 exports.build = build;
 
 /***/ }),
@@ -3335,12 +3361,15 @@ class PageViewport {
         rotateD = 0;
         break;
 
-      default:
+      case 0:
         rotateA = 1;
         rotateB = 0;
         rotateC = 0;
         rotateD = -1;
         break;
+
+      default:
+        throw new Error("PageViewport: Invalid rotation, must be a multiple of 90 degrees.");
     }
 
     if (dontFlip) {
@@ -3683,7 +3712,7 @@ class BaseFontLoader {
 
   async bind(font) {
     if (font.attached || font.missingFile) {
-      return undefined;
+      return;
     }
 
     font.attached = true;
@@ -3698,7 +3727,7 @@ class BaseFontLoader {
           await nativeFontFace.loaded;
         } catch (ex) {
           this._onUnsupportedFeature({
-            featureId: _util.UNSUPPORTED_FEATURES.font
+            featureId: _util.UNSUPPORTED_FEATURES.errorFontLoadNative
           });
 
           (0, _util.warn)(`Failed to load font '${nativeFontFace.family}': '${ex}'.`);
@@ -3707,7 +3736,7 @@ class BaseFontLoader {
         }
       }
 
-      return undefined;
+      return;
     }
 
     const rule = font.createFontFaceRule();
@@ -3716,17 +3745,15 @@ class BaseFontLoader {
       this.insertRule(rule);
 
       if (this.isSyncFontLoadingSupported) {
-        return undefined;
+        return;
       }
 
-      return new Promise(resolve => {
+      await new Promise(resolve => {
         const request = this._queueLoadingCallback(resolve);
 
         this._prepareFontLoadEvent([rule], [font], request);
       });
     }
-
-    return undefined;
   }
 
   _queueLoadingCallback(callback) {
@@ -3734,7 +3761,8 @@ class BaseFontLoader {
   }
 
   get isFontLoadingAPISupported() {
-    (0, _util.unreachable)("Abstract method `isFontLoadingAPISupported`.");
+    const supported = typeof document !== "undefined" && !!document.fonts;
+    return (0, _util.shadow)(this, "isFontLoadingAPISupported", supported);
   }
 
   get isSyncFontLoadingSupported() {
@@ -3755,22 +3783,12 @@ let FontLoader;
 exports.FontLoader = FontLoader;
 {
   exports.FontLoader = FontLoader = class MozcentralFontLoader extends BaseFontLoader {
-    get isFontLoadingAPISupported() {
-      return (0, _util.shadow)(this, "isFontLoadingAPISupported", typeof document !== "undefined" && !!document.fonts);
-    }
-
     get isSyncFontLoadingSupported() {
       return (0, _util.shadow)(this, "isSyncFontLoadingSupported", true);
     }
 
   };
 }
-const IsEvalSupportedCached = {
-  get value() {
-    return (0, _util.shadow)(this, "value", (0, _util.isEvalSupported)());
-  }
-
-};
 
 class FontFaceObject {
   constructor(translatedData, {
@@ -3839,7 +3857,7 @@ class FontFaceObject {
 
       if (this._onUnsupportedFeature) {
         this._onUnsupportedFeature({
-          featureId: _util.UNSUPPORTED_FEATURES.font
+          featureId: _util.UNSUPPORTED_FEATURES.errorFontGetPath
         });
       }
 
@@ -3847,7 +3865,7 @@ class FontFaceObject {
       return this.compiledGlyphs[character] = function (c, size) {};
     }
 
-    if (this.isEvalSupported && IsEvalSupportedCached.value) {
+    if (this.isEvalSupported && _util.IsEvalSupportedCached.value) {
       let args,
           js = "";
 
@@ -3917,12 +3935,6 @@ var MIN_WIDTH_FACTOR = 0.65;
 var COMPILE_TYPE3_GLYPHS = true;
 var MAX_SIZE_TO_COMPILE = 1000;
 var FULL_CHUNK_HEIGHT = 16;
-var IsLittleEndianCached = {
-  get value() {
-    return (0, _util.shadow)(IsLittleEndianCached, "value", (0, _util.isLittleEndian)());
-  }
-
-};
 
 function addContextCurrentTransform(ctx) {
   if (!ctx.mozCurrentTransform) {
@@ -4216,12 +4228,12 @@ function compileType3Glyph(imgData) {
     c.translate(0, -height);
     c.beginPath();
 
-    for (var i = 0, ii = outlines.length; i < ii; i++) {
-      var o = outlines[i];
+    for (let k = 0, kk = outlines.length; k < kk; k++) {
+      var o = outlines[k];
       c.moveTo(o[0], o[1]);
 
-      for (var j = 2, jj = o.length; j < jj; j += 2) {
-        c.lineTo(o[j], o[j + 1]);
+      for (let l = 2, ll = o.length; l < ll; l += 2) {
+        c.lineTo(o[l], o[l + 1]);
       }
     }
 
@@ -4331,7 +4343,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       var dest32DataLength = dest32.length;
       var fullSrcDiff = width + 7 >> 3;
       var white = 0xffffffff;
-      var black = IsLittleEndianCached.value ? 0xff000000 : 0x000000ff;
+      var black = _util.IsLittleEndianCached.value ? 0xff000000 : 0x000000ff;
 
       for (i = 0; i < totalChunks; i++) {
         thisChunkHeight = i < fullChunks ? FULL_CHUNK_HEIGHT : partialChunkHeight;
@@ -5173,7 +5185,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       var fontSize = current.fontSize / current.fontSizeScale;
       var fillStrokeMode = textRenderingMode & _util.TextRenderingMode.FILL_STROKE_MASK;
       var isAddToPathSet = !!(textRenderingMode & _util.TextRenderingMode.ADD_TO_PATH_FLAG);
-      const patternFill = current.patternFill && font.data;
+      const patternFill = current.patternFill && !font.missingFile;
       var addToPath;
 
       if (font.disableFontFace || isAddToPathSet || patternFill) {
@@ -5366,7 +5378,14 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
           }
         }
 
-        var charWidth = width * widthAdvanceScale + spacing * fontDirection;
+        var charWidth;
+
+        if (vertical) {
+          charWidth = width * widthAdvanceScale - spacing * fontDirection;
+        } else {
+          charWidth = width * widthAdvanceScale + spacing * fontDirection;
+        }
+
         x += charWidth;
 
         if (restoreNeeded) {
@@ -5375,7 +5394,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       }
 
       if (vertical) {
-        current.y -= x * textHScale;
+        current.y -= x;
       } else {
         current.x += x * textHScale;
       }
@@ -6139,7 +6158,7 @@ var createMeshCanvas = function createMeshCanvasClosure() {
       var j = rowSize * y + x1_ * 4;
 
       for (var x = x1_; x <= x2_; x++) {
-        let k = (xa - x) / (xa - xb);
+        k = (xa - x) / (xa - xb);
 
         if (k < 0) {
           k = 0;
@@ -6474,7 +6493,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.isNodeJS = void 0;
-const isNodeJS = typeof process === "object" && process + "" === "[object process]" && !process.versions["nw"] && !process.versions["electron"];
+const isNodeJS = typeof process === "object" && process + "" === "[object process]" && !process.versions.nw && !process.versions.electron;
 exports.isNodeJS = isNodeJS;
 
 /***/ }),
@@ -6585,22 +6604,22 @@ class MessageHandler {
       }
 
       if (data.callbackId) {
-        const sourceName = this.sourceName;
-        const targetName = data.sourceName;
+        const cbSourceName = this.sourceName;
+        const cbTargetName = data.sourceName;
         new Promise(function (resolve) {
           resolve(action(data.data));
         }).then(function (result) {
           comObj.postMessage({
-            sourceName,
-            targetName,
+            sourceName: cbSourceName,
+            targetName: cbTargetName,
             callback: CallbackKind.DATA,
             callbackId: data.callbackId,
             data: result
           });
         }, function (reason) {
           comObj.postMessage({
-            sourceName,
-            targetName,
+            sourceName: cbSourceName,
+            targetName: cbTargetName,
             callback: CallbackKind.ERROR,
             callbackId: data.callbackId,
             reason: wrapReason(reason)
@@ -7565,7 +7584,7 @@ var _util = __w_pdfjs_require__(1);
 
 class PDFDataTransportStream {
   constructor(params, pdfDataRangeTransport) {
-    (0, _util.assert)(pdfDataRangeTransport);
+    (0, _util.assert)(pdfDataRangeTransport, 'PDFDataTransportStream - missing required "pdfDataRangeTransport" argument.');
     this._queuedChunks = [];
     this._progressiveDone = params.progressiveDone || false;
     const initialData = params.initialData;
@@ -7630,7 +7649,7 @@ class PDFDataTransportStream {
         return true;
       });
 
-      (0, _util.assert)(found);
+      (0, _util.assert)(found, "_onReceiveData - no `PDFDataTransportStreamRangeReader` instance found.");
     }
   }
 
@@ -7676,7 +7695,7 @@ class PDFDataTransportStream {
   }
 
   getFullReader() {
-    (0, _util.assert)(!this._fullRequestReader);
+    (0, _util.assert)(!this._fullRequestReader, "PDFDataTransportStream.getFullReader can only be called once.");
     const queuedChunks = this._queuedChunks;
     this._queuedChunks = null;
     return new PDFDataTransportStreamReader(this, queuedChunks, this._progressiveDone);
@@ -8439,7 +8458,20 @@ var renderTextLayer = function renderTextLayerClosure() {
       textDivProperties.angle = angle * (180 / Math.PI);
     }
 
+    let shouldScaleText = false;
+
     if (geom.str.length > 1) {
+      shouldScaleText = true;
+    } else if (geom.transform[0] !== geom.transform[3]) {
+      const absScaleX = Math.abs(geom.transform[0]),
+            absScaleY = Math.abs(geom.transform[3]);
+
+      if (absScaleX !== absScaleY && Math.max(absScaleX, absScaleY) / Math.min(absScaleX, absScaleY) > 1.5) {
+        shouldScaleText = true;
+      }
+    }
+
+    if (shouldScaleText) {
       if (style.vertical) {
         textDivProperties.canvasWidth = geom.height * task._viewport.scale;
       } else {
@@ -8510,6 +8542,20 @@ var renderTextLayer = function renderTextLayerClosure() {
     capability.resolve();
   }
 
+  function findPositiveMin(ts, offset, count) {
+    let result = 0;
+
+    for (let i = 0; i < count; i++) {
+      const t = ts[offset++];
+
+      if (t > 0) {
+        result = result ? Math.min(t, result) : t;
+      }
+    }
+
+    return result;
+  }
+
   function expand(task) {
     var bounds = task._bounds;
     var viewport = task._viewport;
@@ -8538,41 +8584,26 @@ var renderTextLayer = function renderTextLayerClosure() {
           s = m[1];
       var points = [[0, 0], [0, b.size[1]], [b.size[0], 0], b.size];
       var ts = new Float64Array(64);
-      points.forEach(function (p, i) {
+      points.forEach(function (p, j) {
         var t = _util.Util.applyTransform(p, m);
 
-        ts[i + 0] = c && (e.left - t[0]) / c;
-        ts[i + 4] = s && (e.top - t[1]) / s;
-        ts[i + 8] = c && (e.right - t[0]) / c;
-        ts[i + 12] = s && (e.bottom - t[1]) / s;
-        ts[i + 16] = s && (e.left - t[0]) / -s;
-        ts[i + 20] = c && (e.top - t[1]) / c;
-        ts[i + 24] = s && (e.right - t[0]) / -s;
-        ts[i + 28] = c && (e.bottom - t[1]) / c;
-        ts[i + 32] = c && (e.left - t[0]) / -c;
-        ts[i + 36] = s && (e.top - t[1]) / -s;
-        ts[i + 40] = c && (e.right - t[0]) / -c;
-        ts[i + 44] = s && (e.bottom - t[1]) / -s;
-        ts[i + 48] = s && (e.left - t[0]) / s;
-        ts[i + 52] = c && (e.top - t[1]) / -c;
-        ts[i + 56] = s && (e.right - t[0]) / s;
-        ts[i + 60] = c && (e.bottom - t[1]) / -c;
+        ts[j + 0] = c && (e.left - t[0]) / c;
+        ts[j + 4] = s && (e.top - t[1]) / s;
+        ts[j + 8] = c && (e.right - t[0]) / c;
+        ts[j + 12] = s && (e.bottom - t[1]) / s;
+        ts[j + 16] = s && (e.left - t[0]) / -s;
+        ts[j + 20] = c && (e.top - t[1]) / c;
+        ts[j + 24] = s && (e.right - t[0]) / -s;
+        ts[j + 28] = c && (e.bottom - t[1]) / c;
+        ts[j + 32] = c && (e.left - t[0]) / -c;
+        ts[j + 36] = s && (e.top - t[1]) / -s;
+        ts[j + 40] = c && (e.right - t[0]) / -c;
+        ts[j + 44] = s && (e.bottom - t[1]) / -s;
+        ts[j + 48] = s && (e.left - t[0]) / s;
+        ts[j + 52] = c && (e.top - t[1]) / -c;
+        ts[j + 56] = s && (e.right - t[0]) / s;
+        ts[j + 60] = c && (e.bottom - t[1]) / -c;
       });
-
-      var findPositiveMin = function (ts, offset, count) {
-        var result = 0;
-
-        for (var i = 0; i < count; i++) {
-          var t = ts[offset++];
-
-          if (t > 0) {
-            result = result ? Math.min(t, result) : t;
-          }
-        }
-
-        return result;
-      };
-
       var boxScale = 1 + Math.min(Math.abs(c), Math.abs(s));
       divProperties.paddingLeft = findPositiveMin(ts, 32, 16) / boxScale;
       divProperties.paddingTop = findPositiveMin(ts, 48, 16) / boxScale;
@@ -9367,6 +9398,7 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
       }
 
       element.disabled = this.data.readOnly;
+      element.name = this.data.fieldName;
 
       if (this.data.maxLen !== null) {
         element.maxLength = this.data.maxLen;
@@ -9436,6 +9468,7 @@ class CheckboxWidgetAnnotationElement extends WidgetAnnotationElement {
     const element = document.createElement("input");
     element.disabled = this.data.readOnly;
     element.type = "checkbox";
+    element.name = this.data.fieldName;
 
     if (this.data.fieldValue && this.data.fieldValue !== "Off") {
       element.setAttribute("checked", true);
@@ -9487,6 +9520,7 @@ class ChoiceWidgetAnnotationElement extends WidgetAnnotationElement {
     this.container.className = "choiceWidgetAnnotation";
     const selectElement = document.createElement("select");
     selectElement.disabled = this.data.readOnly;
+    selectElement.name = this.data.fieldName;
 
     if (!this.data.combo) {
       selectElement.size = this.data.options.length;

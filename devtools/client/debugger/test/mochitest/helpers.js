@@ -15,8 +15,8 @@ Services.scriptloader.loadSubScript(
 );
 
 var { Toolbox } = require("devtools/client/framework/toolbox");
-var { Task } = require("devtools/shared/task");
-var asyncStorage = require("devtools/shared/async-storage");
+const { Task } = require("devtools/shared/task");
+const asyncStorage = require("devtools/shared/async-storage");
 
 const {
   getSelectedLocation,
@@ -319,6 +319,10 @@ function getVisibleSelectedFrameLine(dbg) {
   return frame && frame.location.line;
 }
 
+function waitForPausedLine(dbg, line) {
+  return waitForState(dbg, () => getVisibleSelectedFrameLine(dbg) == line);
+}
+
 /**
  * Assert that the debugger is paused at the correct location.
  *
@@ -390,6 +394,7 @@ function assertDebugLine(dbg, line, column) {
 
     ok(classMatch, "expression is highlighted as paused");
   }
+  info(`Paused on line ${line}`);
 }
 
 /**
@@ -575,11 +580,14 @@ async function clearDebuggerPreferences(prefs = []) {
   Services.prefs.clearUserPref("devtools.debugger.ignore-caught-exceptions");
   Services.prefs.clearUserPref("devtools.debugger.pending-selected-location");
   Services.prefs.clearUserPref("devtools.debugger.expressions");
+  Services.prefs.clearUserPref("devtools.debugger.breakpoints-visible");
   Services.prefs.clearUserPref("devtools.debugger.call-stack-visible");
   Services.prefs.clearUserPref("devtools.debugger.scopes-visible");
   Services.prefs.clearUserPref("devtools.debugger.skip-pausing");
   Services.prefs.clearUserPref("devtools.debugger.map-scopes-enabled");
+  Services.prefs.clearUserPref("javascript.enabled");
   await pushPref("devtools.debugger.log-actions", true);
+
   for (const pref of prefs) {
     await pushPref(...pref);
   }
@@ -1127,8 +1135,8 @@ const startKey = isMac
 
 const keyMappings = {
   close: { code: "w", modifiers: cmdOrCtrl },
-  commandKeyDown: {code: "VK_META", modifiers: {type: "keydown"}},
-  commandKeyUp: {code: "VK_META", modifiers: {type: "keyup"}},
+  commandKeyDown: { code: "VK_META", modifiers: { type: "keydown" } },
+  commandKeyUp: { code: "VK_META", modifiers: { type: "keyup" } },
   debugger: { code: "s", modifiers: shiftOrAlt },
   // test conditional panel shortcut
   toggleCondPanel: { code: "b", modifiers: cmdShift },
@@ -1299,6 +1307,7 @@ const selectors = {
   },
   columnBreakpoints: ".column-breakpoint",
   scopes: ".scopes-list",
+  scopeNodes: ".scopes-list .object-label",
   scopeNode: i => `.scopes-list .tree-node:nth-child(${i}) .object-label`,
   scopeValue: i =>
     `.scopes-list .tree-node:nth-child(${i}) .object-delimiter + *`,
@@ -1378,6 +1387,8 @@ const selectors = {
   previewPopupInvokeGetterButton: ".preview-popup .invoke-getter",
   previewPopupObjectNumber: ".preview-popup .objectBox-number",
   previewPopupObjectObject: ".preview-popup .objectBox-object",
+  sourceTreeRootNode: ".sources-panel .node .window",
+  sourceTreeFolderNode: ".sources-panel .node .folder",
 };
 
 function getSelector(elementName, ...args) {
@@ -1440,8 +1451,8 @@ function clickElementWithSelector(dbg, selector) {
   clickDOMElement(dbg, findElementWithSelector(dbg, selector));
 }
 
-function clickDOMElement(dbg, element) {
-  EventUtils.synthesizeMouseAtCenter(element, {}, dbg.win);
+function clickDOMElement(dbg, element, options = {}) {
+  EventUtils.synthesizeMouseAtCenter(element, options, dbg.win);
 }
 
 function dblClickElement(dbg, elementName, ...args) {
@@ -1487,15 +1498,34 @@ async function clickGutter(dbg, line) {
   clickDOMElement(dbg, el);
 }
 
-function selectContextMenuItem(dbg, selector) {
+async function cmdClickGutter(dbg, line) {
+  const el = await codeMirrorGutterElement(dbg, line);
+  clickDOMElement(dbg, el, cmdOrCtrl);
+}
+
+function findContextMenu(dbg, selector) {
   // the context menu is in the toolbox window
   const doc = dbg.toolbox.topDoc;
 
   // there are several context menus, we want the one with the menu-api
   const popup = doc.querySelector('menupopup[menu-api="true"]');
 
-  const item = popup.querySelector(selector);
+  return popup.querySelector(selector);
+}
+
+async function waitForContextMenu(dbg, selector) {
+  await waitFor(() => findContextMenu(dbg, selector));
+  return findContextMenu(dbg, selector);
+}
+
+function selectContextMenuItem(dbg, selector) {
+  const item = findContextMenu(dbg, selector);
   return EventUtils.synthesizeMouseAtCenter(item, {}, dbg.toolbox.topWindow);
+}
+
+async function assertContextMenuLabel(dbg, selector, label) {
+  const item = await waitForContextMenu(dbg, selector);
+  is(item.label, label, "The label of the context menu item shown to the user");
 }
 
 async function typeInPanel(dbg, text) {

@@ -5,41 +5,39 @@
 "use strict";
 
 class ConsoleCommands {
-  constructor({ devToolsClient, proxy, threadFront, currentTarget }) {
+  constructor({ devToolsClient, hud }) {
     this.devToolsClient = devToolsClient;
-    this.proxy = proxy;
-    this.threadFront = threadFront;
-    this.currentTarget = currentTarget;
+    this.hud = hud;
+  }
+
+  getFrontByID(id) {
+    return this.devToolsClient.getFrontByID(id);
   }
 
   async evaluateJSAsync(expression, options = {}) {
-    const { selectedNodeFront, webConsoleFront, selectedObjectActor } = options;
-    let front = this.proxy.webConsoleFront;
+    const {
+      selectedObjectActor,
+      selectedNodeActor,
+      frameActor,
+      selectedTargetFront,
+    } = options;
 
-    // Defer to the selected paused thread front
-    if (webConsoleFront) {
-      front = webConsoleFront;
-    }
+    let targetFront = this.hud.currentTarget;
 
-    // If there's a selectedObjectActor option, this means the user intend to do a
-    // given action on a specific object, so it should take precedence over selected
-    // node front.
-    if (selectedObjectActor) {
-      const objectFront = this.devToolsClient.getFrontByID(selectedObjectActor);
-      if (objectFront) {
-        front = await objectFront.targetFront.getFront("console");
+    const selectedActor =
+      selectedObjectActor || selectedNodeActor || frameActor;
+
+    if (selectedTargetFront) {
+      targetFront = selectedTargetFront;
+    } else if (selectedActor) {
+      const selectedFront = this.getFrontByID(selectedActor);
+      if (selectedFront) {
+        targetFront = selectedFront.targetFront;
       }
-    } else if (selectedNodeFront) {
-      // Defer to the selected node's thread console front
-      front = await selectedNodeFront.targetFront.getFront("console");
-      options.selectedNodeActor = selectedNodeFront.actorID;
     }
 
+    const front = await targetFront.getFront("console");
     return front.evaluateJSAsync(expression, options);
-  }
-
-  timeWarp(executionPoint) {
-    return this.threadFront.timeWarp(executionPoint);
   }
 }
 

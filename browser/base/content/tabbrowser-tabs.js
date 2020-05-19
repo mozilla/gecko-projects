@@ -67,6 +67,11 @@
       var tab = this.allTabs[0];
       tab.label = this.emptyTabTitle;
 
+      this.newTabButton.setAttribute(
+        "aria-label",
+        GetDynamicShortcutTooltipText("tabs-newtab-button")
+      );
+
       window.addEventListener("resize", this);
 
       this.boundObserve = (...args) => this.observe(...args);
@@ -86,15 +91,6 @@
       );
 
       this._tabMinWidth = this._tabMinWidthPref;
-
-      XPCOMUtils.defineLazyPreferenceGetter(
-        this,
-        "_multiselectEnabledPref",
-        "browser.tabs.multiselect",
-        null,
-        (pref, prevValue, newValue) => (this._multiselectEnabled = newValue)
-      );
-      this._multiselectEnabled = this._multiselectEnabledPref;
 
       this._setPositionalAttributes();
 
@@ -671,8 +667,7 @@
           incrementDropIndex = false;
         }
 
-        let animate = gBrowser.animationsEnabled;
-        if (oldTranslateX && oldTranslateX != newTranslateX && animate) {
+        if (oldTranslateX && oldTranslateX != newTranslateX && !gReduceMotion) {
           for (let tab of movingTabs) {
             tab.setAttribute("tabdrop-samewindow", "true");
             tab.style.transform = "translateX(" + newTranslateX + "px)";
@@ -943,16 +938,6 @@
     set _tabMinWidth(val) {
       this.style.setProperty("--tab-min-width", val + "px");
       return val;
-    }
-
-    set _multiselectEnabled(val) {
-      // Unlike boolean HTML attributes, the value of boolean ARIA attributes actually matters.
-      this.setAttribute("aria-multiselectable", !!val);
-      return val;
-    }
-
-    get _multiselectEnabled() {
-      return this.getAttribute("aria-multiselectable") == "true";
     }
 
     get _isCustomizing() {
@@ -1532,7 +1517,7 @@
     _groupSelectedTabs(tab) {
       let draggedTabPos = tab._tPos;
       let selectedTabs = gBrowser.selectedTabs;
-      let animate = gBrowser.animationsEnabled;
+      let animate = !gReduceMotion;
 
       tab.groupingTabsData = {
         finished: !animate,

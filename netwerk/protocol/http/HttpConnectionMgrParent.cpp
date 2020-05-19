@@ -8,8 +8,11 @@
 #include "HttpLog.h"
 
 #include "HttpConnectionMgrParent.h"
+#include "AltSvcTransactionParent.h"
 #include "mozilla/net/HttpTransactionParent.h"
 #include "nsHttpConnectionInfo.h"
+#include "nsISpeculativeConnect.h"
+#include "nsIOService.h"
 
 namespace mozilla {
 namespace net {
@@ -54,35 +57,31 @@ nsresult HttpConnectionMgrParent::UpdateRequestTokenBucket(
 
 nsresult HttpConnectionMgrParent::DoShiftReloadConnectionCleanup(
     nsHttpConnectionInfo* aCi) {
-  if (!CanSend()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
   Maybe<HttpConnectionInfoCloneArgs> optionArgs;
   if (aCi) {
     optionArgs.emplace();
     nsHttpConnectionInfo::SerializeHttpConnectionInfo(aCi, optionArgs.ref());
   }
 
-  Unused << SendDoShiftReloadConnectionCleanup(optionArgs);
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self, optionArgs{std::move(optionArgs)}]() {
+    Unused << self->SendDoShiftReloadConnectionCleanup(optionArgs);
+  };
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
   return NS_OK;
 }
 
 nsresult HttpConnectionMgrParent::PruneDeadConnections() {
-  if (!CanSend()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  Unused << SendPruneDeadConnections();
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self]() { Unused << self->SendPruneDeadConnections(); };
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
   return NS_OK;
 }
 
 void HttpConnectionMgrParent::AbortAndCloseAllConnections(int32_t, ARefBase*) {
-  if (!CanSend()) {
-    return;
-  }
-
-  Unused << SendAbortAndCloseAllConnections();
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self]() { Unused << self->SendAbortAndCloseAllConnections(); };
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
 }
 
 nsresult HttpConnectionMgrParent::UpdateParam(nsParamName name,
@@ -95,21 +94,22 @@ nsresult HttpConnectionMgrParent::UpdateParam(nsParamName name,
 void HttpConnectionMgrParent::PrintDiagnostics() {
   // Do nothing here. PrintDiagnostics() will be triggered by pref change in
   // socket process.
-  return;
 }
 
 nsresult HttpConnectionMgrParent::UpdateCurrentTopLevelOuterContentWindowId(
     uint64_t aWindowId) {
-  if (!CanSend()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  Unused << SendUpdateCurrentTopLevelOuterContentWindowId(aWindowId);
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self, aWindowId]() {
+    Unused << self->SendUpdateCurrentTopLevelOuterContentWindowId(aWindowId);
+  };
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
   return NS_OK;
 }
 
 nsresult HttpConnectionMgrParent::AddTransaction(HttpTransactionShell* aTrans,
                                                  int32_t aPriority) {
+  MOZ_ASSERT(gIOService->SocketProcessReady());
+
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -121,6 +121,8 @@ nsresult HttpConnectionMgrParent::AddTransaction(HttpTransactionShell* aTrans,
 nsresult HttpConnectionMgrParent::AddTransactionWithStickyConn(
     HttpTransactionShell* aTrans, int32_t aPriority,
     HttpTransactionShell* aTransWithStickyConn) {
+  MOZ_ASSERT(gIOService->SocketProcessReady());
+
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -133,6 +135,8 @@ nsresult HttpConnectionMgrParent::AddTransactionWithStickyConn(
 
 nsresult HttpConnectionMgrParent::RescheduleTransaction(
     HttpTransactionShell* aTrans, int32_t aPriority) {
+  MOZ_ASSERT(gIOService->SocketProcessReady());
+
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -144,6 +148,8 @@ nsresult HttpConnectionMgrParent::RescheduleTransaction(
 
 void HttpConnectionMgrParent::UpdateClassOfServiceOnTransaction(
     HttpTransactionShell* aTrans, uint32_t aClassOfService) {
+  MOZ_ASSERT(gIOService->SocketProcessReady());
+
   if (!CanSend()) {
     return;
   }
@@ -154,6 +160,8 @@ void HttpConnectionMgrParent::UpdateClassOfServiceOnTransaction(
 
 nsresult HttpConnectionMgrParent::CancelTransaction(
     HttpTransactionShell* aTrans, nsresult aReason) {
+  MOZ_ASSERT(gIOService->SocketProcessReady());
+
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -162,7 +170,7 @@ nsresult HttpConnectionMgrParent::CancelTransaction(
   return NS_OK;
 }
 
-nsresult HttpConnectionMgrParent::ReclaimConnection(nsHttpConnection*) {
+nsresult HttpConnectionMgrParent::ReclaimConnection(HttpConnectionBase*) {
   MOZ_ASSERT_UNREACHABLE("ReclaimConnection should not be called");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -182,20 +190,46 @@ nsresult HttpConnectionMgrParent::GetSocketThreadTarget(nsIEventTarget**) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-nsresult HttpConnectionMgrParent::SpeculativeConnect(nsHttpConnectionInfo*,
-                                                     nsIInterfaceRequestor*,
-                                                     uint32_t caps,
-                                                     NullHttpTransaction*) {
-  // TODO: fix this in bug 1527384
-  return NS_ERROR_NOT_IMPLEMENTED;
+nsresult HttpConnectionMgrParent::SpeculativeConnect(
+    nsHttpConnectionInfo* aConnInfo, nsIInterfaceRequestor* aCallbacks,
+    uint32_t aCaps, NullHttpTransaction* aTransaction) {
+  NS_ENSURE_ARG_POINTER(aConnInfo);
+
+  nsCOMPtr<nsISpeculativeConnectionOverrider> overrider =
+      do_GetInterface(aCallbacks);
+  Maybe<SpeculativeConnectionOverriderArgs> overriderArgs;
+  if (overrider) {
+    overriderArgs.emplace();
+    overriderArgs->parallelSpeculativeConnectLimit() =
+        overrider->GetParallelSpeculativeConnectLimit();
+    overriderArgs->ignoreIdle() = overrider->GetIgnoreIdle();
+    overriderArgs->isFromPredictor() = overrider->GetIsFromPredictor();
+    overriderArgs->allow1918() = overrider->GetAllow1918();
+  }
+
+  HttpConnectionInfoCloneArgs connInfo;
+  nsHttpConnectionInfo::SerializeHttpConnectionInfo(aConnInfo, connInfo);
+  RefPtr<AltSvcTransactionParent> trans = do_QueryObject(aTransaction);
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self, connInfo{std::move(connInfo)},
+               overriderArgs{std::move(overriderArgs)}, aCaps,
+               trans{std::move(trans)}]() {
+    Maybe<AltSvcTransactionParent*> maybeTrans;
+    if (trans) {
+      maybeTrans.emplace(trans.get());
+    }
+    Unused << self->SendSpeculativeConnect(connInfo, overriderArgs, aCaps,
+                                           maybeTrans);
+  };
+
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
+  return NS_OK;
 }
 
 nsresult HttpConnectionMgrParent::VerifyTraffic() {
-  if (!CanSend()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  Unused << SendVerifyTraffic();
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self]() { Unused << self->SendVerifyTraffic(); };
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
   return NS_OK;
 }
 
@@ -204,11 +238,9 @@ void HttpConnectionMgrParent::BlacklistSpdy(const nsHttpConnectionInfo* ci) {
 }
 
 nsresult HttpConnectionMgrParent::ClearConnectionHistory() {
-  if (!CanSend()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  Unused << SendClearConnectionHistory();
+  RefPtr<HttpConnectionMgrParent> self = this;
+  auto task = [self]() { Unused << self->SendClearConnectionHistory(); };
+  gIOService->CallOrWaitForSocketProcess(std::move(task));
   return NS_OK;
 }
 
@@ -220,6 +252,10 @@ nsresult HttpConnectionMgrParent::CompleteUpgrade(
 
 nsHttpConnectionMgr* HttpConnectionMgrParent::AsHttpConnectionMgr() {
   return nullptr;
+}
+
+HttpConnectionMgrParent* HttpConnectionMgrParent::AsHttpConnectionMgrParent() {
+  return this;
 }
 
 }  // namespace net

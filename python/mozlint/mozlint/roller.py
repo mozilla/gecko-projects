@@ -202,17 +202,20 @@ class LintRoller(object):
         return 0
 
     def _generate_jobs(self, paths, vcs_paths, num_procs):
+        def __get_current_paths(path=self.root):
+            return [os.path.join(path, p) for p in os.listdir(path)]
+
         """A job is of the form (<linter:dict>, <paths:list>)."""
         for linter in self.linters:
             if any(os.path.isfile(p) and mozpath.match(p, pattern)
                     for pattern in linter.get('support-files', []) for p in vcs_paths):
-                lpaths = [self.root]
+                lpaths = __get_current_paths()
                 print("warning: {} support-file modified, linting entire tree "
                       "(press ctrl-c to cancel)".format(linter['name']))
             else:
                 lpaths = paths.union(vcs_paths)
 
-            lpaths = list(lpaths) or [os.getcwd()]
+            lpaths = list(lpaths) or __get_current_paths(os.getcwd())
             chunk_size = min(self.MAX_PATHS_PER_JOB, int(ceil(len(lpaths) / num_procs))) or 1
             if linter['type'] == 'global':
                 # Global linters lint the entire tree in one job.
@@ -230,7 +233,9 @@ class LintRoller(object):
         # Merge this job's results with our global ones.
         self.result.update(future.result())
 
-    def roll(self, paths=None, outgoing=None, workdir=None, num_procs=None):
+    def roll(self, paths=None,
+             outgoing=None, workdir=None, rev=None,
+             num_procs=None):
         """Run all of the registered linters against the specified file paths.
 
         :param paths: An iterable of files and/or directories to lint.
@@ -261,6 +266,8 @@ class LintRoller(object):
         try:
             if workdir:
                 vcs_paths.update(self.vcs.get_changed_files('AM', mode=workdir))
+            if rev:
+                vcs_paths.update(self.vcs.get_changed_files('AM', rev=rev))
             if outgoing:
                 try:
                     vcs_paths.update(self.vcs.get_outgoing_files('AM', upstream=outgoing))

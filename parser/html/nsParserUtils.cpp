@@ -5,11 +5,11 @@
 
 #include "nsParserUtils.h"
 #include "mozilla/NullPrincipal.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "nsAttrName.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsContentCID.h"
 #include "nsContentUtils.h"
@@ -103,7 +103,8 @@ nsParserUtils::ParseFragment(const nsAString& aFragment, uint32_t aFlags,
     rv = nsContentUtils::ParseFragmentXML(aFragment, document, tagStack, true,
                                           aFlags, getter_AddRefs(fragment));
   } else {
-    fragment = new DocumentFragment(document->NodeInfoManager());
+    fragment = new (document->NodeInfoManager())
+        DocumentFragment(document->NodeInfoManager());
     rv = nsContentUtils::ParseFragmentHTML(aFragment, fragment, nsGkAtoms::body,
                                            kNameSpaceID_XHTML, false, true,
                                            aFlags);

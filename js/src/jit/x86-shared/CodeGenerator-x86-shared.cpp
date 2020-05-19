@@ -415,6 +415,7 @@ void CodeGeneratorX86Shared::visitOutOfLineLoadTypedArrayOutOfBounds(
     case Scalar::Int64:
     case Scalar::BigInt64:
     case Scalar::BigUint64:
+    case Scalar::V128:
     case Scalar::MaxTypedArrayViewType:
       MOZ_CRASH("unexpected array type");
     case Scalar::Float32:
@@ -675,26 +676,6 @@ void CodeGenerator::visitMinMaxF(LMinMaxF* ins) {
   } else {
     masm.minFloat32(second, first, handleNaN);
   }
-}
-
-void CodeGenerator::visitAbsD(LAbsD* ins) {
-  FloatRegister input = ToFloatRegister(ins->input());
-  MOZ_ASSERT(input == ToFloatRegister(ins->output()));
-  // Load a value which is all ones except for the sign bit.
-  ScratchDoubleScope scratch(masm);
-  masm.loadConstantDouble(
-      SpecificNaN<double>(0, FloatingPoint<double>::kSignificandBits), scratch);
-  masm.vandpd(scratch, input, input);
-}
-
-void CodeGenerator::visitAbsF(LAbsF* ins) {
-  FloatRegister input = ToFloatRegister(ins->input());
-  MOZ_ASSERT(input == ToFloatRegister(ins->output()));
-  // Same trick as visitAbsD above.
-  ScratchFloat32Scope scratch(masm);
-  masm.loadConstantFloat32(
-      SpecificNaN<float>(0, FloatingPoint<float>::kSignificandBits), scratch);
-  masm.vandps(scratch, input, input);
 }
 
 void CodeGenerator::visitClzI(LClzI* ins) {
@@ -1807,7 +1788,7 @@ Operand CodeGeneratorX86Shared::ToOperand(const LAllocation& a) {
   if (a.isFloatReg()) {
     return Operand(a.toFloatReg()->reg());
   }
-  return Operand(masm.getStackPointer(), ToStackOffset(&a));
+  return Operand(ToAddress(a));
 }
 
 Operand CodeGeneratorX86Shared::ToOperand(const LAllocation* a) {
@@ -1825,7 +1806,9 @@ MoveOperand CodeGeneratorX86Shared::toMoveOperand(LAllocation a) const {
   if (a.isFloatReg()) {
     return MoveOperand(ToFloatRegister(a));
   }
-  return MoveOperand(StackPointer, ToStackOffset(a));
+  MoveOperand::Kind kind =
+      a.isStackArea() ? MoveOperand::EFFECTIVE_ADDRESS : MoveOperand::MEMORY;
+  return MoveOperand(ToAddress(a), kind);
 }
 
 class OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorX86Shared> {
@@ -2435,13 +2418,9 @@ void CodeGeneratorX86Shared::generateInvalidateEpilogue() {
   // is).
   invalidateEpilogueData_ = masm.pushWithPatch(ImmWord(uintptr_t(-1)));
 
+  // Jump to the invalidator which will replace the current frame.
   TrampolinePtr thunk = gen->jitRuntime()->getInvalidationThunk();
-  masm.call(thunk);
-
-  // We should never reach this point in JIT code -- the invalidation thunk
-  // should pop the invalidated JS frame and return directly to its caller.
-  masm.assumeUnreachable(
-      "Should have returned directly to its caller instead of here.");
+  masm.jump(thunk);
 }
 
 void CodeGenerator::visitNegI(LNegI* ins) {

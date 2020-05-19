@@ -42,6 +42,7 @@
 #include "mozilla/dom/CSPReportBinding.h"
 #include "mozilla/dom/CSPDictionariesBinding.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
+#include "mozilla/dom/WindowGlobalParent.h"
 #include "nsINetworkInterceptController.h"
 #include "nsSandboxFlags.h"
 #include "nsIScriptElement.h"
@@ -53,6 +54,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
 
 static LogModule* GetCspContextLog() {
   static LazyLogModule gCspContextPRLog("CSPContext");
@@ -114,11 +116,11 @@ static void BlockedContentSourceToString(
 NS_IMETHODIMP
 nsCSPContext::ShouldLoad(nsContentPolicyType aContentType,
                          nsICSPEventListener* aCSPEventListener,
-                         nsIURI* aContentLocation, nsISupports* aRequestContext,
+                         nsIURI* aContentLocation,
                          const nsACString& aMimeTypeGuess,
                          nsIURI* aOriginalURIIfRedirect,
                          bool aSendViolationReports, const nsAString& aNonce,
-                         int16_t* outDecision) {
+                         bool aParserCreated, int16_t* outDecision) {
   if (CSPCONTEXTLOGENABLED()) {
     CSPCONTEXTLOG(("nsCSPContext::ShouldLoad, aContentLocation: %s",
                    aContentLocation->GetSpecOrDefault().get()));
@@ -152,14 +154,6 @@ nsCSPContext::ShouldLoad(nsContentPolicyType aContentType,
     return NS_OK;
   }
 
-  bool parserCreated = false;
-  if (!isPreload) {
-    nsCOMPtr<nsIScriptElement> script = do_QueryInterface(aRequestContext);
-    if (script && script->GetParserCreated() != mozilla::dom::NOT_FROM_PARSER) {
-      parserCreated = true;
-    }
-  }
-
   bool permitted =
       permitsInternal(dir,
                       nullptr,  // aTriggeringElement
@@ -168,7 +162,7 @@ nsCSPContext::ShouldLoad(nsContentPolicyType aContentType,
                       false,  // allow fallback to default-src
                       aSendViolationReports,
                       true,  // send blocked URI in violation reports
-                      parserCreated);
+                      aParserCreated);
 
   *outDecision =
       permitted ? nsIContentPolicy::ACCEPT : nsIContentPolicy::REJECT_SERVER;
@@ -189,6 +183,7 @@ bool nsCSPContext::permitsInternal(
     nsIURI* aOriginalURIIfRedirect, const nsAString& aNonce, bool aIsPreload,
     bool aSpecific, bool aSendViolationReports,
     bool aSendContentLocationInViolationReports, bool aParserCreated) {
+  EnsureIPCPoliciesRead();
   bool permits = true;
 
   nsAutoString violatedDirective;
@@ -315,7 +310,7 @@ nsresult nsCSPContext::InitFromOther(nsCSPContext* aOtherContext) {
     AppendPolicy(policyStr, policy->getReportOnlyFlag(),
                  policy->getDeliveredViaMetaTagFlag());
   }
-  mIPCPolicies = aOtherContext->mIPCPolicies;
+  mIPCPolicies = aOtherContext->mIPCPolicies.Clone();
   return NS_OK;
 }
 
@@ -597,7 +592,7 @@ nsCSPContext::GetAllowsInline(nsContentPolicyType aContentType,
 }
 
 NS_IMETHODIMP
-nsCSPContext::GetAllowsNavigateTo(nsIURI* aURI, nsILoadInfo* aLoadInfo,
+nsCSPContext::GetAllowsNavigateTo(nsIURI* aURI, bool aIsFormSubmission,
                                   bool aWasRedirected, bool aEnforceWhitelist,
                                   bool* outAllowsNavigateTo) {
   /*
@@ -617,7 +612,7 @@ nsCSPContext::GetAllowsNavigateTo(nsIURI* aURI, nsILoadInfo* aLoadInfo,
   // So in case this is a form submission and the directive 'form-action' is
   // present then there is nothing for us to do here, see: 6.3.3.1.2
   // https://www.w3.org/TR/CSP3/#navigate-to-pre-navigate
-  if (aLoadInfo->GetIsFormSubmission()) {
+  if (aIsFormSubmission) {
     for (unsigned long i = 0; i < mPolicies.Length(); i++) {
       if (mPolicies[i]->hasDirective(
               nsIContentSecurityPolicy::FORM_ACTION_DIRECTIVE)) {
@@ -1013,9 +1008,17 @@ nsresult nsCSPContext::GatherSecurityPolicyViolationEventData(
 
   // blocked-uri
   if (aBlockedURI) {
+    // in case of blocking a browsing context (frame) we have to report
+    // the final URI in case of a redirect. For subresources we report
+    // the URI before redirects.
+    nsCOMPtr<nsIURI> uriToReport;
+    if (aViolatedDirective.EqualsLiteral("frame-src")) {
+      uriToReport = aBlockedURI;
+    } else {
+      uriToReport = aOriginalURI ? aOriginalURI : aBlockedURI;
+    }
     nsAutoCString reportBlockedURI;
-    StripURIForReporting(aOriginalURI ? aOriginalURI : aBlockedURI, mSelfURI,
-                         reportBlockedURI);
+    StripURIForReporting(uriToReport, mSelfURI, reportBlockedURI);
     aViolationEventInit.mBlockedURI = NS_ConvertUTF8toUTF16(reportBlockedURI);
   } else {
     aViolationEventInit.mBlockedURI = NS_ConvertUTF8toUTF16(aBlockedString);
@@ -1312,6 +1315,17 @@ nsresult nsCSPContext::FireViolationEvent(
     eventTarget = doc;
   }
 
+  if (!eventTarget && mInnerWindowID && XRE_IsParentProcess()) {
+    if (RefPtr<WindowGlobalParent> parent =
+            WindowGlobalParent::GetByInnerWindowId(mInnerWindowID)) {
+      nsAutoString json;
+      if (aViolationEventInit.ToJSON(json)) {
+        Unused << parent->SendDispatchSecurityPolicyViolation(json);
+      }
+    }
+    return NS_OK;
+  }
+
   if (!eventTarget) {
     // If we are here, we are probably dealing with workers. Those are handled
     // via nsICSPEventListener. Nothing to do here.
@@ -1529,6 +1543,7 @@ nsresult nsCSPContext::AsyncReportViolation(
 NS_IMETHODIMP
 nsCSPContext::PermitsAncestry(nsILoadInfo* aLoadInfo,
                               bool* outPermitsAncestry) {
+  MOZ_ASSERT(XRE_IsParentProcess(), "frame-ancestor check only in parent");
   nsresult rv;
 
   *outPermitsAncestry = true;
@@ -1542,16 +1557,9 @@ nsCSPContext::PermitsAncestry(nsILoadInfo* aLoadInfo,
 
   while (ctx) {
     nsCOMPtr<nsIURI> currentURI;
-    // If fission is enabled, then permitsAncestry is called in the parent
-    // process, otherwise in the content process. After Bug 1574372 we should
-    // be able to remove that branching code for querying currentURI.
-    if (XRE_IsParentProcess()) {
-      WindowGlobalParent* window = ctx->Canonical()->GetCurrentWindowGlobal();
-      if (window) {
-        currentURI = window->GetDocumentURI();
-      }
-    } else if (nsPIDOMWindowOuter* windowOuter = ctx->GetDOMWindow()) {
-      currentURI = windowOuter->GetDocumentURI();
+    WindowGlobalParent* window = ctx->Canonical()->GetCurrentWindowGlobal();
+    if (window) {
+      currentURI = window->GetDocumentURI();
     }
 
     if (currentURI) {
@@ -1648,7 +1656,9 @@ nsCSPContext::ToJSON(nsAString& outCSPinJSON) {
   for (uint32_t p = 0; p < mPolicies.Length(); p++) {
     dom::CSP jsonCSP;
     mPolicies[p]->toDomCSPStruct(jsonCSP);
-    jsonPolicies.mCsp_policies.Value().AppendElement(jsonCSP, fallible);
+    if (!jsonPolicies.mCsp_policies.Value().AppendElement(jsonCSP, fallible)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
   }
 
   // convert the gathered information to JSON
@@ -1704,9 +1714,9 @@ nsCSPContext::GetCSPSandboxFlags(uint32_t* aOutSandboxFlags) {
 NS_IMPL_ISUPPORTS(CSPViolationReportListener, nsIStreamListener,
                   nsIRequestObserver, nsISupports);
 
-CSPViolationReportListener::CSPViolationReportListener() {}
+CSPViolationReportListener::CSPViolationReportListener() = default;
 
-CSPViolationReportListener::~CSPViolationReportListener() {}
+CSPViolationReportListener::~CSPViolationReportListener() = default;
 
 nsresult AppendSegmentToString(nsIInputStream* aInputStream, void* aClosure,
                                const char* aRawSegment, uint32_t aToOffset,
@@ -1743,9 +1753,9 @@ CSPViolationReportListener::OnStartRequest(nsIRequest* aRequest) {
 NS_IMPL_ISUPPORTS(CSPReportRedirectSink, nsIChannelEventSink,
                   nsIInterfaceRequestor);
 
-CSPReportRedirectSink::CSPReportRedirectSink() {}
+CSPReportRedirectSink::CSPReportRedirectSink() = default;
 
-CSPReportRedirectSink::~CSPReportRedirectSink() {}
+CSPReportRedirectSink::~CSPReportRedirectSink() = default;
 
 NS_IMETHODIMP
 CSPReportRedirectSink::AsyncOnChannelRedirect(
@@ -1836,8 +1846,8 @@ nsCSPContext::Read(nsIObjectInputStream* aStream) {
     bool deliveredViaMetaTag = false;
     rv = aStream->ReadBoolean(&deliveredViaMetaTag);
     NS_ENSURE_SUCCESS(rv, rv);
-    mIPCPolicies.AppendElement(mozilla::ipc::ContentSecurityPolicy(
-        policyString, reportOnly, deliveredViaMetaTag));
+    AddIPCPolicy(mozilla::ipc::ContentSecurityPolicy(policyString, reportOnly,
+                                                     deliveredViaMetaTag));
   }
 
   return NS_OK;
@@ -1871,4 +1881,21 @@ nsCSPContext::Write(nsIObjectOutputStream* aStream) {
     aStream->WriteBoolean(policy.deliveredViaMetaTagFlag());
   }
   return NS_OK;
+}
+
+void nsCSPContext::AddIPCPolicy(const ContentSecurityPolicy& aPolicy) {
+  mIPCPolicies.AppendElement(aPolicy);
+}
+
+void nsCSPContext::SerializePolicies(
+    nsTArray<ContentSecurityPolicy>& aPolicies) {
+  for (auto* policy : mPolicies) {
+    nsAutoString policyString;
+    policy->toString(policyString);
+    aPolicies.AppendElement(
+        ContentSecurityPolicy(policyString, policy->getReportOnlyFlag(),
+                              policy->getDeliveredViaMetaTagFlag()));
+  }
+
+  aPolicies.AppendElements(mIPCPolicies);
 }

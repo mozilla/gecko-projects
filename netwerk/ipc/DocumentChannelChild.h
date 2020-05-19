@@ -11,6 +11,7 @@
 #include "mozilla/net/PDocumentChannelChild.h"
 #include "mozilla/net/DocumentChannel.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
+#include "mozilla/dom/nsCSPContext.h"
 
 namespace mozilla {
 namespace net {
@@ -25,10 +26,8 @@ class DocumentChannelChild final : public DocumentChannel,
                                    public PDocumentChannelChild {
  public:
   DocumentChannelChild(nsDocShellLoadState* aLoadState,
-                       class LoadInfo* aLoadInfo,
-                       const nsString* aInitiatorType, nsLoadFlags aLoadFlags,
-                       uint32_t aLoadType, uint32_t aCacheKey, bool aIsActive,
-                       bool aIsTopLevelDoc, bool aHasNonEmptySandboxingFlags);
+                       class LoadInfo* aLoadInfo, nsLoadFlags aLoadFlags,
+                       uint32_t aCacheKey, bool aUriModified, bool aIsXFOError);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
@@ -45,23 +44,22 @@ class DocumentChannelChild final : public DocumentChannel,
 
   mozilla::ipc::IPCResult RecvRedirectToRealChannel(
       RedirectToRealChannelArgs&& aArgs,
+      nsTArray<Endpoint<extensions::PStreamFilterParent>>&& aEndpoints,
       RedirectToRealChannelResolver&& aResolve);
 
-  mozilla::ipc::IPCResult RecvAttachStreamFilter(
-      Endpoint<extensions::PStreamFilterParent>&& aEndpoint);
-
-  mozilla::ipc::IPCResult RecvConfirmRedirect(
-      LoadInfoArgs&& aLoadInfo, nsIURI* aNewUri,
-      ConfirmRedirectResolver&& aResolve);
-
  private:
-  void ShutdownListeners(nsresult aStatusCode);
+  void DeleteIPDL() override {
+    if (CanSend()) {
+      Send__delete__(this);
+    }
+  }
 
   ~DocumentChannelChild();
 
   nsCOMPtr<nsIChannel> mRedirectChannel;
 
   RedirectToRealChannelResolver mRedirectResolver;
+  nsTArray<Endpoint<extensions::PStreamFilterParent>> mStreamFilterEndpoints;
 };
 
 }  // namespace net

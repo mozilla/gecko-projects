@@ -8,6 +8,7 @@
 #define mozilla_dom_workers_WorkerLoadInfo_h
 
 #include "mozilla/StorageAccess.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/ChannelInfo.h"
 #include "mozilla/dom/ServiceWorkerRegistrationDescriptor.h"
 #include "mozilla/dom/WorkerCommon.h"
@@ -19,7 +20,7 @@
 
 class nsIChannel;
 class nsIContentSecurityPolicy;
-class nsICookieSettings;
+class nsICookieJarSettings;
 class nsILoadGroup;
 class nsIPrincipal;
 class nsIRunnable;
@@ -54,7 +55,7 @@ struct WorkerLoadInfoData {
   nsCOMPtr<nsIPrincipal> mStoragePrincipal;
 
   // Taken from the parent context.
-  nsCOMPtr<nsICookieSettings> mCookieSettings;
+  nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
 
   nsCOMPtr<nsIScriptContext> mScriptContext;
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
@@ -64,7 +65,7 @@ struct WorkerLoadInfoData {
   // needs to happen on the main thread, but storing the CSPInfo needs to happen
   // on the worker thread. We move the CSPInfo into the Client within
   // ScriptLoader::PreRun().
-  nsAutoPtr<mozilla::ipc::CSPInfo> mCSPInfo;
+  UniquePtr<mozilla::ipc::CSPInfo> mCSPInfo;
 
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsILoadGroup> mLoadGroup;
@@ -100,8 +101,8 @@ struct WorkerLoadInfoData {
   // Only set if we have a custom overriden load group
   RefPtr<InterfaceRequestor> mInterfaceRequestor;
 
-  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
-  nsAutoPtr<mozilla::ipc::PrincipalInfo> mStoragePrincipalInfo;
+  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
+  UniquePtr<mozilla::ipc::PrincipalInfo> mStoragePrincipalInfo;
   nsCString mDomain;
   nsString mOrigin;  // Derived from mPrincipal; can be used on worker thread.
 
@@ -126,7 +127,7 @@ struct WorkerLoadInfoData {
   bool mXHRParamsAllowed;
   bool mPrincipalIsSystem;
   bool mPrincipalIsAddonOrExpandedAddon;
-  bool mWatchedByDevtools;
+  bool mWatchedByDevTools;
   StorageAccess mStorageAccess;
   bool mFirstPartyStorageAccessGranted;
   bool mServiceWorkersTestingInWindow;

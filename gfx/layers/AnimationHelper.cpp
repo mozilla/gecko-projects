@@ -27,7 +27,6 @@ void CompositorAnimationStorage::Clear() {
 
   mAnimatedValues.Clear();
   mAnimations.Clear();
-  mAnimationRenderRoots.Clear();
 }
 
 void CompositorAnimationStorage::ClearById(const uint64_t& aId) {
@@ -35,7 +34,6 @@ void CompositorAnimationStorage::ClearById(const uint64_t& aId) {
 
   mAnimatedValues.Remove(aId);
   mAnimations.Remove(aId);
-  mAnimationRenderRoots.Remove(aId);
 }
 
 AnimatedValue* CompositorAnimationStorage::GetAnimatedValue(
@@ -121,11 +119,9 @@ void CompositorAnimationStorage::SetAnimatedValue(uint64_t aId,
 }
 
 void CompositorAnimationStorage::SetAnimations(uint64_t aId,
-                                               const AnimationArray& aValue,
-                                               wr::RenderRoot aRenderRoot) {
+                                               const AnimationArray& aValue) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   mAnimations.Put(aId, AnimationHelper::ExtractAnimations(aValue));
-  mAnimationRenderRoots.Put(aId, aRenderRoot);
 }
 
 enum class CanSkipCompose {
@@ -318,10 +314,11 @@ AnimationHelper::SampleResult AnimationHelper::SampleAnimationForEachNode(
     // Initialize animation value with base style.
     RefPtr<RawServoAnimationValue> currValue = group.mBaseStyle;
 
-    CanSkipCompose canSkipCompose = aPropertyAnimationGroups.Length() == 1 &&
-                                            group.mAnimations.Length() == 1
-                                        ? CanSkipCompose::IfPossible
-                                        : CanSkipCompose::No;
+    CanSkipCompose canSkipCompose =
+        aPreviousValue && aPropertyAnimationGroups.Length() == 1 &&
+                group.mAnimations.Length() == 1
+            ? CanSkipCompose::IfPossible
+            : CanSkipCompose::No;
 
     MOZ_ASSERT(
         !group.mAnimations.IsEmpty() ||
@@ -435,18 +432,11 @@ AnimationStorageData AnimationHelper::ExtractAnimations(
       currData = storageData.mAnimation.AppendElement();
       currData->mProperty = animation.property();
       if (animation.transformData()) {
-        MOZ_ASSERT(!storageData.mTransformLikeMetaData.mTransform,
+        MOZ_ASSERT(!storageData.mTransformData,
                    "Only one entry has TransformData");
-        storageData.mTransformLikeMetaData.mTransform =
-            animation.transformData();
+        storageData.mTransformData = animation.transformData();
       }
 
-      if (animation.motionPathData()) {
-        MOZ_ASSERT(!storageData.mTransformLikeMetaData.mMotionPath,
-                   "Only one entry has MotionPathData");
-        storageData.mTransformLikeMetaData.mMotionPath =
-            animation.motionPathData();
-      }
       prevID = animation.property();
 
       // Reset the debug pointer.
@@ -555,12 +545,12 @@ AnimationStorageData AnimationHelper::ExtractAnimations(
 
     if (seenProperties.IsSubsetOf(LayerAnimationInfo::GetCSSPropertiesFor(
             DisplayItemType::TYPE_TRANSFORM))) {
-      MOZ_ASSERT(storageData.mTransformLikeMetaData.mTransform,
-                 "Should have TransformData");
+      MOZ_ASSERT(storageData.mTransformData, "Should have TransformData");
     }
 
     if (seenProperties.HasProperty(eCSSProperty_offset_path)) {
-      MOZ_ASSERT(storageData.mTransformLikeMetaData.mMotionPath,
+      MOZ_ASSERT(storageData.mTransformData, "Should have TransformData");
+      MOZ_ASSERT(storageData.mTransformData->motionPathData(),
                  "Should have MotionPathData");
     }
   }
@@ -615,6 +605,12 @@ bool AnimationHelper::SampleAnimations(CompositorAnimationStorage* aStorage,
 
     // Store the AnimatedValue
     switch (lastPropertyAnimationGroup.mProperty) {
+      case eCSSProperty_background_color: {
+        aStorage->SetAnimatedValue(
+            iter.Key(), Servo_AnimationValue_GetColor(animationValues[0],
+                                                      NS_RGBA(0, 0, 0, 0)));
+        break;
+      }
       case eCSSProperty_opacity: {
         MOZ_ASSERT(animationValues.Length() == 1);
         aStorage->SetAnimatedValue(
@@ -629,16 +625,17 @@ bool AnimationHelper::SampleAnimations(CompositorAnimationStorage* aStorage,
       case eCSSProperty_offset_distance:
       case eCSSProperty_offset_rotate:
       case eCSSProperty_offset_anchor: {
+        MOZ_ASSERT(animationStorageData.mTransformData);
+
         gfx::Matrix4x4 transform = ServoAnimationValueToMatrix4x4(
-            animationValues, animationStorageData.mTransformLikeMetaData,
+            animationValues, *animationStorageData.mTransformData,
             animationStorageData.mCachedMotionPath);
         gfx::Matrix4x4 frameTransform = transform;
         // If the parent has perspective transform, then the offset into
         // reference frame coordinates is already on this transform. If not,
         // then we need to ask for it to be added here.
-        MOZ_ASSERT(animationStorageData.mTransformLikeMetaData.mTransform);
         const TransformData& transformData =
-            *animationStorageData.mTransformLikeMetaData.mTransform;
+            *animationStorageData.mTransformData;
         if (!transformData.hasPerspectiveParent()) {
           nsLayoutUtils::PostTranslate(transform, transformData.origin(),
                                        transformData.appUnitsPerDevPixel(),
@@ -662,8 +659,7 @@ bool AnimationHelper::SampleAnimations(CompositorAnimationStorage* aStorage,
 
 gfx::Matrix4x4 AnimationHelper::ServoAnimationValueToMatrix4x4(
     const nsTArray<RefPtr<RawServoAnimationValue>>& aValues,
-    const CompositorAnimationData& aAnimationData,
-    gfx::Path* aCachedMotionPath) {
+    const TransformData& aTransformData, gfx::Path* aCachedMotionPath) {
   using nsStyleTransformMatrix::TransformReferenceBox;
 
   // This is a bit silly just to avoid the transform list copy from the
@@ -723,23 +719,20 @@ gfx::Matrix4x4 AnimationHelper::ServoAnimationValueToMatrix4x4(
     }
   }
 
-  MOZ_ASSERT(aAnimationData.mTransform);
-  const TransformData& transformData = *aAnimationData.mTransform;
-  TransformReferenceBox refBox(nullptr, transformData.bounds());
+  TransformReferenceBox refBox(nullptr, aTransformData.bounds());
   Maybe<ResolvedMotionPathData> motion = MotionPathUtils::ResolveMotionPath(
-      path, distance, offsetRotate, anchor, aAnimationData.mMotionPath, refBox,
-      aCachedMotionPath);
+      path, distance, offsetRotate, anchor, aTransformData.motionPathData(),
+      refBox, aCachedMotionPath);
 
   // We expect all our transform data to arrive in device pixels
-  gfx::Point3D transformOrigin = transformData.transformOrigin();
+  gfx::Point3D transformOrigin = aTransformData.transformOrigin();
   nsDisplayTransform::FrameTransformProperties props(
       translate ? *translate : noneTranslate, rotate ? *rotate : noneRotate,
       scale ? *scale : noneScale, transform ? *transform : noneTransform,
       motion, transformOrigin);
 
   return nsDisplayTransform::GetResultingTransformMatrix(
-      props, refBox, transformData.origin(),
-      transformData.appUnitsPerDevPixel(), 0);
+      props, refBox, aTransformData.appUnitsPerDevPixel());
 }
 
 }  // namespace layers

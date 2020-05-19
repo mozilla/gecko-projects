@@ -60,7 +60,7 @@ void* Pointer::ToPtr(FontList* aFontList) const {
     }
     MOZ_ASSERT(block < aFontList->mBlocks.Length());
   }
-  return static_cast<char*>(aFontList->mBlocks[block]->mAddr) + Offset();
+  return static_cast<char*>(aFontList->mBlocks[block]->Memory()) + Offset();
 }
 
 void String::Assign(const nsACString& aString, FontList* aList) {
@@ -81,7 +81,7 @@ Family::Family(FontList* aList, const InitData& aData)
       mCharacterMap(Pointer::Null()),
       mFaces(Pointer::Null()),
       mIndex(aData.mIndex),
-      mIsHidden(aData.mHidden),
+      mVisibility(aData.mVisibility),
       mIsBadUnderlineFamily(aData.mBadUnderline),
       mIsForceClassic(aData.mForceClassic),
       mIsSimple(false) {
@@ -92,7 +92,7 @@ Family::Family(FontList* aList, const InitData& aData)
 class SetCharMapRunnable : public mozilla::Runnable {
  public:
   SetCharMapRunnable(uint32_t aListGeneration, Face* aFace,
-                     const gfxSparseBitSet* aCharMap)
+                     gfxCharacterMap* aCharMap)
       : Runnable("SetCharMapRunnable"),
         mListGeneration(aListGeneration),
         mFace(aFace),
@@ -111,18 +111,16 @@ class SetCharMapRunnable : public mozilla::Runnable {
  private:
   uint32_t mListGeneration;
   Face* mFace;
-  const gfxSparseBitSet* mCharMap;
+  RefPtr<gfxCharacterMap> mCharMap;
 };
 
-void Face::SetCharacterMap(FontList* aList, const gfxSparseBitSet* aCharMap) {
+void Face::SetCharacterMap(FontList* aList, gfxCharacterMap* aCharMap) {
   if (!XRE_IsParentProcess()) {
     if (NS_IsMainThread()) {
       Pointer ptr = aList->ToSharedPointer(this);
       dom::ContentChild::GetSingleton()->SendSetCharacterMap(
           aList->GetGeneration(), ptr, *aCharMap);
     } else {
-      // aCharMap is kept alive by our caller until it has been successfully
-      // recorded in the Face, so we don't need to make/pass a copy.
       NS_DispatchToMainThread(
           new SetCharMapRunnable(aList->GetGeneration(), this, aCharMap));
     }
@@ -521,27 +519,29 @@ FontList::~FontList() { DetachShmBlocks(); }
 
 bool FontList::AppendShmBlock() {
   MOZ_ASSERT(XRE_IsParentProcess());
-  ipc::SharedMemoryBasic* newShm = new ipc::SharedMemoryBasic();
-  if (!newShm->Create(SHM_BLOCK_SIZE)) {
+  auto newShm = MakeUnique<base::SharedMemory>();
+  if (!newShm->CreateFreezeable(SHM_BLOCK_SIZE)) {
     MOZ_CRASH("failed to create shared memory");
     return false;
   }
-  if (!newShm->Map(SHM_BLOCK_SIZE)) {
+  if (!newShm->Map(SHM_BLOCK_SIZE) || !newShm->memory()) {
     MOZ_CRASH("failed to map shared memory");
+    return false;
   }
-
-  char* addr = static_cast<char*>(newShm->memory());
-  if (!addr) {
-    MOZ_CRASH("null shared memory?");
+  auto readOnly = MakeUnique<base::SharedMemory>();
+  if (!newShm->ReadOnlyCopy(readOnly.get())) {
+    MOZ_CRASH("failed to create read-only copy");
     return false;
   }
 
-  ShmBlock* block = new ShmBlock(newShm, addr);
+  ShmBlock* block = new ShmBlock(std::move(newShm));
   // Allocate space for the Allocated() header field present in all blocks
   block->Allocated().store(4);
 
   mBlocks.AppendElement(block);
   GetHeader().mBlockCount.store(mBlocks.Length());
+
+  mReadOnlyShmems.AppendElement(std::move(readOnly));
 
   return true;
 }
@@ -550,7 +550,8 @@ void FontList::DetachShmBlocks() {
   for (auto& i : mBlocks) {
     i->mShmem = nullptr;
   }
-  mBlocks.SetLength(0);
+  mBlocks.Clear();
+  mReadOnlyShmems.Clear();
 }
 
 FontList::ShmBlock* FontList::GetBlockFromParent(uint32_t aIndex) {
@@ -558,27 +559,22 @@ FontList::ShmBlock* FontList::GetBlockFromParent(uint32_t aIndex) {
   // If we have no existing blocks, we don't want a generation check yet;
   // the header in the first block will define the generation of this list
   uint32_t generation = aIndex == 0 ? 0 : GetGeneration();
-  ipc::SharedMemoryBasic::Handle handle = ipc::SharedMemoryBasic::NULLHandle();
+  base::SharedMemoryHandle handle = base::SharedMemory::NULLHandle();
   if (!dom::ContentChild::GetSingleton()->SendGetFontListShmBlock(
           generation, aIndex, &handle)) {
     return nullptr;
   }
-  RefPtr<ipc::SharedMemoryBasic> newShm = new ipc::SharedMemoryBasic();
+  auto newShm = MakeUnique<base::SharedMemory>();
   if (!newShm->IsHandleValid(handle)) {
     return nullptr;
   }
-  if (!newShm->SetHandle(handle,
-                         mozilla::ipc::SharedMemoryBasic::RightsReadOnly)) {
+  if (!newShm->SetHandle(handle, true)) {
     MOZ_CRASH("failed to set shm handle");
   }
-  if (!newShm->Map(SHM_BLOCK_SIZE)) {
+  if (!newShm->Map(SHM_BLOCK_SIZE) || !newShm->memory()) {
     MOZ_CRASH("failed to map shared memory");
   }
-  char* addr = static_cast<char*>(newShm->memory());
-  if (!addr) {
-    MOZ_CRASH("null shared memory?");
-  }
-  return new ShmBlock(newShm, addr);
+  return new ShmBlock(std::move(newShm));
 }
 
 bool FontList::UpdateShmBlocks() {
@@ -678,7 +674,7 @@ void FontList::SetAliases(
   aliasArray.SetCapacity(aAliasTable.Count());
   for (auto i = aAliasTable.Iter(); !i.Done(); i.Next()) {
     aliasArray.AppendElement(Family::InitData(
-        i.Key(), i.Key(), i.Data()->mIndex, i.Data()->mHidden,
+        i.Key(), i.Key(), i.Data()->mIndex, i.Data()->mVisibility,
         i.Data()->mBundled, i.Data()->mBadUnderline, i.Data()->mForceClassic));
   }
   aliasArray.Sort();
@@ -749,7 +745,7 @@ void FontList::SetLocalNames(
   header.mLocalFaceCount.store(count);
 }
 
-Family* FontList::FindFamily(const nsCString& aName, bool aAllowHidden) {
+Family* FontList::FindFamily(const nsCString& aName) {
   struct FamilyNameComparator {
     FamilyNameComparator(FontList* aList, const nsCString& aTarget)
         : mList(aList), mTarget(aTarget) {}
@@ -769,8 +765,7 @@ Family* FontList::FindFamily(const nsCString& aName, bool aAllowHidden) {
   size_t match;
   if (BinarySearchIf(families, 0, header.mFamilyCount,
                      FamilyNameComparator(this, aName), &match)) {
-    return !aAllowHidden && families[match].IsHidden() ? nullptr
-                                                       : &families[match];
+    return &families[match];
   }
 
   if (header.mAliasCount) {
@@ -778,8 +773,7 @@ Family* FontList::FindFamily(const nsCString& aName, bool aAllowHidden) {
     size_t match;
     if (BinarySearchIf(families, 0, header.mAliasCount,
                        FamilyNameComparator(this, aName), &match)) {
-      return !aAllowHidden && families[match].IsHidden() ? nullptr
-                                                         : &families[match];
+      return &families[match];
     }
   }
 
@@ -915,7 +909,7 @@ Pointer FontList::ToSharedPointer(const void* aPtr) {
   const char* p = (const char*)aPtr;
   const uint32_t blockCount = mBlocks.Length();
   for (uint32_t i = 0; i < blockCount; ++i) {
-    const char* blockAddr = (const char*)mBlocks[i]->mAddr;
+    const char* blockAddr = (const char*)mBlocks[i]->Memory();
     if (p >= blockAddr && p < blockAddr + SHM_BLOCK_SIZE) {
       return Pointer(i, p - blockAddr);
     }

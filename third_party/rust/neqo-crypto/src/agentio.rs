@@ -99,6 +99,7 @@ impl RecordList {
         self.records.retain(|rec| rec.epoch != 1);
     }
 
+    #[allow(clippy::unused_self)]
     unsafe extern "C" fn ingest(
         _fd: *mut ssl::PRFileDesc,
         epoch: ssl::PRUint16,
@@ -259,10 +260,10 @@ impl ::std::fmt::Display for AgentIo {
 }
 
 unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
+    (*fd).secret = null_mut();
     if let Some(dtor) = (*fd).dtor {
         dtor(fd);
     }
-    (*fd).secret = null_mut();
     PR_SUCCESS
 }
 

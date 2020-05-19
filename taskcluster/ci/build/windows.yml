@@ -5,11 +5,11 @@
 job-defaults:
     run:
         using: mozharness
-        use-caches: false
         tooltool-downloads: internal
     fetches:
         toolchain:
             - win64-dump-syms
+            - win64-pdbstr
 
 win32/debug:
     description: "Win32 Debug"
@@ -23,30 +23,45 @@ win32/debug:
         platform: windows2012-32/debug
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
+        actions: [get-secrets, build]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win32.py
+            - builds/releng_base_linux_64_builds.py
             - builds/taskcluster_sub_win32/debug.py
         mozconfig-variant: debug
+        extra-config:
+            mozconfig_platform: win32
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win32/opt:
     description: "Win32 Opt"
@@ -60,31 +75,45 @@ win32/opt:
         platform: windows2012-32/opt
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
+        actions: [get-secrets, build]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win32.py
+            - builds/releng_base_linux_64_builds.py
         extra-config:
             stage_platform: win32
-    run-on-projects: ['mozilla-central', 'try']
+            mozconfig_platform: win32
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64/debug:
     description: "Win64 Debug"
@@ -98,30 +127,45 @@ win64/debug:
         platform: windows2012-64/debug
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
+        actions: [get-secrets, build]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
             - builds/taskcluster_sub_win64/debug.py
         mozconfig-variant: debug
+        extra-config:
+            mozconfig_platform: win64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-fuzzing/debug:
     description: "Win64 Fuzzing Debug"
@@ -150,7 +194,7 @@ win64-fuzzing/debug:
             - builds/taskcluster_base_win64.py
             - builds/taskcluster_sub_win64/debug.py
         mozconfig-variant: debug-fuzzing
-    run-on-projects: ['trunk', 'try']
+    run-on-projects: ['trunk']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -160,6 +204,10 @@ win64-fuzzing/debug:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
+    optimization:
+        build-fuzzing:
+            - windows
 
 win64-plain/debug:
     description: "Win64 Debug Plain"
@@ -196,6 +244,10 @@ win64-plain/debug:
             - win64-node
             - win64-nasm
             - win64-cbindgen
+            - win64-winchecksec
+    optimization:
+        push-interval-10:
+            - windows
 
 win64/opt:
     description: "Win64 Opt"
@@ -209,31 +261,49 @@ win64/opt:
         platform: windows2012-64/opt
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
+        actions: [get-secrets, build]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
         extra-config:
             stage_platform: win64
-    run-on-projects: ['mozilla-central', 'try']
+            mozconfig_platform: win64
+            env:
+                # Setting LD_PRELOAD at the worker level would set it during
+                # fetch-content, which can fail randomly when a tar/unzip subprocess
+                # of fetch-content starts while the library is being extracted by
+                # another.
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-plain/opt:
     description: "Win64 Opt Plain"
@@ -262,7 +332,7 @@ win64-plain/opt:
             disable_package_metrics: true
             stage_platform: win64
         mozconfig-variant: plain-opt
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -270,6 +340,10 @@ win64-plain/opt:
             - win64-nasm
             - win64-node
             - win64-cbindgen
+            - win64-winchecksec
+    optimization:
+        push-interval-10:
+            - windows
 
 win32-shippable/opt:
     description: "Win32 Opt Shippable"
@@ -298,30 +372,44 @@ win32-shippable/opt:
         platform: windows2012-32-shippable/opt
         symbol: Bpgo(B)
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 10800
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win32.py
+              builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win32
+            mozconfig_platform: win32
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-shippable/opt:
     description: "Win64 Shippable"
@@ -339,30 +427,44 @@ win64-shippable/opt:
         platform: windows2012-64-shippable/opt
         symbol: Bpgo(B)
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 10800
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win64
+            mozconfig_platform: win64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win32-add-on-devel/opt:
     description: "Windows32 add-on-devel"
@@ -373,32 +475,45 @@ win32-add-on-devel/opt:
         platform: windows2012-32-add-on-devel/opt
         symbol: B
         tier: 2
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 10800
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win32.py
+            - builds/releng_base_linux_64_builds.py
         extra-config:
             stage_platform: win32-add-on-devel
+            mozconfig_platform: win32
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
         mozconfig-variant: add-on-devel
     run-on-projects: ['mozilla-beta', 'mozilla-release']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-add-on-devel/opt:
     description: "Windows64 add-on-devel"
@@ -409,32 +524,45 @@ win64-add-on-devel/opt:
         platform: windows2012-64-add-on-devel/opt
         symbol: B
         tier: 2
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 10800
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
         extra-config:
             stage_platform: win64-on-devel
+            mozconfig_platform: win64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
         mozconfig-variant: add-on-devel
     run-on-projects: ['mozilla-beta', 'mozilla-release']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-noopt/debug:
     description: "Win64 No-optimize Debug"
@@ -445,31 +573,45 @@ win64-noopt/debug:
         platform: windows2012-64-noopt/debug
         symbol: B
         tier: 2
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
             - builds/taskcluster_sub_win64/noopt_debug.py
         mozconfig-variant: noopt-debug
-    run-on-projects: ['mozilla-central', 'try']
+        extra-config:
+            mozconfig_platform: win64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win32-noopt/debug:
     description: "Win32 No-optimize Debug"
@@ -480,31 +622,45 @@ win32-noopt/debug:
         platform: windows2012-32-noopt/debug
         symbol: B
         tier: 2
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win32.py
+            - builds/releng_base_linux_64_builds.py
             - builds/taskcluster_sub_win32/noopt_debug.py
         mozconfig-variant: noopt-debug
-    run-on-projects: ['mozilla-central', 'try']
+        extra-config:
+            mozconfig_platform: win32
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win32-rusttests/opt:
     description: "Win32 Rust Tests Opt"
@@ -535,7 +691,7 @@ win32-rusttests/opt:
             build_targets: ['pre-export', 'export', 'recurse_rusttests']
             disable_package_metrics: true
         mozconfig-variant: rusttests
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -544,6 +700,7 @@ win32-rusttests/opt:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
 win32-rusttests/debug:
     description: "Win32 Rust Tests Debug"
@@ -574,7 +731,7 @@ win32-rusttests/debug:
             build_targets: ['pre-export', 'export', 'recurse_rusttests']
             disable_package_metrics: true
         mozconfig-variant: rusttests-debug
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -583,6 +740,7 @@ win32-rusttests/debug:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
 win64-rusttests/opt:
     description: "Win64 Rust Tests Opt"
@@ -610,7 +768,7 @@ win64-rusttests/opt:
             - builds/taskcluster_base_win64.py
             - builds/taskcluster_sub_win64/rusttests_opt.py
         mozconfig-variant: rusttests
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -619,6 +777,7 @@ win64-rusttests/opt:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
 win64-rusttests/debug:
     description: "Win64 Rust Tests Debug"
@@ -646,7 +805,7 @@ win64-rusttests/debug:
             - builds/taskcluster_base_win64.py
             - builds/taskcluster_sub_win64/rusttests_opt.py
         mozconfig-variant: rusttests-debug
-    run-on-projects: ['trunk', 'try']
+    run-on-projects: ['trunk']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -655,6 +814,7 @@ win64-rusttests/debug:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
 win64-ccov/opt:
     description: "Win64 Opt Code Coverage"
@@ -671,12 +831,13 @@ win64-ccov/opt:
     worker:
         artifacts:
             - name: public/code-coverage-grcov.zip
-              path: build\src\obj-firefox\code-coverage-grcov.zip
+              path: workspace\obj-build\code-coverage-grcov.zip
               type: file
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
             RUSTC_BOOTSTRAP: '1'
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
@@ -687,7 +848,7 @@ win64-ccov/opt:
             - builds/taskcluster_base_win64.py
             - builds/taskcluster_sub_win64/ccov_opt.py
         mozconfig-variant: code-coverage
-    run-on-projects: ['mozilla-central', 'try']
+    run-on-projects: ['mozilla-central']
     fetches:
         toolchain:
             - win64-clang-cl
@@ -698,6 +859,7 @@ win64-ccov/opt:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
 win64-asan/debug:
     description: "Win64 Debug ASAN"
@@ -733,6 +895,11 @@ win64-asan/debug:
             - win64-sccache
             - win64-nasm
             - win64-node
+            # `fix-stacks` is needed because xpcshell self tests run as part of
+            # the build step. Once bug 1614626 moves them to the xpcshell task,
+            # this dependency can be removed.
+            - win32-fix-stacks
+            - win64-winchecksec
 
 win64-asan/opt:
     description: "Win64 Opt ASAN"
@@ -749,6 +916,7 @@ win64-asan/opt:
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
             PERFHERDER_EXTRA_OPTIONS: "opt asan"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
@@ -769,11 +937,12 @@ win64-asan/opt:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
-win64-asan-reporter-nightly/opt:
-    description: "Win64 Opt ASAN Reporter Nightly"
+win64-asan-reporter-shippable/opt:
+    description: "Win64 Opt ASAN Reporter (Shippable)"
     attributes:
-        nightly: true
+        shippable: true
     shipping-product:
         by-release-type:
             nightly: firefox
@@ -781,7 +950,7 @@ win64-asan-reporter-nightly/opt:
     index:
         product: firefox
         job-name: win64-asan-reporter-opt
-        type: nightly
+        type: shippable
     treeherder:
         platform: win64-asan-reporter/opt
         symbol: BoR
@@ -791,6 +960,7 @@ win64-asan-reporter-nightly/opt:
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
             PERFHERDER_EXTRA_OPTIONS: "asan-reporter"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
@@ -817,6 +987,7 @@ win64-asan-reporter-nightly/opt:
             - win64-cbindgen
             - win64-nasm
             - win64-node
+            - win64-winchecksec
 
 win64-asan-fuzzing/opt:
     description: "Win64 Fuzzing Opt ASAN"
@@ -852,6 +1023,10 @@ win64-asan-fuzzing/opt:
             - win64-sccache
             - win64-nasm
             - win64-node
+            - win64-winchecksec
+    optimization:
+        build-fuzzing:
+            - windows
 
 win32-devedition/opt:
     description: "Win32 Dev Edition (shippable)"
@@ -861,7 +1036,7 @@ win32-devedition/opt:
         job-name: win32-opt
         type: nightly
     attributes:
-        nightly: true
+        shippable: true
         enable-full-crashsymbols: true
     stub-installer:
         by-release-type:
@@ -879,32 +1054,46 @@ win32-devedition/opt:
         platform: windows2012-32-devedition/opt
         symbol: N
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 10800
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
+        actions: [get-secrets, build]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         options: [append-env-variables-from-configs]
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win32.py
+            - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win32-devedition
+            mozconfig_platform: win32
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
         mozconfig-variant: devedition
     run-on-projects: ['mozilla-beta']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-devedition/opt:
     description: "Win64 Dev Edition (shippable)"
@@ -914,7 +1103,7 @@ win64-devedition/opt:
         job-name: win64-opt
         type: nightly
     attributes:
-        nightly: true
+        shippable: true
         enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: devedition
@@ -922,32 +1111,46 @@ win64-devedition/opt:
         platform: windows2012-64-devedition/opt
         symbol: N
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 10800
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
+        actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
         script: mozharness/scripts/fx_desktop_build.py
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win64-devedition
+            mozconfig_platform: win64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
         mozconfig-variant: devedition
     run-on-projects: ['mozilla-beta']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
 
 win64-aarch64/debug:
     description: "AArch64 Win64 Debug"
@@ -960,8 +1163,9 @@ win64-aarch64/debug:
         platform: windows2012-aarch64/debug
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
@@ -973,20 +1177,34 @@ win64-aarch64/debug:
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
+            - builds/releng_base_linux_64_builds.py
             - builds/taskcluster_sub_win64/debug.py
         extra-config:
             mozconfig_platform: win64-aarch64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.9.6"
         mozconfig-variant: debug
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
+    optimization:
+        push-interval-10:
+            - windows
 
 win64-aarch64/opt:
     description: "AArch64 Win64 Opt"
@@ -996,16 +1214,22 @@ win64-aarch64/opt:
     attributes:
         enable-build-signing: true
         enable-full-crashsymbols: true
+        # We need to package tests in order for the win64-aarch64-eme artifact
+        # build to fetch them, even though no tests run against this task
+        # directly.
+        skip-verify-test-packaging: true
     treeherder:
         platform: windows2012-aarch64/opt
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
             PERFHERDER_EXTRA_OPTIONS: aarch64
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
@@ -1013,20 +1237,33 @@ win64-aarch64/opt:
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
         extra-config:
             stage_platform: win64-aarch64
             mozconfig_platform: win64-aarch64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.9.6"
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-sccache
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-sccache
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
+    optimization:
+        push-interval-10:
+            - windows
 
 win64-aarch64-eme/opt:
     description: "AArch64 Win64 Opt w/ EME"
@@ -1037,8 +1274,9 @@ win64-aarch64-eme/opt:
         platform: windows2012-aarch64/opt
         symbol: Be
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
@@ -1053,8 +1291,7 @@ win64-aarch64-eme/opt:
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
         extra-config:
             stage_platform: win64-aarch64
             mozconfig_platform: win64-aarch64
@@ -1063,7 +1300,14 @@ win64-aarch64-eme/opt:
         win64-aarch64-opt: build-win64-aarch64/opt
     fetches:
         toolchain:
-            - win64-node
+            - linux64-node
+            - linux64-wine
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
+    optimization:
+        push-interval-10:
+            - windows
 
 win64-aarch64-shippable/opt:
     description: "AArch64 Win64 Shippable"
@@ -1074,21 +1318,24 @@ win64-aarch64-shippable/opt:
     attributes:
         shippable: true
         enable-full-crashsymbols: true
+        # Skip the test packaging check because we copy test packages from
+        # another build task rather than generating them in this task.
+        skip-verify-test-packaging: true
     shipping-phase: build
     shipping-product: firefox
     treeherder:
         platform: windows2012-aarch64-shippable/opt
         symbol: B
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
             PERFHERDER_EXTRA_OPTIONS: aarch64
             MOZ_ARTIFACT_TASK: {task-reference: '<win64-aarch64-opt>'}
             MOZ_ARTIFACT_TASK_WIN32_OPT: {task-reference: '<win32-opt>'}
-            MOZ_AUTOMATION_PACKAGE_TESTS: '0'
             USE_ARTIFACT: '1'
     run:
         actions: [get-secrets, build]
@@ -1097,8 +1344,7 @@ win64-aarch64-shippable/opt:
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
-            - builds/taskcluster_base_win64.py
+            - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win64-aarch64
@@ -1113,48 +1359,55 @@ win64-aarch64-shippable/opt:
         win64-aarch64-opt:
             - artifact: target.test_packages.json
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.common.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.cppunittest.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.mochitest.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.reftest.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.talos.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.raptor.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.condprof.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.awsy.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.xpcshell.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.web-platform.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.updater-dep.tests.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.generated-files.tar.gz
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
             - artifact: target.langpack.xpi
               extract: false
-              dest: ../public/build
+              dest: ../artifacts
         toolchain:
-            - win64-node
+            - linux64-node
+            - linux64-wine
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
+    optimization:
+        push-interval-10:
+            - windows
 
 win64-aarch64-shippable-no-eme/opt:
     description: "AArch64 Win64 Shippable w/o EME"
@@ -1165,18 +1418,24 @@ win64-aarch64-shippable-no-eme/opt:
         type: shippable
     attributes:
         enable-full-crashsymbols: true
+        # We need to package tests in order for the actual
+        # win64-aarch64-shippable/opt build to copy them from this task, even
+        # though no tests run against this task directly.
+        skip-verify-test-packaging: true
     shipping-phase: build
     shipping-product: firefox
     treeherder:
         platform: windows2012-aarch64/opt
         symbol: Nn
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
             PERFHERDER_EXTRA_OPTIONS: aarch64-no-eme
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
     run:
         actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
@@ -1184,43 +1443,62 @@ win64-aarch64-shippable-no-eme/opt:
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
+            - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win64-aarch64
             mozconfig_platform: win64-aarch64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.9.6"
     run-on-projects: []
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-nasm
-            - win64-node
-
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
+    optimization:
+        push-interval-10:
+            - windows
 
 win64-aarch64-devedition/opt:
-    description: "AArch64 Win64 MSVC Devedition (shippable)"
+    description: "AArch64 Win64 Dev Edition (shippable)"
     index:
         product: devedition
         job-name: win64-aarch64-opt
         type: nightly
     attributes:
-        nightly: true
+        shippable: true
         enable-full-crashsymbols: true
+        # Skip the test packaging check because we copy test packages from
+        # another build task rather than generating them in this task.
+        skip-verify-test-packaging: true
     shipping-phase: build
     shipping-product: devedition
     treeherder:
         platform: windows2012-aarch64-devedition/opt
         symbol: N
         tier: 1
-    worker-type: b-win2012
+    worker-type: b-linux
     worker:
+        docker-image: {in-tree: debian9-amd64-build}
         max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
-            PERFHERDER_EXTRA_OPTIONS: aarch64-devedition
+            MOZ_ARTIFACT_TASK: {task-reference: '<win64-aarch64-opt>'}
+            MOZ_ARTIFACT_TASK_WIN32_OPT: {task-reference: '<win32-opt>'}
+            USE_ARTIFACT: '1'
     run:
         actions: [get-secrets, build]
         options: [append-env-variables-from-configs]
@@ -1228,18 +1506,127 @@ win64-aarch64-devedition/opt:
         secrets: true
         config:
             - builds/releng_base_firefox.py
-            - builds/taskcluster_base_windows.py
+            - builds/releng_base_linux_64_builds.py
+            - taskcluster_nightly.py
+        extra-config:
+            stage_platform: win64-aarch64-devedition
+            mozconfig_platform: win64-aarch64
+        mozconfig-variant: devedition
+    run-on-projects: ['mozilla-beta']
+    dependencies:
+        win32-opt: build-win32-devedition/opt
+        win64-aarch64-opt: build-win64-aarch64-devedition-no-eme/opt
+    fetches:
+        # Abuse fetches to copy the generated-files, langpack, and test
+        # artifacts from the non-eme build directly to the artifacts directory
+        # of this build.
+        win64-aarch64-opt:
+            - artifact: target.test_packages.json
+              extract: false
+              dest: ../artifacts
+            - artifact: target.common.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.cppunittest.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.mochitest.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.reftest.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.talos.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.raptor.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.condprof.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.awsy.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.xpcshell.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.web-platform.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.updater-dep.tests.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.generated-files.tar.gz
+              extract: false
+              dest: ../artifacts
+            - artifact: target.langpack.xpi
+              extract: false
+              dest: ../artifacts
+        toolchain:
+            - linux64-node
+            - linux64-wine
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win
+
+win64-aarch64-devedition-no-eme/opt:
+    description: "AArch64 Win64 Dev Edition w/o EME"
+    use-pgo: win64-shippable/opt
+    index:
+        product: devedition
+        job-name: win64-aarch64-no-eme-opt
+        type: nightly
+    attributes:
+        enable-full-crashsymbols: true
+        # We need to package tests in order for the actual
+        # win64-aarch64-devedition/opt build to copy them from this task, even
+        # though no tests run against this task directly.
+        skip-verify-test-packaging: true
+    shipping-phase: build
+    shipping-product: devedition
+    treeherder:
+        platform: windows2012-aarch64-devedition/opt
+        symbol: Nn
+        tier: 1
+    worker-type: b-linux
+    worker:
+        docker-image: {in-tree: debian9-amd64-build}
+        max-run-time: 7200
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/aarch64.manifest"
+            PERFHERDER_EXTRA_OPTIONS: aarch64-no-eme
+            MOZ_AUTOMATION_PACKAGE_TESTS: "1"
+    run:
+        actions: [get-secrets, build]
+        options: [append-env-variables-from-configs]
+        script: mozharness/scripts/fx_desktop_build.py
+        secrets: true
+        config:
+            - builds/releng_base_firefox.py
+            - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
         extra-config:
             stage_platform: win64-aarch64
             mozconfig_platform: win64-aarch64
+            env:
+                LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
+                LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.9.6"
         mozconfig-variant: devedition
     run-on-projects: ['mozilla-beta']
     fetches:
         toolchain:
-            - win64-clang-cl
-            - win64-rust
-            - win64-rust-size
-            - win64-cbindgen
-            - win64-nasm
-            - win64-node
+            - linux64-binutils
+            - linux64-clang-win-cross
+            - linux64-rust-cross
+            - linux64-rust-size
+            - linux64-nasm
+            - linux64-node
+            - linux64-cbindgen
+            - linux64-dump-syms
+            - linux64-wine
+            - linux64-liblowercase
+            - linux64-winchecksec
+        fetch:
+            - nsis-3.01-win
+            - upx-3.95-win

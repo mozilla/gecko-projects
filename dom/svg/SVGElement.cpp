@@ -69,8 +69,10 @@ static_assert(sizeof(void*) == sizeof(nullptr),
 
 nsresult NS_NewSVGElement(
     Element** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo) {
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo(aNodeInfo);
+  auto* nim = nodeInfo->NodeInfoManager();
   RefPtr<mozilla::dom::SVGElement> it =
-      new mozilla::dom::SVGElement(std::move(aNodeInfo));
+      new (nim) mozilla::dom::SVGElement(nodeInfo.forget());
   nsresult rv = it->Init();
 
   if (NS_FAILED(rv)) {
@@ -104,6 +106,18 @@ JSObject* SVGElement::WrapNode(JSContext* aCx,
   return SVGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
+nsresult SVGElement::CopyInnerTo(mozilla::dom::Element* aDest) {
+  nsresult rv = Element::CopyInnerTo(aDest);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // cloning a node must retain its internal nonce slot
+  nsString* nonce = static_cast<nsString*>(GetProperty(nsGkAtoms::nonce));
+  if (nonce) {
+    static_cast<SVGElement*>(aDest)->SetNonce(*nonce);
+  }
+  return NS_OK;
+}
+
 //----------------------------------------------------------------------
 // SVGElement methods
 
@@ -119,7 +133,7 @@ void SVGElement::DidAnimateClass() {
   nsAutoString src;
   mClassAttribute.GetAnimValue(src, this);
   if (!mClassAnimAttr) {
-    mClassAnimAttr = new nsAttrValue();
+    mClassAnimAttr = MakeUnique<nsAttrValue>();
   }
   mClassAnimAttr->ParseAtomArray(src);
 
@@ -233,6 +247,21 @@ nsresult SVGElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   nsresult rv = SVGElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Hide any nonce from the DOM, but keep the internal value of the
+  // nonce by copying and resetting the internal nonce value.
+  if (HasFlag(NODE_HAS_NONCE_AND_HEADER_CSP) && IsInComposedDoc() &&
+      OwnerDoc()->GetBrowsingContext()) {
+    nsContentUtils::AddScriptRunner(NS_NewRunnableFunction(
+        "SVGElement::ResetNonce::Runnable",
+        [self = RefPtr<SVGElement>(this)]() {
+          nsAutoString nonce;
+          self->GetNonce(nonce);
+          self->SetAttr(kNameSpaceID_None, nsGkAtoms::nonce, EmptyString(),
+                        true);
+          self->SetNonce(nonce);
+        }));
+  }
+
   if (!MayHaveStyle()) {
     return NS_OK;
   }
@@ -287,6 +316,20 @@ nsresult SVGElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
     MOZ_ASSERT(aValue->Type() == nsAttrValue::eString,
                "Expected string value for script body");
     SetEventHandler(GetEventNameForAttr(aName), aValue->GetStringValue());
+  }
+
+  // The nonce will be copied over to an internal slot and cleared from the
+  // Element within BindToTree to avoid CSS Selector nonce exfiltration if
+  // the CSP list contains a header-delivered CSP.
+  if (nsGkAtoms::nonce == aName && kNameSpaceID_None == aNamespaceID) {
+    if (aValue) {
+      SetNonce(aValue->GetStringValue());
+      if (OwnerDoc()->GetHasCSPDeliveredThroughHeader()) {
+        SetFlags(NODE_HAS_NONCE_AND_HEADER_CSP);
+      }
+    } else {
+      RemoveNonce();
+    }
   }
 
   return SVGElementBase::AfterSetAttr(aNamespaceID, aName, aValue, aOldValue,
@@ -921,6 +964,7 @@ const Element::MappedAttributeEntry SVGElement::sGraphicsMap[] = {
     {nsGkAtoms::pointer_events},
     {nsGkAtoms::shape_rendering},
     {nsGkAtoms::text_rendering},
+    {nsGkAtoms::transform_origin},
     {nsGkAtoms::visibility},
     {nullptr}};
 
@@ -1432,6 +1476,11 @@ void SVGElement::DidChangeLength(uint8_t aAttrEnum,
 }
 
 void SVGElement::DidAnimateLength(uint8_t aAttrEnum) {
+  // We need to do this here. Normally the SMIL restyle would also cause us to
+  // do this from DidSetComputedStyle, but we don't have that guarantee if our
+  // frame gets reconstructed.
+  ClearAnyCachedPath();
+
   if (SVGGeometryProperty::ElementMapsLengthsToStyle(this)) {
     nsCSSPropertyID propId =
         SVGGeometryProperty::AttrEnumToCSSPropId(this, aAttrEnum);
@@ -1440,8 +1489,6 @@ void SVGElement::DidAnimateLength(uint8_t aAttrEnum) {
                                       GetLengthInfo().mLengths[aAttrEnum]);
     return;
   }
-
-  ClearAnyCachedPath();
 
   nsIFrame* frame = GetPrimaryFrame();
 

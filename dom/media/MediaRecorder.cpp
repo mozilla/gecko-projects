@@ -27,7 +27,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TaskQueue.h"
-#include "nsAutoPtr.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentTypeParser.h"
 #include "nsContentUtils.h"
@@ -1240,7 +1239,7 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
 
   void MediaEncoderShutdown() {
     MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
-    MOZ_ASSERT(mEncoder->IsShutdown());
+    mEncoder->AssertShutdownCalled();
 
     mMainThread->Dispatch(NewRunnableMethod<nsresult>(
         "MediaRecorder::Session::MediaEncoderShutdown->DoSessionEndTask", this,
@@ -1443,11 +1442,10 @@ void MediaRecorder::Start(const Optional<uint32_t>& aTimeslice,
   if (mStream) {
     mStream->GetTracks(tracks);
   }
-  for (const auto& t : nsTArray<RefPtr<MediaStreamTrack>>(tracks)) {
-    if (t->Ended()) {
-      tracks.RemoveElement(t);
-    }
-  }
+  tracks.RemoveElementsAt(
+      std::remove_if(tracks.begin(), tracks.end(),
+                     [](const auto& t) { return t->Ended(); }),
+      tracks.end());
 
   // 5. If the value of recorder’s state attribute is not inactive, throw an
   //    InvalidStateError DOMException and abort these steps.
@@ -1800,9 +1798,8 @@ already_AddRefed<MediaRecorder> MediaRecorder::Constructor(
   // Allow recording from audio node only when pref is on.
   if (!Preferences::GetBool("media.recorder.audio_node.enabled", false)) {
     // Pretending that this constructor is not defined.
-    NS_NAMED_LITERAL_STRING(argStr, "Argument 1 of MediaRecorder.constructor");
-    NS_NAMED_LITERAL_STRING(typeStr, "MediaStream");
-    aRv.ThrowTypeError<MSG_DOES_NOT_IMPLEMENT_INTERFACE>(argStr, typeStr);
+    aRv.ThrowTypeError<MSG_DOES_NOT_IMPLEMENT_INTERFACE>("Argument 1",
+                                                         "MediaStream");
     return nullptr;
   }
 

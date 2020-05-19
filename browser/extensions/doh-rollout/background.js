@@ -198,7 +198,7 @@ const stateManager = {
 
     let doorhangerShown = await browser.experiments.doorhanger.show({
       name: browser.i18n.getMessage("doorhangerName"),
-      text: "<> " + browser.i18n.getMessage("doorhangerBody"),
+      text: "<> " + browser.i18n.getMessage("doorhangerBodyNew"),
       okLabel: browser.i18n.getMessage("doorhangerButtonOk"),
       okAccessKey: browser.i18n.getMessage("doorhangerButtonOkAccessKey"),
       cancelLabel: browser.i18n.getMessage("doorhangerButtonCancel2"),
@@ -514,6 +514,10 @@ const rollout = {
     if (!(await stateManager.shouldRunHeuristics())) {
       return;
     }
+
+    // Perform TRR selection before running heuristics.
+    await browser.experiments.trrselect.dryRun();
+    log("TRR selection dry run complete!");
 
     let networkStatus = (await browser.networkStatus.getLinkInfo()).status;
     let captiveState = "unknown";

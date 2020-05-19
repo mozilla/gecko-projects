@@ -14,6 +14,7 @@ const TEST_ROOT_2 = getRootDirectory(gTestPath).replace(
 const TEST_PAGE = TEST_ROOT + "test-page.html";
 const TEST_PAGE_2 = TEST_ROOT_2 + "test-page.html";
 const TEST_PAGE_WITH_IFRAME = TEST_ROOT_2 + "test-page-with-iframe.html";
+const TEST_PAGE_WITH_SOUND = TEST_ROOT + "test-page-with-sound.html";
 const WINDOW_TYPE = "Toolkit:PictureInPicture";
 const TOGGLE_ID = "pictureInPictureToggleButton";
 const HOVER_VIDEO_OPACITY = 0.8;
@@ -34,7 +35,7 @@ const HOVER_TOGGLE_OPACITY = 1.0;
  * @resolves With the Picture-in-Picture window when ready.
  */
 async function triggerPictureInPicture(browser, videoID) {
-  let domWindowOpened = BrowserTestUtils.domWindowOpened(null);
+  let domWindowOpened = BrowserTestUtils.domWindowOpenedAndLoaded(null);
   let videoReady = SpecialPowers.spawn(browser, [videoID], async videoID => {
     let video = content.document.getElementById(videoID);
     let event = new content.CustomEvent("MozTogglePictureInPicture", {
@@ -46,7 +47,6 @@ async function triggerPictureInPicture(browser, videoID) {
     }, "Video is being cloned visually.");
   });
   let win = await domWindowOpened;
-  await BrowserTestUtils.waitForEvent(win, "load");
   await win.promiseDocumentFlushed(() => {});
   await videoReady;
   return win;
@@ -499,7 +499,7 @@ async function testToggleHelper(browser, videoID, canToggle, policy) {
     info(
       "Clicking on toggle, and expecting a Picture-in-Picture window to open"
     );
-    let domWindowOpened = BrowserTestUtils.domWindowOpened(null);
+    let domWindowOpened = BrowserTestUtils.domWindowOpenedAndLoaded(null);
     await BrowserTestUtils.synthesizeMouseAtPoint(
       toggleLeft,
       toggleTop,
@@ -544,4 +544,63 @@ async function testToggleHelper(browser, videoID, canToggle, policy) {
   // see all of the mouse events for it.
   await BrowserTestUtils.synthesizeMouseAtPoint(1, 1, {}, browser);
   await assertSawMouseEvents(browser, true);
+}
+
+/**
+ * Helper function that ensures that a provided async function
+ * causes a window to fully enter fullscreen mode.
+ *
+ * @param window (DOM Window)
+ *   The window that is expected to enter fullscreen mode.
+ * @param asyncFn (Async Function)
+ *   The async function to run to trigger the fullscreen switch.
+ * @return Promise
+ * @resolves When the fullscreen entering transition completes.
+ */
+async function promiseFullscreenEntered(window, asyncFn) {
+  let entered = BrowserTestUtils.waitForEvent(
+    window,
+    "MozDOMFullscreen:Entered"
+  );
+
+  await asyncFn();
+
+  await entered;
+
+  await BrowserTestUtils.waitForCondition(() => {
+    return !TelemetryStopwatch.running("FULLSCREEN_CHANGE_MS");
+  });
+}
+
+/**
+ * Helper function that ensures that a provided async function
+ * causes a window to fully exit fullscreen mode.
+ *
+ * @param window (DOM Window)
+ *   The window that is expected to exit fullscreen mode.
+ * @param asyncFn (Async Function)
+ *   The async function to run to trigger the fullscreen switch.
+ * @return Promise
+ * @resolves When the fullscreen exiting transition completes.
+ */
+async function promiseFullscreenExited(window, asyncFn) {
+  let exited = BrowserTestUtils.waitForEvent(window, "MozDOMFullscreen:Exited");
+
+  await asyncFn();
+
+  await exited;
+
+  await BrowserTestUtils.waitForCondition(() => {
+    return !TelemetryStopwatch.running("FULLSCREEN_CHANGE_MS");
+  });
+
+  if (AppConstants.platform == "macosx") {
+    // On macOS, the fullscreen transition takes some extra time
+    // to complete, and we don't receive events for it. We need to
+    // wait for it to complete or else input events in the next test
+    // might get eaten up. This is the best we can currently do.
+    //
+    // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 }

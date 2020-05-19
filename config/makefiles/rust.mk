@@ -152,6 +152,9 @@ export CFLAGS_$(rust_cc_env_name)=$(CC_BASE_FLAGS)
 export CXXFLAGS_$(rust_cc_env_name)=$(CXX_BASE_FLAGS)
 endif
 
+# Force the target down to all bindgen callers, even those that may not
+# read BINDGEN_SYSTEM_FLAGS some way or another.
+export BINDGEN_EXTRA_CLANG_ARGS:=$(filter --target=%,$(BINDGEN_SYSTEM_FLAGS))
 export CARGO_TARGET_DIR
 export RUSTFLAGS
 export RUSTC
@@ -185,6 +188,13 @@ $(target_rust_nonltoable): RUSTFLAGS:=$(rustflags_override) $(rustflags_sancov) 
 
 TARGET_RECIPES := $(target_rust_ltoable) $(target_rust_nonltoable)
 
+# If this is a release build we want rustc to generate one codegen unit per
+# crate. This results in better optimization and less code duplication at the
+# cost of longer compile times.
+ifndef DEVELOPER_OPTIONS
+$(TARGET_RECIPES): RUSTFLAGS += -C codegen-units=1
+endif
+
 HOST_RECIPES := \
   $(foreach a,library program,$(foreach b,build check,force-cargo-host-$(a)-$(b)))
 
@@ -217,10 +227,6 @@ endef
 cargo_host_linker_env_var := CARGO_TARGET_$(call cargo_env,$(RUST_HOST_TARGET))_LINKER
 cargo_linker_env_var := CARGO_TARGET_$(call cargo_env,$(RUST_TARGET))_LINKER
 
-# Defining all of this for ASan/TSan builds results in crashes while running
-# some crates's build scripts (!), so disable it for now.
-# See https://github.com/rust-lang/cargo/issues/5754
-ifndef NATIVE_SANITIZERS
 # Cargo needs the same linker flags as the C/C++ compiler,
 # but not the final libraries. Filter those out because they
 # cause problems on macOS 10.7; see bug 1365993 for details.
@@ -247,7 +253,13 @@ export $(cargo_host_linker_env_var):=$(topsrcdir)/build/cargo-host-linker
 export $(cargo_linker_env_var):=$(topsrcdir)/build/cargo-linker
 WRAP_HOST_LINKER_LIBPATHS:=$(HOST_LINKER_LIBPATHS)
 endif
+
+# Defining all of this for ASan/TSan builds results in crashes while running
+# some crates's build scripts (!), so disable it for now.
+# See https://github.com/rust-lang/cargo/issues/5754
+ifndef NATIVE_SANITIZERS
 $(TARGET_RECIPES): MOZ_CARGO_WRAP_LDFLAGS:=$(filter-out -fsanitize=cfi% -framework Cocoa -lobjc AudioToolbox ExceptionHandling -fprofile-%,$(LDFLAGS))
+endif # NATIVE_SANITIZERS
 
 $(HOST_RECIPES): MOZ_CARGO_WRAP_LDFLAGS:=$(HOST_LDFLAGS) $(WRAP_HOST_LINKER_LIBPATHS)
 $(TARGET_RECIPES) $(HOST_RECIPES): MOZ_CARGO_WRAP_HOST_LDFLAGS:=$(HOST_LDFLAGS) $(WRAP_HOST_LINKER_LIBPATHS)
@@ -265,8 +277,6 @@ else
 $(HOST_RECIPES): MOZ_CARGO_WRAP_LD:=$(HOST_LINKER)
 $(TARGET_RECIPES) $(HOST_RECIPES): MOZ_CARGO_WRAP_HOST_LD:=$(HOST_LINKER)
 endif
-
-endif # NATIVE_SANITIZERS
 
 ifdef RUST_LIBRARY_FILE
 
@@ -288,14 +298,12 @@ $(RUST_LIBRARY_FILE): force-cargo-library-build
 # that we are not importing any networking-related functions in rust code. This reduces
 # the chance of proxy bypasses originating from rust code.
 # The check only works when rust code is built with -Clto.
-# Enabling sancov or TSan also causes this to fail.
+# Sanitizers and sancov also fail because compiler-rt hooks network functions.
 ifndef MOZ_PROFILE_GENERATE
-ifndef MOZ_TSAN
 ifeq ($(OS_ARCH), Linux)
-ifeq (,$(rustflags_sancov))
+ifeq (,$(rustflags_sancov)$(MOZ_ASAN)$(MOZ_TSAN)$(MOZ_UBSAN))
 ifneq (,$(filter -Clto,$(cargo_rustc_flags)))
 	$(call py_action,check_binary,--target --networking $@)
-endif
 endif
 endif
 endif

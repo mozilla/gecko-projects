@@ -13,6 +13,7 @@
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/net/HttpChannelParent.h"
 #include "mozilla/net/RedirectChannelRegistrar.h"
+#include "mozilla/SchedulerGroup.h"
 #include "mozilla/Unused.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIPrompt.h"
@@ -21,6 +22,12 @@
 #include "nsQueryObject.h"
 #include "nsIAuthPrompt.h"
 #include "nsIAuthPrompt2.h"
+#include "nsIPromptFactory.h"
+#include "Element.h"
+#include "nsILoginManagerAuthPrompter.h"
+#include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "mozilla/dom/LoadURIOptionsBinding.h"
+#include "nsIWebNavigation.h"
 
 using mozilla::Unused;
 using mozilla::dom::ServiceWorkerInterceptController;
@@ -29,14 +36,15 @@ using mozilla::dom::ServiceWorkerParentInterceptEnabled;
 namespace mozilla {
 namespace net {
 
-ParentChannelListener::ParentChannelListener(nsIStreamListener* aListener,
-                                             dom::BrowserParent* aBrowserParent)
+ParentChannelListener::ParentChannelListener(
+    nsIStreamListener* aListener,
+    dom::CanonicalBrowsingContext* aBrowsingContext, bool aUsePrivateBrowsing)
     : mNextListener(aListener),
       mSuspendedForDiversion(false),
       mShouldIntercept(false),
       mShouldSuspendIntercept(false),
       mInterceptCanceled(false),
-      mBrowserParent(aBrowserParent) {
+      mBrowsingContext(aBrowsingContext) {
   LOG(("ParentChannelListener::ParentChannelListener [this=%p, next=%p]", this,
        aListener));
 
@@ -61,6 +69,8 @@ NS_INTERFACE_MAP_BEGIN(ParentChannelListener)
   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
   NS_INTERFACE_MAP_ENTRY(nsIMultiPartChannelListener)
   NS_INTERFACE_MAP_ENTRY(nsINetworkInterceptController)
+  NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableStreamListener)
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIAuthPromptProvider, mBrowsingContext)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIInterfaceRequestor)
   NS_INTERFACE_MAP_ENTRY_CONCRETE(ParentChannelListener)
 NS_INTERFACE_MAP_END
@@ -150,32 +160,25 @@ ParentChannelListener::GetInterface(const nsIID& aIID, void** result) {
     return QueryInterface(aIID, result);
   }
 
-  if (aIID.Equals(NS_GET_IID(nsIAuthPromptProvider)) ||
-      aIID.Equals(NS_GET_IID(nsISecureBrowserUI)) ||
-      aIID.Equals(NS_GET_IID(nsIRemoteTab))) {
-    if (mBrowserParent) {
-      return mBrowserParent->QueryInterface(aIID, result);
-    }
-  }
-
-  if (mBrowserParent && aIID.Equals(NS_GET_IID(nsIPrompt))) {
-    nsCOMPtr<dom::Element> frameElement = mBrowserParent->GetOwnerElement();
+  if (mBrowsingContext && aIID.Equals(NS_GET_IID(nsIPrompt))) {
+    nsCOMPtr<dom::Element> frameElement =
+        mBrowsingContext->Top()->GetEmbedderElement();
     if (frameElement) {
       nsCOMPtr<nsPIDOMWindowOuter> win = frameElement->OwnerDoc()->GetWindow();
-      NS_ENSURE_TRUE(win, NS_ERROR_UNEXPECTED);
+      NS_ENSURE_TRUE(win, NS_ERROR_NO_INTERFACE);
 
       nsresult rv;
       nsCOMPtr<nsIWindowWatcher> wwatch =
           do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
 
       if (NS_WARN_IF(!NS_SUCCEEDED(rv))) {
-        return rv;
+        return NS_ERROR_NO_INTERFACE;
       }
 
       nsCOMPtr<nsIPrompt> prompt;
       rv = wwatch->GetNewPrompter(win, getter_AddRefs(prompt));
       if (NS_WARN_IF(!NS_SUCCEEDED(rv))) {
-        return rv;
+        return NS_ERROR_NO_INTERFACE;
       }
 
       prompt.forget(result);
@@ -183,19 +186,13 @@ ParentChannelListener::GetInterface(const nsIID& aIID, void** result) {
     }
   }
 
-  if (mBrowserParent && (aIID.Equals(NS_GET_IID(nsIAuthPrompt)) ||
-                         aIID.Equals(NS_GET_IID(nsIAuthPrompt2)))) {
-    nsCOMPtr<nsIAuthPromptProvider> provider(do_QueryObject(mBrowserParent));
-    if (provider) {
-      return provider->GetAuthPrompt(nsIAuthPromptProvider::PROMPT_NORMAL, aIID,
-                                     result);
+  if (mBrowsingContext && (aIID.Equals(NS_GET_IID(nsIAuthPrompt)) ||
+                           aIID.Equals(NS_GET_IID(nsIAuthPrompt2)))) {
+    nsresult rv =
+        GetAuthPrompt(nsIAuthPromptProvider::PROMPT_NORMAL, aIID, result);
+    if (NS_FAILED(rv)) {
+      return NS_ERROR_NO_INTERFACE;
     }
-  }
-
-  if (aIID.Equals(NS_GET_IID(nsIRemoteWindowContext)) && mBrowserParent) {
-    nsCOMPtr<nsIRemoteWindowContext> ctx(
-        new dom::RemoteWindowContext(mBrowserParent));
-    ctx.forget(result);
     return NS_OK;
   }
 
@@ -288,7 +285,8 @@ ParentChannelListener::ChannelIntercepted(nsIInterceptedChannel* aChannel) {
     nsCOMPtr<nsIRunnable> r = NewRunnableMethod<nsresult>(
         "ParentChannelListener::CancelInterception", aChannel,
         &nsIInterceptedChannel::CancelInterception, NS_BINDING_ABORTED);
-    MOZ_ALWAYS_SUCCEEDS(SystemGroup::Dispatch(TaskCategory::Other, r.forget()));
+    MOZ_ALWAYS_SUCCEEDS(
+        SchedulerGroup::Dispatch(TaskCategory::Other, r.forget()));
     return NS_OK;
   }
 
@@ -383,6 +381,58 @@ void ParentChannelListener::ClearInterceptedChannel(
   // Note that channel interception has been canceled.  If we got this before
   // the interception even occured we will trigger the cancel later.
   mInterceptCanceled = true;
+}
+
+//-----------------------------------------------------------------------------
+// ParentChannelListener::nsIAuthPromptProvider
+//
+
+NS_IMETHODIMP
+ParentChannelListener::GetAuthPrompt(uint32_t aPromptReason, const nsIID& iid,
+                                     void** aResult) {
+  if (!mBrowsingContext) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  // we're either allowing auth, or it's a proxy request
+  nsresult rv;
+  nsCOMPtr<nsIPromptFactory> wwatch =
+      do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsPIDOMWindowOuter> window;
+  RefPtr<dom::Element> frame = mBrowsingContext->Top()->GetEmbedderElement();
+  if (frame) window = frame->OwnerDoc()->GetWindow();
+
+  // Get an auth prompter for our window so that the parenting
+  // of the dialogs works as it should when using tabs.
+  nsCOMPtr<nsISupports> prompt;
+  rv = wwatch->GetPrompt(window, iid, getter_AddRefs(prompt));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsILoginManagerAuthPrompter> prompter = do_QueryInterface(prompt);
+  if (prompter) {
+    prompter->SetBrowser(frame);
+  }
+
+  *aResult = prompt.forget().take();
+  return NS_OK;
+}
+
+//-----------------------------------------------------------------------------
+// ParentChannelListener::nsIThreadRetargetableStreamListener
+//
+
+NS_IMETHODIMP
+ParentChannelListener::CheckListenerChain() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsIThreadRetargetableStreamListener> listener =
+      do_QueryInterface(mNextListener);
+  if (!listener) {
+    return NS_ERROR_NO_INTERFACE;
+  }
+
+  return listener->CheckListenerChain();
 }
 
 }  // namespace net

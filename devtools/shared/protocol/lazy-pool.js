@@ -163,9 +163,7 @@ LazyActor.prototype = {
       // Fetch the actor constructor
     } catch (e) {
       throw new Error(
-        `Unable to load actor module '${options.id}'\n${e.message}\n${
-          e.stack
-        }\n`
+        `Unable to load actor module '${options.id}'\n${e.message}\n${e.stack}\n`
       );
     }
   },
@@ -173,7 +171,7 @@ LazyActor.prototype = {
   getConstructor() {
     const options = this._options;
     if (options.constructorFun) {
-      // Actor definition registered by ActorRegistryActor or testing helpers
+      // Actor definition registered by testing helpers
       return options.constructorFun;
     }
     // Lazy actor definition, where options contains all the information
@@ -185,9 +183,7 @@ LazyActor.prototype = {
     const constructor = module[options.constructorName];
     if (!constructor) {
       throw new Error(
-        `Unable to find actor constructor named '${
-          this.name
-        }'. (Is it exported?)`
+        `Unable to find actor constructor named '${this.name}'. (Is it exported?)`
       );
     }
     return constructor;
@@ -196,7 +192,7 @@ LazyActor.prototype = {
   /**
    * Return the parent pool for this lazy actor.
    */
-  parent: function() {
+  getParent: function() {
     return this.conn && this.conn.poolFor(this.actorID);
   },
 
@@ -207,7 +203,7 @@ LazyActor.prototype = {
    * actor
    */
   destroy() {
-    const parent = this.parent();
+    const parent = this.getParent();
     if (parent) {
       parent.unmanage(this);
     }

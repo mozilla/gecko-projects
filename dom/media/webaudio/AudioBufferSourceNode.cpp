@@ -586,8 +586,8 @@ AudioBufferSourceNode::AudioBufferSourceNode(AudioContext* aContext)
       mLoop(false),
       mStartCalled(false),
       mBufferSet(false) {
-  CreateAudioParam(mPlaybackRate, PLAYBACKRATE, "playbackRate", 1.0f);
-  CreateAudioParam(mDetune, DETUNE, "detune", 0.0f);
+  CreateAudioParam(mPlaybackRate, PLAYBACKRATE, u"playbackRate", 1.0f);
+  CreateAudioParam(mDetune, DETUNE, u"detune", 0.0f);
   AudioBufferSourceNodeEngine* engine =
       new AudioBufferSourceNodeEngine(this, aContext->Destination());
   mTrack = AudioNodeTrack::Create(aContext, engine,
@@ -651,15 +651,15 @@ void AudioBufferSourceNode::Start(double aWhen, double aOffset,
                                   const Optional<double>& aDuration,
                                   ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"start time");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("start time");
     return;
   }
   if (aOffset < 0) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"offset");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("offset");
     return;
   }
   if (aDuration.WasPassed() && !WebAudioUtils::IsTimeValid(aDuration.Value())) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"duration");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("duration");
     return;
   }
 
@@ -757,7 +757,7 @@ void AudioBufferSourceNode::SendOffsetAndDurationParametersToTrack(
 
 void AudioBufferSourceNode::Stop(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"stop time");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("stop time");
     return;
   }
 

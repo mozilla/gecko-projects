@@ -144,10 +144,7 @@ cfr-whatsnew-lockwise-take-link-text = Get the app
 ## Search Bar
 
 cfr-whatsnew-searchbar-title = Type less, find more with the address bar
-# Variables:
-#   $searchEngineName - Name of the current default search engine as also shown in the urlbar.
-cfr-whatsnew-searchbar-body-enginename = Get to the sites you use most with a single click into the address bar. Find things faster with results from { $searchEngineName } and your browsing history.
-cfr-whatsnew-searchbar-body-generic = Get to the sites you use most with a single click into the address bar. Find things faster with search results from your browsing history.
+cfr-whatsnew-searchbar-body-topsites = Now, just select the address bar, and a box will expand with links to your top sites.
 cfr-whatsnew-searchbar-icon-alt-text = Magnifying glass icon
 
 ## Picture-in-Picture
@@ -233,3 +230,23 @@ cfr-doorhanger-milestone-heading =
   }
 cfr-doorhanger-milestone-ok-button = See All
   .accesskey = S
+
+## What’s New Panel Content for Firefox 76
+
+## Lockwise message
+
+cfr-whatsnew-lockwise-header = Easily create secure passwords
+cfr-whatsnew-lockwise-body = It’s difficult to think of unique, secure passwords for every account. When creating a password, select the password field to use a secure, generated password from { -brand-shorter-name }.
+cfr-whatsnew-lockwise-icon-alt = { -lockwise-brand-short-name } icon
+
+## Vulnerable Passwords message
+
+cfr-whatsnew-passwords-header = Get alerts about vulnerable passwords
+cfr-whatsnew-passwords-body = Hackers know people reuse the same passwords. If you used the same password on multiple sites, and one of those sites was in a data breach, you’ll see an alert in { -lockwise-brand-short-name } to change your password on those sites.
+cfr-whatsnew-passwords-icon-alt = Vulnerable password key icon
+
+## Picture-in-Picture fullscreen message
+
+cfr-whatsnew-pip-fullscreen-header = Take picture-in-picture fullscreen
+cfr-whatsnew-pip-fullscreen-body = When you pop a video into a floating window, you can now double-click on that window to go fullscreen.
+cfr-whatsnew-pip-fullscreen-icon-alt = Picture-in-picture icon

@@ -53,6 +53,7 @@
 #include "nsMimeTypes.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
+#include "nsQueryObject.h"
 #include "nsReadableUtils.h"
 #include "nsStreamUtils.h"
 #include "prtime.h"
@@ -549,8 +550,8 @@ NS_IMPL_ISUPPORTS(nsProgressNotificationProxy, nsIProgressEventSink,
                   nsIChannelEventSink, nsIInterfaceRequestor)
 
 NS_IMETHODIMP
-nsProgressNotificationProxy::OnProgress(nsIRequest* request, nsISupports* ctxt,
-                                        int64_t progress, int64_t progressMax) {
+nsProgressNotificationProxy::OnProgress(nsIRequest* request, int64_t progress,
+                                        int64_t progressMax) {
   nsCOMPtr<nsILoadGroup> loadGroup;
   request->GetLoadGroup(getter_AddRefs(loadGroup));
 
@@ -561,12 +562,11 @@ nsProgressNotificationProxy::OnProgress(nsIRequest* request, nsISupports* ctxt,
   if (!target) {
     return NS_OK;
   }
-  return target->OnProgress(mImageRequest, ctxt, progress, progressMax);
+  return target->OnProgress(mImageRequest, progress, progressMax);
 }
 
 NS_IMETHODIMP
-nsProgressNotificationProxy::OnStatus(nsIRequest* request, nsISupports* ctxt,
-                                      nsresult status,
+nsProgressNotificationProxy::OnStatus(nsIRequest* request, nsresult status,
                                       const char16_t* statusArg) {
   nsCOMPtr<nsILoadGroup> loadGroup;
   request->GetLoadGroup(getter_AddRefs(loadGroup));
@@ -578,7 +578,7 @@ nsProgressNotificationProxy::OnStatus(nsIRequest* request, nsISupports* ctxt,
   if (!target) {
     return NS_OK;
   }
-  return target->OnStatus(mImageRequest, ctxt, status, statusArg);
+  return target->OnStatus(mImageRequest, status, statusArg);
 }
 
 NS_IMETHODIMP
@@ -664,7 +664,7 @@ static bool ShouldRevalidateEntry(imgCacheEntry* aEntry, nsLoadFlags aFlags,
 
 /* Call content policies on cached images that went through a redirect */
 static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
-                                  nsISupports* aLoadingContext,
+                                  Document* aLoadingDocument,
                                   nsIPrincipal* aTriggeringPrincipal,
                                   nsContentPolicyType aPolicyType,
                                   bool aSendCSPViolationReports) {
@@ -682,9 +682,9 @@ static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
   aImgRequest->GetFinalURI(getter_AddRefs(contentLocation));
   nsresult rv;
 
-  nsCOMPtr<nsINode> requestingNode = do_QueryInterface(aLoadingContext);
   nsCOMPtr<nsIPrincipal> loadingPrincipal =
-      requestingNode ? requestingNode->NodePrincipal() : aTriggeringPrincipal;
+      aLoadingDocument ? aLoadingDocument->NodePrincipal()
+                       : aTriggeringPrincipal;
   // If there is no context and also no triggeringPrincipal, then we use a fresh
   // nullPrincipal as the loadingPrincipal because we can not create a loadinfo
   // without a valid loadingPrincipal.
@@ -693,7 +693,7 @@ static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
   }
 
   nsCOMPtr<nsILoadInfo> secCheckLoadInfo = new LoadInfo(
-      loadingPrincipal, aTriggeringPrincipal, requestingNode,
+      loadingPrincipal, aTriggeringPrincipal, aLoadingDocument,
       nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK, aPolicyType);
 
   secCheckLoadInfo->SetSendCSPViolationEvents(aSendCSPViolationReports);
@@ -716,7 +716,7 @@ static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
     // the doc and the resource load is http: which would result in an incorrect
     // mixed content warning.
     nsCOMPtr<nsIDocShell> docShell =
-        NS_CP_GetDocShellFromContext(aLoadingContext);
+        NS_CP_GetDocShellFromContext(ToSupports(aLoadingDocument));
     if (docShell) {
       Document* document = docShell->GetDocument();
       if (document && document->GetUpgradeInsecureRequests(false)) {
@@ -727,11 +727,10 @@ static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
     if (!aTriggeringPrincipal || !aTriggeringPrincipal->IsSystemPrincipal()) {
       // reset the decision for mixed content blocker check
       decision = nsIContentPolicy::REJECT_REQUEST;
-      rv = nsMixedContentBlocker::ShouldLoad(insecureRedirect, aPolicyType,
-                                             contentLocation, nullptr,
-                                             aLoadingContext,
+      rv = nsMixedContentBlocker::ShouldLoad(insecureRedirect, contentLocation,
+                                             secCheckLoadInfo,
                                              EmptyCString(),  // mime guess
-                                             aTriggeringPrincipal, &decision);
+                                             &decision);
       if (NS_FAILED(rv) || !NS_CP_ACCEPTED(decision)) {
         return false;
       }
@@ -748,7 +747,7 @@ static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
 static bool ValidateSecurityInfo(imgRequest* request, bool forcePrincipalCheck,
                                  int32_t corsmode,
                                  nsIPrincipal* triggeringPrincipal,
-                                 nsISupports* aCX,
+                                 Document* aLoadingDocument,
                                  nsContentPolicyType aPolicyType,
                                  nsIReferrerInfo* aReferrerInfo) {
   // If the referrer policy doesn't match, we can't use this request.
@@ -797,7 +796,8 @@ static bool ValidateSecurityInfo(imgRequest* request, bool forcePrincipalCheck,
   }
 
   // Content Policy Check on Cached Images
-  return ShouldLoadCachedImage(request, aCX, triggeringPrincipal, aPolicyType,
+  return ShouldLoadCachedImage(request, aLoadingDocument, triggeringPrincipal,
+                               aPolicyType,
                                /* aSendCSPViolationReports */ false);
 }
 
@@ -813,7 +813,7 @@ static nsresult NewImageChannel(
     nsIURI* aInitialDocumentURI, int32_t aCORSMode,
     nsIReferrerInfo* aReferrerInfo, nsILoadGroup* aLoadGroup,
     nsLoadFlags aLoadFlags, nsContentPolicyType aPolicyType,
-    nsIPrincipal* aTriggeringPrincipal, nsISupports* aRequestingContext,
+    nsIPrincipal* aTriggeringPrincipal, nsINode* aRequestingNode,
     bool aRespectPrivacy) {
   MOZ_ASSERT(aResult);
 
@@ -840,8 +840,6 @@ static nsresult NewImageChannel(
   // canceled too.
   //
 
-  nsCOMPtr<nsINode> requestingNode = do_QueryInterface(aRequestingContext);
-
   nsSecurityFlags securityFlags =
       aCORSMode == imgIRequest::CORS_NONE
           ? nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS
@@ -857,8 +855,8 @@ static nsresult NewImageChannel(
   // node and a principal. This is for things like background images that are
   // specified by user stylesheets, where the document is being styled, but
   // the principal is that of the user stylesheet.
-  if (requestingNode && aTriggeringPrincipal) {
-    rv = NS_NewChannelWithTriggeringPrincipal(aResult, aURI, requestingNode,
+  if (aRequestingNode && aTriggeringPrincipal) {
+    rv = NS_NewChannelWithTriggeringPrincipal(aResult, aURI, aRequestingNode,
                                               aTriggeringPrincipal,
                                               securityFlags, aPolicyType,
                                               nullptr,  // PerformanceStorage
@@ -888,7 +886,7 @@ static nsresult NewImageChannel(
     // requestingNode.
     rv = NS_NewChannel(aResult, aURI, nsContentUtils::GetSystemPrincipal(),
                        securityFlags, aPolicyType,
-                       nullptr,  // nsICookieSettings
+                       nullptr,  // nsICookieJarSettings
                        nullptr,  // PerformanceStorage
                        nullptr,  // loadGroup
                        callbacks, aLoadFlags);
@@ -1120,9 +1118,9 @@ imgCacheQueue::const_iterator imgCacheQueue::end() const {
 }
 
 nsresult imgLoader::CreateNewProxyForRequest(
-    imgRequest* aRequest, nsILoadGroup* aLoadGroup, Document* aLoadingDocument,
-    imgINotificationObserver* aObserver, nsLoadFlags aLoadFlags,
-    imgRequestProxy** _retval) {
+    imgRequest* aRequest, nsIURI* aURI, nsILoadGroup* aLoadGroup,
+    Document* aLoadingDocument, imgINotificationObserver* aObserver,
+    nsLoadFlags aLoadFlags, imgRequestProxy** _retval) {
   LOG_SCOPE_WITH_PARAM(gImgLog, "imgLoader::CreateNewProxyForRequest",
                        "imgRequest", aRequest);
 
@@ -1138,11 +1136,8 @@ nsresult imgLoader::CreateNewProxyForRequest(
    */
   proxyRequest->SetLoadFlags(aLoadFlags);
 
-  nsCOMPtr<nsIURI> uri;
-  aRequest->GetURI(getter_AddRefs(uri));
-
   // init adds itself to imgRequest's list of observers
-  nsresult rv = proxyRequest->Init(aRequest, aLoadGroup, aLoadingDocument, uri,
+  nsresult rv = proxyRequest->Init(aRequest, aLoadGroup, aLoadingDocument, aURI,
                                    aObserver);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -1164,9 +1159,8 @@ class imgCacheExpirationTracker final
 };
 
 imgCacheExpirationTracker::imgCacheExpirationTracker()
-    : nsExpirationTracker<imgCacheEntry, 3>(
-          TIMEOUT_SECONDS * 1000, "imgCacheExpirationTracker",
-          SystemGroup::EventTargetFor(TaskCategory::Other)) {}
+    : nsExpirationTracker<imgCacheEntry, 3>(TIMEOUT_SECONDS * 1000,
+                                            "imgCacheExpirationTracker") {}
 
 void imgCacheExpirationTracker::NotifyExpired(imgCacheEntry* entry) {
   // Hold on to a reference to this entry, because the expiration tracker
@@ -1203,6 +1197,21 @@ NS_IMPL_ISUPPORTS(imgLoader, imgILoader, nsIContentSniffer, imgICache,
 
 static imgLoader* gNormalLoader = nullptr;
 static imgLoader* gPrivateBrowsingLoader = nullptr;
+
+/* static */
+mozilla::CORSMode imgLoader::ConvertToCORSMode(uint32_t aImgCORS) {
+  switch (aImgCORS) {
+    case imgIRequest::CORS_NONE:
+      return CORSMode::CORS_NONE;
+    case imgIRequest::CORS_ANONYMOUS:
+      return CORSMode::CORS_ANONYMOUS;
+    case imgIRequest::CORS_USE_CREDENTIALS:
+      return CORSMode::CORS_USE_CREDENTIALS;
+  }
+
+  MOZ_ASSERT(false, "Unexpected imgIRequest CORS value");
+  return CORSMode::CORS_NONE;
+}
 
 /* static */
 already_AddRefed<imgLoader> imgLoader::CreateImageLoader() {
@@ -1538,7 +1547,7 @@ bool imgLoader::PutIntoCache(const ImageCacheKey& aKey, imgCacheEntry* entry) {
              nullptr));
   }
 
-  cache.Put(aKey, entry);
+  cache.Put(aKey, RefPtr{entry});
 
   // We can be called to resurrect an evicted entry.
   if (entry->Evicted()) {
@@ -1669,10 +1678,10 @@ void imgLoader::CheckCacheLimits(imgCacheTable& cache, imgCacheQueue& queue) {
 bool imgLoader::ValidateRequestWithNewChannel(
     imgRequest* request, nsIURI* aURI, nsIURI* aInitialDocumentURI,
     nsIReferrerInfo* aReferrerInfo, nsILoadGroup* aLoadGroup,
-    imgINotificationObserver* aObserver, nsISupports* aCX,
-    Document* aLoadingDocument, uint64_t aInnerWindowId, nsLoadFlags aLoadFlags,
+    imgINotificationObserver* aObserver, Document* aLoadingDocument,
+    uint64_t aInnerWindowId, nsLoadFlags aLoadFlags,
     nsContentPolicyType aLoadPolicyType, imgRequestProxy** aProxyRequest,
-    nsIPrincipal* aTriggeringPrincipal, int32_t aCORSMode,
+    nsIPrincipal* aTriggeringPrincipal, int32_t aCORSMode, bool aLinkPreload,
     bool* aNewChannelCreated) {
   // now we need to insert a new channel request object in between the real
   // request and the proxy that basically delays loading the image until it
@@ -1682,8 +1691,8 @@ bool imgLoader::ValidateRequestWithNewChannel(
 
   // If we're currently in the middle of validating this request, just hand
   // back a proxy to it; the required work will be done for us.
-  if (request->GetValidator()) {
-    rv = CreateNewProxyForRequest(request, aLoadGroup, aLoadingDocument,
+  if (imgCacheValidator* validator = request->GetValidator()) {
+    rv = CreateNewProxyForRequest(request, aURI, aLoadGroup, aLoadingDocument,
                                   aObserver, aLoadFlags, aProxyRequest);
     if (NS_FAILED(rv)) {
       return false;
@@ -1698,8 +1707,18 @@ bool imgLoader::ValidateRequestWithNewChannel(
       // resulting from methods such as StartDecoding(). See bug 579122.
       proxy->MarkValidating();
 
+      if (aLinkPreload) {
+        MOZ_ASSERT(aLoadingDocument);
+        MOZ_ASSERT(aReferrerInfo);
+        proxy->PrioritizeAsPreload();
+        auto preloadKey = PreloadHashKey::CreateAsImage(
+            aURI, aTriggeringPrincipal, ConvertToCORSMode(aCORSMode),
+            aReferrerInfo->ReferrerPolicy());
+        proxy->NotifyOpen(&preloadKey, aLoadingDocument, true);
+      }
+
       // Attach the proxy without notifying
-      request->GetValidator()->AddProxy(proxy);
+      validator->AddProxy(proxy);
     }
 
     return NS_SUCCEEDED(rv);
@@ -1712,7 +1731,7 @@ bool imgLoader::ValidateRequestWithNewChannel(
   rv = NewImageChannel(getter_AddRefs(newChannel), &forcePrincipalCheck, aURI,
                        aInitialDocumentURI, aCORSMode, aReferrerInfo,
                        aLoadGroup, aLoadFlags, aLoadPolicyType,
-                       aTriggeringPrincipal, aCX, mRespectPrivacy);
+                       aTriggeringPrincipal, aLoadingDocument, mRespectPrivacy);
   if (NS_FAILED(rv)) {
     return false;
   }
@@ -1722,7 +1741,7 @@ bool imgLoader::ValidateRequestWithNewChannel(
   }
 
   RefPtr<imgRequestProxy> req;
-  rv = CreateNewProxyForRequest(request, aLoadGroup, aLoadingDocument,
+  rv = CreateNewProxyForRequest(request, aURI, aLoadGroup, aLoadingDocument,
                                 aObserver, aLoadFlags, getter_AddRefs(req));
   if (NS_FAILED(rv)) {
     return false;
@@ -1735,8 +1754,9 @@ bool imgLoader::ValidateRequestWithNewChannel(
     return false;
   }
 
-  RefPtr<imgCacheValidator> hvc = new imgCacheValidator(
-      progressproxy, this, request, aCX, aInnerWindowId, forcePrincipalCheck);
+  RefPtr<imgCacheValidator> hvc =
+      new imgCacheValidator(progressproxy, this, request, aLoadingDocument,
+                            aInnerWindowId, forcePrincipalCheck);
 
   // Casting needed here to get past multiple inheritance.
   nsCOMPtr<nsIStreamListener> listener =
@@ -1755,6 +1775,16 @@ bool imgLoader::ValidateRequestWithNewChannel(
   // the imgRequest's proxy list, and we can get extra notifications
   // resulting from methods such as StartDecoding(). See bug 579122.
   req->MarkValidating();
+
+  if (aLinkPreload) {
+    MOZ_ASSERT(aLoadingDocument);
+    MOZ_ASSERT(aReferrerInfo);
+    req->PrioritizeAsPreload();
+    auto preloadKey = PreloadHashKey::CreateAsImage(
+        aURI, aTriggeringPrincipal, ConvertToCORSMode(aCORSMode),
+        aReferrerInfo->ReferrerPolicy());
+    req->NotifyOpen(&preloadKey, aLoadingDocument, true);
+  }
 
   // Add the proxy without notifying
   hvc->AddProxy(req);
@@ -1775,11 +1805,11 @@ bool imgLoader::ValidateRequestWithNewChannel(
 bool imgLoader::ValidateEntry(
     imgCacheEntry* aEntry, nsIURI* aURI, nsIURI* aInitialDocumentURI,
     nsIReferrerInfo* aReferrerInfo, nsILoadGroup* aLoadGroup,
-    imgINotificationObserver* aObserver, nsISupports* aCX,
-    Document* aLoadingDocument, nsLoadFlags aLoadFlags,
-    nsContentPolicyType aLoadPolicyType, bool aCanMakeNewChannel,
-    bool* aNewChannelCreated, imgRequestProxy** aProxyRequest,
-    nsIPrincipal* aTriggeringPrincipal, int32_t aCORSMode) {
+    imgINotificationObserver* aObserver, Document* aLoadingDocument,
+    nsLoadFlags aLoadFlags, nsContentPolicyType aLoadPolicyType,
+    bool aCanMakeNewChannel, bool* aNewChannelCreated,
+    imgRequestProxy** aProxyRequest, nsIPrincipal* aTriggeringPrincipal,
+    int32_t aCORSMode, bool aLinkPreload) {
   LOG_SCOPE(gImgLog, "imgLoader::ValidateEntry");
 
   // If the expiration time is zero, then the request has not gotten far enough
@@ -1816,9 +1846,10 @@ bool imgLoader::ValidateEntry(
   }
 
   if (!ValidateSecurityInfo(request, aEntry->ForcePrincipalCheck(), aCORSMode,
-                            aTriggeringPrincipal, aCX, aLoadPolicyType,
-                            aReferrerInfo))
+                            aTriggeringPrincipal, aLoadingDocument,
+                            aLoadPolicyType, aReferrerInfo)) {
     return false;
+  }
 
   // data URIs are immutable and by their nature can't leak data, so we can
   // just return true in that case.  Doing so would mean that shift-reload
@@ -1833,17 +1864,17 @@ bool imgLoader::ValidateEntry(
 
   bool validateRequest = false;
 
-  // If the request's loadId is the same as the aCX, then it is ok to use
-  // this one because it has already been validated for this context.
+  // If the request's loadId is the same as the aLoadingDocument, then it is ok
+  // to use this one because it has already been validated for this context.
   //
   // XXX: nullptr seems to be a 'special' key value that indicates that NO
   //      validation is required.
   // XXX: we also check the window ID because the loadID() can return a reused
   //      pointer of a document. This can still happen for non-document image
   //      cache entries.
-  void* key = (void*)aCX;
-  nsCOMPtr<Document> doc = do_QueryInterface(aCX);
-  uint64_t innerWindowID = doc ? doc->InnerWindowID() : 0;
+  void* key = (void*)aLoadingDocument;
+  uint64_t innerWindowID =
+      aLoadingDocument ? aLoadingDocument->InnerWindowID() : 0;
   if (request->LoadId() != key || request->InnerWindowID() != innerWindowID) {
     // If we would need to revalidate this entry, but we're being told to
     // bypass the cache, we don't allow this entry to be used.
@@ -1896,8 +1927,8 @@ bool imgLoader::ValidateEntry(
 
     return ValidateRequestWithNewChannel(
         request, aURI, aInitialDocumentURI, aReferrerInfo, aLoadGroup,
-        aObserver, aCX, aLoadingDocument, innerWindowID, aLoadFlags,
-        aLoadPolicyType, aProxyRequest, aTriggeringPrincipal, aCORSMode,
+        aObserver, aLoadingDocument, innerWindowID, aLoadFlags, aLoadPolicyType,
+        aProxyRequest, aTriggeringPrincipal, aCORSMode, aLinkPreload,
         aNewChannelCreated);
   }
 
@@ -2046,26 +2077,22 @@ bool imgLoader::PreferLoadFromCache(nsIURI* aURI) const {
    nsIRequest::VALIDATE_ONCE_PER_SESSION)
 
 NS_IMETHODIMP
-imgLoader::LoadImageXPCOM(nsIURI* aURI, nsIURI* aInitialDocumentURI,
-                          nsIReferrerInfo* aReferrerInfo,
-                          nsIPrincipal* aTriggeringPrincipal,
-                          nsILoadGroup* aLoadGroup,
-                          imgINotificationObserver* aObserver, nsISupports* aCX,
-                          nsLoadFlags aLoadFlags, nsISupports* aCacheKey,
-                          nsContentPolicyType aContentPolicyType,
-                          imgIRequest** _retval) {
+imgLoader::LoadImageXPCOM(
+    nsIURI* aURI, nsIURI* aInitialDocumentURI, nsIReferrerInfo* aReferrerInfo,
+    nsIPrincipal* aTriggeringPrincipal, nsILoadGroup* aLoadGroup,
+    imgINotificationObserver* aObserver, Document* aLoadingDocument,
+    nsLoadFlags aLoadFlags, nsISupports* aCacheKey,
+    nsContentPolicyType aContentPolicyType, imgIRequest** _retval) {
   // Optional parameter, so defaults to 0 (== TYPE_INVALID)
   if (!aContentPolicyType) {
     aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
   }
   imgRequestProxy* proxy;
-  nsCOMPtr<nsINode> node = do_QueryInterface(aCX);
-  nsCOMPtr<Document> doc = do_QueryInterface(aCX);
-  nsresult rv =
-      LoadImage(aURI, aInitialDocumentURI, aReferrerInfo, aTriggeringPrincipal,
-                0, aLoadGroup, aObserver, node, doc, aLoadFlags, aCacheKey,
-                aContentPolicyType, EmptyString(),
-                /* aUseUrgentStartForChannel */ false, &proxy);
+  nsresult rv = LoadImage(
+      aURI, aInitialDocumentURI, aReferrerInfo, aTriggeringPrincipal, 0,
+      aLoadGroup, aObserver, aLoadingDocument, aLoadingDocument, aLoadFlags,
+      aCacheKey, aContentPolicyType, EmptyString(),
+      /* aUseUrgentStartForChannel */ false, /* aListPreload */ false, &proxy);
   *_retval = proxy;
   return rv;
 }
@@ -2077,7 +2104,7 @@ nsresult imgLoader::LoadImage(
     nsINode* aContext, Document* aLoadingDocument, nsLoadFlags aLoadFlags,
     nsISupports* aCacheKey, nsContentPolicyType aContentPolicyType,
     const nsAString& initiatorType, bool aUseUrgentStartForChannel,
-    imgRequestProxy** _retval) {
+    bool aLinkPreload, imgRequestProxy** _retval) {
   VerifyCacheSizes();
 
   NS_ASSERTION(aURI, "imgLoader::LoadImage -- NULL URI pointer");
@@ -2147,6 +2174,9 @@ nsresult imgLoader::LoadImage(
   if (aLoadFlags & nsIRequest::LOAD_BACKGROUND) {
     // Propagate background loading...
     requestFlags |= nsIRequest::LOAD_BACKGROUND;
+  } else if (aLinkPreload) {
+    // Set background loading if it is <link rel=preload>
+    requestFlags |= nsIRequest::LOAD_BACKGROUND;
   }
 
   int32_t corsmode = imgIRequest::CORS_NONE;
@@ -2154,6 +2184,53 @@ nsresult imgLoader::LoadImage(
     corsmode = imgIRequest::CORS_ANONYMOUS;
   } else if (aLoadFlags & imgILoader::LOAD_CORS_USE_CREDENTIALS) {
     corsmode = imgIRequest::CORS_USE_CREDENTIALS;
+  }
+
+  // Look in the preloaded images of loading document first.
+  if (StaticPrefs::network_preload() && !aLinkPreload && aLoadingDocument) {
+    auto key = PreloadHashKey::CreateAsImage(
+        aURI, aTriggeringPrincipal, ConvertToCORSMode(corsmode),
+        aReferrerInfo ? aReferrerInfo->ReferrerPolicy()
+                      : ReferrerPolicy::_empty);
+    if (RefPtr<PreloaderBase> preload =
+            aLoadingDocument->Preloads().LookupPreload(&key)) {
+      RefPtr<imgRequestProxy> proxy = do_QueryObject(preload);
+      MOZ_ASSERT(proxy);
+
+      MOZ_LOG(gImgLog, LogLevel::Debug,
+              ("[this=%p] imgLoader::LoadImage -- preloaded [proxy=%p]"
+               " [document=%p]\n",
+               this, proxy.get(), aLoadingDocument));
+      proxy->NotifyUsage();
+      // XXXedgar: we link the preloaded image to all subsequent "real" load,
+      // where Blink seems only link the preloaded image to the next "real"
+      // load.
+      // There is a spec discussion for "preload cache", see
+      // https://github.com/w3c/preload/issues/97. And it is also not clear how
+      // preload image interacts with list of available images, see
+      // https://github.com/whatwg/html/issues/4474.
+      imgRequest* request = proxy->GetOwner();
+      nsresult rv =
+          CreateNewProxyForRequest(request, aURI, aLoadGroup, aLoadingDocument,
+                                   aObserver, requestFlags, _retval);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      imgRequestProxy* newProxy = *_retval;
+      if (imgCacheValidator* validator = request->GetValidator()) {
+        newProxy->MarkValidating();
+        // Attach the proxy without notifying and this will add us to the load
+        // group.
+        validator->AddProxy(newProxy);
+      } else {
+        // It's OK to add here even if the request is done. If it is, it'll send
+        // a OnStopRequest()and the proxy will be removed from the loadgroup in
+        // imgRequestProxy::OnLoadComplete.
+        newProxy->AddToLoadGroup();
+        newProxy->NotifyListener();
+      }
+
+      return NS_OK;
+    }
   }
 
   RefPtr<imgCacheEntry> entry;
@@ -2172,10 +2249,9 @@ nsresult imgLoader::LoadImage(
   if (cache.Get(key, getter_AddRefs(entry)) && entry) {
     bool newChannelCreated = false;
     if (ValidateEntry(entry, aURI, aInitialDocumentURI, aReferrerInfo,
-                      aLoadGroup, aObserver, ToSupports(aLoadingDocument),
-                      aLoadingDocument, requestFlags, aContentPolicyType, true,
-                      &newChannelCreated, _retval, aTriggeringPrincipal,
-                      corsmode)) {
+                      aLoadGroup, aObserver, aLoadingDocument, requestFlags,
+                      aContentPolicyType, true, &newChannelCreated, _retval,
+                      aTriggeringPrincipal, corsmode, aLinkPreload)) {
       request = entry->GetRequest();
 
       // If this entry has no proxies, its request has no reference to the
@@ -2201,10 +2277,9 @@ nsresult imgLoader::LoadImage(
         // - we don't have cache. We are not in this if() stmt. A new channel is
         //   created and that triggers the CSP checks.
         // - We have a cache entry and this is blocked by CSP directives.
-        DebugOnly<bool> shouldLoad =
-            ShouldLoadCachedImage(request, ToSupports(aLoadingDocument),
-                                  aTriggeringPrincipal, aContentPolicyType,
-                                  /* aSendCSPViolationReports */ true);
+        DebugOnly<bool> shouldLoad = ShouldLoadCachedImage(
+            request, aLoadingDocument, aTriggeringPrincipal, aContentPolicyType,
+            /* aSendCSPViolationReports */ true);
         MOZ_ASSERT(shouldLoad);
       }
     } else {
@@ -2260,9 +2335,8 @@ nsresult imgLoader::LoadImage(
     nsCOMPtr<nsILoadGroup> channelLoadGroup;
     newChannel->GetLoadGroup(getter_AddRefs(channelLoadGroup));
     rv = request->Init(aURI, aURI, /* aHadInsecureRedirect = */ false,
-                       channelLoadGroup, newChannel, entry,
-                       ToSupports(aLoadingDocument), aTriggeringPrincipal,
-                       corsmode, aReferrerInfo);
+                       channelLoadGroup, newChannel, entry, aLoadingDocument,
+                       aTriggeringPrincipal, corsmode, aReferrerInfo);
     if (NS_FAILED(rv)) {
       return NS_ERROR_FAILURE;
     }
@@ -2318,7 +2392,7 @@ nsresult imgLoader::LoadImage(
     request->SetLoadId(aLoadingDocument);
 
     LOG_MSG(gImgLog, "imgLoader::LoadImage", "creating proxy request.");
-    rv = CreateNewProxyForRequest(request, aLoadGroup, aLoadingDocument,
+    rv = CreateNewProxyForRequest(request, aURI, aLoadGroup, aLoadingDocument,
                                   aObserver, requestFlags, _retval);
     if (NS_FAILED(rv)) {
       return rv;
@@ -2335,6 +2409,16 @@ nsresult imgLoader::LoadImage(
         return NS_ERROR_OUT_OF_MEMORY;
       }
       newChannel->SetNotificationCallbacks(requestor);
+    }
+
+    if (aLinkPreload) {
+      MOZ_ASSERT(aLoadingDocument);
+      MOZ_ASSERT(aReferrerInfo);
+      proxy->PrioritizeAsPreload();
+      auto preloadKey = PreloadHashKey::CreateAsImage(
+          aURI, aTriggeringPrincipal, ConvertToCORSMode(corsmode),
+          aReferrerInfo->ReferrerPolicy());
+      proxy->NotifyOpen(&preloadKey, aLoadingDocument, true);
     }
 
     // Note that it's OK to add here even if the request is done.  If it is,
@@ -2362,19 +2446,20 @@ nsresult imgLoader::LoadImage(
 NS_IMETHODIMP
 imgLoader::LoadImageWithChannelXPCOM(nsIChannel* channel,
                                      imgINotificationObserver* aObserver,
-                                     nsISupports* aCX,
+                                     Document* aLoadingDocument,
                                      nsIStreamListener** listener,
                                      imgIRequest** _retval) {
   nsresult result;
   imgRequestProxy* proxy;
-  result = LoadImageWithChannel(channel, aObserver, aCX, listener, &proxy);
+  result = LoadImageWithChannel(channel, aObserver, aLoadingDocument, listener,
+                                &proxy);
   *_retval = proxy;
   return result;
 }
 
 nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
                                          imgINotificationObserver* aObserver,
-                                         nsISupports* aCX,
+                                         Document* aLoadingDocument,
                                          nsIStreamListener** listener,
                                          imgRequestProxy** _retval) {
   NS_ASSERTION(channel,
@@ -2387,14 +2472,13 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
   nsCOMPtr<nsIURI> uri;
   channel->GetURI(getter_AddRefs(uri));
-  nsCOMPtr<Document> doc = do_QueryInterface(aCX);
 
   NS_ENSURE_TRUE(channel, NS_ERROR_FAILURE);
   nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
 
   OriginAttributes attrs = loadInfo->GetOriginAttributes();
 
-  ImageCacheKey key(uri, attrs, doc);
+  ImageCacheKey key(uri, attrs, aLoadingDocument);
 
   nsLoadFlags requestFlags = nsIRequest::LOAD_NORMAL;
   channel->GetLoadFlags(&requestFlags);
@@ -2430,9 +2514,10 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
       // default to the internal image type
       nsContentPolicyType policyType = loadInfo->InternalContentPolicyType();
 
-      if (ValidateEntry(entry, uri, nullptr, nullptr, nullptr, aObserver, aCX,
-                        doc, requestFlags, policyType, false, nullptr, nullptr,
-                        nullptr, imgIRequest::CORS_NONE)) {
+      if (ValidateEntry(entry, uri, nullptr, nullptr, nullptr, aObserver,
+                        aLoadingDocument, requestFlags, policyType, false,
+                        nullptr, nullptr, nullptr, imgIRequest::CORS_NONE,
+                        false)) {
         request = entry->GetRequest();
       } else {
         nsCOMPtr<nsICacheInfoChannel> cacheChan(do_QueryInterface(channel));
@@ -2475,11 +2560,12 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
   channel->GetLoadGroup(getter_AddRefs(loadGroup));
 
 #ifdef DEBUG
-  if (doc) {
+  if (aLoadingDocument) {
     // The load group of the channel should always match that of the
     // document if given. If that isn't the case, then we need to add more
     // plumbing to ensure we block the document as well.
-    nsCOMPtr<nsILoadGroup> docLoadGroup = doc->GetDocumentLoadGroup();
+    nsCOMPtr<nsILoadGroup> docLoadGroup =
+        aLoadingDocument->GetDocumentLoadGroup();
     MOZ_ASSERT(docLoadGroup == loadGroup);
   }
 #endif
@@ -2496,8 +2582,8 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
     *listener = nullptr;  // give them back a null nsIStreamListener
 
-    rv = CreateNewProxyForRequest(request, loadGroup, doc, aObserver,
-                                  requestFlags, _retval);
+    rv = CreateNewProxyForRequest(request, uri, loadGroup, aLoadingDocument,
+                                  aObserver, requestFlags, _retval);
     static_cast<imgRequestProxy*>(*_retval)->NotifyListener();
   } else {
     // We use originalURI here to fulfil the imgIRequest contract on GetURI.
@@ -2508,7 +2594,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // constructed above with the *current URI* and not the *original URI*. I'm
     // pretty sure this is a bug, and it's preventing us from ever getting a
     // cache hit in LoadImageWithChannel when redirects are involved.
-    ImageCacheKey originalURIKey(originalURI, attrs, doc);
+    ImageCacheKey originalURIKey(originalURI, attrs, aLoadingDocument);
 
     // Default to doing a principal check because we don't know who
     // started that load and whether their principal ended up being
@@ -2526,7 +2612,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // including the redirects will go through content policy).  Hence, we
     // can set aHadInsecureRedirect to false here.
     rv = request->Init(originalURI, uri, /* aHadInsecureRedirect = */ false,
-                       channel, channel, entry, aCX, nullptr,
+                       channel, channel, entry, aLoadingDocument, nullptr,
                        imgIRequest::CORS_NONE, nullptr);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2537,8 +2623,9 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // Try to add the new request into the cache.
     PutIntoCache(originalURIKey, entry);
 
-    rv = CreateNewProxyForRequest(request, loadGroup, doc, aObserver,
-                                  requestFlags, _retval);
+    rv = CreateNewProxyForRequest(request, originalURI, loadGroup,
+                                  aLoadingDocument, aObserver, requestFlags,
+                                  _retval);
 
     // Explicitly don't notify our proxy, because we're loading off the
     // network, and necko (or things called from necko, such as
@@ -2764,12 +2851,12 @@ NS_IMPL_ISUPPORTS(imgCacheValidator, nsIStreamListener, nsIRequestObserver,
 
 imgCacheValidator::imgCacheValidator(nsProgressNotificationProxy* progress,
                                      imgLoader* loader, imgRequest* request,
-                                     nsISupports* aContext,
+                                     Document* aDocument,
                                      uint64_t aInnerWindowId,
                                      bool forcePrincipalCheckForCacheEntry)
     : mProgressProxy(progress),
       mRequest(request),
-      mContext(aContext),
+      mDocument(aDocument),
       mInnerWindowId(aInnerWindowId),
       mImgLoader(loader),
       mHadInsecureRedirect(false) {
@@ -2797,6 +2884,11 @@ void imgCacheValidator::AddProxy(imgRequestProxy* aProxy) {
 
 void imgCacheValidator::RemoveProxy(imgRequestProxy* aProxy) {
   mProxies.RemoveElement(aProxy);
+}
+
+void imgCacheValidator::PrioritizeAsPreload() {
+  MOZ_ASSERT(mNewRequest);
+  mNewRequest->PrioritizeAsPreload();
 }
 
 void imgCacheValidator::UpdateProxies(bool aCancelRequest, bool aSyncNotify) {
@@ -2858,7 +2950,7 @@ void imgCacheValidator::UpdateProxies(bool aCancelRequest, bool aSyncNotify) {
 NS_IMETHODIMP
 imgCacheValidator::OnStartRequest(nsIRequest* aRequest) {
   // We may be holding on to a document, so ensure that it's released.
-  nsCOMPtr<nsISupports> context = mContext.forget();
+  RefPtr<Document> document = mDocument.forget();
 
   // If for some reason we don't still have an existing request (probably
   // because OnStartRequest got delivered more than once), just bail.
@@ -2895,7 +2987,7 @@ imgCacheValidator::OnStartRequest(nsIRequest* aRequest) {
 
       // Clear the validator before updating the proxies. The notifications may
       // clone an existing request, and its state could be inconsistent.
-      mRequest->SetLoadId(context);
+      mRequest->SetLoadId(document);
       mRequest->SetInnerWindowID(mInnerWindowId);
       UpdateProxies(/* aCancelRequest */ false, /* aSyncNotify */ true);
       return NS_OK;
@@ -2923,7 +3015,7 @@ imgCacheValidator::OnStartRequest(nsIRequest* aRequest) {
   nsCOMPtr<nsIURI> originalURI;
   channel->GetOriginalURI(getter_AddRefs(originalURI));
   nsresult rv = mNewRequest->Init(originalURI, uri, mHadInsecureRedirect,
-                                  aRequest, channel, mNewEntry, context,
+                                  aRequest, channel, mNewEntry, document,
                                   triggeringPrincipal, corsmode, referrerInfo);
   if (NS_FAILED(rv)) {
     UpdateProxies(/* aCancelRequest */ true, /* aSyncNotify */ true);
@@ -2943,7 +3035,7 @@ imgCacheValidator::OnStartRequest(nsIRequest* aRequest) {
 NS_IMETHODIMP
 imgCacheValidator::OnStopRequest(nsIRequest* aRequest, nsresult status) {
   // Be sure we've released the document that we may have been holding on to.
-  mContext = nullptr;
+  mDocument = nullptr;
 
   if (!mDestListener) {
     return NS_OK;

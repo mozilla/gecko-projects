@@ -1,11 +1,5 @@
-commit 4383f2c6bacbc4f3fb11dcec6afebdf1a98786a4
+commit 4a8e49b3ca7f9f74a4cafe6621ff9ba548ccc353
 Author: Alexey Shvayka <shvaikalesh@gmail.com>
-Date:   Tue Jan 14 18:31:45 2020 +0200
+Date:   Sat Apr 11 01:41:59 2020 +0300
 
-    Add Object.{freeze,preventExtensions,seal} abrupt completion tests (#2468)
-    
-    * Add Object.freeze test
-    
-    * Add Object.preventExtensions test
-    
-    * Add Object.seal test
+    Add test for \0 in Unicode patterns (#2569)

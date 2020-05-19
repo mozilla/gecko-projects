@@ -10,8 +10,10 @@ from abc import (
 )
 
 import errno
+import io
 import itertools
 import os
+import six
 import time
 
 from contextlib import contextmanager
@@ -148,7 +150,7 @@ class BuildBackend(LoggingMixin):
         for path in delete_files:
             full_path = mozpath.join(self.environment.topobjdir, path)
             try:
-                with open(full_path, 'r') as existing:
+                with io.open(full_path, mode='r', encoding='utf-8') as existing:
                     old_content = existing.read()
                     if old_content:
                         self.file_diffs[full_path] = simple_diff(
@@ -311,7 +313,7 @@ class BuildBackend(LoggingMixin):
         srcdir = mozpath.dirname(obj.input_path)
         pp.context.update({
             k: ' '.join(v) if isinstance(v, list) else v
-            for k, v in obj.config.substs.iteritems()
+            for k, v in six.iteritems(obj.config.substs)
         })
         pp.context.update(
             top_srcdir=obj.topsrcdir,

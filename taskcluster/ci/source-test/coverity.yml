@@ -5,8 +5,7 @@
 job-defaults:
     # Run only on try and code-review tasks
     # to avoid running Coverity SA on the whole codebase
-    run-on-projects:
-        - try
+    run-on-projects: []
     platform: linux64/opt
     worker-type:
         by-platform:
@@ -61,6 +60,9 @@ coverity:
             - type: file
               name: public/code-review/coverity.json
               path: /builds/worker/coverity.json
+            - type: file
+              name: public/code-review/coverity-orig.json
+              path: /builds/worker/workspace/coverity/cov-results.json
 
 coverity-full-analysis:
     description: Run Coverity based static-analysis on the entire Gecko repo

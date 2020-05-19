@@ -219,7 +219,7 @@ const RECOMMENDED_PREFS = new Map([
   ["extensions.update.notifyUser", false],
 
   // Make sure opening about:addons will not hit the network
-  ["extensions.webservice.discoverURL", "http://%(server)s/dummy/discoveryURL"],
+  ["extensions.getAddons.discovery.api_url", "data:, "],
 
   // Allow the application to have focus even it runs in the background
   ["focusmanager.testmode", true],
@@ -242,10 +242,6 @@ const RECOMMENDED_PREFS = new Map([
 
   // Do not prompt for temporary redirects
   ["network.http.prompt-temp-redirect", false],
-
-  // Disable speculative connections so they are not reported as leaking
-  // when they are hanging around
-  ["network.http.speculative-parallel-limit", 0],
 
   // Do not automatically switch between offline and online
   ["network.manage-offline-status", false],
@@ -306,23 +302,30 @@ class MarionetteParentProcess {
     this.alteredPrefs = new Set();
 
     if (env.exists(ENV_ENABLED)) {
-      MarionettePrefs.enabled = true;
+      this.enabled = true;
+    } else {
+      // TODO: Don't read the preference anymore (bug 1632821)
+      this.enabled = MarionettePrefs.enabled;
     }
 
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "enabled",
-      "marionette.enabled",
-      false,
-      (aPreference, previousValue, newValue) => {
-        if (newValue) {
-          this.init(false);
-        } else {
-          this.uninit();
-        }
-      }
-    );
+    if (this.enabled) {
+      log.trace(`Marionette enabled`);
+    }
+
     Services.ppmm.addMessageListener("Marionette:IsRunning", this);
+  }
+
+  get enabled() {
+    return !!this._enabled;
+  }
+
+  set enabled(value) {
+    if (value) {
+      // Only update the preference when Marionette is going to be enabled
+      MarionettePrefs.enabled = value;
+    }
+
+    this._enabled = value;
   }
 
   get running() {
@@ -341,17 +344,13 @@ class MarionetteParentProcess {
   }
 
   observe(subject, topic) {
-    log.trace(`Received observer notification ${topic}`);
+    if (this.enabled) {
+      log.trace(`Received observer notification ${topic}`);
+    }
 
     switch (topic) {
       case "profile-after-change":
         Services.obs.addObserver(this, "command-line-startup");
-        Services.obs.addObserver(this, "toplevel-window-ready");
-        Services.obs.addObserver(this, "marionette-startup-requested");
-
-        for (let [pref, value] of EnvironmentPrefs.from(ENV_PRESERVE_PREFS)) {
-          Preferences.set(pref, value);
-        }
         break;
 
       // In safe mode the command line handlers are getting parsed after the
@@ -362,13 +361,25 @@ class MarionetteParentProcess {
         Services.obs.removeObserver(this, topic);
 
         if (!this.enabled && subject.handleFlag("marionette", false)) {
-          MarionettePrefs.enabled = true;
+          log.trace(`Marionette enabled`);
+          this.enabled = true;
         }
 
-        // We want to suppress the modal dialog that's shown
-        // when starting up in safe-mode to enable testing.
-        if (this.enabled && Services.appinfo.inSafeMode) {
-          Services.obs.addObserver(this, "domwindowopened");
+        if (this.enabled) {
+          Services.obs.addObserver(this, "toplevel-window-ready");
+          Services.obs.addObserver(this, "marionette-startup-requested");
+
+          // Only set preferences to preserve in a new profile
+          // when Marionette is enabled.
+          for (let [pref, value] of EnvironmentPrefs.from(ENV_PRESERVE_PREFS)) {
+            Preferences.set(pref, value);
+          }
+
+          // We want to suppress the modal dialog that's shown
+          // when starting up in safe-mode to enable testing.
+          if (Services.appinfo.inSafeMode) {
+            Services.obs.addObserver(this, "domwindowopened");
+          }
         }
 
         break;
@@ -555,7 +566,7 @@ const MarionetteFactory = {
 
   createInstance(outer, iid) {
     if (outer) {
-      throw Cr.NS_ERROR_NO_AGGREGATION;
+      throw Components.Exception("", Cr.NS_ERROR_NO_AGGREGATION);
     }
 
     if (!this.instance_) {

@@ -47,10 +47,10 @@ bool GfxInfoBase::sShutdownOccurred;
 
 // Observes for shutdown so that the child GfxDriverInfo list is freed.
 class ShutdownObserver : public nsIObserver {
-  virtual ~ShutdownObserver() {}
+  virtual ~ShutdownObserver() = default;
 
  public:
-  ShutdownObserver() {}
+  ShutdownObserver() = default;
 
   NS_DECL_ISUPPORTS
 
@@ -629,7 +629,7 @@ GfxInfoBase::Observe(nsISupports* aSubject, const char* aTopic,
 
 GfxInfoBase::GfxInfoBase() : mScreenPixels(INT64_MAX), mMutex("GfxInfoBase") {}
 
-GfxInfoBase::~GfxInfoBase() {}
+GfxInfoBase::~GfxInfoBase() = default;
 
 nsresult GfxInfoBase::Init() {
   InitGfxDriverInfoShutdownObserver();
@@ -765,13 +765,21 @@ inline bool MatchingOperatingSystems(OperatingSystem aBlockedOS,
   }
 
   constexpr uint32_t kMinWin10BuildNumber = 18362;
-  if (aSystemOSBuild && aBlockedOS == OperatingSystem::RecentWindows10 &&
+  if (aBlockedOS == OperatingSystem::RecentWindows10 &&
       aSystemOS == OperatingSystem::Windows10) {
     // For allowlist purposes, we sometimes want to restrict to only recent
     // versions of Windows 10. This is a bit of a kludge but easier than adding
     // complicated blocklist infrastructure for build ID comparisons like driver
     // versions.
     return aSystemOSBuild >= kMinWin10BuildNumber;
+  }
+
+  if (aBlockedOS == OperatingSystem::NotRecentWindows10) {
+    if (aSystemOS == OperatingSystem::Windows10) {
+      return aSystemOSBuild < kMinWin10BuildNumber;
+    } else {
+      return true;
+    }
   }
 #endif
 
@@ -849,8 +857,7 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
     return 0;
   }
 
-  // OS build number is only used for the allowlist.
-  uint32_t osBuild = aForAllowing ? OperatingSystemBuild() : 0;
+  uint32_t osBuild = OperatingSystemBuild();
 
   // Get the adapters once then reuse below
   nsAutoString adapterVendorID[2];
@@ -1082,7 +1089,7 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
 void GfxInfoBase::SetFeatureStatus(
     const nsTArray<dom::GfxInfoFeatureStatus>& aFS) {
   MOZ_ASSERT(!sFeatureStatus);
-  sFeatureStatus = new nsTArray<dom::GfxInfoFeatureStatus>(aFS);
+  sFeatureStatus = new nsTArray<dom::GfxInfoFeatureStatus>(aFS.Clone());
 }
 
 bool GfxInfoBase::DoesDesktopEnvironmentMatch(
@@ -1597,21 +1604,21 @@ bool GfxInfoBase::BuildFeatureStateLog(JSContext* aCx,
 void GfxInfoBase::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj) {
   JS::Rooted<JSObject*> obj(aCx);
 
-  gfx::FeatureStatus gpuProcess =
-      gfxConfig::GetValue(gfx::Feature::GPU_PROCESS);
+  gfx::FeatureState& gpuProcess =
+      gfxConfig::GetFeature(gfx::Feature::GPU_PROCESS);
   InitFeatureObject(aCx, aObj, "gpuProcess", gpuProcess, &obj);
 
-  gfx::FeatureStatus wrQualified =
-      gfxConfig::GetValue(gfx::Feature::WEBRENDER_QUALIFIED);
+  gfx::FeatureState& wrQualified =
+      gfxConfig::GetFeature(gfx::Feature::WEBRENDER_QUALIFIED);
   InitFeatureObject(aCx, aObj, "wrQualified", wrQualified, &obj);
 
-  gfx::FeatureStatus webrender = gfxConfig::GetValue(gfx::Feature::WEBRENDER);
+  gfx::FeatureState& webrender = gfxConfig::GetFeature(gfx::Feature::WEBRENDER);
   InitFeatureObject(aCx, aObj, "webrender", webrender, &obj);
 
   // Only include AL if the platform attempted to use it.
-  gfx::FeatureStatus advancedLayers =
-      gfxConfig::GetValue(gfx::Feature::ADVANCED_LAYERS);
-  if (advancedLayers != FeatureStatus::Unused) {
+  gfx::FeatureState& advancedLayers =
+      gfxConfig::GetFeature(gfx::Feature::ADVANCED_LAYERS);
+  if (advancedLayers.GetValue() != FeatureStatus::Unused) {
     InitFeatureObject(aCx, aObj, "advancedLayers", advancedLayers, &obj);
 
     if (gfxConfig::UseFallback(Fallback::NO_CONSTANT_BUFFER_OFFSETTING)) {
@@ -1624,17 +1631,23 @@ void GfxInfoBase::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj) {
 bool GfxInfoBase::InitFeatureObject(JSContext* aCx,
                                     JS::Handle<JSObject*> aContainer,
                                     const char* aName,
-                                    mozilla::gfx::FeatureStatus& aFeatureStatus,
+                                    mozilla::gfx::FeatureState& aFeatureState,
                                     JS::MutableHandle<JSObject*> aOutObj) {
   JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
   if (!obj) {
     return false;
   }
 
-  // Set "status".
-  const char* status = FeatureStatusToString(aFeatureStatus);
+  nsCString status;
+  if (aFeatureState.GetValue() == FeatureStatus::Blacklisted) {
+    status.AppendPrintf("%s:%s",
+                        FeatureStatusToString(aFeatureState.GetValue()),
+                        aFeatureState.GetFailureId().get());
+  } else {
+    status.Append(FeatureStatusToString(aFeatureState.GetValue()));
+  }
 
-  JS::Rooted<JSString*> str(aCx, JS_NewStringCopyZ(aCx, status));
+  JS::Rooted<JSString*> str(aCx, JS_NewStringCopyZ(aCx, status.get()));
   JS::Rooted<JS::Value> val(aCx, JS::StringValue(str));
   JS_SetProperty(aCx, obj, "status", val);
 

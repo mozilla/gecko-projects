@@ -9,8 +9,8 @@ var EXPORTED_SYMBOLS = ["UAWidgetsChild"];
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 class UAWidgetsChild extends JSWindowActorChild {
-  constructor(dispatcher) {
-    super(dispatcher);
+  constructor() {
+    super();
 
     this.widgets = new WeakMap();
     this.prefsCache = new Map();
@@ -76,6 +76,7 @@ class UAWidgetsChild extends JSWindowActorChild {
         prefKeys = [
           "media.videocontrols.picture-in-picture.video-toggle.enabled",
           "media.videocontrols.picture-in-picture.video-toggle.always-show",
+          "media.videocontrols.picture-in-picture.video-toggle.min-video-secs",
         ];
         break;
       case "input":

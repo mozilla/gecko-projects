@@ -43,8 +43,8 @@
 #  include "ProfilerMarkerPayload.h"  // for LayerTranslationMarkerPayload
 #endif
 
-#define CULLING_LOG(...)
-// #define CULLING_LOG(...) printf_stderr("CULLING: " __VA_ARGS__)
+static mozilla::LazyLogModule sGfxCullLog("gfx.culling");
+#define CULLING_LOG(...) MOZ_LOG(sGfxCullLog, LogLevel::Debug, (__VA_ARGS__))
 
 #define DUMP(...)                 \
   do {                            \
@@ -309,14 +309,14 @@ void RenderMinimap(ContainerT* aContainer, const RefPtr<APZSampler>& aSampler,
   // Options
   const int verticalPadding = 10;
   const int horizontalPadding = 5;
-  gfx::Color backgroundColor(0.3f, 0.3f, 0.3f, 0.3f);
-  gfx::Color tileActiveColor(1, 1, 1, 0.4f);
-  gfx::Color tileBorderColor(0, 0, 0, 0.1f);
-  gfx::Color pageBorderColor(0, 0, 0);
-  gfx::Color criticalDisplayPortColor(1.f, 1.f, 0);
-  gfx::Color displayPortColor(0, 1.f, 0);
-  gfx::Color layoutPortColor(1.f, 0, 0);
-  gfx::Color visualPortColor(0, 0, 1.f, 0.3f);
+  gfx::DeviceColor backgroundColor(0.3f, 0.3f, 0.3f, 0.3f);
+  gfx::DeviceColor tileActiveColor(1, 1, 1, 0.4f);
+  gfx::DeviceColor tileBorderColor(0, 0, 0, 0.1f);
+  gfx::DeviceColor pageBorderColor(0, 0, 0);
+  gfx::DeviceColor criticalDisplayPortColor(1.f, 1.f, 0);
+  gfx::DeviceColor displayPortColor(0, 1.f, 0);
+  gfx::DeviceColor layoutPortColor(1.f, 0, 0);
+  gfx::DeviceColor visualPortColor(0, 0, 1.f, 0.3f);
 
   // Rects
   ParentLayerRect compositionBounds = fm.GetCompositionBounds();

@@ -481,6 +481,206 @@ fn define_control_flow(
     );
 }
 
+#[inline(never)]
+fn define_simd_lane_access(
+    ig: &mut InstructionGroupBuilder,
+    formats: &Formats,
+    imm: &Immediates,
+    _: &EntityRefs,
+) {
+    let TxN = &TypeVar::new(
+        "TxN",
+        "A SIMD vector type",
+        TypeSetBuilder::new()
+            .ints(Interval::All)
+            .floats(Interval::All)
+            .bools(Interval::All)
+            .simd_lanes(Interval::All)
+            .includes_scalars(false)
+            .build(),
+    );
+
+    let x = &Operand::new("x", &TxN.lane_of()).with_doc("Value to splat to all lanes");
+    let a = &Operand::new("a", TxN);
+
+    ig.push(
+        Inst::new(
+            "splat",
+            r#"
+        Vector splat.
+
+        Return a vector whose lanes are all ``x``.
+        "#,
+            &formats.unary,
+        )
+        .operands_in(vec![x])
+        .operands_out(vec![a]),
+    );
+
+    let I8x16 = &TypeVar::new(
+        "I8x16",
+        "A SIMD vector type consisting of 16 lanes of 8-bit integers",
+        TypeSetBuilder::new()
+            .ints(8..8)
+            .simd_lanes(16..16)
+            .includes_scalars(false)
+            .build(),
+    );
+    let x = &Operand::new("x", I8x16).with_doc("Vector to modify by re-arranging lanes");
+    let y = &Operand::new("y", I8x16).with_doc("Mask for re-arranging lanes");
+
+    ig.push(
+        Inst::new(
+            "swizzle",
+            r#"
+        Vector swizzle.
+
+        Returns a new vector with byte-width lanes selected from the lanes of the first input 
+        vector ``x`` specified in the second input vector ``s``. The indices ``i`` in range 
+        ``[0, 15]`` select the ``i``-th element of ``x``. For indices outside of the range the 
+        resulting lane is 0. Note that this operates on byte-width lanes.
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    let x = &Operand::new("x", TxN).with_doc("The vector to modify");
+    let y = &Operand::new("y", &TxN.lane_of()).with_doc("New lane value");
+    let Idx = &Operand::new("Idx", &imm.uimm8).with_doc("Lane index");
+
+    ig.push(
+        Inst::new(
+            "insertlane",
+            r#"
+        Insert ``y`` as lane ``Idx`` in x.
+
+        The lane index, ``Idx``, is an immediate value, not an SSA value. It
+        must indicate a valid lane index for the type of ``x``.
+        "#,
+            &formats.insert_lane,
+        )
+        .operands_in(vec![x, Idx, y])
+        .operands_out(vec![a]),
+    );
+
+    let x = &Operand::new("x", TxN);
+    let a = &Operand::new("a", &TxN.lane_of());
+
+    ig.push(
+        Inst::new(
+            "extractlane",
+            r#"
+        Extract lane ``Idx`` from ``x``.
+
+        The lane index, ``Idx``, is an immediate value, not an SSA value. It
+        must indicate a valid lane index for the type of ``x``. Note that the upper bits of ``a``
+        may or may not be zeroed depending on the ISA but the type system should prevent using
+        ``a`` as anything other than the extracted value.
+        "#,
+            &formats.extract_lane,
+        )
+        .operands_in(vec![x, Idx])
+        .operands_out(vec![a]),
+    );
+}
+
+#[inline(never)]
+fn define_simd_arithmetic(
+    ig: &mut InstructionGroupBuilder,
+    formats: &Formats,
+    _: &Immediates,
+    _: &EntityRefs,
+) {
+    let Int = &TypeVar::new(
+        "Int",
+        "A scalar or vector integer type",
+        TypeSetBuilder::new()
+            .ints(Interval::All)
+            .simd_lanes(Interval::All)
+            .build(),
+    );
+
+    let a = &Operand::new("a", Int);
+    let x = &Operand::new("x", Int);
+    let y = &Operand::new("y", Int);
+
+    ig.push(
+        Inst::new(
+            "imin",
+            r#"
+        Signed integer minimum.
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    ig.push(
+        Inst::new(
+            "umin",
+            r#"
+        Unsigned integer minimum.
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    ig.push(
+        Inst::new(
+            "imax",
+            r#"
+        Signed integer maximum.
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    ig.push(
+        Inst::new(
+            "umax",
+            r#"
+        Unsigned integer maximum.
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+
+    let IxN = &TypeVar::new(
+        "IxN",
+        "A SIMD vector type containing integers",
+        TypeSetBuilder::new()
+            .ints(Interval::All)
+            .simd_lanes(Interval::All)
+            .includes_scalars(false)
+            .build(),
+    );
+
+    let a = &Operand::new("a", IxN);
+    let x = &Operand::new("x", IxN);
+    let y = &Operand::new("y", IxN);
+
+    ig.push(
+        Inst::new(
+            "avg_round",
+            r#"
+        Unsigned average with rounding: `a := (x + y + 1) // 2`
+        "#,
+            &formats.binary,
+        )
+        .operands_in(vec![x, y])
+        .operands_out(vec![a]),
+    );
+}
+
 #[allow(clippy::many_single_char_names)]
 pub(crate) fn define(
     all_instructions: &mut AllInstructions,
@@ -491,6 +691,8 @@ pub(crate) fn define(
     let mut ig = InstructionGroupBuilder::new(all_instructions);
 
     define_control_flow(&mut ig, formats, imm, entities);
+    define_simd_lane_access(&mut ig, formats, imm, entities);
+    define_simd_arithmetic(&mut ig, formats, imm, entities);
 
     // Operand kind shorthands.
     let iflags: &TypeVar = &ValueType::Special(types::Flag::IFlags.into()).into();
@@ -557,7 +759,6 @@ pub(crate) fn define(
             .includes_scalars(false)
             .build(),
     );
-
     let Any = &TypeVar::new(
         "Any",
         "Any integer, float, boolean, or reference scalar or vector type",
@@ -946,6 +1147,123 @@ pub(crate) fn define(
         .can_store(true),
     );
 
+    let I16x8 = &TypeVar::new(
+        "I16x8",
+        "A SIMD vector with exactly 8 lanes of 16-bit values",
+        TypeSetBuilder::new()
+            .ints(16..16)
+            .simd_lanes(8..8)
+            .includes_scalars(false)
+            .build(),
+    );
+    let a = &Operand::new("a", I16x8).with_doc("Value loaded");
+
+    ig.push(
+        Inst::new(
+            "uload8x8",
+            r#"
+        Load an 8x8 vector (64 bits) from memory at ``p + Offset`` and zero-extend into an i16x8 
+        vector.
+        "#,
+            &formats.load,
+        )
+        .operands_in(vec![MemFlags, p, Offset])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
+    ig.push(
+        Inst::new(
+            "sload8x8",
+            r#"
+        Load an 8x8 vector (64 bits) from memory at ``p + Offset`` and sign-extend into an i16x8 
+        vector.
+        "#,
+            &formats.load,
+        )
+        .operands_in(vec![MemFlags, p, Offset])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
+    let I32x4 = &TypeVar::new(
+        "I32x4",
+        "A SIMD vector with exactly 4 lanes of 32-bit values",
+        TypeSetBuilder::new()
+            .ints(32..32)
+            .simd_lanes(4..4)
+            .includes_scalars(false)
+            .build(),
+    );
+    let a = &Operand::new("a", I32x4).with_doc("Value loaded");
+
+    ig.push(
+        Inst::new(
+            "uload16x4",
+            r#"
+        Load an 16x4 vector (64 bits) from memory at ``p + Offset`` and zero-extend into an i32x4 
+        vector.
+        "#,
+            &formats.load,
+        )
+        .operands_in(vec![MemFlags, p, Offset])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
+    ig.push(
+        Inst::new(
+            "sload16x4",
+            r#"
+        Load a 16x4 vector (64 bits) from memory at ``p + Offset`` and sign-extend into an i32x4 
+        vector.
+        "#,
+            &formats.load,
+        )
+        .operands_in(vec![MemFlags, p, Offset])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
+    let I64x2 = &TypeVar::new(
+        "I64x2",
+        "A SIMD vector with exactly 2 lanes of 64-bit values",
+        TypeSetBuilder::new()
+            .ints(64..64)
+            .simd_lanes(2..2)
+            .includes_scalars(false)
+            .build(),
+    );
+    let a = &Operand::new("a", I64x2).with_doc("Value loaded");
+
+    ig.push(
+        Inst::new(
+            "uload32x2",
+            r#"
+        Load an 32x2 vector (64 bits) from memory at ``p + Offset`` and zero-extend into an i64x2 
+        vector.
+        "#,
+            &formats.load,
+        )
+        .operands_in(vec![MemFlags, p, Offset])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
+    ig.push(
+        Inst::new(
+            "sload32x2",
+            r#"
+        Load a 32x2 vector (64 bits) from memory at ``p + Offset`` and sign-extend into an i64x2 
+        vector.
+        "#,
+            &formats.load,
+        )
+        .operands_in(vec![MemFlags, p, Offset])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
     let x = &Operand::new("x", Mem).with_doc("Value to be stored");
     let a = &Operand::new("a", Mem).with_doc("Value loaded");
     let Offset =
@@ -1025,6 +1343,18 @@ pub(crate) fn define(
             "symbol_value",
             r#"
         Compute the value of global GV, which is a symbolic value.
+        "#,
+            &formats.unary_global_value,
+        )
+        .operands_in(vec![GV])
+        .operands_out(vec![a]),
+    );
+
+    ig.push(
+        Inst::new(
+            "tls_value",
+            r#"
+        Compute the value of global GV, which is a TLS (thread local storage) value.
         "#,
             &formats.unary_global_value,
         )
@@ -1210,6 +1540,21 @@ pub(crate) fn define(
         )
         .operands_in(vec![N])
         .operands_out(vec![a]),
+    );
+
+    let constant =
+        &Operand::new("constant", &imm.pool_constant).with_doc("A constant in the constant pool");
+    let address = &Operand::new("address", iAddr);
+    ig.push(
+        Inst::new(
+            "const_addr",
+            r#"
+        Calculate the base address of a value in the constant pool.
+        "#,
+            &formats.unary_const,
+        )
+        .operands_in(vec![constant])
+        .operands_out(vec![address]),
     );
 
     let mask = &Operand::new("mask", &imm.uimm128)
@@ -1695,61 +2040,6 @@ pub(crate) fn define(
         )
         .operands_in(vec![a])
         .operands_out(vec![s]),
-    );
-
-    let x = &Operand::new("x", &TxN.lane_of());
-
-    ig.push(
-        Inst::new(
-            "splat",
-            r#"
-        Vector splat.
-
-        Return a vector whose lanes are all ``x``.
-        "#,
-            &formats.unary,
-        )
-        .operands_in(vec![x])
-        .operands_out(vec![a]),
-    );
-
-    let x = &Operand::new("x", TxN).with_doc("SIMD vector to modify");
-    let y = &Operand::new("y", &TxN.lane_of()).with_doc("New lane value");
-    let Idx = &Operand::new("Idx", &imm.uimm8).with_doc("Lane index");
-
-    ig.push(
-        Inst::new(
-            "insertlane",
-            r#"
-        Insert ``y`` as lane ``Idx`` in x.
-
-        The lane index, ``Idx``, is an immediate value, not an SSA value. It
-        must indicate a valid lane index for the type of ``x``.
-        "#,
-            &formats.insert_lane,
-        )
-        .operands_in(vec![x, Idx, y])
-        .operands_out(vec![a]),
-    );
-
-    let x = &Operand::new("x", TxN);
-    let a = &Operand::new("a", &TxN.lane_of());
-
-    ig.push(
-        Inst::new(
-            "extractlane",
-            r#"
-        Extract lane ``Idx`` from ``x``.
-
-        The lane index, ``Idx``, is an immediate value, not an SSA value. It
-        must indicate a valid lane index for the type of ``x``. Note that the upper bits of ``a``
-        may or may not be zeroed depending on the ISA but the type system should prevent using
-        ``a`` as anything other than the extracted value.
-        "#,
-            &formats.extract_lane,
-        )
-        .operands_in(vec![x, Idx])
-        .operands_out(vec![a]),
     );
 
     let a = &Operand::new("a", &Int.as_bool());

@@ -66,6 +66,8 @@ class ScrollFrameHelper : public nsIReflowCallback {
   mozilla::ScrollStyles GetScrollStylesFromFrame() const;
   mozilla::layers::OverscrollBehaviorInfo GetOverscrollBehaviorInfo() const;
 
+  bool IsForTextControlWithNoScrollbars() const;
+
   // If a child frame was added or removed on the scrollframe,
   // reload our child frame list.
   // We need this if a scrollbar frame is recreated.
@@ -431,6 +433,7 @@ class ScrollFrameHelper : public nsIReflowCallback {
   ScrollSnapInfo GetScrollSnapInfo(
       const mozilla::Maybe<nsPoint>& aDestination) const;
 
+  nsRect RestrictToRootDisplayPort(const nsRect& aDisplayportBase);
   bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                              nsRect* aVisibleRect, nsRect* aDirtyRect,
                              bool aSetBase,
@@ -516,7 +519,7 @@ class ScrollFrameHelper : public nsIReflowCallback {
   // This is mOuter->GetSize(), except when mOuter has been sized to reflect
   // a virtual (layout) viewport in which case this returns the outer size
   // used to size the physical (visual) viewport.
-  nsSize TrueOuterSize() const;
+  nsSize TrueOuterSize(nsDisplayListBuilder* aBuilder) const;
 
   already_AddRefed<Element> MakeScrollbar(dom::NodeInfo* aNodeInfo,
                                           bool aVertical,
@@ -728,8 +731,6 @@ class ScrollFrameHelper : public nsIReflowCallback {
   bool HasBgAttachmentLocal() const;
   mozilla::StyleDirection GetScrolledFrameDir() const;
 
-  bool IsForTextControlWithNoScrollbars() const;
-
   // Ask APZ to smooth scroll to |aDestination|.
   // This method does not clamp the destination; callers should clamp it to
   // either the layout or the visual scroll range (APZ will happily smooth
@@ -738,13 +739,6 @@ class ScrollFrameHelper : public nsIReflowCallback {
 
   // Removes any RefreshDriver observers we might have registered.
   void RemoveObservers();
-
-  static void EnsureFrameVisPrefsCached();
-  static bool sFrameVisPrefsCached;
-  // The number of scrollports wide/high to expand when tracking frame
-  // visibility.
-  static uint32_t sHorzExpandScrollPort;
-  static uint32_t sVertExpandScrollPort;
 };
 
 }  // namespace mozilla
@@ -861,6 +855,9 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   }
   mozilla::ScrollStyles GetScrollStyles() const override {
     return mHelper.GetScrollStylesFromFrame();
+  }
+  bool IsForTextControlWithNoScrollbars() const final {
+    return mHelper.IsForTextControlWithNoScrollbars();
   }
   mozilla::layers::OverscrollBehaviorInfo GetOverscrollBehaviorInfo()
       const final {
@@ -1329,6 +1326,9 @@ class nsXULScrollFrame final : public nsBoxFrame,
   }
   mozilla::ScrollStyles GetScrollStyles() const final {
     return mHelper.GetScrollStylesFromFrame();
+  }
+  bool IsForTextControlWithNoScrollbars() const final {
+    return mHelper.IsForTextControlWithNoScrollbars();
   }
   mozilla::layers::OverscrollBehaviorInfo GetOverscrollBehaviorInfo()
       const final {

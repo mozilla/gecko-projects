@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsHTMLDNSPrefetch.h"
+
 #include "base/basictypes.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/NeckoChild.h"
 #include "nsURLHelper.h"
 
-#include "nsHTMLDNSPrefetch.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 
@@ -62,11 +64,6 @@ nsresult nsHTMLDNSPrefetch::Initialize() {
 
   sEsniEnabled = Preferences::GetBool("network.security.esni.enabled", false);
 
-  NS_IF_RELEASE(sDNSService);
-  nsresult rv;
-  rv = CallGetService(kDNSServiceCID, &sDNSService);
-  if (NS_FAILED(rv)) return rv;
-
   if (IsNeckoChild()) NeckoChild::InitNeckoChild();
 
   sInitialized = true;
@@ -86,6 +83,21 @@ nsresult nsHTMLDNSPrefetch::Shutdown() {
   return NS_OK;
 }
 
+static bool EnsureDNSService() {
+  if (sDNSService) {
+    return true;
+  }
+
+  NS_IF_RELEASE(sDNSService);
+  nsresult rv;
+  rv = CallGetService(kDNSServiceCID, &sDNSService);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  return !!sDNSService;
+}
+
 bool nsHTMLDNSPrefetch::IsAllowed(Document* aDocument) {
   // There is no need to do prefetch on non UI scenarios such as XMLHttpRequest.
   return aDocument->IsDNSPrefetchAllowed() && aDocument->GetWindow();
@@ -102,7 +114,7 @@ static uint32_t GetDNSFlagsFromLink(Link* aElement) {
 }
 
 nsresult nsHTMLDNSPrefetch::Prefetch(Link* aElement, uint32_t flags) {
-  if (!(sInitialized && sPrefetches && sDNSService && sDNSListener))
+  if (!(sInitialized && sPrefetches && sDNSListener) || !EnsureDNSService())
     return NS_ERROR_NOT_AVAILABLE;
 
   flags |= GetDNSFlagsFromLink(aElement);
@@ -138,7 +150,7 @@ nsresult nsHTMLDNSPrefetch::Prefetch(const nsAString& hostname, bool isHttps,
     return NS_OK;
   }
 
-  if (!(sInitialized && sDNSService && sPrefetches && sDNSListener))
+  if (!(sInitialized && sPrefetches && sDNSListener) || !EnsureDNSService())
     return NS_ERROR_NOT_AVAILABLE;
 
   nsCOMPtr<nsICancelable> tmpOutstanding;
@@ -188,7 +200,7 @@ nsresult nsHTMLDNSPrefetch::PrefetchHigh(
 
 nsresult nsHTMLDNSPrefetch::CancelPrefetch(Link* aElement, uint32_t flags,
                                            nsresult aReason) {
-  if (!(sInitialized && sPrefetches && sDNSService && sDNSListener))
+  if (!(sInitialized && sPrefetches && sDNSListener) || !EnsureDNSService())
     return NS_ERROR_NOT_AVAILABLE;
 
   nsAutoString hostname;
@@ -227,7 +239,7 @@ nsresult nsHTMLDNSPrefetch::CancelPrefetch(
     return NS_OK;
   }
 
-  if (!(sInitialized && sDNSService && sPrefetches && sDNSListener))
+  if (!(sInitialized && sPrefetches && sDNSListener) || !EnsureDNSService())
     return NS_ERROR_NOT_AVAILABLE;
 
   // Forward cancellation to DNS service
@@ -281,13 +293,6 @@ NS_IMETHODIMP
 nsHTMLDNSPrefetch::nsListener::OnLookupComplete(nsICancelable* request,
                                                 nsIDNSRecord* rec,
                                                 nsresult status) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsHTMLDNSPrefetch::nsListener::OnLookupByTypeComplete(nsICancelable* request,
-                                                      nsIDNSByTypeRecord* res,
-                                                      nsresult status) {
   return NS_OK;
 }
 
@@ -348,7 +353,9 @@ void nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue() {
   NS_ASSERTION(NS_IsMainThread(),
                "nsDeferrals::SubmitQueue must be on main thread");
   nsCString hostName;
-  if (!sDNSService) return;
+  if (!EnsureDNSService()) {
+    return;
+  }
 
   while (mHead != mTail) {
     nsCOMPtr<Link> link = mEntries[mTail].mElement;

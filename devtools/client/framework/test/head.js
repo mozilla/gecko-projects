@@ -25,25 +25,24 @@ function toggleAllTools(state) {
   }
 }
 
-function getParentProcessActors(callback) {
+async function getParentProcessActors(callback) {
   const { DevToolsServer } = require("devtools/server/devtools-server");
-  const { DevToolsClient } = require("devtools/shared/client/devtools-client");
+  const { DevToolsClient } = require("devtools/client/devtools-client");
 
   DevToolsServer.init();
   DevToolsServer.registerAllActors();
   DevToolsServer.allowChromeProcess = true;
 
-  const client = new DevToolsClient(DevToolsServer.connectPipe());
-  client
-    .connect()
-    .then(() => client.mainRoot.getMainProcess())
-    .then(front => {
-      callback(client, front);
-    });
-
   SimpleTest.registerCleanupFunction(() => {
     DevToolsServer.destroy();
   });
+
+  const client = new DevToolsClient(DevToolsServer.connectPipe());
+  await client.connect();
+  const mainProcessDescriptor = await client.mainRoot.getMainProcess();
+  const mainProcessTargetFront = await mainProcessDescriptor.getTarget();
+
+  callback(client, mainProcessTargetFront);
 }
 
 function getSourceActor(aSources, aURL) {
@@ -77,22 +76,16 @@ function waitForContentMessage(name) {
  * @param {String} name The message name. Should be one of the messages defined
  * in doc_frame_script.js
  * @param {Object} data Optional data to send along
- * @param {Object} objects Optional CPOW objects to send along
  * @param {Boolean} expectResponse If set to false, don't wait for a response
  * with the same name from the content script. Defaults to true.
  * @return {Promise} Resolves to the response data if a response is expected,
  * immediately resolves otherwise
  */
-function executeInContent(
-  name,
-  data = {},
-  objects = {},
-  expectResponse = true
-) {
+function executeInContent(name, data = {}, expectResponse = true) {
   info("Sending message " + name + " to content");
   const mm = gBrowser.selectedBrowser.messageManager;
 
-  mm.sendAsyncMessage(name, data, objects);
+  mm.sendAsyncMessage(name, data);
   if (expectResponse) {
     return waitForContentMessage(name);
   }

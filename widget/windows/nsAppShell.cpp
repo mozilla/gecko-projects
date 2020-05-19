@@ -313,7 +313,7 @@ nsresult nsAppShell::Init() {
 
   hal::Init();
 
-  if (XRE_Win32kCallsAllowed()) {
+  if (XRE_IsParentProcess()) {
     sTaskbarButtonCreatedMsg = ::RegisterWindowMessageW(kTaskbarButtonEventId);
     NS_ASSERTION(sTaskbarButtonCreatedMsg,
                  "Could not register taskbar button creation message");
@@ -543,7 +543,6 @@ bool nsAppShell::ProcessNextNativeEvent(bool mayWait) {
       mozilla::BackgroundHangMonitor().NotifyWait();
       {
         AUTO_PROFILER_LABEL("nsAppShell::ProcessNextNativeEvent::Wait", IDLE);
-        AUTO_PROFILER_THREAD_SLEEP;
         WinUtils::WaitForMessage();
       }
     }

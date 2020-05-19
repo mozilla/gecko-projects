@@ -77,10 +77,21 @@ var Policies = {
     },
   },
 
-  AppUpdateURL: {
-    onBeforeAddons(manager, param) {
-      setDefaultPref("app.update.url", param.href);
+  AppAutoUpdate: {
+    onBeforeUIStartup(manager, param) {
+      // Logic feels a bit reversed here, but it's correct. If AppAutoUpdate is
+      // true, we disallow turning off auto updating, and visa versa.
+      if (param) {
+        manager.disallowFeature("app-auto-updates-off");
+      } else {
+        manager.disallowFeature("app-auto-updates-on");
+      }
     },
+  },
+
+  AppUpdateURL: {
+    // No implementation needed here. UpdateService.jsm will check for this
+    // policy directly when determining the update URL.
   },
 
   Authentication: {
@@ -142,6 +153,13 @@ var Policies = {
             locked
           );
         }
+      }
+      if ("PrivateBrowsing" in param) {
+        setDefaultPref(
+          "network.auth.private-browsing-sso",
+          param.PrivateBrowsing,
+          locked
+        );
       }
     },
   },
@@ -382,6 +400,44 @@ var Policies = {
         setAndLockPref("pdfjs.disabled", true);
       }
     },
+  },
+
+  DisabledCiphers: {
+    onBeforeAddons(manager, param) {
+      if ("TLS_DHE_RSA_WITH_AES_128_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.dhe_rsa_aes_128_sha", false);
+      }
+      if ("TLS_DHE_RSA_WITH_AES_256_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.dhe_rsa_aes_256_sha", false);
+      }
+      if ("TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.ecdhe_rsa_aes_128_sha", false);
+      }
+      if ("TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.ecdhe_rsa_aes_256_sha", false);
+      }
+      if ("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" in param) {
+        setAndLockPref("security.ssl3.ecdhe_rsa_aes_128_gcm_sha256", false);
+      }
+      if ("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256" in param) {
+        setAndLockPref("security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256", false);
+      }
+      if ("TLS_RSA_WITH_AES_128_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.rsa_aes_128_sha", false);
+      }
+      if ("TLS_RSA_WITH_AES_256_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.rsa_aes_256_sha", false);
+      }
+      if ("TLS_RSA_WITH_3DES_EDE_CBC_SHA" in param) {
+        setAndLockPref("security.ssl3.rsa_des_ede3_sha", false);
+      }
+    },
+  },
+
+  DisableDefaultBrowserAgent: {
+    // The implementation of this policy is in the default browser agent itself
+    // (/toolkit/mozapps/defaultagent); we need an entry for it here so that it
+    // shows up in about:policies as a real policy and not as an error.
   },
 
   DisableDeveloperTools: {
@@ -709,6 +765,18 @@ var Policies = {
     },
   },
 
+  EncryptedMediaExtensions: {
+    onBeforeAddons(manager, param) {
+      let locked = false;
+      if ("Locked" in param) {
+        locked = param.Locked;
+      }
+      if ("Enabled" in param) {
+        setDefaultPref("media.eme.enabled", param.Enabled, locked);
+      }
+    },
+  },
+
   Extensions: {
     onBeforeUIStartup(manager, param) {
       let uninstallingPromise = Promise.resolve();
@@ -794,6 +862,17 @@ var Policies = {
           // Block about:debugging
           blockAboutPage(manager, "about:debugging");
         }
+        if ("restricted_domains" in extensionSettings["*"]) {
+          let restrictedDomains = Services.prefs
+            .getCharPref("extensions.webextensions.restrictedDomains")
+            .split(",");
+          setAndLockPref(
+            "extensions.webextensions.restrictedDomains",
+            restrictedDomains
+              .concat(extensionSettings["*"].restricted_domains)
+              .join(",")
+          );
+        }
       }
       let addons = await AddonManager.getAllAddons();
       let allowedExtensions = [];
@@ -812,12 +891,11 @@ var Policies = {
             if (!extensionSettings[extensionID].install_url) {
               throw new Error(`Missing install_url for ${extensionID}`);
             }
-            if (!addons.find(addon => addon.id == extensionID)) {
-              installAddonFromURL(
-                extensionSettings[extensionID].install_url,
-                extensionID
-              );
-            }
+            installAddonFromURL(
+              extensionSettings[extensionID].install_url,
+              extensionID,
+              addons.find(addon => addon.id == extensionID)
+            );
             manager.disallowFeature(`uninstall-extension:${extensionID}`);
             if (
               extensionSettings[extensionID].installation_mode ==
@@ -950,10 +1028,15 @@ var Policies = {
 
   Homepage: {
     onBeforeUIStartup(manager, param) {
+      if ("StartPage" in param && param.StartPage == "none") {
+        // For blank startpage, we use about:blank rather
+        // than messing with browser.startup.page
+        param.URL = new URL("about:blank");
+      }
       // |homepages| will be a string containing a pipe-separated ('|') list of
       // URLs because that is what the "Home page" section of about:preferences
       // (and therefore what the pref |browser.startup.homepage|) accepts.
-      if (param.URL) {
+      if ("URL" in param) {
         let homepages = param.URL.href;
         if (param.Additional && param.Additional.length) {
           homepages += "|" + param.Additional.map(url => url.href).join("|");
@@ -980,17 +1063,20 @@ var Policies = {
       if (param.StartPage) {
         let prefValue;
         switch (param.StartPage) {
-          case "none":
-            prefValue = 0;
-            break;
           case "homepage":
+          case "homepage-locked":
+          case "none":
             prefValue = 1;
             break;
           case "previous-session":
             prefValue = 3;
             break;
         }
-        setDefaultPref("browser.startup.page", prefValue, param.Locked);
+        setDefaultPref(
+          "browser.startup.page",
+          prefValue,
+          param.StartPage == "homepage-locked"
+        );
       }
     },
   },
@@ -1020,6 +1106,21 @@ var Policies = {
 
   LegacyProfiles: {
     // Handled in nsToolkitProfileService.cpp (Windows only)
+  },
+
+  LegacySameSiteCookieBehaviorEnabled: {
+    onBeforeAddons(manager, param) {
+      setDefaultPref("network.cookie.sameSite.laxByDefault", !param);
+    },
+  },
+
+  LegacySameSiteCookieBehaviorEnabledForDomainList: {
+    onBeforeAddons(manager, param) {
+      setDefaultPref(
+        "network.cookie.sameSite.laxByDefault.disabledHosts",
+        param.join(",")
+      );
+    },
   },
 
   LocalFileLinks: {
@@ -1097,10 +1198,20 @@ var Policies = {
     onBeforeUIStartup(manager, param) {
       if (!param) {
         blockAboutPage(manager, "about:logins", true);
-        gBlockedChromePages.push("passwordManager.xhtml");
         setAndLockPref("pref.privacy.disable_button.view_passwords", true);
       }
       setAndLockPref("signon.rememberSignons", param);
+    },
+  },
+
+  PDFjs: {
+    onBeforeAddons(manager, param) {
+      if ("Enabled" in param) {
+        setAndLockPref("pdfjs.disabled", !param.Enabled);
+      }
+      if ("EnablePermissions" in param) {
+        setAndLockPref("pdfjs.enablePermissions", !param.Enabled);
+      }
     },
   },
 
@@ -1130,7 +1241,25 @@ var Policies = {
           param.Autoplay.Allow,
           param.Autoplay.Block
         );
-        setDefaultPermission("autoplay-media", param.Autoplay);
+        if ("Default" in param.Autoplay) {
+          let prefValue;
+          switch (param.Autoplay.Default) {
+            case "allow-audio-video":
+              prefValue = 0;
+              break;
+            case "block-audio":
+              prefValue = 1;
+              break;
+            case "block-audio-video":
+              prefValue = 5;
+              break;
+          }
+          setDefaultPref(
+            "media.autoplay.default",
+            prefValue,
+            param.Autoplay.Locked
+          );
+        }
       }
 
       if (param.Location) {
@@ -1198,8 +1327,10 @@ var Policies = {
     onBeforeAddons(manager, param) {
       if (Array.isArray(param)) {
         Services.locale.requestedLocales = param;
-      } else {
+      } else if (param) {
         Services.locale.requestedLocales = param.split(",");
+      } else {
+        Services.locale.requestedLocales = [];
       }
     },
   },
@@ -1561,17 +1692,20 @@ var Policies = {
       }
       if ("ExtensionRecommendations" in param) {
         setDefaultPref(
-          "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features",
+          "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons",
           param.ExtensionRecommendations,
           locked
         );
       }
       if ("FeatureRecommendations" in param) {
         setDefaultPref(
-          "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons",
+          "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features",
           param.FeatureRecommendations,
           locked
         );
+      }
+      if ("UrlbarInterventions" in param && !param.UrlbarInterventions) {
+        manager.disallowFeature("urlbarinterventions");
       }
     },
   },
@@ -1800,7 +1934,15 @@ function replacePathVariables(path) {
  * Helper function that installs an addon from a URL
  * and verifies that the addon ID matches.
  */
-function installAddonFromURL(url, extensionID) {
+function installAddonFromURL(url, extensionID, addon) {
+  if (
+    addon &&
+    addon.sourceURI.spec == url &&
+    !addon.sourceURI.schemeIs("file")
+  ) {
+    // It's the same addon, don't reinstall.
+    return;
+  }
   AddonManager.getInstallForURL(url, {
     telemetryInfo: { source: "enterprise-policy" },
   }).then(install => {
@@ -1814,15 +1956,21 @@ function installAddonFromURL(url, extensionID) {
       onDownloadEnded: install => {
         if (extensionID && install.addon.id != extensionID) {
           log.error(
-            `Add-on downloaded from ${url} had unexpected id (got ${
-              install.addon.id
-            } expected ${extensionID})`
+            `Add-on downloaded from ${url} had unexpected id (got ${install.addon.id} expected ${extensionID})`
           );
           install.removeListener(listener);
           install.cancel();
         }
         if (install.addon && install.addon.appDisabled) {
           log.error(`Incompatible add-on - ${url}`);
+          install.removeListener(listener);
+          install.cancel();
+        }
+        if (
+          addon &&
+          Services.vc.compare(addon.version, install.addon.version) == 0
+        ) {
+          log.debug("Installation cancelled because versions are the same");
           install.removeListener(listener);
           install.cancel();
         }

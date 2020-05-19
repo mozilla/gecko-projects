@@ -22,7 +22,7 @@ class SystemFontListEntry;
 };
 };  // namespace mozilla
 
-class gfxPlatformGtk : public gfxPlatform {
+class gfxPlatformGtk final : public gfxPlatform {
  public:
   gfxPlatformGtk();
   virtual ~gfxPlatformGtk();
@@ -46,12 +46,6 @@ class gfxPlatformGtk : public gfxPlatform {
                               nsTArray<const char*>& aFontList) override;
 
   gfxPlatformFontList* CreatePlatformFontList() override;
-
-  gfxFontGroup* CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
-                                const gfxFontStyle* aStyle,
-                                gfxTextPerfMetrics* aTextPerf,
-                                gfxUserFontSet* aUserFontSet,
-                                gfxFloat aDevToCssSize) override;
 
   /**
    * Calls XFlush if xrender is enabled.
@@ -95,6 +89,7 @@ class gfxPlatformGtk : public gfxPlatform {
 #ifdef MOZ_WAYLAND
   bool UseWaylandDMABufTextures();
   bool UseWaylandDMABufWebGL();
+  bool UseWaylandHardwareVideoDecoding();
 #endif
 
   bool IsX11Display() { return mIsX11Display; }
@@ -109,7 +104,7 @@ class gfxPlatformGtk : public gfxPlatform {
   int8_t mMaxGenericSubstitutions;
 
  private:
-  void GetPlatformCMSOutputProfile(void*& mem, size_t& size) override;
+  nsTArray<uint8_t> GetPlatformCMSOutputProfileData() override;
 
   bool mIsX11Display;
 #ifdef MOZ_X11

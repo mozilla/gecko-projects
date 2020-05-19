@@ -15,6 +15,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPtr.h"
+#include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsIHttpChannel.h"
@@ -481,19 +482,27 @@ void ReportingHeader::GetEndpointForReport(
     const nsAString& aGroupName,
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
     nsACString& aEndpointURI) {
+  auto principalOrErr = PrincipalInfoToPrincipal(aPrincipalInfo);
+  if (NS_WARN_IF(principalOrErr.isErr())) {
+    return;
+  }
+
+  nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
+  GetEndpointForReport(aGroupName, principal, aEndpointURI);
+}
+
+/* static */
+void ReportingHeader::GetEndpointForReport(const nsAString& aGroupName,
+                                           nsIPrincipal* aPrincipal,
+                                           nsACString& aEndpointURI) {
   MOZ_ASSERT(aEndpointURI.IsEmpty());
 
   if (!gReporting) {
     return;
   }
 
-  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
-  if (NS_WARN_IF(!principal)) {
-    return;
-  }
-
   nsAutoCString origin;
-  nsresult rv = principal->GetOrigin(origin);
+  nsresult rv = aPrincipal->GetOrigin(origin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
@@ -587,13 +596,13 @@ void ReportingHeader::RemoveEndpoint(
     return;
   }
 
-  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
-  if (NS_WARN_IF(!principal)) {
+  auto principalOrErr = PrincipalInfoToPrincipal(aPrincipalInfo);
+  if (NS_WARN_IF(principalOrErr.isErr())) {
     return;
   }
 
   nsAutoCString origin;
-  rv = principal->GetOrigin(origin);
+  rv = principalOrErr.unwrap()->GetOrigin(origin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
@@ -746,8 +755,7 @@ void ReportingHeader::MaybeCreateCleanupTimer() {
   uint32_t timeout = StaticPrefs::dom_reporting_cleanup_timeout() * 1000;
   nsresult rv =
       NS_NewTimerWithCallback(getter_AddRefs(mCleanupTimer), this, timeout,
-                              nsITimer::TYPE_ONE_SHOT_LOW_PRIORITY,
-                              SystemGroup::EventTargetFor(TaskCategory::Other));
+                              nsITimer::TYPE_ONE_SHOT_LOW_PRIORITY);
   Unused << NS_WARN_IF(NS_FAILED(rv));
 }
 

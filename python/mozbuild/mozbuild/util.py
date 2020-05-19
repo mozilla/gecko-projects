@@ -14,12 +14,12 @@ import difflib
 import errno
 import functools
 import hashlib
+import io
 import itertools
 import os
 import pprint
 import re
 import stat
-import subprocess
 import sys
 import time
 from collections import (
@@ -51,6 +51,12 @@ def exec_(object, globals=None, locals=None):
     which happen with older versions of python 2.7.
     """
     exec(object, globals, locals)
+
+
+def _open(path, mode):
+    if 'b' in mode:
+        return io.open(path, mode)
+    return io.open(path, mode, encoding='utf-8', newline='\n')
 
 
 def hash_file(path, hasher=None):
@@ -227,9 +233,7 @@ class FileAvoidWrite(BytesIO):
         self._binary_mode = 'b' in readmode
 
     def write(self, buf):
-        if isinstance(buf, six.text_type):
-            buf = buf.encode('utf-8')
-        BytesIO.write(self, buf)
+        BytesIO.write(self, six.ensure_binary(buf))
 
     def avoid_writing_to_file(self):
         self._write_to_file = False
@@ -245,23 +249,16 @@ class FileAvoidWrite(BytesIO):
         underlying file was changed, ``.diff`` will be populated with the diff
         of the result.
         """
-        if self._binary_mode or six.PY2:
-            # Use binary data under Python 2 because it can be written to files
-            # opened with either open(mode='w') or open(mode='wb') without raising
-            # unicode errors. Also use binary data if the caller explicitly asked for
-            # it.
-            buf = self.getvalue()
-        else:
-            # Use strings in Python 3 unless the caller explicitly asked for binary
-            # data.
-            buf = self.getvalue().decode('utf-8')
+        # Use binary data if the caller explicitly asked for it.
+        ensure = six.ensure_binary if self._binary_mode else six.ensure_text
+        buf = ensure(self.getvalue())
 
         BytesIO.close(self)
         existed = False
         old_content = None
 
         try:
-            existing = open(self.name, self.mode)
+            existing = _open(self.name, self.mode)
             existed = True
         except IOError:
             pass
@@ -282,7 +279,10 @@ class FileAvoidWrite(BytesIO):
             writemode = 'w'
             if self._binary_mode:
                 writemode += 'b'
-            with open(self.name, writemode) as file:
+                buf = six.ensure_binary(buf)
+            else:
+                buf = six.ensure_text(buf)
+            with _open(self.name, writemode) as file:
                 file.write(buf)
 
         self._generate_diff(buf, old_content)
@@ -1296,28 +1296,6 @@ def _escape_char(c):
     return six.text_type(c.encode('unicode_escape'))
 
 
-# The default PrettyPrinter has some issues with UTF-8, so we need to override
-# some stuff here.
-class _PrettyPrinter(pprint.PrettyPrinter):
-    def format(self, object, context, maxlevels, level):
-        if not (isinstance(object, six.text_type) or
-                isinstance(object, six.binary_type)):
-            return super(_PrettyPrinter, self).format(
-                object, context, maxlevels, level)
-        # This is super hacky and weird, but the output of 'repr' actually
-        # varies based on the default I/O encoding of the process, which isn't
-        # necessarily utf-8. Instead we open a new shell and ask what the repr
-        # WOULD be assuming the default encoding is utf-8. If you can come up
-        # with a better way of doing this without simply re-implementing the
-        # logic of "repr", please replace this.
-        env = dict(os.environ)
-        env['PYTHONIOENCODING'] = 'utf-8'
-        ret = six.ensure_text(subprocess.check_output(
-            [sys.executable], input='print(repr(%s))' % repr(object),
-            universal_newlines=True, env=env, encoding='utf-8')).strip()
-        return (ret, True, False)
-
-
 if six.PY2:  # Delete when we get rid of Python 2.
     # Mapping table between raw characters below \x80 and their escaped
     # counterpart, when they differ
@@ -1332,14 +1310,16 @@ if six.PY2:  # Delete when we get rid of Python 2.
         '([' + ''.join(_INDENTED_REPR_TABLE.values()) + ']+)')
 
 
-def indented_repr(o, indent=4):
-    '''Similar to repr(), but returns an indented representation of the object
+def write_indented_repr(f, o, indent=4):
+    '''Write an indented representation (similar to repr()) of the object to the
+    given file `f`.
 
     One notable difference with repr is that the returned representation
     assumes `from __future__ import unicode_literals`.
     '''
     if six.PY3:
-        return _PrettyPrinter(indent=indent).pformat(o)
+        pprint.pprint(o, stream=f, indent=indent)
+        return
     # Delete everything below when we get rid of Python 2.
     one_indent = ' ' * indent
 
@@ -1381,7 +1361,8 @@ def indented_repr(o, indent=4):
             yield ']'
         else:
             yield repr(o)
-    return ''.join(recurse_indented_repr(o, 0))
+    result = ''.join(recurse_indented_repr(o, 0)) + '\n'
+    f.write(result)
 
 
 def patch_main():
@@ -1501,3 +1482,10 @@ def ensure_subprocess_env(env, encoding='utf-8'):
     """
     ensure = ensure_bytes if sys.version_info[0] < 3 else ensure_unicode
     return {ensure(k, encoding): ensure(v, encoding) for k, v in six.iteritems(env)}
+
+
+def process_time():
+    if six.PY2:
+        return time.clock()
+    else:
+        return time.process_time()

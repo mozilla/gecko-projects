@@ -27,7 +27,10 @@ function sleep(delay) {
 function force_prompt(allow, callback) {
   SpecialPowers.pushPrefEnv(
     {
-      set: [["geo.prompt.testing", true], ["geo.prompt.testing.allow", allow]],
+      set: [
+        ["geo.prompt.testing", true],
+        ["geo.prompt.testing.allow", allow],
+      ],
     },
     callback
   );
@@ -84,7 +87,7 @@ function check_geolocation(location) {
   ok(location, "Check to see if this location is non-null");
 
   const timestamp = location.timestamp;
-  dump(`timestamp=$timestamp}\n`);
+  dump(`timestamp=${timestamp}\n`);
   ok(IsNumber(timestamp), "check timestamp type");
   ok(timestamp > 0, "check timestamp range");
 

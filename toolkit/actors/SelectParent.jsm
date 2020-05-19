@@ -26,7 +26,7 @@ const PROPERTIES_RESET_WHEN_ACTIVE = [
 
 // Duplicated in SelectChild.jsm
 // Please keep these lists in sync.
-const SUPPORTED_PROPERTIES = [
+const SUPPORTED_OPTION_OPTGROUP_PROPERTIES = [
   "direction",
   "color",
   "background-color",
@@ -35,6 +35,12 @@ const SUPPORTED_PROPERTIES = [
   "font-weight",
   "font-size",
   "font-style",
+];
+
+const SUPPORTED_SELECT_PROPERTIES = [
+  ...SUPPORTED_OPTION_OPTGROUP_PROPERTIES,
+  "scrollbar-width",
+  "scrollbar-color",
 ];
 
 const customStylingEnabled = Services.prefs.getBoolPref(
@@ -122,7 +128,7 @@ var SelectParentHelper = {
       }
 
       let addedRule = false;
-      for (let property of SUPPORTED_PROPERTIES) {
+      for (let property of SUPPORTED_SELECT_PROPERTIES) {
         if (property == "direction") {
           continue;
         } // Handled above, or before.
@@ -442,7 +448,7 @@ var SelectParentHelper = {
 
       if (customStylingEnabled) {
         let addedRule = false;
-        for (const property of SUPPORTED_PROPERTIES) {
+        for (const property of SUPPORTED_OPTION_OPTGROUP_PROPERTIES) {
           if (property == "direction" || property == "font-size") {
             continue;
           } // handled above
@@ -565,11 +571,8 @@ var SelectParentHelper = {
       let searchbox = element.ownerDocument.createXULElement("search-textbox");
       searchbox.className = "contentSelectDropdown-searchbox";
       searchbox.addEventListener("input", this.onSearchInput);
-      searchbox.inputField.addEventListener(
-        "focus",
-        this.onSearchFocus.bind(this)
-      );
-      searchbox.inputField.addEventListener("blur", this.onSearchBlur);
+      searchbox.addEventListener("focus", this.onSearchFocus.bind(this));
+      searchbox.addEventListener("blur", this.onSearchBlur);
       searchbox.addEventListener("command", this.onSearchInput);
 
       // Handle special keys for exiting search
@@ -688,16 +691,14 @@ var SelectParentHelper = {
   },
 
   onSearchFocus(event) {
-    let searchObj = event.currentTarget;
-    let menupopup = searchObj.closest("menupopup");
+    let menupopup = event.target.closest("menupopup");
     menupopup.parentElement.activeChild = null;
     menupopup.setAttribute("ignorekeys", "true");
     this._actor.sendAsyncMessage("Forms:SearchFocused", {});
   },
 
   onSearchBlur(event) {
-    let searchObj = event.currentTarget;
-    let menupopup = searchObj.closest("menupopup");
+    let menupopup = event.target.closest("menupopup");
     menupopup.setAttribute("ignorekeys", "false");
   },
 };

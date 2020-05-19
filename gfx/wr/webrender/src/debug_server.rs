@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ApiMsg, DebugCommand, DebugFlags};
-use api::channel::MsgSender;
 use api::units::DeviceIntSize;
 use crate::print_tree::PrintTreePrinter;
 use crate::renderer;
@@ -27,7 +26,7 @@ enum DebugMsg {
 struct Server {
     ws: ws::Sender,
     debug_tx: Sender<DebugMsg>,
-    api_tx: MsgSender<ApiMsg>,
+    api_tx: Sender<ApiMsg>,
     debug_flags: DebugFlags,
 }
 
@@ -111,7 +110,7 @@ pub struct DebugServerImpl {
 }
 
 impl DebugServerImpl {
-    pub fn new(api_tx: MsgSender<ApiMsg>) -> DebugServerImpl {
+    pub fn new(api_tx: Sender<ApiMsg>) -> DebugServerImpl {
         let (debug_tx, debug_rx) = channel();
 
         let socket = ws::Builder::new()
@@ -310,7 +309,7 @@ impl Screenshot {
                 &data,
                 size.width as u32,
                 size.height as u32,
-                image_loader::ColorType::RGBA(8),
+                image_loader::ColorType::Rgba8,
             ).unwrap();
         }
 

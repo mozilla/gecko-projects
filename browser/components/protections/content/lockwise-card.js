@@ -4,13 +4,11 @@
 
 /* eslint-env mozilla/frame-script */
 
-const LOCKWISE_URL = RPMGetStringPref(
-  "browser.contentblocking.report.lockwise.url",
-  ""
+const LOCKWISE_URL_IOS = RPMGetStringPref(
+  "browser.contentblocking.report.lockwise.mobile-ios.url"
 );
-const MANAGE_DEVICES_URL = RPMGetStringPref(
-  "browser.contentblocking.report.manage_devices.url",
-  ""
+const LOCKWISE_URL_ANDROID = RPMGetStringPref(
+  "browser.contentblocking.report.lockwise.mobile-android.url"
 );
 const HOW_IT_WORKS_URL_PREF = RPMGetFormatURLPref(
   "browser.contentblocking.report.lockwise.how_it_works.url"
@@ -25,30 +23,37 @@ export default class LockwiseCard {
    * Initializes message listeners/senders.
    */
   init() {
-    const openAboutLoginsButton = this.doc.getElementById(
-      "open-about-logins-button"
+    const savePasswordsButton = this.doc.getElementById(
+      "save-passwords-button"
     );
-    openAboutLoginsButton.addEventListener("click", () => {
-      this.doc.sendTelemetryEvent("click", "lw_open_button");
-      RPMSendAsyncMessage("OpenAboutLogins");
+    savePasswordsButton.addEventListener(
+      "click",
+      this.openAboutLogins.bind(this)
+    );
+
+    const managePasswordsButton = this.doc.getElementById(
+      "manage-passwords-button"
+    );
+    managePasswordsButton.addEventListener(
+      "click",
+      this.openAboutLogins.bind(this)
+    );
+
+    const androidLockwiseAppLink = this.doc.getElementById(
+      "lockwise-android-inline-link"
+    );
+    androidLockwiseAppLink.href = LOCKWISE_URL_ANDROID;
+    androidLockwiseAppLink.addEventListener("click", () => {
+      this.doc.sendTelemetryEvent("click", "lw_sync_link", "android");
     });
 
-    const syncLink = this.doc.getElementById("turn-on-sync");
-    // Register a click handler for the anchor since it's not possible to navigate to about:preferences via href
-    const eventHandler = evt => {
-      if (evt.keyCode == evt.DOM_VK_RETURN || evt.type == "click") {
-        this.doc.sendTelemetryEvent("click", "lw_app_link");
-        RPMSendAsyncMessage("OpenSyncPreferences");
-      }
-    };
-    syncLink.addEventListener("click", eventHandler);
-    syncLink.addEventListener("keydown", eventHandler);
-
-    // Attach link to Firefox Lockwise app page.
-    const lockwiseAppLink = this.doc.getElementById("lockwise-inline-link");
-    lockwiseAppLink.href = LOCKWISE_URL;
-    lockwiseAppLink.addEventListener("click", () => {
-      this.doc.sendTelemetryEvent("click", "lw_sync_link");
+    // Attach link to Firefox Lockwise ios mobile app.
+    const iosLockwiseAppLink = this.doc.getElementById(
+      "lockwise-ios-inline-link"
+    );
+    iosLockwiseAppLink.href = LOCKWISE_URL_IOS;
+    iosLockwiseAppLink.addEventListener("click", () => {
+      this.doc.sendTelemetryEvent("click", "lw_sync_link", "ios");
     });
 
     // Attack link to Firefox Lockwise "How it works" page.
@@ -56,102 +61,128 @@ export default class LockwiseCard {
     lockwiseReportLink.addEventListener("click", () => {
       this.doc.sendTelemetryEvent("click", "lw_about_link");
     });
+  }
 
-    RPMAddMessageListener("SendUserLoginsData", ({ data }) => {
-      // Once data for the user is retrieved, display the lockwise card.
-      this.buildContent(data);
-
-      const lockwiseUI = document.querySelector(".card.lockwise-card.loading");
-      lockwiseUI.classList.remove("loading");
-    });
+  openAboutLogins() {
+    const lockwiseCard = this.doc.querySelector(".lockwise-card");
+    if (lockwiseCard.classList.contains("has-logins")) {
+      if (lockwiseCard.classList.contains("breached-logins")) {
+        this.doc.sendTelemetryEvent(
+          "click",
+          "lw_open_button",
+          "manage_breached_passwords"
+        );
+      } else if (lockwiseCard.classList.contains("no-breached-logins")) {
+        this.doc.sendTelemetryEvent(
+          "click",
+          "lw_open_button",
+          "manage_passwords"
+        );
+      }
+    } else if (lockwiseCard.classList.contains("no-logins")) {
+      this.doc.sendTelemetryEvent("click", "lw_open_button", "save_passwords");
+    }
+    RPMSendAsyncMessage("OpenAboutLogins");
   }
 
   buildContent(data) {
-    const { hasFxa, numLogins, numSyncedDevices } = data;
-    const isLoggedIn = numLogins > 0 || hasFxa;
+    const { numLogins, potentiallyBreachedLogins } = data;
+    const hasLogins = numLogins > 0;
     const title = this.doc.getElementById("lockwise-title");
-    const headerContent = this.doc.getElementById("lockwise-header-content");
+    const headerContent = this.doc.querySelector(
+      "#lockwise-header-content span"
+    );
     const lockwiseBodyContent = this.doc.getElementById(
       "lockwise-body-content"
     );
+    const cardBody = this.doc.querySelector(".lockwise-card .card-body");
+    const lockwiseCard = this.doc.querySelector(".card.lockwise-card");
 
-    // Get the container for the content to display.
-    const container = isLoggedIn
-      ? lockwiseBodyContent.querySelector(".has-logins")
-      : lockwiseBodyContent.querySelector(".no-logins");
-    // Display the content
-    container.classList.remove("hidden");
+    const exitIcon = lockwiseBodyContent.querySelector(".exit-icon");
+    // User has closed the lockwise promotion, hide it and don't show again.
+    exitIcon.addEventListener("click", () => {
+      RPMSetBoolPref("browser.contentblocking.report.hide_lockwise_app", true);
+      lockwiseBodyContent.querySelector(".no-logins").classList.add("hidden");
+      cardBody.classList.add("hidden");
+    });
 
-    if (isLoggedIn) {
-      title.setAttribute("data-l10n-id", "lockwise-title-logged-in");
+    if (hasLogins) {
+      lockwiseCard.classList.remove("no-logins");
+      lockwiseCard.classList.add("has-logins");
+      title.setAttribute("data-l10n-id", "lockwise-title-logged-in2");
       headerContent.setAttribute(
         "data-l10n-id",
         "lockwise-header-content-logged-in"
       );
-      this.renderContentForLoggedInUser(container, numLogins, numSyncedDevices);
+      this.renderContentForLoggedInUser(numLogins, potentiallyBreachedLogins);
     } else {
+      lockwiseCard.classList.remove("has-logins");
+      lockwiseCard.classList.add("no-logins");
+      if (
+        !RPMGetBoolPref(
+          "browser.contentblocking.report.hide_lockwise_app",
+          false
+        )
+      ) {
+        lockwiseBodyContent
+          .querySelector(".no-logins")
+          .classList.remove("hidden");
+        cardBody.classList.remove("hidden");
+      }
       title.setAttribute("data-l10n-id", "lockwise-title");
       headerContent.setAttribute("data-l10n-id", "lockwise-header-content");
     }
+
+    const lockwiseUI = document.querySelector(".card.lockwise-card.loading");
+    lockwiseUI.classList.remove("loading");
   }
 
   /**
-   * Displays the number of stored logins and synced devices for a user.
+   * Displays strings indicating stored logins for a user.
    *
-   * @param {Element} container
-   *        The containing element for the content.
    * @param {Number}  storedLogins
    *        The number of browser-stored logins.
-   * @param {Number}  syncedDevices
-   *        The number of synced devices.
+   * @param {Number}  potentiallyBreachedLogins
+   *        The number of potentially breached logins.
    */
-  renderContentForLoggedInUser(container, storedLogins, syncedDevices) {
-    const lockwiseCardBody = this.doc.querySelector(
-      ".card.lockwise-card .card-body"
+  renderContentForLoggedInUser(storedLogins, potentiallyBreachedLogins) {
+    const lockwiseScannedText = this.doc.getElementById(
+      "lockwise-scanned-text"
     );
-    lockwiseCardBody.classList.remove("hidden");
+    const lockwiseScannedIcon = this.doc.getElementById(
+      "lockwise-scanned-icon"
+    );
+    const lockwiseCard = this.doc.querySelector(".card.lockwise-card");
 
-    // Set the text for number of stored logins.
-    const numberOfLoginsBlock = container.querySelector(
-      ".number-of-logins.block"
-    );
-    numberOfLoginsBlock.textContent = storedLogins;
-
-    const lockwisePasswordsStored = this.doc.getElementById(
-      "lockwise-passwords-stored"
-    );
-    lockwisePasswordsStored.setAttribute(
-      "data-l10n-args",
-      JSON.stringify({ count: storedLogins })
-    );
-    lockwisePasswordsStored.setAttribute(
-      "data-l10n-id",
-      "lockwise-passwords-stored"
-    );
+    if (potentiallyBreachedLogins) {
+      document.l10n.setAttributes(
+        lockwiseScannedText,
+        "lockwise-scanned-text-breached-logins",
+        {
+          count: potentiallyBreachedLogins,
+        }
+      );
+      lockwiseScannedIcon.setAttribute(
+        "src",
+        "chrome://browser/skin/protections/breached-password.svg"
+      );
+      lockwiseCard.classList.add("breached-logins");
+    } else {
+      document.l10n.setAttributes(
+        lockwiseScannedText,
+        "lockwise-scanned-text-no-breached-logins",
+        {
+          count: storedLogins,
+        }
+      );
+      lockwiseScannedIcon.setAttribute(
+        "src",
+        "chrome://browser/skin/protections/resolved-breach.svg"
+      );
+      lockwiseCard.classList.add("no-breached-logins");
+    }
 
     const howItWorksLink = this.doc.getElementById("lockwise-how-it-works");
     howItWorksLink.href = HOW_IT_WORKS_URL_PREF;
-
-    // Set the text for the number of synced devices.
-    const syncedDevicesBlock = container.querySelector(
-      ".number-of-synced-devices.block"
-    );
-    syncedDevicesBlock.textContent = syncedDevices;
-
-    const syncedDevicesText = container.querySelector(".synced-devices-text");
-    const textEl = syncedDevicesText.querySelector("span");
-    document.l10n.setAttributes(textEl, "lockwise-connected-device-status", {
-      count: syncedDevices,
-    });
-
-    // Display the link for enabling sync if no synced devices are detected.
-    if (syncedDevices === 0) {
-      const syncLink = this.doc.getElementById("turn-on-sync");
-      syncLink.classList.remove("hidden");
-    } else {
-      const manageDevicesLink = this.doc.getElementById("manage-devices");
-      manageDevicesLink.href = MANAGE_DEVICES_URL;
-      manageDevicesLink.classList.remove("hidden");
-    }
   }
 }

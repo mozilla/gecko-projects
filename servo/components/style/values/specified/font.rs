@@ -20,7 +20,6 @@ use crate::values::specified::{AllowQuirks, Angle, Integer, LengthPercentage};
 use crate::values::specified::{NoCalcLength, NonNegativeNumber, Number, Percentage};
 use crate::values::CustomIdent;
 use crate::Atom;
-use byteorder::{BigEndian, ByteOrder};
 use cssparser::{Parser, Token};
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
@@ -61,7 +60,7 @@ macro_rules! system_font_methods {
                 None
             }
         }
-    }
+    };
 }
 
 const DEFAULT_SCRIPT_MIN_SIZE_PT: u32 = 8;
@@ -493,7 +492,9 @@ impl ToComputedValue for FontStretch {
     SpecifiedValueInfo,
     ToAnimatedValue,
     ToAnimatedZero,
+    ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
 #[allow(missing_docs)]
@@ -535,7 +536,9 @@ impl Default for KeywordSize {
     PartialEq,
     ToAnimatedValue,
     ToAnimatedZero,
+    ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
 /// Additional information for keyword-derived font sizes.
@@ -568,7 +571,7 @@ impl KeywordInfo {
     /// Computes the final size for this font-size keyword, accounting for
     /// text-zoom.
     fn to_computed_value(&self, context: &Context) -> CSSPixelLength {
-        let base = context.maybe_zoom_text(self.kw.to_computed_value(context).0);
+        let base = context.maybe_zoom_text(self.kw.to_length(context).0);
         base * self.factor + context.maybe_zoom_text(self.offset)
     }
 
@@ -761,11 +764,10 @@ const LARGER_FONT_SIZE_RATIO: f32 = 1.2;
 /// The default font size.
 pub const FONT_MEDIUM_PX: i32 = 16;
 
-#[cfg(feature = "servo")]
-impl ToComputedValue for KeywordSize {
-    type ComputedValue = NonNegativeLength;
+impl KeywordSize {
     #[inline]
-    fn to_computed_value(&self, _: &Context) -> NonNegativeLength {
+    #[cfg(feature = "servo")]
+    fn to_length(&self, _: &Context) -> NonNegativeLength {
         let medium = Length::new(FONT_MEDIUM_PX as f32);
         // https://drafts.csswg.org/css-fonts-3/#font-size-prop
         NonNegative(match *self {
@@ -780,17 +782,9 @@ impl ToComputedValue for KeywordSize {
         })
     }
 
+    #[cfg(feature = "gecko")]
     #[inline]
-    fn from_computed_value(_: &NonNegativeLength) -> Self {
-        unreachable!()
-    }
-}
-
-#[cfg(feature = "gecko")]
-impl ToComputedValue for KeywordSize {
-    type ComputedValue = NonNegativeLength;
-    #[inline]
-    fn to_computed_value(&self, cx: &Context) -> NonNegativeLength {
+    fn to_length(&self, cx: &Context) -> NonNegativeLength {
         use crate::context::QuirksMode;
 
         // The tables in this function are originally from
@@ -857,11 +851,6 @@ impl ToComputedValue for KeywordSize {
         } else {
             base_size * FONT_SIZE_FACTORS[html_size] as f32 / 100.0
         })
-    }
-
-    #[inline]
-    fn from_computed_value(_: &NonNegativeLength) -> Self {
-        unreachable!()
     }
 }
 
@@ -2057,19 +2046,9 @@ impl FontLanguageOverride {
     #[inline]
     pub fn compute_non_system(&self) -> computed::FontLanguageOverride {
         match *self {
-            FontLanguageOverride::Normal => computed::FontLanguageOverride(0),
+            FontLanguageOverride::Normal => computed::FontLanguageOverride::zero(),
             FontLanguageOverride::Override(ref lang) => {
-                if lang.is_empty() || lang.len() > 4 {
-                    return computed::FontLanguageOverride(0);
-                }
-                let mut bytes = [b' '; 4];
-                for (byte, lang_byte) in bytes.iter_mut().zip(lang.as_bytes()) {
-                    if !lang_byte.is_ascii() {
-                        return computed::FontLanguageOverride(0);
-                    }
-                    *byte = *lang_byte;
-                }
-                computed::FontLanguageOverride(BigEndian::read_u32(&bytes))
+                computed::FontLanguageOverride::from_str(lang)
             },
             FontLanguageOverride::System(..) => unreachable!(),
         }
@@ -2090,19 +2069,10 @@ impl ToComputedValue for FontLanguageOverride {
     }
     #[inline]
     fn from_computed_value(computed: &computed::FontLanguageOverride) -> Self {
-        if computed.0 == 0 {
+        if *computed == computed::FontLanguageOverride::zero() {
             return FontLanguageOverride::Normal;
         }
-        let mut buf = [0; 4];
-        BigEndian::write_u32(&mut buf, computed.0);
-        FontLanguageOverride::Override(
-            if cfg!(debug_assertions) {
-                String::from_utf8(buf.to_vec()).unwrap()
-            } else {
-                unsafe { String::from_utf8_unchecked(buf.to_vec()) }
-            }
-            .into_boxed_str(),
-        )
+        FontLanguageOverride::Override(computed.to_str(&mut [0; 4]).into())
     }
 }
 

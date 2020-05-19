@@ -5,18 +5,40 @@
 use nsstring::nsACString;
 use nsstring::nsCString;
 use thin_vec::ThinVec;
-pub use unic_langid::LanguageIdentifier;
+pub use unic_langid::{CharacterDirection, LanguageIdentifier, LanguageIdentifierError};
+
+pub fn new_langid_for_mozilla(
+    name: &nsACString,
+) -> Result<LanguageIdentifier, LanguageIdentifierError> {
+    if name.eq_ignore_ascii_case(b"ja-jp-mac") {
+        "ja-JP-macos".parse()
+    } else {
+        // Cut out any `.FOO` like `en-US.POSIX`.
+        let mut name: &[u8] = name.as_ref();
+        if let Some(ptr) = name.iter().position(|b| b == &b'.') {
+            name = &name[..ptr];
+        }
+        LanguageIdentifier::from_bytes(name)
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn unic_langid_canonicalize(name: &mut nsACString) -> bool {
+    let langid = new_langid_for_mozilla(name);
+
+    let result = langid.is_ok();
+
+    name.assign(&langid.unwrap_or_default().to_string());
+
+    result
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn unic_langid_new(
     name: &nsACString,
     ret_val: &mut bool,
 ) -> *mut LanguageIdentifier {
-    let langid = if name.eq_ignore_ascii_case(b"ja-jp-mac") {
-        "ja-JP-macos".parse()
-    } else {
-        LanguageIdentifier::from_bytes(name)
-    };
+    let langid = new_langid_for_mozilla(name);
 
     *ret_val = langid.is_ok();
     Box::into_raw(Box::new(langid.unwrap_or_default()))
@@ -138,6 +160,14 @@ pub unsafe extern "C" fn unic_langid_matches(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn unic_langid_add_likely_subtags(langid: &mut LanguageIdentifier) -> bool {
+pub unsafe extern "C" fn unic_langid_maximize(langid: &mut LanguageIdentifier) -> bool {
     langid.maximize()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn unic_langid_is_rtl(name: &nsACString) -> bool {
+    match new_langid_for_mozilla(name) {
+        Ok(langid) => langid.character_direction() == CharacterDirection::RTL,
+        Err(_) => false,
+    }
 }

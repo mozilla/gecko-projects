@@ -265,6 +265,12 @@ struct ParamTraits<mozilla::gfx::ColorSpace>
                                       mozilla::gfx::ColorSpace::SRGB,
                                       mozilla::gfx::ColorSpace::Max> {};
 
+template <>
+struct ParamTraits<mozilla::gfx::CompositionOp>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::gfx::CompositionOp, mozilla::gfx::CompositionOp::OP_OVER,
+          mozilla::gfx::CompositionOp::OP_COUNT> {};
+
 /*
 template <>
 struct ParamTraits<mozilla::PixelFormat>
@@ -275,8 +281,27 @@ struct ParamTraits<mozilla::PixelFormat>
 */
 
 template <>
-struct ParamTraits<mozilla::gfx::Color> {
-  typedef mozilla::gfx::Color paramType;
+struct ParamTraits<mozilla::gfx::sRGBColor> {
+  typedef mozilla::gfx::sRGBColor paramType;
+
+  static void Write(Message* msg, const paramType& param) {
+    WriteParam(msg, param.r);
+    WriteParam(msg, param.g);
+    WriteParam(msg, param.b);
+    WriteParam(msg, param.a);
+  }
+
+  static bool Read(const Message* msg, PickleIterator* iter,
+                   paramType* result) {
+    return (
+        ReadParam(msg, iter, &result->r) && ReadParam(msg, iter, &result->g) &&
+        ReadParam(msg, iter, &result->b) && ReadParam(msg, iter, &result->a));
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::gfx::DeviceColor> {
+  typedef mozilla::gfx::DeviceColor paramType;
 
   static void Write(Message* msg, const paramType& param) {
     WriteParam(msg, param.r);
@@ -545,6 +570,31 @@ struct ParamTraits<mozilla::gfx::RectTyped<T>> {
 };
 
 template <class T>
+struct ParamTraits<mozilla::gfx::RectAbsoluteTyped<T>> {
+  typedef mozilla::gfx::RectAbsoluteTyped<T> paramType;
+
+  static void Write(Message* msg, const paramType& param) {
+    WriteParam(msg, param.Left());
+    WriteParam(msg, param.Top());
+    WriteParam(msg, param.Right());
+    WriteParam(msg, param.Bottom());
+  }
+
+  static bool Read(const Message* msg, PickleIterator* iter,
+                   paramType* result) {
+    auto l = result->Left();
+    auto t = result->Top();
+    auto r = result->Right();
+    auto b = result->Bottom();
+
+    bool retVal = (ReadParam(msg, iter, &l) && ReadParam(msg, iter, &t) &&
+                   ReadParam(msg, iter, &r) && ReadParam(msg, iter, &b));
+    result->SetBox(l, t, r, b);
+    return retVal;
+  }
+};
+
+template <class T>
 struct ParamTraits<mozilla::gfx::IntRectTyped<T>> {
   typedef mozilla::gfx::IntRectTyped<T> paramType;
 
@@ -592,6 +642,26 @@ struct ParamTraits<mozilla::gfx::Margin> {
 template <class T>
 struct ParamTraits<mozilla::gfx::MarginTyped<T>> {
   typedef mozilla::gfx::MarginTyped<T> paramType;
+
+  static void Write(Message* msg, const paramType& param) {
+    WriteParam(msg, param.top);
+    WriteParam(msg, param.right);
+    WriteParam(msg, param.bottom);
+    WriteParam(msg, param.left);
+  }
+
+  static bool Read(const Message* msg, PickleIterator* iter,
+                   paramType* result) {
+    return (ReadParam(msg, iter, &result->top) &&
+            ReadParam(msg, iter, &result->right) &&
+            ReadParam(msg, iter, &result->bottom) &&
+            ReadParam(msg, iter, &result->left));
+  }
+};
+
+template <class T>
+struct ParamTraits<mozilla::gfx::IntMarginTyped<T>> {
+  typedef mozilla::gfx::IntMarginTyped<T> paramType;
 
   static void Write(Message* msg, const paramType& param) {
     WriteParam(msg, param.top);

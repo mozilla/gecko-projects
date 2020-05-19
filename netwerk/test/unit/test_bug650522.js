@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 function run_test() {
   var cs = Cc["@mozilla.org/cookieService;1"].getService(Ci.nsICookieService);
   var cm = Cc["@mozilla.org/cookiemanager;1"].getService(Ci.nsICookieManager);
@@ -21,8 +23,12 @@ function run_test() {
     Ci.nsICookie.SAMESITE_NONE
   );
   Assert.equal(cm.countCookiesFromHost("e.mail.com"), 1);
-  Assert.equal(
-    cs.getCookieString(NetUtil.newURI("http://e.mail.com"), null),
-    "foo=bar"
+
+  const uri = NetUtil.newURI("http://e.mail.com");
+  const principal = Services.scriptSecurityManager.createContentPrincipal(
+    uri,
+    {}
   );
+
+  Assert.equal(cs.getCookieStringForPrincipal(principal), "foo=bar");
 }

@@ -102,7 +102,7 @@ ImageContainerListener::ImageContainerListener(ImageContainer* aImageContainer)
     : mLock("mozilla.layers.ImageContainerListener.mLock"),
       mImageContainer(aImageContainer) {}
 
-ImageContainerListener::~ImageContainerListener() {}
+ImageContainerListener::~ImageContainerListener() = default;
 
 void ImageContainerListener::NotifyComposite(
     const ImageCompositeNotification& aNotification) {
@@ -228,6 +228,9 @@ RefPtr<PlanarYCbCrImage> ImageContainer::CreatePlanarYCbCrImage() {
   if (mImageClient && mImageClient->AsImageClientSingle()) {
     return new SharedPlanarYCbCrImage(mImageClient);
   }
+  if (mRecycleAllocator) {
+    return new SharedPlanarYCbCrImage(mRecycleAllocator);
+  }
   return mImageFactory->CreatePlanarYCbCrImage(mScaleHint, mRecycleBin);
 }
 
@@ -293,6 +296,7 @@ void ImageContainer::ClearImagesFromImageBridge() {
 }
 
 void ImageContainer::SetCurrentImages(const nsTArray<NonOwningImage>& aImages) {
+  AUTO_PROFILER_LABEL("ImageContainer::SetCurrentImages", GRAPHICS);
   MOZ_ASSERT(!aImages.IsEmpty());
   RecursiveMutexAutoLock lock(mRecursiveMutex);
   if (mIsAsync) {
@@ -367,7 +371,7 @@ void ImageContainer::GetCurrentImages(nsTArray<OwningImage>* aImages,
                                       uint32_t* aGenerationCounter) {
   RecursiveMutexAutoLock lock(mRecursiveMutex);
 
-  *aImages = mCurrentImages;
+  *aImages = mCurrentImages.Clone();
   if (aGenerationCounter) {
     *aGenerationCounter = mGenerationCounter;
   }
@@ -410,20 +414,39 @@ void ImageContainer::NotifyDropped(uint32_t aDropped) {
   mDroppedImageCount += aDropped;
 }
 
+void ImageContainer::EnsureRecycleAllocatorForRDD(
+    KnowsCompositor* aKnowsCompositor) {
+  MOZ_ASSERT(!mIsAsync);
+  MOZ_ASSERT(!mImageClient);
+  MOZ_ASSERT(XRE_IsRDDProcess());
+
+  if (mRecycleAllocator &&
+      aKnowsCompositor == mRecycleAllocator->GetKnowsCompositor()) {
+    return;
+  }
+
+  static const uint32_t MAX_POOLED_VIDEO_COUNT = 5;
+
+  mRecycleAllocator =
+      new layers::TextureClientRecycleAllocator(aKnowsCompositor);
+  mRecycleAllocator->SetMaxPoolSize(MAX_POOLED_VIDEO_COUNT);
+}
+
 #ifdef XP_WIN
 D3D11YCbCrRecycleAllocator* ImageContainer::GetD3D11YCbCrRecycleAllocator(
-    KnowsCompositor* aAllocator) {
+    KnowsCompositor* aKnowsCompositor) {
   if (mD3D11YCbCrRecycleAllocator &&
-      aAllocator == mD3D11YCbCrRecycleAllocator->GetAllocator()) {
+      aKnowsCompositor == mD3D11YCbCrRecycleAllocator->GetKnowsCompositor()) {
     return mD3D11YCbCrRecycleAllocator;
   }
 
-  if (!aAllocator->SupportsD3D11() ||
+  if (!aKnowsCompositor->SupportsD3D11() ||
       !gfx::DeviceManagerDx::Get()->GetImageDevice()) {
     return nullptr;
   }
 
-  mD3D11YCbCrRecycleAllocator = new D3D11YCbCrRecycleAllocator(aAllocator);
+  mD3D11YCbCrRecycleAllocator =
+      new D3D11YCbCrRecycleAllocator(aKnowsCompositor);
   return mD3D11YCbCrRecycleAllocator;
 }
 #endif

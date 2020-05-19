@@ -8,6 +8,7 @@
 
 #include "mozilla/net/PSocketProcessChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/Mutex.h"
 #include "nsRefPtrHashtable.h"
 
 namespace mozilla {
@@ -18,6 +19,7 @@ namespace mozilla {
 namespace net {
 
 class SocketProcessBridgeParent;
+class BackgroundDataBridgeParent;
 
 // The IPC actor implements PSocketProcessChild in child process.
 // This is allocated and kept alive by SocketProcessImpl.
@@ -25,8 +27,9 @@ class SocketProcessChild final
     : public PSocketProcessChild,
       public mozilla::ipc::ChildToParentStreamActorManager {
  public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SocketProcessChild)
+
   SocketProcessChild();
-  ~SocketProcessChild();
 
   static SocketProcessChild* GetSingleton();
 
@@ -41,6 +44,8 @@ class SocketProcessChild final
       const bool& minimizeMemoryUsage,
       const Maybe<mozilla::ipc::FileDescriptor>& DMDFile);
   mozilla::ipc::IPCResult RecvSetOffline(const bool& aOffline);
+  mozilla::ipc::IPCResult RecvInitLinuxSandbox(
+      const Maybe<ipc::FileDescriptor>& aBrokerFd);
   mozilla::ipc::IPCResult RecvInitSocketProcessBridgeParent(
       const ProcessId& aContentProcessId,
       Endpoint<mozilla::net::PSocketProcessBridgeParent>&& aEndpoint);
@@ -78,6 +83,41 @@ class SocketProcessChild final
   AllocPInputChannelThrottleQueueChild(const uint32_t& aMeanBytesPerSecond,
                                        const uint32_t& aMaxBytesPerSecond);
 
+  already_AddRefed<PAltSvcTransactionChild> AllocPAltSvcTransactionChild(
+      const HttpConnectionInfoCloneArgs& aConnInfo, const uint32_t& aCaps);
+
+  bool IsShuttingDown() { return mShuttingDown; }
+
+  already_AddRefed<PDNSRequestChild> AllocPDNSRequestChild(
+      const nsCString& aHost, const nsCString& aTrrServer,
+      const uint16_t& aType, const OriginAttributes& aOriginAttributes,
+      const uint32_t& aFlags);
+  mozilla::ipc::IPCResult RecvPDNSRequestConstructor(
+      PDNSRequestChild* aActor, const nsCString& aHost,
+      const nsCString& aTrrServer, const uint16_t& aType,
+      const OriginAttributes& aOriginAttributes,
+      const uint32_t& aFlags) override;
+
+  void AddDataBridgeToMap(uint64_t aChannelId,
+                          BackgroundDataBridgeParent* aActor);
+  void RemoveDataBridgeFromMap(uint64_t aChannelId);
+  Maybe<RefPtr<BackgroundDataBridgeParent>> GetAndRemoveDataBridge(
+      uint64_t aChannelId);
+
+  mozilla::ipc::IPCResult RecvClearSessionCache();
+
+  already_AddRefed<PTRRServiceChild> AllocPTRRServiceChild(
+      const bool& aCaptiveIsPassed, const bool& aParentalControlEnabled,
+      const nsTArray<nsCString>& aDNSSuffixList);
+  mozilla::ipc::IPCResult RecvPTRRServiceConstructor(
+      PTRRServiceChild* aActor, const bool& aCaptiveIsPassed,
+      const bool& aParentalControlEnabled,
+      nsTArray<nsCString>&& aDNSSuffixList) override;
+
+ protected:
+  friend class SocketProcessImpl;
+  ~SocketProcessChild();
+
  private:
   // Mapping of content process id and the SocketProcessBridgeParent.
   // This table keeps SocketProcessBridgeParent alive in socket process.
@@ -87,6 +127,12 @@ class SocketProcessChild final
 #ifdef MOZ_GECKO_PROFILER
   RefPtr<ChildProfilerController> mProfilerController;
 #endif
+
+  bool mShuttingDown;
+  // Protect the table below.
+  Mutex mMutex;
+  nsDataHashtable<nsUint64HashKey, RefPtr<BackgroundDataBridgeParent>>
+      mBackgroundDataBridgeMap;
 };
 
 }  // namespace net

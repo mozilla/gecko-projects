@@ -32,20 +32,19 @@
 #include "mozilla/Omnijar.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ResultExtensions.h"
+#include "mozilla/SchedulerGroup.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefsAll.h"
 #include "mozilla/SyncRunnable.h"
-#include "mozilla/SystemGroup.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/URLPreloader.h"
 #include "mozilla/Variant.h"
 #include "mozilla/Vector.h"
 #include "nsAppDirectoryServiceDefs.h"
-#include "nsAutoPtr.h"
 #include "nsCategoryManagerUtils.h"
 #include "nsClassHashtable.h"
 #include "nsCOMArray.h"
@@ -3040,27 +3039,36 @@ class PreferencesWriter final {
   }
 
   static void Flush() {
-    // This can be further optimized; instead of waiting for all of the writer
-    // thread to be available, we just have to wait for all the pending writes
-    // to be done.
-    if (!sPendingWriteData.compareExchange(nullptr, nullptr)) {
-      nsresult rv = NS_OK;
-      nsCOMPtr<nsIEventTarget> target =
-          do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID, &rv);
-      if (NS_SUCCEEDED(rv)) {
-        target->Dispatch(NS_NewRunnableFunction("Preferences_dummy", [] {}),
-                         nsIEventTarget::DISPATCH_SYNC);
-      }
-    }
+    MOZ_DIAGNOSTIC_ASSERT(sPendingWriteCount >= 0);
+    // SpinEventLoopUntil is unfortunate, but ultimately it's the best thing
+    // we can do here given the constraint that we need to ensure that
+    // the preferences on disk match what we have in memory. We could
+    // easily perform the write here ourselves by doing exactly what
+    // happens in PWRunnable::Run. This would be the right thing to do
+    // if we're stuck here because other unrelated runnables are taking
+    // a long time, and the wrong thing to do if PreferencesWriter::Write
+    // is what takes a long time, as we would be trading a SpinEventLoopUntil
+    // for a synchronous disk write, wherein we could not even spin the
+    // event loop. Given that PWRunnable generally runs on a thread pool,
+    // if we're stuck here, it's likely because of PreferencesWriter::Write
+    // and not some other runnable. Thus, spin away.
+    mozilla::SpinEventLoopUntil([]() { return sPendingWriteCount <= 0; });
   }
 
   // This is the data that all of the runnables (see below) will attempt
   // to write.  It will always have the most up to date version, or be
   // null, if the up to date information has already been written out.
   static Atomic<PrefSaveData*> sPendingWriteData;
+
+  // This is the number of writes via PWRunnables which have been dispatched
+  // but not yet completed. This is intended to be used by Flush to ensure
+  // that there are no outstanding writes left incomplete, and thus our prefs
+  // on disk are in sync with what we have in memory.
+  static Atomic<int> sPendingWriteCount;
 };
 
 Atomic<PrefSaveData*> PreferencesWriter::sPendingWriteData(nullptr);
+Atomic<int> PreferencesWriter::sPendingWriteCount(0);
 
 class PWRunnable : public Runnable {
  public:
@@ -3080,7 +3088,7 @@ class PWRunnable : public Runnable {
       // ref counted pointer off main thread.
       nsresult rvCopy = rv;
       nsCOMPtr<nsIFile> fileCopy(mFile);
-      SystemGroup::Dispatch(
+      SchedulerGroup::Dispatch(
           TaskCategory::Other,
           NS_NewRunnableFunction("Preferences::WriterRunnable",
                                  [fileCopy, rvCopy] {
@@ -3090,6 +3098,13 @@ class PWRunnable : public Runnable {
                                    }
                                  }));
     }
+
+    // We've completed the write to the best of our abilities, whether
+    // we had prefs to write or another runnable got to them first. If
+    // PreferencesWriter::Write failed, this is still correct as the
+    // write is no longer outstanding, and the above HandleDirty call
+    // will just start the cycle again.
+    PreferencesWriter::sPendingWriteCount--;
     return rv;
   }
 
@@ -3594,7 +3609,8 @@ void Preferences::DeserializePreferences(char* aStr, size_t aPrefsLen) {
 // Forward declarations.
 namespace StaticPrefs {
 
-static void InitAll(bool aIsStartup);
+static void InitAll();
+static void StartObservingAlwaysPrefs();
 static void InitOncePrefs();
 static void InitStaticPrefsFromShared();
 static void RegisterOncePrefs(SharedPrefMapBuilder& aBuilder);
@@ -4121,6 +4137,17 @@ nsresult Preferences::WritePrefFile(nsIFile* aFile, SaveMethod aSaveMethod) {
         do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID, &rv);
     if (NS_SUCCEEDED(rv)) {
       bool async = aSaveMethod == SaveMethod::Asynchronous;
+
+      // Increment sPendingWriteCount, even though it's redundant to track this
+      // in the case of a sync runnable; it just makes it easier to simply
+      // decrement this inside PWRunnable. We could alternatively increment
+      // sPendingWriteCount in PWRunnable's constructor, but if for any reason
+      // in future code we create a PWRunnable without dispatching it, we would
+      // get stuck in an infinite SpinEventLoopUntil inside
+      // PreferencesWriter::Flush. Better that in future code we miss an
+      // increment of sPendingWriteCount and cause a simple crash due to it
+      // ending up negative.
+      PreferencesWriter::sPendingWriteCount++;
       if (async) {
         rv = target->Dispatch(new PWRunnable(aFile),
                               nsIEventTarget::DISPATCH_NORMAL);
@@ -4301,16 +4328,14 @@ static nsresult pref_ReadPrefFromJar(nsZipArchive* aJarReader,
 
 static nsresult pref_ReadDefaultPrefs(const RefPtr<nsZipArchive> jarReader,
                                       const char* path) {
-  nsZipFind* findPtr;
-  nsAutoPtr<nsZipFind> find;
+  UniquePtr<nsZipFind> find;
   nsTArray<nsCString> prefEntries;
   const char* entryName;
   uint16_t entryNameLen;
 
-  nsresult rv = jarReader->FindInit(path, &findPtr);
+  nsresult rv = jarReader->FindInit(path, getter_Transfers(find));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  find = findPtr;
   while (NS_SUCCEEDED(find->FindNext(&entryName, &entryNameLen))) {
     prefEntries.AppendElement(Substring(entryName, entryNameLen));
   }
@@ -4435,14 +4460,17 @@ struct Internals {
 nsresult Preferences::InitInitialObjects(bool aIsStartup) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  // Initialize static prefs before prefs from data files so that the latter
-  // will override the former.
-  StaticPrefs::InitAll(aIsStartup);
-
   if (!XRE_IsParentProcess()) {
     MOZ_DIAGNOSTIC_ASSERT(gSharedMap);
+    if (aIsStartup) {
+      StaticPrefs::StartObservingAlwaysPrefs();
+    }
     return NS_OK;
   }
+
+  // Initialize static prefs before prefs from data files so that the latter
+  // will override the former.
+  StaticPrefs::InitAll();
 
   // In the omni.jar case, we load the following prefs:
   // - jar:$gre/omni.jar!/greprefs.js
@@ -4473,8 +4501,7 @@ nsresult Preferences::InitInitialObjects(bool aIsStartup) {
   // preferences from omni.jar, whether or not `$app == $gre`.
 
   nsresult rv = NS_ERROR_FAILURE;
-  nsZipFind* findPtr;
-  nsAutoPtr<nsZipFind> find;
+  UniquePtr<nsZipFind> find;
   nsTArray<nsCString> prefEntries;
   const char* entryName;
   uint16_t entryNameLen;
@@ -4570,9 +4597,9 @@ nsresult Preferences::InitInitialObjects(bool aIsStartup) {
   }
 
   if (appJarReader) {
-    rv = appJarReader->FindInit("defaults/preferences/*.js$", &findPtr);
+    rv = appJarReader->FindInit("defaults/preferences/*.js$",
+                                getter_Transfers(find));
     NS_ENSURE_SUCCESS(rv, rv);
-    find = findPtr;
     prefEntries.Clear();
     while (NS_SUCCEEDED(find->FindNext(&entryName, &entryNameLen))) {
       prefEntries.AppendElement(Substring(entryName, entryNameLen));
@@ -4614,6 +4641,14 @@ nsresult Preferences::InitInitialObjects(bool aIsStartup) {
 
   if (XRE_IsParentProcess()) {
     SetupTelemetryPref();
+  }
+
+  if (aIsStartup) {
+    // Now that all prefs have their initial values, install the callbacks for
+    // `always`-mirrored static prefs. We do this now rather than in
+    // StaticPrefs::InitAll() so that the callbacks don't need to be traversed
+    // while we load prefs from data files.
+    StaticPrefs::StartObservingAlwaysPrefs();
   }
 
   NS_CreateServicesFromCategory(NS_PREFSERVICE_APPDEFAULTS_TOPIC_ID, nullptr,
@@ -5273,22 +5308,12 @@ static void InitPref(const char* aName, float aDefaultValue) {
 
 template <typename T>
 static void InitAlwaysPref(const nsCString& aName, T* aCache,
-                           StripAtomic<T> aDefaultValue, bool aIsStartup,
-                           bool aIsParent) {
-  // In the parent process, set/reset the pref value and the `always` mirror (if
-  // there is one) to the default value.
-  // - `once` mirrors will be initialized lazily in InitOncePrefs().
-  // - In child processes, the parent sends the correct initial values via
-  //   shared memory, so we do not re-initialize them here.
-  if (aIsParent) {
-    InitPref(aName.get(), aDefaultValue);
-    *aCache = aDefaultValue;
-  }
-
-  // At startup, setup the callback for the `always` mirror (if there is one).
-  if (MOZ_LIKELY(aIsStartup)) {
-    AddMirrorCallback(aCache, aName);
-  }
+                           StripAtomic<T> aDefaultValue) {
+  // Only called in the parent process. Set/reset the pref value and the
+  // `always` mirror to the default value.
+  // `once` mirrors will be initialized lazily in InitOncePrefs().
+  InitPref(aName.get(), aDefaultValue);
+  *aCache = aDefaultValue;
 }
 
 static Atomic<bool> sOncePrefRead(false);
@@ -5309,8 +5334,7 @@ void MaybeInitOncePrefs() {
     RefPtr<Runnable> runnable = NS_NewRunnableFunction(
         "Preferences::MaybeInitOncePrefs", [&]() { InitOncePrefs(); });
     // This logic needs to run on the main thread
-    SyncRunnable::DispatchToThread(
-        SystemGroup::EventTargetFor(TaskCategory::Other), runnable);
+    SyncRunnable::DispatchToThread(GetMainThreadSerialEventTarget(), runnable);
   }
   sOncePrefRead = true;
 }
@@ -5326,10 +5350,9 @@ void MaybeInitOncePrefs() {
 #undef ALWAYS_PREF
 #undef ONCE_PREF
 
-static void InitAll(bool aIsStartup) {
+static void InitAll() {
   MOZ_ASSERT(NS_IsMainThread());
-
-  bool isParent = XRE_IsParentProcess();
+  MOZ_ASSERT(XRE_IsParentProcess());
 
   // For all prefs we generate some initialization code.
   //
@@ -5337,23 +5360,27 @@ static void InitAll(bool aIsStartup) {
   // prefs having int32_t and float default values. That suffix is not needed
   // for the InitAlwaysPref() functions because they take a pointer parameter,
   // which prevents automatic int-to-float coercion.
-  //
-  // In content processes, we rely on the parent to send us the correct initial
-  // values via shared memory, so we do not re-initialize them here.
-  if (isParent) {
 #define NEVER_PREF(name, cpp_type, value) InitPref_##cpp_type(name, value);
-#define ALWAYS_PREF(name, base_id, full_id, cpp_type, value)
+#define ALWAYS_PREF(name, base_id, full_id, cpp_type, value) \
+  InitAlwaysPref(NS_LITERAL_CSTRING(name), &sMirror_##full_id, value);
 #define ONCE_PREF(name, base_id, full_id, cpp_type, value) \
   InitPref_##cpp_type(name, value);
 #include "mozilla/StaticPrefListAll.h"
 #undef NEVER_PREF
 #undef ALWAYS_PREF
 #undef ONCE_PREF
-  }
+}
+
+static void StartObservingAlwaysPrefs() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Call AddMirror so that our mirrors for `always` prefs will stay updated.
+  // The call to AddMirror re-reads the current pref value into the mirror, so
+  // our mirror will now be up-to-date even if some of the prefs have changed
+  // since the call to InitAll().
 #define NEVER_PREF(name, cpp_type, value)
-#define ALWAYS_PREF(name, base_id, full_id, cpp_type, value)          \
-  InitAlwaysPref(NS_LITERAL_CSTRING(name), &sMirror_##full_id, value, \
-                 aIsStartup, isParent);
+#define ALWAYS_PREF(name, base_id, full_id, cpp_type, value) \
+  AddMirror(&sMirror_##full_id, NS_LITERAL_CSTRING(name), sMirror_##full_id);
 #define ONCE_PREF(name, base_id, full_id, cpp_type, value)
 #include "mozilla/StaticPrefListAll.h"
 #undef NEVER_PREF
@@ -5493,35 +5520,35 @@ static void InitStaticPrefsFromShared() {
   // process (the common case) then the overwriting here won't change the
   // mirror variable's value.
   //
-  // Note that the MOZ_ALWAYS_TRUE calls below can fail in one obscure case:
-  // when a Firefox update occurs and we get a main process from the old binary
-  // (with static prefs {A,B,C,D}) plus a new content process from the new
-  // binary (with static prefs {A,B,C,D,E}). The content process' call to
+  // Note that the MOZ_ASSERT calls below can fail in one obscure case: when a
+  // Firefox update occurs and we get a main process from the old binary (with
+  // static prefs {A,B,C,D}) plus a new content process from the new binary
+  // (with static prefs {A,B,C,D,E}). The content process' call to
   // GetSharedPrefValue() for pref E will fail because the shared pref map was
-  // created by the main process, which doesn't have pref E. (This failure will
-  // be silent because MOZ_ALWAYS_TRUE is a no-op in non-debug builds.)
+  // created by the main process, which doesn't have pref E.
   //
   // This silent failure is safe. The mirror variable for pref E is already
   // initialized to the default value in the content process, and the main
   // process cannot have changed pref E because it doesn't know about it!
   //
-  // Nonetheless, it's useful to have the MOZ_ALWAYS_TRUE here for testing of
-  // debug builds, where this scenario involving inconsistent binaries should
-  // not occur.
+  // Nonetheless, it's useful to have the MOZ_ASSERT here for testing of debug
+  // builds, where this scenario involving inconsistent binaries should not
+  // occur.
 #define NEVER_PREF(name, cpp_type, value)
-#define ALWAYS_PREF(name, base_id, full_id, cpp_type, value) \
-  {                                                          \
-    StripAtomic<cpp_type> val;                               \
-    nsresult rv = Internals::GetSharedPrefValue(name, &val); \
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));                       \
-    StaticPrefs::sMirror_##full_id = val;                    \
+#define ALWAYS_PREF(name, base_id, full_id, cpp_type, value)            \
+  {                                                                     \
+    StripAtomic<cpp_type> val;                                          \
+    DebugOnly<nsresult> rv = Internals::GetSharedPrefValue(name, &val); \
+    MOZ_ASSERT(NS_SUCCEEDED(rv));                                       \
+    StaticPrefs::sMirror_##full_id = val;                               \
   }
-#define ONCE_PREF(name, base_id, full_id, cpp_type, value)                   \
-  {                                                                          \
-    cpp_type val;                                                            \
-    nsresult rv = Internals::GetSharedPrefValue(ONCE_PREF_NAME(name), &val); \
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));                                       \
-    StaticPrefs::sMirror_##full_id = val;                                    \
+#define ONCE_PREF(name, base_id, full_id, cpp_type, value)         \
+  {                                                                \
+    cpp_type val;                                                  \
+    DebugOnly<nsresult> rv =                                       \
+        Internals::GetSharedPrefValue(ONCE_PREF_NAME(name), &val); \
+    MOZ_ASSERT(NS_SUCCEEDED(rv));                                  \
+    StaticPrefs::sMirror_##full_id = val;                          \
   }
 #include "mozilla/StaticPrefListAll.h"
 #undef NEVER_PREF

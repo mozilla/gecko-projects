@@ -132,6 +132,7 @@ EXPORTS.js += [
     '../public/CallNonGenericMethod.h',
     '../public/CharacterEncoding.h',
     '../public/Class.h',
+    '../public/ComparisonOperators.h',
     '../public/CompilationAndEvaluation.h',
     '../public/CompileOptions.h',
     '../public/ContextOptions.h',
@@ -140,6 +141,7 @@ EXPORTS.js += [
     '../public/Debug.h',
     '../public/Equality.h',
     '../public/ErrorReport.h',
+    '../public/Exception.h',
     '../public/ForOfIterator.h',
     '../public/GCAnnotations.h',
     '../public/GCAPI.h',
@@ -218,7 +220,7 @@ UNIFIED_SOURCES += [
     'builtin/Boolean.cpp',
     'builtin/DataViewObject.cpp',
     'builtin/Eval.cpp',
-    'builtin/FinalizationGroupObject.cpp',
+    'builtin/FinalizationRegistryObject.cpp',
     'builtin/JSON.cpp',
     'builtin/MapObject.cpp',
     'builtin/ModuleObject.cpp',
@@ -234,6 +236,7 @@ UNIFIED_SOURCES += [
     'builtin/streams/QueueingStrategies.cpp',
     'builtin/streams/QueueWithSizes.cpp',
     'builtin/streams/ReadableStream.cpp',
+    'builtin/streams/ReadableStreamBYOBReader.cpp',
     'builtin/streams/ReadableStreamDefaultController.cpp',
     'builtin/streams/ReadableStreamDefaultControllerOperations.cpp',
     'builtin/streams/ReadableStreamDefaultReader.cpp',
@@ -258,14 +261,6 @@ UNIFIED_SOURCES += [
     'ds/Bitmap.cpp',
     'ds/LifoAlloc.cpp',
     'ds/MemoryProtectionExceptionHandler.cpp',
-    'irregexp/NativeRegExpMacroAssembler.cpp',
-    'irregexp/RegExpAST.cpp',
-    'irregexp/RegExpCharacters.cpp',
-    'irregexp/RegExpEngine.cpp',
-    'irregexp/RegExpInterpreter.cpp',
-    'irregexp/RegExpMacroAssembler.cpp',
-    'irregexp/RegExpParser.cpp',
-    'irregexp/RegExpStack.cpp',
     'jsapi.cpp',
     'jsdate.cpp',
     'jsexn.cpp',
@@ -299,6 +294,7 @@ UNIFIED_SOURCES += [
     'vm/AsyncIteration.cpp',
     'vm/BigIntType.cpp',
     'vm/BuildId.cpp',
+    'vm/BytecodeLocation.cpp',
     'vm/BytecodeUtil.cpp',
     'vm/Caches.cpp',
     'vm/CallNonGenericMethod.cpp',
@@ -312,8 +308,10 @@ UNIFIED_SOURCES += [
     'vm/EqualityOperations.cpp',
     'vm/ErrorObject.cpp',
     'vm/ErrorReporting.cpp',
+    'vm/Exception.cpp',
     'vm/ForOfIterator.cpp',
     'vm/FrameIter.cpp',
+    'vm/FunctionFlags.cpp',
     'vm/GeckoProfiler.cpp',
     'vm/GeneratorObject.cpp',
     'vm/GlobalObject.cpp',
@@ -338,6 +336,7 @@ UNIFIED_SOURCES += [
     'vm/OffThreadPromiseRuntimeState.cpp',
     'vm/OffThreadScriptCompilation.cpp',
     'vm/PIC.cpp',
+    'vm/PlainObject.cpp',
     'vm/Printer.cpp',
     'vm/Probes.cpp',
     'vm/PromiseLookup.cpp',
@@ -358,6 +357,7 @@ UNIFIED_SOURCES += [
     'vm/StringType.cpp',
     'vm/SymbolType.cpp',
     'vm/TaggedProto.cpp',
+    'vm/ThrowMsgKind.cpp',
     'vm/Time.cpp',
     'vm/ToSource.cpp',
     'vm/TypedArrayObject.cpp',
@@ -454,6 +454,18 @@ if CONFIG['MOZ_VTUNE']:
             '-Wno-stringop-overflow'
         ]
 
+if not CONFIG['ENABLE_NEW_REGEXP']:
+    UNIFIED_SOURCES += [
+        'irregexp/NativeRegExpMacroAssembler.cpp',
+        'irregexp/RegExpAST.cpp',
+        'irregexp/RegExpCharacters.cpp',
+        'irregexp/RegExpEngine.cpp',
+        'irregexp/RegExpInterpreter.cpp',
+        'irregexp/RegExpMacroAssembler.cpp',
+        'irregexp/RegExpParser.cpp',
+        'irregexp/RegExpStack.cpp',
+        ]
+
 DIRS += [
     'build',
     'debugger',
@@ -509,12 +521,12 @@ selfhosted_inputs = [
     'builtin/intl/NumberFormat.js',
     'builtin/intl/PluralRules.js',
     'builtin/intl/RelativeTimeFormat.js',
+    'builtin/intl/SanctionedSimpleUnitIdentifiersGenerated.js',
 ] if CONFIG['JS_HAS_INTL_API'] else [])
 
 # Prepare self-hosted JS code for embedding
 GeneratedFile('selfhosted.out.h', 'selfhosted.js',
               script='builtin/embedjs.py',
-              py2=True,
               entry_point='generate_selfhosted',
               inputs=selfhosted_inputs)
 

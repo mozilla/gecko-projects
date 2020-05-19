@@ -401,7 +401,8 @@ class ConfigureSandbox(dict):
             self._help = HelpFormatter(argv[0])
             self._help.add(self._help_option)
         elif moz_logger:
-            handler = logging.FileHandler('config.log', mode='w', delay=True)
+            handler = logging.FileHandler('config.log', mode='w', delay=True,
+                                          encoding='utf-8')
             handler.setFormatter(formatter)
             logger.addHandler(handler)
 
@@ -554,11 +555,16 @@ class ConfigureSandbox(dict):
     @memoize
     def _value_for_option(self, option):
         implied = {}
-        for implied_option in self._implied_options[:]:
-            if implied_option.name not in (option.name, option.env):
-                continue
-            self._implied_options.remove(implied_option)
+        matching_implied_options = [
+            o for o in self._implied_options if o.name in (option.name, option.env)
+        ]
+        # Update self._implied_options before going into the loop with the non-matching
+        # options.
+        self._implied_options = [
+            o for o in self._implied_options if o.name not in (option.name, option.env)
+        ]
 
+        for implied_option in matching_implied_options:
             if (implied_option.when and
                 not self._value_for(implied_option.when)):
                 continue

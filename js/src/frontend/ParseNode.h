@@ -7,16 +7,21 @@
 #ifndef frontend_ParseNode_h
 #define frontend_ParseNode_h
 
+#include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Variant.h"
 
+#include <iterator>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "frontend/FunctionSyntaxKind.h"  // FunctionSyntaxKind
 #include "frontend/Stencil.h"
 #include "frontend/Token.h"
-#include "util/Text.h"
+#include "js/RootingAPI.h"
 #include "vm/BytecodeUtil.h"
-#include "vm/JSContext.h"
-#include "vm/Printer.h"
 #include "vm/Scope.h"
+#include "vm/ScopeKind.h"
+#include "vm/StringType.h"
 
 // [SMDOC] ParseNode tree lifetime information
 //
@@ -41,9 +46,17 @@
 // - Once the parser is deallocated, the `JSAtom` instances MAY be
 //   garbage-collected.
 
+struct JSContext;
+
+namespace JS {
+class BigInt;
+}
+
 namespace js {
 
-class ArrayObject;
+class GenericPrinter;
+class LifoAlloc;
+class RegExpObject;
 
 namespace frontend {
 
@@ -52,8 +65,6 @@ struct CompilationInfo;
 class ParserSharedBase;
 class FullParseHandler;
 class FunctionBox;
-class ObjectBox;
-class BigIntBox;
 
 #define FOR_EACH_PARSE_NODE_KIND(F)                              \
   F(EmptyStmt, NullaryNode)                                      \
@@ -207,6 +218,9 @@ class BigIntBox;
   F(AssignExpr, AssignmentNode)                                  \
   F(AddAssignExpr, AssignmentNode)                               \
   F(SubAssignExpr, AssignmentNode)                               \
+  F(CoalesceAssignExpr, AssignmentNode)                          \
+  F(OrAssignExpr, AssignmentNode)                                \
+  F(AndAssignExpr, AssignmentNode)                               \
   F(BitOrAssignExpr, AssignmentNode)                             \
   F(BitXorAssignExpr, AssignmentNode)                            \
   F(BitAndAssignExpr, AssignmentNode)                            \
@@ -254,9 +268,7 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
 /*
  * <Definitions>
  * Function (FunctionNode)
- *   funbox: ptr to js::FunctionBox holding function object containing arg and
- *           var properties.  We create the function object at parse (not emit)
- *           time to specialize arg and var bytecodes early.
+ *   funbox: ptr to js::FunctionBox
  *   body: ParamsBody or null for lazily-parsed function, ordinarily;
  *         ParseNodeKind::LexicalScope for implicit function in genexpr
  *   syntaxKind: the syntax of the function
@@ -369,8 +381,6 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
  *   kid: returned expression, or null if none
  * ExpressionStmt (UnaryNode)
  *   kid: expr
- *   prologue: true if Directive Prologue member in original source, not
- *             introduced via constant folding or other tree rewriting
  * EmptyStmt (NullaryNode)
  *   (no fields)
  * LabelStmt (LabeledStatement)
@@ -415,9 +425,10 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
  * AssignExpr (BinaryNode)
  *   left: target of assignment
  *   right: value to assign
- * AddAssignExpr, SubAssignExpr, BitOrAssignExpr, BitXorAssignExpr,
- * BitAndAssignExpr, LshAssignExpr, RshAssignExpr, UrshAssignExpr,
- * MulAssignExpr, DivAssignExpr, ModAssignExpr, PowAssignExpr (AssignmentNode)
+ * AddAssignExpr, SubAssignExpr, CoalesceAssignExpr, OrAssignExpr,
+ * AndAssignExpr, BitOrAssignExpr, BitXorAssignExpr, BitAndAssignExpr,
+ * LshAssignExpr, RshAssignExpr, UrshAssignExpr, MulAssignExpr, DivAssignExpr,
+ * ModAssignExpr, PowAssignExpr (AssignmentNode)
  *   left: target of assignment
  *   right: value to assign
  * ConditionalExpr (ConditionalExpression)
@@ -532,7 +543,8 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
  * NumberExpr (NumericLiteral)
  *   value: double value of numeric literal
  * BigIntExpr (BigIntLiteral)
- *   box: BigIntBox holding BigInt* value
+ *   compilationInfo: script compilation struct
+ *   index: index into the script compilation's |bigIntData| vector
  * TrueExpr, FalseExpr (BooleanLiteral)
  * NullExpr (NullLiteral)
  * RawUndefinedExpr (RawUndefinedLiteral)
@@ -618,24 +630,6 @@ inline bool IsTypeofKind(ParseNodeKind kind) {
 FOR_EACH_PARSENODE_SUBCLASS(DECLARE_CLASS)
 #undef DECLARE_CLASS
 
-enum class FunctionSyntaxKind : uint8_t {
-  // A non-arrow function expression.
-  Expression,
-
-  // A named function appearing as a Statement.
-  Statement,
-
-  Arrow,
-
-  // Method of a class or object. Field initializers also desugar to methods.
-  Method,
-
-  ClassConstructor,
-  DerivedClassConstructor,
-  Getter,
-  Setter,
-};
-
 enum class AccessorType { None, Getter, Setter };
 
 static inline bool IsConstructorKind(FunctionSyntaxKind kind) {
@@ -645,6 +639,7 @@ static inline bool IsConstructorKind(FunctionSyntaxKind kind) {
 
 static inline bool IsMethodDefinitionKind(FunctionSyntaxKind kind) {
   return IsConstructorKind(kind) || kind == FunctionSyntaxKind::Method ||
+         kind == FunctionSyntaxKind::FieldInitializer ||
          kind == FunctionSyntaxKind::Getter ||
          kind == FunctionSyntaxKind::Setter;
 }
@@ -875,11 +870,10 @@ inline bool ParseNode::isName(PropertyName* name) const {
 
 class UnaryNode : public ParseNode {
   ParseNode* kid_;
-  bool prologue; /* directive prologue member */
 
  public:
   UnaryNode(ParseNodeKind kind, const TokenPos& pos, ParseNode* kid)
-      : ParseNode(kind, pos), kid_(kid), prologue(false) {
+      : ParseNode(kind, pos), kid_(kid) {
     MOZ_ASSERT(is<UnaryNode>());
   }
 
@@ -904,11 +898,6 @@ class UnaryNode : public ParseNode {
 #endif
 
   ParseNode* kid() const { return kid_; }
-
-  /* Return true if this node appears in a Directive Prologue. */
-  bool isDirectivePrologueMember() const { return prologue; }
-
-  void setIsDirectivePrologueMember() { prologue = true; }
 
   /*
    * Non-null if this is a statement node which could be a member of a
@@ -1342,6 +1331,13 @@ class ListNode : public ParseNode {
     explicit iterator(ParseNode* node) : node_(node) {}
 
    public:
+    // Implement std::iterator_traits.
+    using iterator_category = std::input_iterator_tag;
+    using value_type = ParseNode*;
+    using difference_type = ptrdiff_t;
+    using pointer = ParseNode**;
+    using reference = ParseNode*&;
+
     bool operator==(const iterator& other) const {
       return node_ == other.node_;
     }
@@ -1548,26 +1544,15 @@ class NumericLiteral : public ParseNode {
 };
 
 class BigIntLiteral : public ParseNode {
-  // BigIntLiterals hold onto a CompilationInfo reference to avoid
-  // having to plumb CompilationInfo through FoldConstants.
-  struct Deferred {
-    CompilationInfo& compilationInfo;
-    BigIntIndex index;
-  };
-  mozilla::Variant<Deferred, BigIntBox*> data_;
-
-  BigIntBox* box() const { return data_.as<BigIntBox*>(); }
+  CompilationInfo& compilationInfo_;
+  BigIntIndex index_;
 
  public:
-  BigIntLiteral(BigIntBox* bibox, const TokenPos& pos)
-      : ParseNode(ParseNodeKind::BigIntExpr, pos), data_(bibox) {}
-
-  explicit BigIntLiteral(BigIntIndex index, CompilationInfo& compilationInfo,
-                         const TokenPos& pos)
+  BigIntLiteral(BigIntIndex index, CompilationInfo& compilationInfo,
+                const TokenPos& pos)
       : ParseNode(ParseNodeKind::BigIntExpr, pos),
-        data_(Deferred{compilationInfo, index}) {}
-
-  bool isDeferred() { return data_.is<Deferred>(); }
+        compilationInfo_(compilationInfo),
+        index_(index) {}
 
   static bool test(const ParseNode& node) {
     return node.isKind(ParseNodeKind::BigIntExpr);
@@ -1584,15 +1569,10 @@ class BigIntLiteral : public ParseNode {
   void dumpImpl(GenericPrinter& out, int indent);
 #endif
 
-  BigIntIndex index() { return data_.as<Deferred>().index; }
+  BigIntIndex index() { return index_; }
 
-  // Get the contained BigInt value: Assumes it was created with one,
-  // and cannot be used when deferred allocation mode is enabled.
-  BigInt* value();
-
-  // Get the contained BigIntValue, or parse it from the creation data
-  // Can be used when deferred allocation mode is enabled.
-  BigInt* getOrCreate(JSContext* cx);
+  // Create a BigInt value of this BigInt literal.
+  BigInt* create(JSContext* cx);
 
   // Return the decimal string representation of this BigInt literal.
   JSAtom* toAtom(JSContext* cx);
@@ -1634,8 +1614,6 @@ class LexicalScopeNode : public ParseNode {
     // the rest of the frontend also depends on.
     return Handle<LexicalScope::Data*>::fromMarkedLocation(&bindings);
   }
-
-  void clearScopeBindings() { this->bindings = nullptr; }
 
   ParseNode* scopeBody() const { return body; }
 
@@ -1875,21 +1853,14 @@ class BooleanLiteral : public NullaryNode {
 };
 
 class RegExpLiteral : public ParseNode {
-  mozilla::Variant<ObjectBox*, RegExpIndex> data_;
+  RegExpIndex index_;
 
  public:
-  RegExpLiteral(ObjectBox* reobj, const TokenPos& pos)
-      : ParseNode(ParseNodeKind::RegExpExpr, pos), data_(reobj) {}
-
   RegExpLiteral(RegExpIndex dataIndex, const TokenPos& pos)
-      : ParseNode(ParseNodeKind::RegExpExpr, pos), data_(dataIndex) {}
+      : ParseNode(ParseNodeKind::RegExpExpr, pos), index_(dataIndex) {}
 
-  bool isDeferred() const { return data_.is<RegExpIndex>(); }
-
-  ObjectBox* objbox() const { return data_.as<ObjectBox*>(); }
-
-  RegExpObject* getOrCreate(JSContext* cx,
-                            CompilationInfo& compilationInfo) const;
+  // Create a RegExp object of this RegExp literal.
+  RegExpObject* create(JSContext* cx, CompilationInfo& compilationInfo) const;
 
 #ifdef DEBUG
   void dumpImpl(GenericPrinter& out, int indent);
@@ -1906,7 +1877,7 @@ class RegExpLiteral : public ParseNode {
     return true;
   }
 
-  RegExpIndex index() { return data_.as<RegExpIndex>(); }
+  RegExpIndex index() { return index_; }
 };
 
 class PropertyAccessBase : public BinaryNode {
@@ -2037,8 +2008,6 @@ class OptionalPropertyByValue : public PropertyByValueBase {
  * TaggedTemplate.
  */
 class CallSiteNode : public ListNode {
-  MOZ_MUST_USE ArrayObject* getArrayValue(JSContext* cx, ListNode* cookedOrRaw);
-
  public:
   explicit CallSiteNode(uint32_t begin)
       : ListNode(ParseNodeKind::CallSiteObj, TokenPos(begin, begin + 1)) {}
@@ -2047,14 +2016,6 @@ class CallSiteNode : public ListNode {
     bool match = node.isKind(ParseNodeKind::CallSiteObj);
     MOZ_ASSERT_IF(match, node.is<ListNode>());
     return match;
-  }
-
-  MOZ_MUST_USE ArrayObject* getCookedArrayValue(JSContext* cx) {
-    return getArrayValue(cx, this);
-  }
-
-  MOZ_MUST_USE ArrayObject* getRawArrayValue(JSContext* cx) {
-    return getArrayValue(cx, rawNodes());
   }
 
   ListNode* rawNodes() const {
@@ -2123,13 +2084,14 @@ class ClassMethod : public BinaryNode {
 };
 
 class ClassField : public BinaryNode {
+  bool isStatic_;
+
  public:
-  ClassField(ParseNode* name, ParseNode* initializer)
+  ClassField(ParseNode* name, ParseNode* initializer, bool isStatic)
       : BinaryNode(ParseNodeKind::ClassField,
-                   initializer == nullptr
-                       ? name->pn_pos
-                       : TokenPos::box(name->pn_pos, initializer->pn_pos),
-                   name, initializer) {}
+                   TokenPos::box(name->pn_pos, initializer->pn_pos), name,
+                   initializer),
+        isStatic_(isStatic) {}
 
   static bool test(const ParseNode& node) {
     bool match = node.isKind(ParseNodeKind::ClassField);
@@ -2139,9 +2101,9 @@ class ClassField : public BinaryNode {
 
   ParseNode& name() const { return *left(); }
 
-  FunctionNode* initializer() const {
-    return right() ? &right()->as<FunctionNode>() : nullptr;
-  }
+  FunctionNode* initializer() const { return &right()->as<FunctionNode>(); }
+
+  bool isStatic() const { return isStatic_; }
 };
 
 class PropertyDefinition : public BinaryNode {
@@ -2306,64 +2268,6 @@ inline bool ParseNode::isConstant() {
       return false;
   }
 }
-
-class TraceListNode {
-  friend class ParserSharedBase;
-
- protected:
-  enum NodeType { Object, BigInt, Function, LastNodeType };
-
-  js::gc::Cell* gcThing;
-  TraceListNode* traceLink;
-  NodeType type_;
-
-  TraceListNode(js::gc::Cell* gcThing, TraceListNode* traceLink, NodeType type);
-
-  bool isBigIntBox() const { return type_ == NodeType::BigInt; }
-  bool isObjectBox() const {
-    return type_ == NodeType::Object || type_ == NodeType::Function;
-  }
-
-  BigIntBox* asBigIntBox();
-  ObjectBox* asObjectBox();
-
-  virtual void trace(JSTracer* trc);
-
- public:
-  static void TraceList(JSTracer* trc, TraceListNode* listHead);
-};
-
-class BigIntBox : public TraceListNode {
- public:
-  BigIntBox(JS::BigInt* bi, TraceListNode* link);
-  JS::BigInt* value() const { return gcThing->as<JS::BigInt>(); }
-};
-
-class ObjectBox : public TraceListNode {
- protected:
-  friend struct GCThingList;
-  ObjectBox* emitLink;
-
-  ObjectBox(JSObject* obj, TraceListNode* link, TraceListNode::NodeType type);
-
- public:
-  ObjectBox(JSObject* obj, TraceListNode* link)
-      : ObjectBox(obj, link, TraceListNode::NodeType::Object) {}
-
-  bool hasObject() const { return gcThing != nullptr; }
-
-  JSObject* object() const { return gcThing->as<JSObject>(); }
-
-  bool isFunctionBox() const { return type_ == NodeType::Function; }
-  FunctionBox* asFunctionBox();
-};
-
-enum ParseReportKind {
-  ParseError,
-  ParseWarning,
-  ParseExtraWarning,
-  ParseStrictError
-};
 
 static inline ParseNode* FunctionFormalParametersList(ParseNode* fn,
                                                       unsigned* numFormals) {

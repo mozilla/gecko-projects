@@ -10,7 +10,7 @@
 var gIdentityHandler = {
   /**
    * nsIURI for which the identity UI is displayed. This has been already
-   * processed by nsIURIFixup.createExposableURI.
+   * processed by createExposableURI.
    */
   _uri: null,
 
@@ -131,11 +131,6 @@ var gIdentityHandler = {
     );
   },
 
-  get _hasInsecureLoginForms() {
-    // This function will be deleted in bug 1567827.
-    return false;
-  },
-
   // smart getters
   get _identityPopup() {
     delete this._identityPopup;
@@ -205,18 +200,7 @@ var gIdentityHandler = {
       ...document.querySelectorAll(".identity-popup-mcb-learn-more"),
     ]);
   },
-  get _identityPopupInsecureLoginFormsLearnMore() {
-    delete this._identityPopupInsecureLoginFormsLearnMore;
-    return (this._identityPopupInsecureLoginFormsLearnMore = document.getElementById(
-      "identity-popup-insecure-login-forms-learn-more"
-    ));
-  },
-  get _identityIconLabels() {
-    delete this._identityIconLabels;
-    return (this._identityIconLabels = document.getElementById(
-      "identity-icon-labels"
-    ));
-  },
+
   get _identityIconLabel() {
     delete this._identityIconLabel;
     return (this._identityIconLabel = document.getElementById(
@@ -228,12 +212,6 @@ var gIdentityHandler = {
     return (this._overrideService = Cc[
       "@mozilla.org/security/certoverride;1"
     ].getService(Ci.nsICertOverrideService));
-  },
-  get _identityIconCountryLabel() {
-    delete this._identityIconCountryLabel;
-    return (this._identityIconCountryLabel = document.getElementById(
-      "identity-icon-country-label"
-    ));
   },
   get _identityIcon() {
     delete this._identityIcon;
@@ -277,12 +255,6 @@ var gIdentityHandler = {
       permissionAnchors[anchor.getAttribute("data-permission-id")] = anchor;
     }
     return (this._permissionAnchors = permissionAnchors);
-  },
-  get _trackingProtectionIconContainer() {
-    delete this._trackingProtectionIconContainer;
-    return (this._trackingProtectionIconContainer = document.getElementById(
-      "tracking-protection-icon-container"
-    ));
   },
 
   get _geoSharingIcon() {
@@ -358,17 +330,6 @@ var gIdentityHandler = {
       false
     );
     return this._useGrayLockIcon;
-  },
-
-  get _showExtendedValidation() {
-    delete this._showExtendedValidation;
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_showExtendedValidation",
-      "security.identityblock.show_extended_validation",
-      false
-    );
-    return this._showExtendedValidation;
   },
 
   /**
@@ -507,7 +468,7 @@ var gIdentityHandler = {
    *        Bitmask provided by nsIWebProgressListener.onSecurityChange.
    * @param uri
    *        nsIURI for which the identity UI should be displayed, already
-   *        processed by nsIURIFixup.createExposableURI.
+   *        processed by createExposableURI.
    */
   updateIdentity(state, uri) {
     let shouldHidePopup = this._uri && this._uri.spec != uri.spec;
@@ -555,19 +516,6 @@ var gIdentityHandler = {
       );
       Services.console.logMessage(consoleMsg);
     }
-  },
-
-  /**
-   * This is called asynchronously when requested by the Logins module, after
-   * the insecure login forms state for the page has been updated.
-   */
-  refreshForInsecureLoginForms() {
-    // Check this._uri because we don't want to refresh the user interface if
-    // this is called before the first page load in the window for any reason.
-    if (!this._uri) {
-      return;
-    }
-    this.refreshIdentityBlock();
   },
 
   updateSharingIndicator() {
@@ -645,6 +593,10 @@ var gIdentityHandler = {
       host = "about:" + this._uri.filePath;
     }
 
+    if (this._uri.schemeIs("chrome")) {
+      host = this._uri.spec;
+    }
+
     let readerStrippedURI = ReaderMode.getOriginalUrlObjectForDisplay(
       this._uri.displaySpec
     );
@@ -671,9 +623,6 @@ var gIdentityHandler = {
    */
   get pointerlockFsWarningClassName() {
     // Note that the fullscreen warning does not handle _isSecureInternalUI.
-    if (this._uriHasHost && this._isEV && this._showExtendedValidation) {
-      return "verifiedIdentity";
-    }
     if (this._uriHasHost && this._isSecureConnection) {
       return "verifiedDomain";
     }
@@ -713,45 +662,12 @@ var gIdentityHandler = {
   _refreshIdentityIcons() {
     let icon_label = "";
     let tooltip = "";
-    let icon_country_label = "";
-    let icon_labels_dir = "ltr";
 
     if (this._isSecureInternalUI) {
       // This is a secure internal Firefox page.
       this._identityBox.className = "chromeUI";
       let brandBundle = document.getElementById("bundle_brand");
       icon_label = brandBundle.getString("brandShorterName");
-    } else if (this._uriHasHost && this._isEV && this._showExtendedValidation) {
-      // This is a secure connection with EV.
-      this._identityBox.className = "verifiedIdentity";
-      if (this._isMixedActiveContentBlocked) {
-        this._identityBox.classList.add("mixedActiveBlocked");
-      }
-
-      if (!this._isCertUserOverridden) {
-        // If it's identified, then we can populate the dialog with credentials
-        let iData = this.getIdentityData();
-        tooltip = gNavigatorBundle.getFormattedString(
-          "identity.identified.verifier",
-          [iData.caOrg]
-        );
-        icon_label = iData.subjectOrg;
-        if (iData.country) {
-          icon_country_label = "(" + iData.country + ")";
-        }
-
-        // If the organization name starts with an RTL character, then
-        // swap the positions of the organization and country code labels.
-        // The Unicode ranges reflect the definition of the UTF16_CODE_UNIT_IS_BIDI
-        // macro in intl/unicharutil/util/nsBidiUtils.h. When bug 218823 gets
-        // fixed, this test should be replaced by one adhering to the
-        // Unicode Bidirectional Algorithm proper (at the paragraph level).
-        icon_labels_dir = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc\ud802\ud803\ud83a\ud83b]/.test(
-          icon_label
-        )
-          ? "rtl"
-          : "ltr";
-      }
     } else if (this._pageExtensionPolicy) {
       // This is a WebExtension page.
       this._identityBox.className = "extensionPage";
@@ -760,7 +676,6 @@ var gIdentityHandler = {
         "identity.extension.label",
         [extensionName]
       );
-      icon_labels_dir = "";
     } else if (this._uriHasHost && this._isSecureConnection) {
       // This is a secure connection.
       this._identityBox.className = "verifiedDomain";
@@ -820,11 +735,6 @@ var gIdentityHandler = {
         icon_label = gNavigatorBundle.getString("identity.notSecure.label");
         this._identityBox.classList.add("notSecureText");
       }
-      if (this._hasInsecureLoginForms) {
-        // Insecure login forms can only be present on "unknown identity"
-        // pages, either already insecure or with mixed active content loaded.
-        this._identityBox.classList.add("insecureLoginForms");
-      }
     }
 
     if (this._isCertUserOverridden) {
@@ -855,17 +765,9 @@ var gIdentityHandler = {
       );
     }
 
-    this._identityIconLabels.setAttribute("tooltiptext", tooltip);
+    this._identityIconLabel.setAttribute("tooltiptext", tooltip);
     this._identityIconLabel.setAttribute("value", icon_label);
-    this._identityIconCountryLabel.setAttribute("value", icon_country_label);
-    // Set cropping and direction
-    this._identityIconLabel.setAttribute(
-      "crop",
-      icon_country_label ? "end" : "center"
-    );
-    this._identityIconLabel.parentNode.style.direction = icon_labels_dir;
-    // Hide completely if the organization label is empty
-    this._identityIconLabel.parentNode.collapsed = !icon_label;
+    this._identityIconLabel.collapsed = !icon_label;
   },
 
   /**
@@ -935,7 +837,7 @@ var gIdentityHandler = {
     this._refreshPermissionIcons();
 
     // Hide the shield icon if it is a chrome page.
-    this._trackingProtectionIconContainer.classList.toggle(
+    gProtectionsHandler._trackingProtectionIconContainer.classList.toggle(
       "chromeUI",
       this._isSecureInternalUI
     );
@@ -961,10 +863,7 @@ var gIdentityHandler = {
     this._identityPopupMixedContentLearnMore.forEach(e =>
       e.setAttribute("href", baseURL + "mixed-content")
     );
-    this._identityPopupInsecureLoginFormsLearnMore.setAttribute(
-      "href",
-      baseURL + "insecure-password"
-    );
+
     this._identityPopupCustomRootLearnMore.setAttribute(
       "href",
       baseURL + "enterprise-roots"
@@ -994,12 +893,6 @@ var gIdentityHandler = {
       customRoot = this._hasCustomRoot();
     } else if (this._isAboutCertErrorPage) {
       connection = "cert-error-page";
-    }
-
-    // Determine if there are insecure login forms.
-    let loginforms = "secure";
-    if (this._hasInsecureLoginForms) {
-      loginforms = "insecure";
     }
 
     // Determine the mixed content state.
@@ -1039,7 +932,6 @@ var gIdentityHandler = {
     for (let id of elementIDs) {
       let element = document.getElementById(id);
       this._updateAttribute(element, "connection", connection);
-      this._updateAttribute(element, "loginforms", loginforms);
       this._updateAttribute(element, "ciphers", ciphers);
       this._updateAttribute(element, "mixedcontent", mixedcontent);
       this._updateAttribute(element, "isbroken", this._isBrokenConnection);
@@ -1054,14 +946,14 @@ var gIdentityHandler = {
 
     // Fill in the CA name if we have a valid TLS certificate.
     if (this._isSecureConnection || this._isCertUserOverridden) {
-      verifier = this._identityIconLabels.tooltipText;
+      verifier = this._identityIconLabel.tooltipText;
     }
 
     // Fill in organization information if we have a valid EV certificate.
     if (this._isEV) {
       let iData = this.getIdentityData();
       owner = iData.subjectOrg;
-      verifier = this._identityIconLabels.tooltipText;
+      verifier = this._identityIconLabel.tooltipText;
 
       // Build an appropriate supplemental block out of whatever location data we have
       if (iData.city) {
@@ -1278,6 +1170,10 @@ var gIdentityHandler = {
   },
 
   onDragStart(event) {
+    const TEXT_SIZE = 14;
+    const IMAGE_SIZE = 16;
+    const SPACING = 5;
+
     if (gURLBar.getAttribute("pageproxystate") != "valid") {
       return;
     }
@@ -1294,12 +1190,45 @@ var gIdentityHandler = {
     );
     canvas.width = 550 * scale;
     let ctx = canvas.getContext("2d");
-    ctx.font = `${14 * scale}px sans-serif`;
-    ctx.fillText(`${value}`, 20 * scale, 14 * scale);
+    ctx.font = `${TEXT_SIZE * scale}px sans-serif`;
     let tabIcon = gBrowser.selectedTab.iconImage;
     let image = new Image();
     image.src = tabIcon.src;
-    ctx.drawImage(image, 0, 0, 16 * scale, 16 * scale);
+    let textWidth = ctx.measureText(value).width / scale;
+    let textHeight = parseInt(ctx.font, 10) / scale;
+    let imageHorizontalOffset, imageVerticalOffset;
+    imageHorizontalOffset = imageVerticalOffset = SPACING;
+    let textHorizontalOffset = image.width ? IMAGE_SIZE + SPACING * 2 : SPACING;
+    let textVerticalOffset = textHeight + SPACING - 1;
+    let backgroundColor = "white";
+    let textColor = "black";
+    let totalWidth = image.width
+      ? textWidth + IMAGE_SIZE + 3 * SPACING
+      : textWidth + 2 * SPACING;
+    let totalHeight = image.width
+      ? IMAGE_SIZE + 2 * SPACING
+      : textHeight + 2 * SPACING;
+    ctx.fillStyle = backgroundColor;
+    ctx.fillRect(0, 0, totalWidth * scale, totalHeight * scale);
+    ctx.fillStyle = textColor;
+    ctx.fillText(
+      `${value}`,
+      textHorizontalOffset * scale,
+      textVerticalOffset * scale
+    );
+    try {
+      ctx.drawImage(
+        image,
+        imageHorizontalOffset * scale,
+        imageVerticalOffset * scale,
+        IMAGE_SIZE * scale,
+        IMAGE_SIZE * scale
+      );
+    } catch (e) {
+      // Sites might specify invalid data URIs favicons that
+      // will result in errors when trying to draw, we can
+      // just ignore this case and not paint any favicon.
+    }
 
     let dt = event.dataTransfer;
     dt.setData("text/x-moz-url", urlString);
@@ -1508,7 +1437,6 @@ var gIdentityHandler = {
       let block = document.createXULElement("vbox");
       block.setAttribute("id", "identity-popup-popup-container");
       menulist.setAttribute("sizetopopup", "none");
-      menulist.setAttribute("class", "identity-popup-popup-menulist");
       menulist.setAttribute("id", "identity-popup-popup-menulist");
 
       for (let state of SitePermissions.getAvailableStates(aPermission.id)) {
@@ -1742,9 +1670,13 @@ var gIdentityHandler = {
     indicator.appendChild(icon);
     indicator.appendChild(text);
 
-    document
-      .getElementById("identity-popup-geo-container")
-      .appendChild(indicator);
+    let geoContainer = document.getElementById("identity-popup-geo-container");
+
+    // Check whether geoContainer still exists.
+    // We are async, the identity popup could have been closed already.
+    if (geoContainer) {
+      geoContainer.appendChild(indicator);
+    }
   },
 
   _createBlockedPopupIndicator(aTotalBlockedPopups) {

@@ -9,7 +9,6 @@
 
 #include "nsNetUtil.h"
 
-#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/LoadContext.h"
@@ -70,6 +69,7 @@
 #include "plstr.h"
 #include "nsINestedURI.h"
 #include "mozilla/dom/nsCSPUtils.h"
+#include "mozilla/dom/nsHTTPSOnlyUtils.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/net/HttpBaseChannel.h"
@@ -101,6 +101,7 @@
 #include "nsAboutProtocolHandler.h"
 #include "nsResProtocolHandler.h"
 #include "mozilla/net/ExtensionProtocolHandler.h"
+#include "mozilla/net/PageThumbProtocolHandler.h"
 #include <limits>
 
 #if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
@@ -148,6 +149,22 @@ nsresult NS_NewLocalFileOutputStream(nsIOutputStream** result, nsIFile* file,
     if (NS_SUCCEEDED(rv)) out.forget(result);
   }
   return rv;
+}
+
+nsresult NS_NewLocalFileOutputStream(nsIOutputStream** result,
+                                     const mozilla::ipc::FileDescriptor& fd) {
+  nsCOMPtr<nsIFileOutputStream> out;
+  nsFileOutputStream::Create(nullptr, NS_GET_IID(nsIFileOutputStream),
+                             getter_AddRefs(out));
+
+  nsresult rv =
+      static_cast<nsFileOutputStream*>(out.get())->InitWithFileDescriptor(fd);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  out.forget(result);
+  return NS_OK;
 }
 
 nsresult net_EnsureIOService(nsIIOService** ios, nsCOMPtr<nsIIOService>& grip) {
@@ -287,19 +304,21 @@ void AssertLoadingPrincipalAndClientInfoMatch(
   }
 
   // Perform a fast comparison for most principal checks.
-  nsCOMPtr<nsIPrincipal> clientPrincipal(aLoadingClientInfo.GetPrincipal());
-  if (aLoadingPrincipal->Equals(clientPrincipal)) {
-    return;
+  auto clientPrincipalOrErr(aLoadingClientInfo.GetPrincipal());
+  if (clientPrincipalOrErr.isOk()) {
+    nsCOMPtr<nsIPrincipal> clientPrincipal = clientPrincipalOrErr.unwrap();
+    if (aLoadingPrincipal->Equals(clientPrincipal)) {
+      return;
+    }
+    // Fall back to a slower origin equality test to support null principals.
+    nsAutoCString loadingOrigin;
+    MOZ_ALWAYS_SUCCEEDS(aLoadingPrincipal->GetOrigin(loadingOrigin));
+
+    nsAutoCString clientOrigin;
+    MOZ_ALWAYS_SUCCEEDS(clientPrincipal->GetOrigin(clientOrigin));
+
+    MOZ_DIAGNOSTIC_ASSERT(loadingOrigin == clientOrigin);
   }
-
-  // Fall back to a slower origin equality test to support null principals.
-  nsAutoCString loadingOrigin;
-  MOZ_ALWAYS_SUCCEEDS(aLoadingPrincipal->GetOrigin(loadingOrigin));
-
-  nsAutoCString clientOrigin;
-  MOZ_ALWAYS_SUCCEEDS(clientPrincipal->GetOrigin(clientOrigin));
-
-  MOZ_DIAGNOSTIC_ASSERT(loadingOrigin == clientOrigin);
 #endif
 }
 
@@ -309,7 +328,7 @@ nsresult NS_NewChannel(nsIChannel** outChannel, nsIURI* aUri,
                        nsIPrincipal* aLoadingPrincipal,
                        nsSecurityFlags aSecurityFlags,
                        nsContentPolicyType aContentPolicyType,
-                       nsICookieSettings* aCookieSettings /* = nullptr */,
+                       nsICookieJarSettings* aCookieJarSettings /* = nullptr */,
                        PerformanceStorage* aPerformanceStorage /* = nullptr */,
                        nsILoadGroup* aLoadGroup /* = nullptr */,
                        nsIInterfaceRequestor* aCallbacks /* = nullptr */,
@@ -322,7 +341,7 @@ nsresult NS_NewChannel(nsIChannel** outChannel, nsIURI* aUri,
       aLoadingPrincipal,
       nullptr,  // aTriggeringPrincipal
       Maybe<ClientInfo>(), Maybe<ServiceWorkerDescriptor>(), aSecurityFlags,
-      aContentPolicyType, aCookieSettings, aPerformanceStorage, aLoadGroup,
+      aContentPolicyType, aCookieJarSettings, aPerformanceStorage, aLoadGroup,
       aCallbacks, aLoadFlags, aIoService, aSandboxFlags);
 }
 
@@ -332,7 +351,7 @@ nsresult NS_NewChannel(nsIChannel** outChannel, nsIURI* aUri,
                        const Maybe<ServiceWorkerDescriptor>& aController,
                        nsSecurityFlags aSecurityFlags,
                        nsContentPolicyType aContentPolicyType,
-                       nsICookieSettings* aCookieSettings /* = nullptr */,
+                       nsICookieJarSettings* aCookieJarSettings /* = nullptr */,
                        PerformanceStorage* aPerformanceStorage /* = nullptr */,
                        nsILoadGroup* aLoadGroup /* = nullptr */,
                        nsIInterfaceRequestor* aCallbacks /* = nullptr */,
@@ -350,7 +369,7 @@ nsresult NS_NewChannel(nsIChannel** outChannel, nsIURI* aUri,
                                aLoadingPrincipal,
                                nullptr,  // aTriggeringPrincipal
                                loadingClientInfo, aController, aSecurityFlags,
-                               aContentPolicyType, aCookieSettings,
+                               aContentPolicyType, aCookieJarSettings,
                                aPerformanceStorage, aLoadGroup, aCallbacks,
                                aLoadFlags, aIoService, aSandboxFlags);
 }
@@ -361,7 +380,7 @@ nsresult NS_NewChannelInternal(
     const Maybe<ClientInfo>& aLoadingClientInfo,
     const Maybe<ServiceWorkerDescriptor>& aController,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings /* = nullptr */,
+    nsICookieJarSettings* aCookieJarSettings /* = nullptr */,
     PerformanceStorage* aPerformanceStorage /* = nullptr */,
     nsILoadGroup* aLoadGroup /* = nullptr */,
     nsIInterfaceRequestor* aCallbacks /* = nullptr */,
@@ -407,15 +426,15 @@ nsresult NS_NewChannelInternal(
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  if (aPerformanceStorage || aCookieSettings) {
+  if (aPerformanceStorage || aCookieJarSettings) {
     nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
 
     if (aPerformanceStorage) {
       loadInfo->SetPerformanceStorage(aPerformanceStorage);
     }
 
-    if (aCookieSettings) {
-      loadInfo->SetCookieSettings(aCookieSettings);
+    if (aCookieJarSettings) {
+      loadInfo->SetCookieJarSettings(aCookieJarSettings);
     }
   }
 
@@ -440,7 +459,7 @@ NS_NewChannelWithTriggeringPrincipal(
       outChannel, aUri, aLoadingNode, aLoadingNode->NodePrincipal(),
       aTriggeringPrincipal, Maybe<ClientInfo>(),
       Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType,
-      aLoadingNode->OwnerDoc()->CookieSettings(), aPerformanceStorage,
+      aLoadingNode->OwnerDoc()->CookieJarSettings(), aPerformanceStorage,
       aLoadGroup, aCallbacks, aLoadFlags, aIoService);
 }
 
@@ -449,7 +468,7 @@ nsresult NS_NewChannelWithTriggeringPrincipal(
     nsIChannel** outChannel, nsIURI* aUri, nsIPrincipal* aLoadingPrincipal,
     nsIPrincipal* aTriggeringPrincipal, nsSecurityFlags aSecurityFlags,
     nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings /* = nullptr */,
+    nsICookieJarSettings* aCookieJarSettings /* = nullptr */,
     PerformanceStorage* aPerformanceStorage /* = nullptr */,
     nsILoadGroup* aLoadGroup /* = nullptr */,
     nsIInterfaceRequestor* aCallbacks /* = nullptr */,
@@ -462,8 +481,8 @@ nsresult NS_NewChannelWithTriggeringPrincipal(
       nullptr,  // aLoadingNode
       aLoadingPrincipal, aTriggeringPrincipal, Maybe<ClientInfo>(),
       Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType,
-      aCookieSettings, aPerformanceStorage, aLoadGroup, aCallbacks, aLoadFlags,
-      aIoService);
+      aCookieJarSettings, aPerformanceStorage, aLoadGroup, aCallbacks,
+      aLoadFlags, aIoService);
 }
 
 // See NS_NewChannelInternal for usage and argument description
@@ -472,7 +491,7 @@ nsresult NS_NewChannelWithTriggeringPrincipal(
     nsIPrincipal* aTriggeringPrincipal, const ClientInfo& aLoadingClientInfo,
     const Maybe<ServiceWorkerDescriptor>& aController,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings /* = nullptr */,
+    nsICookieJarSettings* aCookieJarSettings /* = nullptr */,
     PerformanceStorage* aPerformanceStorage /* = nullptr */,
     nsILoadGroup* aLoadGroup /* = nullptr */,
     nsIInterfaceRequestor* aCallbacks /* = nullptr */,
@@ -488,8 +507,8 @@ nsresult NS_NewChannelWithTriggeringPrincipal(
       outChannel, aUri,
       nullptr,  // aLoadingNode
       aLoadingPrincipal, aTriggeringPrincipal, loadingClientInfo, aController,
-      aSecurityFlags, aContentPolicyType, aCookieSettings, aPerformanceStorage,
-      aLoadGroup, aCallbacks, aLoadFlags, aIoService);
+      aSecurityFlags, aContentPolicyType, aCookieJarSettings,
+      aPerformanceStorage, aLoadGroup, aCallbacks, aLoadFlags, aIoService);
 }
 
 nsresult NS_NewChannel(nsIChannel** outChannel, nsIURI* aUri,
@@ -506,7 +525,7 @@ nsresult NS_NewChannel(nsIChannel** outChannel, nsIURI* aUri,
       outChannel, aUri, aLoadingNode, aLoadingNode->NodePrincipal(),
       nullptr,  // aTriggeringPrincipal
       Maybe<ClientInfo>(), Maybe<ServiceWorkerDescriptor>(), aSecurityFlags,
-      aContentPolicyType, aLoadingNode->OwnerDoc()->CookieSettings(),
+      aContentPolicyType, aLoadingNode->OwnerDoc()->CookieJarSettings(),
       aPerformanceStorage, aLoadGroup, aCallbacks, aLoadFlags, aIoService,
       aSandboxFlags);
 }
@@ -567,7 +586,7 @@ nsresult NS_MakeAbsoluteURI(char** result, const char* spec, nsIURI* baseURI) {
   nsAutoCString resultBuf;
   rv = NS_MakeAbsoluteURI(resultBuf, nsDependentCString(spec), baseURI);
   if (NS_SUCCEEDED(rv)) {
-    *result = ToNewCString(resultBuf);
+    *result = ToNewCString(resultBuf, mozilla::fallible);
     if (!*result) rv = NS_ERROR_OUT_OF_MEMORY;
   }
   return rv;
@@ -932,7 +951,7 @@ nsresult NS_NewStreamLoaderInternal(
       nullptr,  // aTriggeringPrincipal
       Maybe<ClientInfo>(), Maybe<ServiceWorkerDescriptor>(), aSecurityFlags,
       aContentPolicyType,
-      nullptr,  // nsICookieSettings
+      nullptr,  // nsICookieJarSettings
       nullptr,  // PerformanceStorage
       aLoadGroup, aCallbacks, aLoadFlags);
 
@@ -1258,7 +1277,7 @@ nsresult NS_NewBufferedOutputStream(
   return rv;
 }
 
-MOZ_MUST_USE nsresult NS_NewBufferedInputStream(
+[[nodiscard]] nsresult NS_NewBufferedInputStream(
     nsIInputStream** aResult, already_AddRefed<nsIInputStream> aInputStream,
     uint32_t aBufferSize) {
   nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
@@ -1753,7 +1772,6 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
   if (scheme.EqualsLiteral("moz-safe-about") ||
       scheme.EqualsLiteral("page-icon") || scheme.EqualsLiteral("moz") ||
       scheme.EqualsLiteral("moz-anno") ||
-      scheme.EqualsLiteral("moz-page-thumb") ||
       scheme.EqualsLiteral("moz-fonttable")) {
     return NS_MutateURI(new nsSimpleURI::Mutator())
         .SetSpec(aSpec)
@@ -1798,6 +1816,22 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
   if (scheme.EqualsLiteral("moz-extension")) {
     RefPtr<mozilla::net::ExtensionProtocolHandler> handler =
         mozilla::net::ExtensionProtocolHandler::GetSingleton();
+    if (!handler) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    return handler->NewURI(aSpec, aCharset, aBaseURI, aURI);
+  }
+
+  if (scheme.EqualsLiteral("moz-page-thumb")) {
+    // The moz-page-thumb service runs JS to resolve a URI to a
+    // storage location, so this should only ever run on the main
+    // thread.
+    if (!NS_IsMainThread()) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    RefPtr<mozilla::net::PageThumbProtocolHandler> handler =
+        mozilla::net::PageThumbProtocolHandler::GetSingleton();
     if (!handler) {
       return NS_ERROR_NOT_AVAILABLE;
     }
@@ -1940,41 +1974,17 @@ nsresult NS_LoadPersistentPropertiesFromURISpec(
 
 bool NS_UsePrivateBrowsing(nsIChannel* channel) {
   OriginAttributes attrs;
-  bool result = NS_GetOriginAttributes(channel, attrs, false);
+  bool result = StoragePrincipalHelper::GetOriginAttributes(
+      channel, attrs, StoragePrincipalHelper::eRegularPrincipal);
   NS_ENSURE_TRUE(result, result);
   return attrs.mPrivateBrowsingId > 0;
-}
-
-bool NS_GetOriginAttributes(nsIChannel* aChannel,
-                            mozilla::OriginAttributes& aAttributes,
-                            bool aUsingStoragePrincipal) {
-  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
-  loadInfo->GetOriginAttributes(&aAttributes);
-
-  bool isPrivate = false;
-  nsCOMPtr<nsIPrivateBrowsingChannel> pbChannel = do_QueryInterface(aChannel);
-  if (pbChannel) {
-    nsresult rv = pbChannel->GetIsChannelPrivate(&isPrivate);
-    NS_ENSURE_SUCCESS(rv, false);
-  } else {
-    // Some channels may not implement nsIPrivateBrowsingChannel
-    nsCOMPtr<nsILoadContext> loadContext;
-    NS_QueryNotificationCallbacks(aChannel, loadContext);
-    isPrivate = loadContext && loadContext->UsePrivateBrowsing();
-  }
-  aAttributes.SyncAttributesWithPrivateBrowsing(isPrivate);
-
-  if (aUsingStoragePrincipal) {
-    StoragePrincipalHelper::PrepareOriginAttributes(aChannel, aAttributes);
-  }
-  return true;
 }
 
 bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport) {
   nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
   // TYPE_DOCUMENT loads have a null LoadingPrincipal and can not be cross
   // origin.
-  if (!loadInfo->LoadingPrincipal()) {
+  if (!loadInfo->GetLoadingPrincipal()) {
     return false;
   }
 
@@ -1983,7 +1993,7 @@ bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport) {
     return true;
   }
 
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = loadInfo->LoadingPrincipal();
+  nsCOMPtr<nsIPrincipal> loadingPrincipal = loadInfo->GetLoadingPrincipal();
   uint32_t mode = loadInfo->GetSecurityMode();
   bool dataInherits =
       mode == nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_INHERITS ||
@@ -2003,7 +2013,8 @@ bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport) {
     }
 
     nsCOMPtr<nsIURI> uri;
-    principal->GetURI(getter_AddRefs(uri));
+    auto* basePrin = BasePrincipal::Cast(principal);
+    basePrin->GetURI(getter_AddRefs(uri));
     if (!uri) {
       return true;
     }
@@ -2077,30 +2088,29 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI) {
   // Do not treat loads triggered by web extensions as foreign
   nsCOMPtr<nsIURI> channelURI;
   NS_GetFinalChannelURI(aChannel, getter_AddRefs(channelURI));
-  if (BasePrincipal::Cast(loadInfo->TriggeringPrincipal())
-          ->AddonAllowsLoad(channelURI)) {
+  RefPtr<BasePrincipal> triggeringPrincipal =
+      BasePrincipal::Cast(loadInfo->TriggeringPrincipal());
+  if (triggeringPrincipal->AddonPolicy() &&
+      triggeringPrincipal->AddonAllowsLoad(channelURI)) {
     return false;
   }
 
-  nsCOMPtr<nsIURI> uri;
+  bool isForeign = true;
+  nsresult rv;
   if (loadInfo->GetExternalContentPolicyType() ==
       nsIContentPolicy::TYPE_DOCUMENT) {
     // for loads of TYPE_DOCUMENT we query the hostURI from the
     // triggeringPrincipal which returns the URI of the document that caused the
     // navigation.
-    loadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(uri));
+    rv = triggeringPrincipal->IsThirdPartyChannel(aChannel, &isForeign);
   } else {
-    uri = aHostURI;
+    nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
+        do_GetService(THIRDPARTYUTIL_CONTRACTID);
+    if (!thirdPartyUtil) {
+      return true;
+    }
+    rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, aHostURI, &isForeign);
   }
-
-  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
-      do_GetService(THIRDPARTYUTIL_CONTRACTID);
-  if (!thirdPartyUtil) {
-    return false;
-  }
-
-  bool isForeign = true;
-  nsresult rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, uri, &isForeign);
   // if we are dealing with a cross origin request, we can return here
   // because we already know the request is 'foreign'.
   if (NS_FAILED(rv) || isForeign) {
@@ -2114,11 +2124,8 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI) {
   // foreign.
   if (loadInfo->GetExternalContentPolicyType() ==
       nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    nsCOMPtr<nsIURI> triggeringPrincipalURI;
-    loadInfo->TriggeringPrincipal()->GetURI(
-        getter_AddRefs(triggeringPrincipalURI));
-    rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, triggeringPrincipalURI,
-                                             &isForeign);
+    rv = loadInfo->TriggeringPrincipal()->IsThirdPartyChannel(aChannel,
+                                                              &isForeign);
     if (NS_FAILED(rv) || isForeign) {
       return true;
     }
@@ -2129,13 +2136,10 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI) {
   // with regards to CSRF.
 
   nsCOMPtr<nsIPrincipal> redirectPrincipal;
-  nsCOMPtr<nsIURI> redirectURI;
   for (nsIRedirectHistoryEntry* entry : loadInfo->RedirectChain()) {
     entry->GetPrincipal(getter_AddRefs(redirectPrincipal));
     if (redirectPrincipal) {
-      redirectPrincipal->GetURI(getter_AddRefs(redirectURI));
-      rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, redirectURI,
-                                               &isForeign);
+      rv = redirectPrincipal->IsThirdPartyChannel(aChannel, &isForeign);
       // if at any point we encounter a cross-origin redirect we can return.
       if (NS_FAILED(rv) || isForeign) {
         return true;
@@ -2377,7 +2381,8 @@ bool NS_SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI,
   if (BlobURLProtocolHandler::GetBlobURLPrincipal(
           sourceBaseURI, getter_AddRefs(sourceBlobPrincipal))) {
     nsCOMPtr<nsIURI> sourceBlobOwnerURI;
-    rv = sourceBlobPrincipal->GetURI(getter_AddRefs(sourceBlobOwnerURI));
+    auto* basePrin = BasePrincipal::Cast(sourceBlobPrincipal);
+    rv = basePrin->GetURI(getter_AddRefs(sourceBlobOwnerURI));
     if (NS_SUCCEEDED(rv)) {
       sourceBaseURI = sourceBlobOwnerURI;
     }
@@ -2387,7 +2392,8 @@ bool NS_SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI,
   if (BlobURLProtocolHandler::GetBlobURLPrincipal(
           targetBaseURI, getter_AddRefs(targetBlobPrincipal))) {
     nsCOMPtr<nsIURI> targetBlobOwnerURI;
-    rv = targetBlobPrincipal->GetURI(getter_AddRefs(targetBlobOwnerURI));
+    auto* basePrin = BasePrincipal::Cast(targetBlobPrincipal);
+    rv = basePrin->GetURI(getter_AddRefs(targetBlobOwnerURI));
     if (NS_SUCCEEDED(rv)) {
       targetBaseURI = targetBlobOwnerURI;
     }
@@ -2659,8 +2665,7 @@ uint32_t NS_GetContentDispositionFromHeader(const nsACString& aHeader,
 }
 
 nsresult NS_GetFilenameFromDisposition(nsAString& aFilename,
-                                       const nsACString& aDisposition,
-                                       nsIURI* aURI /* = nullptr */) {
+                                       const nsACString& aDisposition) {
   aFilename.Truncate();
 
   nsresult rv;
@@ -2685,8 +2690,7 @@ nsresult NS_GetFilenameFromDisposition(nsAString& aFilename,
         do_GetService(NS_ITEXTTOSUBURI_CONTRACTID, &rv);
     if (NS_SUCCEEDED(rv)) {
       nsAutoString unescaped;
-      textToSubURI->UnEscapeURIForUI(NS_LITERAL_CSTRING("UTF-8"),
-                                     NS_ConvertUTF16toUTF8(aFilename),
+      textToSubURI->UnEscapeURIForUI(NS_ConvertUTF16toUTF8(aFilename),
                                      unescaped);
       aFilename.Assign(unescaped);
     }
@@ -2696,6 +2700,14 @@ nsresult NS_GetFilenameFromDisposition(nsAString& aFilename,
 }
 
 void net_EnsurePSMInit() {
+  if (XRE_IsSocketProcess()) {
+    EnsureNSSInitializedChromeOrContent();
+    return;
+  }
+
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsresult rv;
   nsCOMPtr<nsISupports> psm = do_GetService(PSM_COMPONENT_CONTRACTID, &rv);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -2833,6 +2845,12 @@ nsresult NS_ShouldSecureUpgrade(
   if (!isHttps &&
       !nsMixedContentBlocker::IsPotentiallyTrustworthyLoopbackURL(aURI)) {
     if (aLoadInfo) {
+      // Check if the request can get upgraded with the HTTPS-Only mode
+      if (nsHTTPSOnlyUtils::ShouldUpgradeRequest(aURI, aLoadInfo)) {
+        aShouldUpgrade = true;
+        return NS_OK;
+      }
+
       // If any of the documents up the chain to the root document makes use of
       // the CSP directive 'upgrade-insecure-requests', then it's time to
       // fulfill the promise to CSP and mixed content blocking to upgrade the
@@ -3047,8 +3065,8 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel) {
   // the loadInfo will use originAttributes from the content. Thus, the
   // originAttributes between loadInfo and loadContext will be different.
   // That's why we have to skip the comparison for the favicon loading.
-  if (loadInfo->LoadingPrincipal() &&
-      loadInfo->LoadingPrincipal()->IsSystemPrincipal() &&
+  if (loadInfo->GetLoadingPrincipal() &&
+      loadInfo->GetLoadingPrincipal()->IsSystemPrincipal() &&
       loadInfo->InternalContentPolicyType() ==
           nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON) {
     return NS_OK;

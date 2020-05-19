@@ -34,6 +34,9 @@ var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(
 ).wrappedJSObject;
 
 const { TargetList } = require("devtools/shared/resources/target-list");
+const {
+  ResourceWatcher,
+} = require("devtools/shared/resources/resource-watcher");
 
 const { BrowserLoader } = ChromeUtils.import(
   "resource://devtools/client/shared/browser-loader.js"
@@ -44,6 +47,12 @@ const L10N = new LocalizationHelper(
   "devtools/client/locales/toolbox.properties"
 );
 
+loader.lazyRequireGetter(
+  this,
+  "registerStoreObserver",
+  "devtools/client/shared/redux/subscriber",
+  true
+);
 loader.lazyRequireGetter(
   this,
   "createToolboxStore",
@@ -58,16 +67,24 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "registerThread",
+  "registerTarget",
   "devtools/client/framework/actions/index",
   true
 );
 loader.lazyRequireGetter(
   this,
-  "clearThread",
+  "unregisterTarget",
   "devtools/client/framework/actions/index",
   true
 );
+
+loader.lazyRequireGetter(
+  this,
+  "selectTarget",
+  "devtools/client/framework/actions/index",
+  true
+);
+
 loader.lazyRequireGetter(
   this,
   "AppConstants",
@@ -136,6 +153,12 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
+  "getSelectedTarget",
+  "devtools/client/framework/reducers/targets",
+  true
+);
+loader.lazyRequireGetter(
+  this,
   "remoteClientManager",
   "devtools/client/shared/remote-debugging/remote-client-manager.js",
   true
@@ -179,7 +202,7 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "NodeFront",
-  "devtools/shared/fronts/node",
+  "devtools/client/fronts/node",
   true
 );
 
@@ -188,6 +211,15 @@ loader.lazyRequireGetter(
   "PICKER_TYPES",
   "devtools/shared/picker-constants"
 );
+
+loader.lazyRequireGetter(
+  this,
+  "getF12SessionId",
+  "devtools/client/framework/enable-devtools-popup",
+  true
+);
+
+const DEVTOOLS_F12_DISABLED_PREF = "devtools.experiment.f12.shortcut_disabled";
 
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
@@ -223,11 +255,31 @@ function Toolbox(
   this.telemetry = new Telemetry();
 
   this.targetList = new TargetList(target.client.mainRoot, target);
+  this.resourceWatcher = new ResourceWatcher(this.targetList);
 
   // The session ID is used to determine which telemetry events belong to which
   // toolbox session. Because we use Amplitude to analyse the telemetry data we
   // must use the time since the system wide epoch as the session ID.
   this.sessionId = msSinceProcessStart;
+
+  // If the user opened the toolbox, we can now enable the F12 shortcut.
+  if (Services.prefs.getBoolPref(DEVTOOLS_F12_DISABLED_PREF, false)) {
+    // If the toolbox is opening while F12 was disabled, the user might have
+    // pressed F12 and seen the "enable devtools" notification.
+    // A telemetry session_id was generated for the f12_popup_displayed event.
+    // Reuse it here in order to link the toolbox session to the
+    // f12_popup_displayed events.
+    // getF12SessionId() might return null if the popup was never displayed.
+    // In this case, fallback on the provided `msSinceProcessStart`.
+    this.sessionId = getF12SessionId() || msSinceProcessStart;
+
+    this.telemetry.recordEvent("f12_enabled", "tools", null, {
+      session_id: this.sessionId,
+    });
+
+    // Flip the preference.
+    Services.prefs.setBoolPref(DEVTOOLS_F12_DISABLED_PREF, false);
+  }
 
   // Map of the available DevTools WebExtensions:
   //   Map<extensionUUID, extensionName>
@@ -303,6 +355,7 @@ function Toolbox(
   this._onResumedState = this._onResumedState.bind(this);
   this._onTargetAvailable = this._onTargetAvailable.bind(this);
   this._onTargetDestroyed = this._onTargetDestroyed.bind(this);
+  this._onNavigate = this._onNavigate.bind(this);
 
   this.isPaintFlashing = false;
 
@@ -384,6 +437,7 @@ Toolbox.prototype = {
   get store() {
     if (!this._store) {
       this._store = createToolboxStore();
+      registerStoreObserver(this._store, this._onToolboxStateChange.bind(this));
     }
     return this._store;
   },
@@ -593,6 +647,45 @@ Toolbox.prototype = {
     return this.hostType === Toolbox.HostType.BROWSERTOOLBOX;
   },
 
+  /**
+   * Set a given target as selected (which may impact the console evaluation context selector).
+   *
+   * @param {String} targetActorID: The actorID of the target we want to select.
+   */
+  selectTarget(targetActorID) {
+    if (this.getSelectedTargetFront()?.actorID !== targetActorID) {
+      this.store.dispatch(selectTarget(targetActorID));
+    }
+  },
+
+  /**
+   * @returns {ThreadFront|null} The selected thread front, or null if there is none.
+   */
+  getSelectedTargetFront: function() {
+    const selectedTarget = getSelectedTarget(this.store.getState());
+    if (!selectedTarget) {
+      return null;
+    }
+
+    return this.target.client.getFrontByID(selectedTarget.actorID);
+  },
+
+  _onToolboxStateChange(state, oldState) {
+    if (getSelectedTarget(state) !== getSelectedTarget(oldState)) {
+      const dbg = this.getPanel("jsdebugger");
+      if (!dbg) {
+        return;
+      }
+
+      const threadActorID = getSelectedTarget(state)?.threadFront?.actorID;
+      if (!threadActorID) {
+        return;
+      }
+
+      dbg.selectThread(threadActorID);
+    }
+  },
+
   _onPausedState: function(packet, threadFront) {
     // Suppress interrupted events by default because the thread is
     // paused/resumed a lot for various actions.
@@ -629,12 +722,12 @@ Toolbox.prototype = {
    * This method will be called for the top-level target, as well as any potential
    * additional targets we may care about.
    */
-  async _onTargetAvailable({ type, targetFront, isTopLevel }) {
-    if (isTopLevel) {
+  async _onTargetAvailable({ targetFront }) {
+    if (targetFront.isTopLevel) {
       // Attach to a new top-level target.
       // For now, register these event listeners only on the top level target
       targetFront.on("will-navigate", this._onWillNavigate);
-      targetFront.on("navigate", this._refreshHostTitle);
+      targetFront.on("navigate", this._onNavigate);
       targetFront.on("frame-update", this._updateFrames);
       targetFront.on("inspect-object", this._onInspectObject);
 
@@ -643,24 +736,24 @@ Toolbox.prototype = {
       });
     }
 
-    await this._attachTarget({ type, targetFront, isTopLevel });
+    await this._attachTarget(targetFront);
 
     if (this.hostType !== Toolbox.HostType.PAGE) {
-      await this.store.dispatch(registerThread(targetFront));
+      await this.store.dispatch(registerTarget(targetFront));
     }
 
-    if (isTopLevel) {
+    if (targetFront.isTopLevel) {
       this.emit("top-target-attached");
     }
   },
 
-  _onTargetDestroyed({ type, targetFront, isTopLevel }) {
-    if (isTopLevel) {
+  _onTargetDestroyed({ targetFront }) {
+    if (targetFront.isTopLevel) {
       this.detachTarget();
     }
 
     if (this.hostType !== Toolbox.HostType.PAGE) {
-      this.store.dispatch(clearThread(targetFront));
+      this.store.dispatch(unregisterTarget(targetFront));
     }
   },
 
@@ -671,7 +764,7 @@ Toolbox.prototype = {
    * And we listen for thread actor events in order to update toolbox UI when
    * we hit a breakpoint.
    */
-  async _attachTarget({ type, targetFront, isTopLevel }) {
+  async _attachTarget(targetFront) {
     await targetFront.attach();
 
     // Start tracking network activity on toolbox open for targets such as tabs.
@@ -682,10 +775,13 @@ Toolbox.prototype = {
     // already tracked by the content process targets. At least in the context
     // of the Browser Toolbox.
     // We would have to revisit that for the content toolboxes.
-    if (isTopLevel || type != TargetList.TYPES.FRAME) {
+    if (
+      targetFront.isTopLevel ||
+      targetFront.targetType != TargetList.TYPES.FRAME
+    ) {
       const threadFront = await this._attachAndResumeThread(targetFront);
       this._startThreadFrontListeners(threadFront);
-      if (isTopLevel) {
+      if (targetFront.isTopLevel) {
         this._threadFront = threadFront;
       }
     }
@@ -701,7 +797,7 @@ Toolbox.prototype = {
 
   _attachAndResumeThread: async function(target) {
     const options = defaultThreadOptions();
-    const [, threadFront] = await target.attachThread(options);
+    const threadFront = await target.attachThread(options);
 
     try {
       await threadFront.resume();
@@ -732,13 +828,6 @@ Toolbox.prototype = {
       if (isToolboxURL) {
         // Update the URL so that onceDOMReady watch for the right url.
         this._URL = this.win.location.href;
-      }
-
-      if (this.hostType === Toolbox.HostType.PAGE) {
-        // Displays DebugTargetInfo which shows the basic information of debug target,
-        // if `about:devtools-toolbox` URL opens directly.
-        // DebugTargetInfo requires this._debugTargetData to be populated
-        this._debugTargetData = this._getDebugTargetData();
       }
 
       const domReady = new Promise(resolve => {
@@ -793,14 +882,17 @@ Toolbox.prototype = {
       this._addChromeEventHandlerEvents();
       this._registerOverlays();
 
-      this._componentMount.addEventListener(
-        "keypress",
-        this._onToolbarArrowKeypress
-      );
+      // Get the tab bar of the ToolboxController to attach the "keypress" event listener to.
+      this._tabBar = this.doc.querySelector(".devtools-tabbar");
+      this._tabBar.addEventListener("keypress", this._onToolbarArrowKeypress);
+
       this._componentMount.setAttribute(
         "aria-label",
         L10N.getStr("toolbox.label")
       );
+
+      // Set debug target data on the ToolboxController component.
+      this._setDebugTargetData();
 
       this.webconsolePanel = this.doc.querySelector(
         "#toolbox-panel-webconsole"
@@ -908,7 +1000,7 @@ Toolbox.prototype = {
   detachTarget() {
     this.target.off("inspect-object", this._onInspectObject);
     this.target.off("will-navigate", this._onWillNavigate);
-    this.target.off("navigate", this._refreshHostTitle);
+    this.target.off("navigate", this._onNavigate);
     this.target.off("frame-update", this._updateFrames);
 
     // Detach the thread
@@ -1741,7 +1833,6 @@ Toolbox.prototype = {
       closeToolbox: this.closeToolbox,
       focusButton: this._onToolbarFocus,
       toolbox: this,
-      debugTargetData: this._debugTargetData,
       onTabsOrderUpdated: this._onTabsOrderUpdated,
     });
 
@@ -1775,7 +1866,7 @@ Toolbox.prototype = {
       return;
     }
 
-    const buttons = [...this._componentMount.querySelectorAll("button")];
+    const buttons = [...this._tabBar.querySelectorAll("button")];
     const curIndex = buttons.indexOf(target);
 
     if (curIndex === -1) {
@@ -2091,7 +2182,7 @@ Toolbox.prototype = {
     const button = this.pickerButton;
     const currentPanel = this.getCurrentPanel();
 
-    if (currentPanel && currentPanel.updatePickerButton) {
+    if (currentPanel?.updatePickerButton) {
       currentPanel.updatePickerButton();
     } else {
       // If the current panel doesn't define a custom updatePickerButton,
@@ -2495,8 +2586,7 @@ Toolbox.prototype = {
    * @param {IFrameElement} iframe
    */
   setIframeDocumentDir: function(iframe) {
-    const docEl =
-      iframe.contentWindow && iframe.contentWindow.document.documentElement;
+    const docEl = iframe.contentWindow?.document.documentElement;
     if (!docEl || docEl.namespaceURI !== HTML_NS) {
       // Bail out if the content window or document is not ready or if the document is not
       // HTML.
@@ -3464,11 +3554,16 @@ Toolbox.prototype = {
     };
   },
 
-  _onNewSelectedNodeFront: function() {
+  _onNewSelectedNodeFront: async function() {
     // Emit a "selection-changed" event when the toolbox.selection has been set
     // to a new node (or cleared). Currently used in the WebExtensions APIs (to
     // provide the `devtools.panels.elements.onSelectionChanged` event).
     this.emit("selection-changed");
+
+    const targetFrontActorID = this.selection?.nodeFront?.targetFront?.actorID;
+    if (targetFrontActorID) {
+      this.selectTarget(targetFrontActorID);
+    }
   },
 
   _onInspectObject: function(packet) {
@@ -3486,8 +3581,9 @@ Toolbox.prototype = {
   },
 
   inspectObjectActor: async function(objectActor, inspectFromAnnotation) {
-    const objectGrip =
-      objectActor && objectActor.getGrip ? objectActor.getGrip() : objectActor;
+    const objectGrip = objectActor?.getGrip
+      ? objectActor.getGrip()
+      : objectActor;
 
     if (
       objectGrip.preview &&
@@ -3560,6 +3656,14 @@ Toolbox.prototype = {
   _destroyToolbox: async function() {
     this.emit("destroy");
 
+    // This flag will be checked by Fronts in order to decide if they should
+    // skip their destroy.
+    if (this.target.client) {
+      // Note: this.target.client might be null if the target was already
+      // destroyed (eg: tab is closed during remote debugging).
+      this.target.client.isToolboxDestroy = true;
+    }
+
     this.off("select", this._onToolSelected);
     this.off("host-changed", this._refreshHostTitle);
 
@@ -3606,12 +3710,13 @@ Toolbox.prototype = {
       this.webconsolePanel = null;
     }
     if (this._componentMount) {
-      this._componentMount.removeEventListener(
+      this._tabBar.removeEventListener(
         "keypress",
         this._onToolbarArrowKeypress
       );
       this.ReactDOM.unmountComponentAtNode(this._componentMount);
       this._componentMount = null;
+      this._tabBar = null;
     }
 
     const outstanding = [];
@@ -4106,5 +4211,25 @@ Toolbox.prototype = {
     }
 
     return id;
+  },
+
+  /**
+   * Fired when the user navigates to another page.
+   */
+  _onNavigate: function() {
+    this._refreshHostTitle();
+    this._setDebugTargetData();
+  },
+
+  /**
+   * Sets basic information on the DebugTargetInfo component
+   */
+  _setDebugTargetData() {
+    if (this.hostType === Toolbox.HostType.PAGE) {
+      // Displays DebugTargetInfo which shows the basic information of debug target,
+      // if `about:devtools-toolbox` URL opens directly.
+      // DebugTargetInfo requires this._debugTargetData to be populated
+      this.component.setDebugTargetData(this._getDebugTargetData());
+    }
   },
 };

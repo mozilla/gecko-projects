@@ -71,7 +71,7 @@ const VALID_FLOOR_ORIGIN_MATRIX = [1, 0,    0,  0,
                                      1, 1.65, -1, 1];
 
 const VALID_FLOOR_ORIGIN = {
-    position: [1.0, 1.65, -1.0],
+    position: [-1.0, -1.65, 1.0],
     orientation: [0, 0, 0, 1]
 };
 
@@ -85,8 +85,8 @@ const VALID_BOUNDS = [
 ];
 
 const VALID_RESOLUTION = {
-    width: 20,
-    height: 20
+    width: 200,
+    height: 200
 };
 
 const LEFT_OFFSET = {
@@ -128,6 +128,7 @@ const ALL_FEATURES = [
   'unbounded',
   'hit-test',
   'dom-overlay',
+  'light-estimation',
 ];
 
 const TRACKED_IMMERSIVE_DEVICE = {

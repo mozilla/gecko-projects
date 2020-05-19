@@ -14,6 +14,7 @@ import pytest
 
 from mozlint.errors import LintersNotConfigured
 from mozlint.result import Issue, ResultSummary
+from itertools import chain
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -51,28 +52,33 @@ def test_roll_from_subdir(lint, linters):
         os.chdir(os.path.join(lint.root, 'files'))
 
         # Path relative to cwd works
-        result = lint.roll('no_foobar.js')
-        assert len(result.issues) == 0
+        result = lint.roll('foobar.js')
+        assert len(result.issues) == 1
         assert len(result.failed) == 0
-        assert result.returncode == 0
-
-        # Path relative to root doesn't work
-        result = lint.roll(os.path.join('files', 'no_foobar.js'))
-        assert len(result.issues) == 0
-        assert len(result.failed) == 3
         assert result.returncode == 1
 
-        # Paths from vcs are always joined to root instead of cwd
-        lint.mock_vcs([os.path.join('files', 'no_foobar.js')])
-        result = lint.roll(outgoing=True)
+        # Path relative to root doesn't work
+        result = lint.roll(os.path.join('files', 'foobar.js'))
         assert len(result.issues) == 0
         assert len(result.failed) == 0
         assert result.returncode == 0
 
-        result = lint.roll(workdir=True)
-        assert len(result.issues) == 0
+        # Paths from vcs are always joined to root instead of cwd
+        lint.mock_vcs([os.path.join('files', 'foobar.js')])
+        result = lint.roll(outgoing=True)
+        assert len(result.issues) == 1
         assert len(result.failed) == 0
-        assert result.returncode == 0
+        assert result.returncode == 1
+
+        result = lint.roll(workdir=True)
+        assert len(result.issues) == 1
+        assert len(result.failed) == 0
+        assert result.returncode == 1
+
+        result = lint.roll(rev='not public() and keyword("dummy revset expression")')
+        assert len(result.issues) == 1
+        assert len(result.failed) == 0
+        assert result.returncode == 1
     finally:
         os.chdir(oldcwd)
 
@@ -238,7 +244,7 @@ def test_keyboard_interrupt():
     assert 'Traceback' not in out
 
 
-def test_support_files(lint, linters, filedir, monkeypatch):
+def test_support_files(lint, linters, filedir, monkeypatch, files):
     jobs = []
 
     # Replace the original _generate_jobs with a new one that simply
@@ -253,27 +259,39 @@ def test_support_files(lint, linters, filedir, monkeypatch):
 
     linter_path = linters('support_files')[0]
     lint.read(linter_path)
+    lint.root = filedir
 
     # Modified support files only lint entire root if --outgoing or --workdir
     # are used.
     path = os.path.join(filedir, 'foobar.js')
     lint.mock_vcs([os.path.join(filedir, 'foobar.py')])
     lint.roll(path)
-    assert jobs[0] == [path]
+    actual_files = sorted(chain(*jobs))
+    assert actual_files == [path]
+
+    expected_files = sorted(files)
 
     jobs = []
     lint.roll(path, workdir=True)
-    assert jobs[0] == [lint.root]
+    actual_files = sorted(chain(*jobs))
+    assert actual_files == expected_files
 
     jobs = []
     lint.roll(path, outgoing=True)
-    assert jobs[0] == [lint.root]
+    actual_files = sorted(chain(*jobs))
+    assert actual_files == expected_files
+
+    jobs = []
+    lint.roll(path, rev='draft() and keyword("dummy revset expression")')
+    actual_files = sorted(chain(*jobs))
+    assert actual_files == expected_files
 
     # Lint config file is implicitly added as a support file
     lint.mock_vcs([linter_path])
     jobs = []
     lint.roll(path, outgoing=True, workdir=True)
-    assert jobs[0] == [lint.root]
+    actual_files = sorted(chain(*jobs))
+    assert actual_files == expected_files
 
 
 def test_setup(lint, linters, filedir, capfd):

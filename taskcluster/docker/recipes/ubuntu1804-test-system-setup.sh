@@ -19,6 +19,7 @@ apt_packages+=('bluez-cups')
 apt_packages+=('build-essential')
 apt_packages+=('ca-certificates')
 apt_packages+=('ccache')
+apt_packages+=('compiz')
 apt_packages+=('curl')
 apt_packages+=('fonts-kacst')
 apt_packages+=('fonts-kacst-one')
@@ -32,9 +33,11 @@ apt_packages+=('gcc-multilib')
 apt_packages+=('gir1.2-gnomebluetooth-1.0')
 apt_packages+=('git')
 apt_packages+=('gnome-icon-theme')
+apt_packages+=('gstreamer1.0-gtk3')
 apt_packages+=('gstreamer1.0-plugins-base')
 apt_packages+=('gstreamer1.0-plugins-good')
 apt_packages+=('gstreamer1.0-tools')
+apt_packages+=('gstreamer1.0-pulseaudio')
 apt_packages+=('language-pack-en-base')
 apt_packages+=('libc6-dbg')
 apt_packages+=('libasound2-dev')
@@ -126,44 +129,24 @@ pip install --upgrade pip==19.2.3
 hash -r
 pip install virtualenv==15.2.0
 
-# Install Valgrind (trunk, late Jan 2016) and do some crude sanity
-# checks.  It has to go in /usr/local, otherwise it won't work.  Copy
-# the launcher binary to /usr/bin, though, so that direct invokations
-# of /usr/bin/valgrind also work.  Also install libc6-dbg since
-# Valgrind won't work at all without the debug symbols for libc.so and
-# ld.so being available.
-tooltool_fetch <<'EOF'
-[
-{
-    "size": 41331092,
-    "visibility": "public",
-    "digest": "a89393c39171b8304fc262094a650df9a756543ffe9fbec935911e7b86842c4828b9b831698f97612abb0eca95cf7f7b3ff33ea7a9b0313b30c9be413a5efffc",
-    "algorithm": "sha512",
-    "filename": "valgrind-15775-3206-ubuntu1204.tgz"
-}
-]
-EOF
-cp valgrind-15775-3206-ubuntu1204.tgz /tmp
-(cd / && tar xzf /tmp/valgrind-15775-3206-ubuntu1204.tgz)
-rm /tmp/valgrind-15775-3206-ubuntu1204.tgz
-cp /usr/local/bin/valgrind /usr/bin/valgrind
-apt-get install -y libc6-dbg
-valgrind --version
-valgrind date
-
 # Build a list of packages to purge from the image.
 apt_packages=()
-apt_packages+=('*alsa*')
+apt_packages+=('*cheese*')
+apt_packages+=('example-content')
 apt_packages+=('git')
 apt_packages+=('gnome-calendar')
 apt_packages+=('gnome-initial-setup')
 apt_packages+=('gnome-mahjongg')
 apt_packages+=('gnome-mines')
 apt_packages+=('gnome-sudoku')
+apt_packages+=('libx11-doc')
+apt_packages+=('manpages-dev')
+apt_packages+=('orca')
+apt_packages+=('rhythmbox')
+apt_packages+=('thunderbird')
 apt_packages+=('ubuntu-release-upgrader*')
 apt_packages+=('update-manager-core')
 apt_packages+=('update-manager')
-apt_packages+=('*whoopsie*')
 apt_packages+=('yelp')
 
 # Purge unnecessary packages
@@ -177,8 +160,6 @@ rm -rf /usr/share/help /usr/share/doc /usr/share/man
 
 # Remove all locale files other than en_US.UTF-8
 rm -rf /usr/share/locale/   /usr/share/locale-langpack/     /usr/share/locales/
-echo "en_US.UTF-8 UTF-8" > /var/lib/locales/supported.d/en
-locale-gen
 
 # Further cleanup
 cd /

@@ -30,6 +30,7 @@ https://tools.ietf.org/html/draft-ietf-httpbis-alt-svc-06
 #include "nsIStreamListener.h"
 #include "nsISpeculativeConnect.h"
 #include "mozilla/BasePrincipal.h"
+#include "NullHttpTransaction.h"
 
 class nsILoadInfo;
 
@@ -104,6 +105,7 @@ class AltSvcMapping {
                           const OriginAttributes& originAttributes);
 
   bool IsHttp3() { return mIsHttp3; }
+  const nsCString& NPNToken() const { return mNPNToken; }
 
  private:
   virtual ~AltSvcMapping() = default;
@@ -192,7 +194,7 @@ class AltSvcCache {
   already_AddRefed<AltSvcMapping> GetAltServiceMapping(
       const nsACString& scheme, const nsACString& host, int32_t port, bool pb,
       bool isolated, const nsACString& topWindowOrigin,
-      const OriginAttributes& originAttributes);
+      const OriginAttributes& originAttributes, bool aHttp3Allowed);
   void ClearAltServiceMappings();
   void ClearHostMapping(const nsACString& host, int32_t port,
                         const OriginAttributes& originAttributes,
@@ -203,10 +205,60 @@ class AltSvcCache {
   nsresult GetAltSvcCacheKeys(nsTArray<nsCString>& value);
 
  private:
+  void EnsureStorageInited();
   already_AddRefed<AltSvcMapping> LookupMapping(const nsCString& key,
                                                 bool privateBrowsing);
   RefPtr<DataStorage> mStorage;
   int32_t mStorageEpoch;
+};
+
+// This class is used to write the validated result to AltSvcMapping when the
+// AltSvcTransaction is closed and destroyed.
+class AltSvcMappingValidator final {
+ public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AltSvcMappingValidator)
+
+  explicit AltSvcMappingValidator(AltSvcMapping* aMap);
+
+  void OnTransactionDestroy(bool aValidateResult);
+
+  void OnTransactionClose(bool aValidateResult);
+
+ protected:
+  virtual ~AltSvcMappingValidator() = default;
+
+  RefPtr<AltSvcMapping> mMapping;
+};
+
+// This is the asynchronous null transaction used to validate
+// an alt-svc advertisement only for https://
+// When http over socket process is enabled, this class should live only in
+// socket process.
+template <class Validator>
+class AltSvcTransaction final : public NullHttpTransaction {
+ public:
+  AltSvcTransaction(nsHttpConnectionInfo* ci, nsIInterfaceRequestor* callbacks,
+                    uint32_t caps, Validator* aValidator, bool aIsHttp3);
+
+  ~AltSvcTransaction() override;
+
+ private:
+  // check on alternate route.
+  // also evaluate 'reasonable assurances' for opportunistic security
+  bool MaybeValidate(nsresult reason);
+
+ public:
+  void Close(nsresult reason) override;
+  nsresult ReadSegments(nsAHttpSegmentReader* reader, uint32_t count,
+                        uint32_t* countRead) override;
+
+ private:
+  RefPtr<Validator> mValidator;
+  uint32_t mIsHttp3 : 1;
+  uint32_t mRunning : 1;
+  uint32_t mTriedToValidate : 1;
+  uint32_t mTriedToWrite : 1;
+  uint32_t mValidatedResult : 1;
 };
 
 }  // namespace net

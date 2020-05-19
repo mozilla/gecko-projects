@@ -206,6 +206,7 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
   // the places setter.
   this._initiallySelectedElement = null;
   this._downloadsData = DownloadsCommon.getData(window.opener || window, true);
+  this._waitingForInitialData = true;
   this._downloadsData.addView(this);
 
   // Get the Download button out of the attention state since we're about to
@@ -227,7 +228,7 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
   window.addEventListener(
     "resize",
     () => {
-      this._ensureVisibleElementsAreActive();
+      this._ensureVisibleElementsAreActive(true);
     },
     true
   );
@@ -246,69 +247,97 @@ DownloadsPlacesView.prototype = {
   set active(val) {
     this._active = val;
     if (this._active) {
-      this._ensureVisibleElementsAreActive();
+      this._ensureVisibleElementsAreActive(true);
     }
     return this._active;
   },
 
-  _ensureVisibleElementsAreActive() {
+  /**
+   * Ensure the custom element contents are created and shown for each
+   * visible element in the list.
+   *
+   * @param debounce whether to use a short timeout rather than running
+   *                 immediately. The default is running immediately. If you
+   *                 pass `true`, we'll run on a 10ms timeout. This is used to
+   *                 avoid running this code lots while scrolling or resizing.
+   */
+  _ensureVisibleElementsAreActive(debounce = false) {
     if (
       !this.active ||
-      this._ensureVisibleTimer ||
+      (debounce && this._ensureVisibleTimer) ||
       !this._richlistbox.firstChild
     ) {
       return;
     }
 
-    this._ensureVisibleTimer = setTimeout(() => {
-      delete this._ensureVisibleTimer;
-      if (!this._richlistbox.firstChild) {
-        return;
-      }
+    if (debounce) {
+      this._ensureVisibleTimer = setTimeout(() => {
+        this._internalEnsureVisibleElementsAreActive();
+      }, 10);
+    } else {
+      this._internalEnsureVisibleElementsAreActive();
+    }
+  },
 
-      let rlbRect = this._richlistbox.getBoundingClientRect();
-      let winUtils = window.windowUtils;
-      let nodes = winUtils.nodesFromRect(
-        rlbRect.left,
-        rlbRect.top,
-        0,
-        rlbRect.width,
-        rlbRect.height,
-        0,
-        true,
-        false,
-        false
-      );
-      // nodesFromRect returns nodes in z-index order, and for the same z-index
-      // sorts them in inverted DOM order, thus starting from the one that would
-      // be on top.
-      let firstVisibleNode, lastVisibleNode;
-      for (let node of nodes) {
-        if (node.localName === "richlistitem" && node._shell) {
-          node._shell.ensureActive();
-          // The first visible node is the last match.
-          firstVisibleNode = node;
-          // While the last visible node is the first match.
-          if (!lastVisibleNode) {
-            lastVisibleNode = node;
-          }
+  _internalEnsureVisibleElementsAreActive() {
+    // If there are no children, we can't do anything so bail out.
+    // However, avoid clearing the timer because there may be children
+    // when the timer fires.
+    if (!this._richlistbox.firstChild) {
+      // If we were called asynchronously (debounced), we need to delete
+      // the timer variable to ensure we are called again if another
+      // debounced call comes in.
+      delete this._ensureVisibleTimer;
+      return;
+    }
+
+    if (this._ensureVisibleTimer) {
+      clearTimeout(this._ensureVisibleTimer);
+      delete this._ensureVisibleTimer;
+    }
+
+    let rlbRect = this._richlistbox.getBoundingClientRect();
+    let winUtils = window.windowUtils;
+    let nodes = winUtils.nodesFromRect(
+      rlbRect.left,
+      rlbRect.top,
+      0,
+      rlbRect.width,
+      rlbRect.height,
+      0,
+      true,
+      false,
+      false
+    );
+    // nodesFromRect returns nodes in z-index order, and for the same z-index
+    // sorts them in inverted DOM order, thus starting from the one that would
+    // be on top.
+    let firstVisibleNode, lastVisibleNode;
+    for (let node of nodes) {
+      if (node.localName === "richlistitem" && node._shell) {
+        node._shell.ensureActive();
+        // The first visible node is the last match.
+        firstVisibleNode = node;
+        // While the last visible node is the first match.
+        if (!lastVisibleNode) {
+          lastVisibleNode = node;
         }
       }
+    }
 
-      // Also activate the first invisible nodes in both boundaries (that is,
-      // above and below the visible area) to ensure proper keyboard navigation
-      // in both directions.
-      let nodeBelowVisibleArea = lastVisibleNode && lastVisibleNode.nextSibling;
-      if (nodeBelowVisibleArea && nodeBelowVisibleArea._shell) {
-        nodeBelowVisibleArea._shell.ensureActive();
-      }
+    // Also activate the first invisible nodes in both boundaries (that is,
+    // above and below the visible area) to ensure proper keyboard navigation
+    // in both directions.
+    let nodeBelowVisibleArea = lastVisibleNode && lastVisibleNode.nextSibling;
+    if (nodeBelowVisibleArea && nodeBelowVisibleArea._shell) {
+      nodeBelowVisibleArea._shell.ensureActive();
+    }
 
-      let nodeAboveVisibleArea =
-        firstVisibleNode && firstVisibleNode.previousSibling;
-      if (nodeAboveVisibleArea && nodeAboveVisibleArea._shell) {
-        nodeAboveVisibleArea._shell.ensureActive();
-      }
-    }, 10);
+    let nodeAboveVisibleArea =
+      firstVisibleNode && firstVisibleNode.previousSibling;
+    if (nodeAboveVisibleArea && nodeAboveVisibleArea._shell) {
+      nodeAboveVisibleArea._shell.ensureActive();
+    }
   },
 
   _place: "",
@@ -378,15 +407,11 @@ DownloadsPlacesView.prototype = {
       let firstDownloadElement = this._richlistbox.firstChild;
       if (firstDownloadElement != this._initiallySelectedElement) {
         // We may be called before _ensureVisibleElementsAreActive,
-        // or before the download binding is attached. Therefore, ensure the
-        // first item is activated, and pass the item to the richlistbox
-        // setters only at a point we know for sure the binding is attached.
+        // therefore, ensure the first item is activated.
         firstDownloadElement._shell.ensureActive();
-        Services.tm.dispatchToMainThread(() => {
-          this._richlistbox.selectedItem = firstDownloadElement;
-          this._richlistbox.currentItem = firstDownloadElement;
-          this._initiallySelectedElement = firstDownloadElement;
-        });
+        this._richlistbox.selectedItem = firstDownloadElement;
+        this._richlistbox.currentItem = firstDownloadElement;
+        this._initiallySelectedElement = firstDownloadElement;
       }
     }
   },
@@ -419,6 +444,12 @@ DownloadsPlacesView.prototype = {
     this._ensureInitialSelection();
     this._ensureVisibleElementsAreActive();
     goUpdateDownloadCommands();
+    if (this._waitingForInitialData) {
+      this._waitingForInitialData = false;
+      this._richlistbox.dispatchEvent(
+        new CustomEvent("InitialDownloadsLoaded")
+      );
+    }
   },
 
   _prependBatchFragment() {
@@ -713,7 +744,7 @@ DownloadsPlacesView.prototype = {
   },
 
   onScroll() {
-    this._ensureVisibleElementsAreActive();
+    this._ensureVisibleElementsAreActive(true);
   },
 
   onSelect() {
@@ -778,6 +809,7 @@ DownloadsPlacesView.prototype = {
     if (!links.length) {
       return;
     }
+    aEvent.preventDefault();
     let browserWin = BrowserWindowTracker.getTopWindow();
     let initiatingDoc = browserWin ? browserWin.document : document;
     for (let link of links) {
@@ -810,31 +842,38 @@ function goUpdateDownloadCommands() {
 }
 
 document.addEventListener("DOMContentLoaded", function() {
-  let richtListBox = document.getElementById("downloadsRichListBox");
-  richtListBox.addEventListener("scroll", function(event) {
+  let richListBox = document.getElementById("downloadsRichListBox");
+  richListBox.addEventListener("scroll", function(event) {
     return this._placesView.onScroll();
   });
-  richtListBox.addEventListener("keypress", function(event) {
+  richListBox.addEventListener("keypress", function(event) {
     return this._placesView.onKeyPress(event);
   });
-  richtListBox.addEventListener("dblclick", function(event) {
+  richListBox.addEventListener("dblclick", function(event) {
     return this._placesView.onDoubleClick(event);
   });
-  richtListBox.addEventListener("contextmenu", function(event) {
+  richListBox.addEventListener("contextmenu", function(event) {
     return this._placesView.onContextMenu(event);
   });
-  richtListBox.addEventListener("dragstart", function(event) {
+  richListBox.addEventListener("dragstart", function(event) {
     this._placesView.onDragStart(event);
   });
-  richtListBox.addEventListener("dragover", function(event) {
-    this._placesView.onDragOver(event);
+  let dropNode = richListBox;
+  // In about:downloads, also allow drops if the list is empty, by
+  // adding the listener to the document, as the richlistbox is
+  // hidden when it is empty.
+  if (document.documentElement.id == "contentAreaDownloadsView") {
+    dropNode = richListBox.parentNode;
+  }
+  dropNode.addEventListener("dragover", function(event) {
+    richListBox._placesView.onDragOver(event);
   });
-  richtListBox.addEventListener("drop", function(event) {
-    this._placesView.onDrop(event);
+  dropNode.addEventListener("drop", function(event) {
+    richListBox._placesView.onDrop(event);
   });
-  richtListBox.addEventListener("select", function(event) {
+  richListBox.addEventListener("select", function(event) {
     this._placesView.onSelect();
   });
-  richtListBox.addEventListener("focus", goUpdateDownloadCommands);
-  richtListBox.addEventListener("blur", goUpdateDownloadCommands);
+  richListBox.addEventListener("focus", goUpdateDownloadCommands);
+  richListBox.addEventListener("blur", goUpdateDownloadCommands);
 });

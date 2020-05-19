@@ -12,6 +12,8 @@
 #include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 
 #include "nsContentUtils.h"
+#include "nsIClassOfService.h"
+#include "nsISupportsPriority.h"
 #include "ScriptLoadRequest.h"
 #include "ScriptSettings.h"
 
@@ -29,7 +31,7 @@ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(ScriptFetchOptions, Release)
 
 ScriptFetchOptions::ScriptFetchOptions(mozilla::CORSMode aCORSMode,
                                        ReferrerPolicy aReferrerPolicy,
-                                       nsIScriptElement* aElement,
+                                       Element* aElement,
                                        nsIPrincipal* aTriggeringPrincipal)
     : mCORSMode(aCORSMode),
       mReferrerPolicy(aReferrerPolicy),
@@ -39,7 +41,7 @@ ScriptFetchOptions::ScriptFetchOptions(mozilla::CORSMode aCORSMode,
   MOZ_ASSERT(mTriggeringPrincipal);
 }
 
-ScriptFetchOptions::~ScriptFetchOptions() {}
+ScriptFetchOptions::~ScriptFetchOptions() = default;
 
 //////////////////////////////////////////////////////////////
 // ScriptLoadRequest
@@ -230,6 +232,24 @@ void ScriptLoadRequest::SetScript(JSScript* aScript) {
   MOZ_ASSERT(!mScript);
   mScript = aScript;
   HoldJSObjects(this);
+}
+
+// static
+void ScriptLoadRequest::PrioritizeAsPreload(nsIChannel* aChannel) {
+  if (nsCOMPtr<nsIClassOfService> cos = do_QueryInterface(aChannel)) {
+    cos->AddClassFlags(nsIClassOfService::Unblocked);
+  }
+  if (nsCOMPtr<nsISupportsPriority> sp = do_QueryInterface(aChannel)) {
+    sp->AdjustPriority(nsISupportsPriority::PRIORITY_HIGHEST);
+  }
+}
+
+void ScriptLoadRequest::PrioritizeAsPreload() {
+  if (!IsLinkPreloadScript()) {
+    // Do the prioritization only if this request has not already been created
+    // as a preload.
+    PrioritizeAsPreload(Channel());
+  }
 }
 
 //////////////////////////////////////////////////////////////

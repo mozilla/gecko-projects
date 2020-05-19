@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { Cc, Ci, Cr } = require("chrome");
+const { Cc, Ci, Cr, components: Components } = require("chrome");
 const ChromeUtils = require("ChromeUtils");
 const Services = require("Services");
 
@@ -83,7 +83,7 @@ NetworkResponseListener.prototype = {
     if (this._wrappedNotificationCallbacks) {
       return this._wrappedNotificationCallbacks.getInterface(iid);
     }
-    throw Cr.NS_ERROR_NO_INTERFACE;
+    throw Components.Exception("", Cr.NS_ERROR_NO_INTERFACE);
   },
 
   /**
@@ -215,6 +215,7 @@ NetworkResponseListener.prototype = {
    * @param nsISupports context
    */
   onStartRequest: function(request) {
+    request = request.QueryInterface(Ci.nsIChannel);
     // Converter will call this again, we should just ignore that.
     if (this.request) {
       return;
@@ -378,7 +379,7 @@ NetworkResponseListener.prototype = {
    * Handle progress event as data is transferred.  This is used to record the
    * size on the wire, which may be compressed / encoded.
    */
-  onProgress: function(request, context, progress, progressMax) {
+  onProgress: function(request, progress, progressMax) {
     this.transferredSize = progress;
     // Need to forward as well to keep things like Download Manager's progress
     // bar working properly.
@@ -502,9 +503,22 @@ NetworkResponseListener.prototype = {
 
     this.receivedData = "";
 
+    let id;
+    let reason;
+
+    try {
+      const properties = this.request.QueryInterface(Ci.nsIPropertyBag);
+      reason = this.request.loadInfo.requestBlockingReason;
+      id = properties.getProperty("cancelledByExtension");
+    } catch (err) {
+      // "cancelledByExtension" doesn't have to be available.
+    }
+
     this.httpActivity.owner.addResponseContent(response, {
       discardResponseBody: this.httpActivity.discardResponseBody,
       truncated: this.truncated,
+      blockedReason: reason,
+      blockingExtension: id,
     });
 
     this._wrappedNotificationCallbacks = null;

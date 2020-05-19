@@ -47,7 +47,6 @@ exports.ConsoleMessage = function(props) {
       groupId: null,
       errorMessageName: null,
       exceptionDocURL: null,
-      executionPoint: undefined,
       cssSelectors: "",
       userProvidedStyles: null,
       notes: null,
@@ -56,6 +55,8 @@ exports.ConsoleMessage = function(props) {
       private: false,
       logpointId: undefined,
       chromeContext: false,
+      hasException: false,
+      isPromiseRejection: false,
     },
     props
   );

@@ -7,8 +7,10 @@
 #include "mozilla/css/StreamLoader.h"
 
 #include "mozilla/Encoding.h"
+#include "mozilla/ScopeExit.h"
 #include "nsIChannel.h"
 #include "nsIInputStream.h"
+#include "nsISupportsPriority.h"
 
 #include <limits>
 
@@ -21,14 +23,26 @@ StreamLoader::StreamLoader(SheetLoadData& aSheetLoadData)
     : mSheetLoadData(&aSheetLoadData), mStatus(NS_OK) {}
 
 StreamLoader::~StreamLoader() {
-  MOZ_DIAGNOSTIC_ASSERT(mOnStopRequestCalled || mChannelOpenFailed);
+#ifdef NIGHTLY_BUILD
+  MOZ_RELEASE_ASSERT(mOnStopRequestCalled || mChannelOpenFailed);
+#endif
 }
 
 NS_IMPL_ISUPPORTS(StreamLoader, nsIStreamListener)
 
+// static
+void StreamLoader::PrioritizeAsPreload(nsIChannel* aChannel) {
+  if (nsCOMPtr<nsISupportsPriority> sp = do_QueryInterface(aChannel)) {
+    sp->AdjustPriority(nsISupportsPriority::PRIORITY_HIGHEST);
+  }
+}
+
+void StreamLoader::PrioritizeAsPreload() { PrioritizeAsPreload(Channel()); }
+
 /* nsIRequestObserver implementation */
 NS_IMETHODIMP
 StreamLoader::OnStartRequest(nsIRequest* aRequest) {
+  NotifyStart(aRequest);
 
   // It's kinda bad to let Web content send a number that results
   // in a potentially large allocation directly, but efficiency of
@@ -51,10 +65,13 @@ StreamLoader::OnStartRequest(nsIRequest* aRequest) {
 
 NS_IMETHODIMP
 StreamLoader::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
-  MOZ_DIAGNOSTIC_ASSERT(!mOnStopRequestCalled);
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#ifdef NIGHTLY_BUILD
+  MOZ_RELEASE_ASSERT(!mOnStopRequestCalled);
   mOnStopRequestCalled = true;
 #endif
+
+  nsresult rv = mStatus;
+  auto notifyStop = MakeScopeExit([&] { NotifyStop(aRequest, rv); });
 
   // Decoded data
   nsCString utf8String;
@@ -72,9 +89,14 @@ StreamLoader::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
       return mStatus;
     }
 
-    nsresult rv = mSheetLoadData->VerifySheetReadyToParse(aStatus, mBOMBytes,
-                                                          bytes, channel);
+    rv = mSheetLoadData->VerifySheetReadyToParse(aStatus, mBOMBytes, bytes,
+                                                 channel);
     if (rv != NS_OK_PARSE_SHEET) {
+      // VerifySheetReadyToParse returns `NS_OK` when there was something wrong
+      // with the script.  We need to override the result so that any <link
+      // preload> tags associted to this load will be notified the "error"
+      // event.  It's fine because this error goes no where.
+      rv = NS_ERROR_NOT_AVAILABLE;
       return rv;
     }
 
@@ -115,6 +137,7 @@ StreamLoader::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   // accessing fields of mSheetLoadData from here.
   mSheetLoadData->mLoader->ParseSheet(utf8String, *mSheetLoadData,
                                       Loader::AllowAsyncParse::Yes);
+
   return NS_OK;
 }
 

@@ -29,7 +29,6 @@
 #include "nsIObserver.h"
 #include "nsCOMArray.h"
 #include "nsWeakReference.h"
-#include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 
 class nsExternalAppHandler;
@@ -62,7 +61,7 @@ class nsExternalHelperAppService : public nsIExternalHelperAppService,
    * Initializes internal state. Will be called automatically when
    * this service is first instantiated.
    */
-  MOZ_MUST_USE nsresult Init();
+  [[nodiscard]] nsresult Init();
 
   /**
    * nsIExternalProtocolService methods that we provide in this class. Other
@@ -75,7 +74,7 @@ class nsExternalHelperAppService : public nsIExternalHelperAppService,
   NS_IMETHOD GetProtocolHandlerInfo(const nsACString& aScheme,
                                     nsIHandlerInfo** aHandlerInfo) override;
   NS_IMETHOD LoadURI(nsIURI* aURI,
-                     nsIInterfaceRequestor* aWindowContext) override;
+                     mozilla::dom::BrowsingContext* aBrowsingContext) override;
   NS_IMETHOD SetProtocolHandlerDefaults(nsIHandlerInfo* aHandlerInfo,
                                         bool aOSHandlerExists) override;
 
@@ -310,6 +309,11 @@ class nsExternalAppHandler final : public nsIStreamListener,
   bool mShouldCloseWindow;
 
   /**
+   * True if the file should be handled internally.
+   */
+  bool mHandleInternally;
+
+  /**
    * One of the REASON_ constants from nsIHelperAppLauncherDialog. Indicates the
    * reason the dialog was shown (unknown content type, server requested it,
    * etc).
@@ -384,7 +388,7 @@ class nsExternalAppHandler final : public nsIStreamListener,
    * If we fail to create the necessary temporary file to initiate a transfer
    * we will report the failure by creating a failed nsITransfer.
    */
-  nsresult CreateFailedTransfer(bool aIsPrivateBrowsing);
+  nsresult CreateFailedTransfer();
 
   /*
    * The following two functions are part of the split of SaveToDisk
@@ -429,11 +433,10 @@ class nsExternalAppHandler final : public nsIStreamListener,
   bool GetNeverAskFlagFromPref(const char* prefName, const char* aContentType);
 
   /**
-   * Helper routine to ensure mSuggestedFileName is "correct";
-   * this ensures that mTempFileExtension only contains an extension when it
-   * is different from mSuggestedFileName's extension.
+   * Helper routine to ensure that mTempFileExtension only contains an extension
+   * when it is different from mSuggestedFileName's extension.
    */
-  void EnsureSuggestedFileName();
+  void EnsureTempFileExtension(const nsString& aFileExt);
 
   typedef enum { kReadError, kWriteError, kLaunchError } ErrorType;
   /**

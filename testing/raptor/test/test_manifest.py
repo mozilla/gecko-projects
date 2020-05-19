@@ -16,7 +16,6 @@ sys.path.insert(0, raptor_dir)
 
 from manifest import (
     add_test_url_params,
-    bool_from_str,
     get_browser_test_list,
     get_raptor_test_list,
     validate_test_ini,
@@ -143,24 +142,6 @@ INVALID_MANIFESTS = [{
 }]
 
 
-@pytest.mark.parametrize('value, expected_result', [
-    ('true', True),
-    ('TRUE', True),
-    ('True', True),
-    ('false', False),
-    ('FALSE', False),
-    ('False', False)
-])
-def test_bool_from_str(value, expected_result):
-    assert expected_result == bool_from_str(value)
-
-
-@pytest.mark.parametrize('invalid_value', ['yes', 'no', '1', '0', 'invalid_str', ''])
-def test_bool_from_str_with_invalid_values(invalid_value):
-    with pytest.raises(ValueError):
-        bool_from_str(invalid_value)
-
-
 @pytest.mark.parametrize('app', ['firefox', 'chrome', 'chromium', 'geckoview', 'refbrow', 'fenix'])
 def test_get_browser_test_list(app):
     test_list = get_browser_test_list(app, run_local=True)
@@ -285,6 +266,18 @@ def test_get_raptor_test_list_debug_mode(create_args):
     assert test_list[0]['name'] == 'raptor-tp6-google-firefox'
     assert test_list[0]['debug_mode'] is True
     assert test_list[0]['page_cycles'] == 2
+
+
+def test_get_raptor_test_list_using_live_sites(create_args):
+    args = create_args(test="raptor-tp6-amazon-firefox",
+                       live_sites=True,
+                       browser_cycles=1)
+
+    test_list = get_raptor_test_list(args, mozinfo.os)
+    assert len(test_list) == 1
+    assert test_list[0]['name'] == 'raptor-tp6-amazon-firefox'
+    assert test_list[0]['use_live_sites'] == 'true'
+    assert test_list[0]['playback'] is None
 
 
 def test_get_raptor_test_list_override_page_cycles(create_args):

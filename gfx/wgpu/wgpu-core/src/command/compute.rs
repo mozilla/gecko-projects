@@ -5,24 +5,27 @@
 use crate::{
     command::{
         bind::{Binder, LayoutChange},
-        CommandBuffer,
-        PhantomSlice,
+        CommandBuffer, PhantomSlice,
     },
-    device::{all_buffer_stages, BIND_BUFFER_ALIGNMENT},
-    hub::{GfxBackend, Global, Token},
+    device::all_buffer_stages,
+    hub::{GfxBackend, Global, GlobalIdentityHandlerFactory, Token},
     id,
-    resource::BufferUsage,
-    BufferAddress,
-    DynamicOffset,
+    resource::BufferUse,
 };
 
 use hal::command::CommandBuffer as _;
-use peek_poke::{Peek, PeekCopy, Poke};
+use peek_poke::{Peek, PeekPoke, Poke};
+use wgt::{BufferAddress, BufferUsage, DynamicOffset, BIND_BUFFER_ALIGNMENT};
 
 use std::iter;
 
+#[derive(Debug, PartialEq)]
+enum PipelineState {
+    Required,
+    Set,
+}
 
-#[derive(Clone, Copy, Debug, PeekCopy, Poke)]
+#[derive(Clone, Copy, Debug, PeekPoke)]
 enum ComputeCommand {
     SetBindGroup {
         index: u8,
@@ -37,6 +40,12 @@ enum ComputeCommand {
         offset: BufferAddress,
     },
     End,
+}
+
+impl Default for ComputeCommand {
+    fn default() -> Self {
+        ComputeCommand::End
+    }
 }
 
 impl super::RawPass {
@@ -58,7 +67,7 @@ pub struct ComputePassDescriptor {
 
 // Common routines between render/compute
 
-impl<F> Global<F> {
+impl<G: GlobalIdentityHandlerFactory> Global<G> {
     pub fn command_encoder_run_compute_pass<B: GfxBackend>(
         &self,
         encoder_id: id::CommandEncoderId,
@@ -78,18 +87,27 @@ impl<F> Global<F> {
         let (buffer_guard, mut token) = hub.buffers.read(&mut token);
         let (texture_guard, _) = hub.textures.read(&mut token);
 
+        let mut pipeline_state = PipelineState::Required;
+
         let mut peeker = raw_data.as_ptr();
-        let raw_data_end = unsafe {
-            raw_data.as_ptr().add(raw_data.len())
-        };
+        let raw_data_end = unsafe { raw_data.as_ptr().add(raw_data.len()) };
         let mut command = ComputeCommand::Dispatch([0; 3]); // dummy
         loop {
             assert!(unsafe { peeker.add(ComputeCommand::max_size()) } <= raw_data_end);
-            peeker = unsafe { command.peek_from(peeker) };
+            peeker = unsafe { ComputeCommand::peek_from(peeker, &mut command) };
             match command {
-                ComputeCommand::SetBindGroup { index, num_dynamic_offsets, bind_group_id, phantom_offsets } => {
+                ComputeCommand::SetBindGroup {
+                    index,
+                    num_dynamic_offsets,
+                    bind_group_id,
+                    phantom_offsets,
+                } => {
                     let (new_peeker, offsets) = unsafe {
-                        phantom_offsets.decode_unaligned(peeker, num_dynamic_offsets as usize, raw_data_end)
+                        phantom_offsets.decode_unaligned(
+                            peeker,
+                            num_dynamic_offsets as usize,
+                            raw_data_end,
+                        )
                     };
                     peeker = new_peeker;
 
@@ -125,11 +143,14 @@ impl<F> Global<F> {
                         &*texture_guard,
                     );
 
-                    if let Some((pipeline_layout_id, follow_ups)) = binder
-                        .provide_entry(index as usize, bind_group_id, bind_group, offsets)
+                    if let Some((pipeline_layout_id, follow_ups)) =
+                        binder.provide_entry(index as usize, bind_group_id, bind_group, offsets)
                     {
-                        let bind_groups = iter::once(bind_group.raw.raw())
-                            .chain(follow_ups.clone().map(|(bg_id, _)| bind_group_guard[bg_id].raw.raw()));
+                        let bind_groups = iter::once(bind_group.raw.raw()).chain(
+                            follow_ups
+                                .clone()
+                                .map(|(bg_id, _)| bind_group_guard[bg_id].raw.raw()),
+                        );
                         unsafe {
                             raw.bind_compute_descriptor_sets(
                                 &pipeline_layout_guard[pipeline_layout_id].raw,
@@ -138,33 +159,37 @@ impl<F> Global<F> {
                                 offsets
                                     .iter()
                                     .chain(follow_ups.flat_map(|(_, offsets)| offsets))
-                                    .map(|&off| off as hal::command::DescriptorSetOffset),
+                                    .cloned(),
                             );
                         }
                     }
                 }
                 ComputeCommand::SetPipeline(pipeline_id) => {
-                    let pipeline = &pipeline_guard[pipeline_id];
+                    pipeline_state = PipelineState::Set;
+                    let pipeline = cmb
+                        .trackers
+                        .compute_pipes
+                        .use_extend(&*pipeline_guard, pipeline_id, (), ())
+                        .unwrap();
 
                     unsafe {
                         raw.bind_compute_pipeline(&pipeline.raw);
                     }
 
                     // Rebind resources
-                    if binder.pipeline_layout_id != Some(pipeline.layout_id) {
-                        let pipeline_layout = &pipeline_layout_guard[pipeline.layout_id];
-                        binder.pipeline_layout_id = Some(pipeline.layout_id);
-                        binder
-                            .reset_expectations(pipeline_layout.bind_group_layout_ids.len());
+                    if binder.pipeline_layout_id != Some(pipeline.layout_id.value) {
+                        let pipeline_layout = &pipeline_layout_guard[pipeline.layout_id.value];
+                        binder.pipeline_layout_id = Some(pipeline.layout_id.value);
+                        binder.reset_expectations(pipeline_layout.bind_group_layout_ids.len());
                         let mut is_compatible = true;
 
-                        for (index, (entry, &bgl_id)) in binder
+                        for (index, (entry, bgl_id)) in binder
                             .entries
                             .iter_mut()
                             .zip(&pipeline_layout.bind_group_layout_ids)
                             .enumerate()
                         {
-                            match entry.expect_layout(bgl_id) {
+                            match entry.expect_layout(bgl_id.value) {
                                 LayoutChange::Match(bg_id, offsets) if is_compatible => {
                                     let desc_set = bind_group_guard[bg_id].raw.raw();
                                     unsafe {
@@ -172,7 +197,7 @@ impl<F> Global<F> {
                                             &pipeline_layout.raw,
                                             index,
                                             iter::once(desc_set),
-                                            offsets.iter().map(|offset| *offset as u32),
+                                            offsets.iter().cloned(),
                                         );
                                     }
                                 }
@@ -185,16 +210,26 @@ impl<F> Global<F> {
                     }
                 }
                 ComputeCommand::Dispatch(groups) => {
+                    assert_eq!(
+                        pipeline_state,
+                        PipelineState::Set,
+                        "Dispatch error: Pipeline is missing"
+                    );
                     unsafe {
                         raw.dispatch(groups);
                     }
                 }
                 ComputeCommand::DispatchIndirect { buffer_id, offset } => {
+                    assert_eq!(
+                        pipeline_state,
+                        PipelineState::Set,
+                        "Dispatch error: Pipeline is missing"
+                    );
                     let (src_buffer, src_pending) = cmb.trackers.buffers.use_replace(
                         &*buffer_guard,
                         buffer_id,
                         (),
-                        BufferUsage::INDIRECT,
+                        BufferUse::INDIRECT,
                     );
                     assert!(src_buffer.usage.contains(BufferUsage::INDIRECT));
 
@@ -202,7 +237,7 @@ impl<F> Global<F> {
 
                     unsafe {
                         raw.pipeline_barrier(
-                            all_buffer_stages() .. all_buffer_stages(),
+                            all_buffer_stages()..all_buffer_stages(),
                             hal::memory::Dependencies::empty(),
                             barriers,
                         );
@@ -217,16 +252,12 @@ impl<F> Global<F> {
 
 pub mod compute_ffi {
     use super::{
-        ComputeCommand,
         super::{PhantomSlice, RawPass},
+        ComputeCommand,
     };
-    use crate::{
-        id,
-        BufferAddress,
-        DynamicOffset,
-        RawString,
-    };
+    use crate::{id, RawString};
     use std::{convert::TryInto, slice};
+    use wgt::{BufferAddress, DynamicOffset};
 
     /// # Safety
     ///
@@ -246,11 +277,9 @@ pub mod compute_ffi {
             index: index.try_into().unwrap(),
             num_dynamic_offsets: offset_length.try_into().unwrap(),
             bind_group_id,
-            phantom_offsets: PhantomSlice::new(),
+            phantom_offsets: PhantomSlice::default(),
         });
-        pass.encode_slice(
-            slice::from_raw_parts(offsets, offset_length),
-        );
+        pass.encode_slice(slice::from_raw_parts(offsets, offset_length));
     }
 
     #[no_mangle]
@@ -277,24 +306,16 @@ pub mod compute_ffi {
         buffer_id: id::BufferId,
         offset: BufferAddress,
     ) {
-        pass.encode(&ComputeCommand::DispatchIndirect {
-            buffer_id,
-            offset,
-        });
+        pass.encode(&ComputeCommand::DispatchIndirect { buffer_id, offset });
     }
 
     #[no_mangle]
-    pub extern "C" fn wgpu_compute_pass_push_debug_group(
-        _pass: &mut RawPass,
-        _label: RawString,
-    ) {
+    pub extern "C" fn wgpu_compute_pass_push_debug_group(_pass: &mut RawPass, _label: RawString) {
         //TODO
     }
 
     #[no_mangle]
-    pub extern "C" fn wgpu_compute_pass_pop_debug_group(
-        _pass: &mut RawPass,
-    ) {
+    pub extern "C" fn wgpu_compute_pass_pop_debug_group(_pass: &mut RawPass) {
         //TODO
     }
 

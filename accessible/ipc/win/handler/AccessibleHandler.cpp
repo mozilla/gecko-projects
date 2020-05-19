@@ -41,6 +41,16 @@
 namespace mozilla {
 namespace a11y {
 
+// Must be kept in sync with kClassNameTabContent in
+// accessible/windows/msaa/nsWinUtils.h.
+const WCHAR kEmulatedWindowClassName[] = L"MozillaContentWindowClass";
+const uint32_t kEmulatedWindowClassNameNChars =
+    sizeof(kEmulatedWindowClassName) / sizeof(WCHAR);
+// Mask to get the content process portion of a Windows accessible unique id.
+// This is bits 24 through 30 (LSB 0) of the id. This must be kept in sync
+// with kNumContentProcessIDBits in accessible/windows/msaa/MsaaIdGenerator.cpp.
+const uint32_t kIdContentProcessMask = 0x7F000000;
+
 static mscom::Factory<AccessibleHandler> sHandlerFactory;
 
 HRESULT
@@ -78,7 +88,8 @@ AccessibleHandler::AccessibleHandler(IUnknown* aOuter, HRESULT* aResult)
       mCachedTextAttribRuns(nullptr),
       mCachedNTextAttribRuns(-1),
       mCachedRelations(nullptr),
-      mCachedNRelations(-1) {
+      mCachedNRelations(-1),
+      mIsEmulatedWindow(false) {
   RefPtr<AccessibleHandlerControl> ctl(gControlFactory.GetOrCreateSingleton());
   MOZ_ASSERT(ctl);
   if (!ctl) {
@@ -92,8 +103,7 @@ AccessibleHandler::AccessibleHandler(IUnknown* aOuter, HRESULT* aResult)
 }
 
 AccessibleHandler::~AccessibleHandler() {
-  // No need to zero memory, since we're being destroyed anyway.
-  CleanupDynamicIA2Data(mCachedData.mDynamicData, false);
+  CleanupDynamicIA2Data(mCachedData.mDynamicData);
   if (mCachedData.mGeckoBackChannel) {
     mCachedData.mGeckoBackChannel->Release();
   }
@@ -456,8 +466,7 @@ AccessibleHandler::ReadHandlerPayload(IStream* aStream, REFIID aIid) {
     return E_FAIL;
   }
   // Clean up the old data.
-  // No need to zero memory, since we're about to completely replace this.
-  CleanupDynamicIA2Data(mCachedData.mDynamicData, false);
+  CleanupDynamicIA2Data(mCachedData.mDynamicData);
   mCachedData = newData;
 
   // These interfaces have been aggregated into the proxy manager.
@@ -470,6 +479,15 @@ AccessibleHandler::ReadHandlerPayload(IStream* aStream, REFIID aIid) {
   // interfaces of *this* object) are added in future, we should not release
   // those pointers.
   ReleaseStaticIA2DataInterfaces(mCachedData.mStaticData);
+
+  WCHAR className[kEmulatedWindowClassNameNChars];
+  if (mCachedData.mDynamicData.mHwnd &&
+      ::GetClassName(
+          reinterpret_cast<HWND>(uintptr_t(mCachedData.mDynamicData.mHwnd)),
+          className, kEmulatedWindowClassNameNChars) > 0 &&
+      wcscmp(className, kEmulatedWindowClassName) == 0) {
+    mIsEmulatedWindow = true;
+  }
 
   if (!mCachedData.mGeckoBackChannel) {
     return S_OK;
@@ -662,6 +680,33 @@ AccessibleHandler::get_accChild(VARIANT varChild, IDispatch** ppdispChild) {
     disp.forget(ppdispChild);
     return S_OK;
   }
+
+  if (mIsEmulatedWindow && varChild.vt == VT_I4 && varChild.lVal < 0 &&
+      (varChild.lVal & kIdContentProcessMask) !=
+          (mCachedData.mDynamicData.mUniqueId & kIdContentProcessMask)) {
+    // Window emulation is enabled and the target id is in a different
+    // process to this accessible.
+    // When window emulation is enabled, each tab document gets its own HWND.
+    // OOP iframes get the same HWND as their tab document and fire events with
+    // that HWND. However, the root accessible for the HWND (the tab document)
+    // can't return accessibles for OOP iframes. Therefore, we must get the root
+    // accessible from the main HWND and call accChild on that instead.
+    // We don't need an oleacc proxy, so send WM_GETOBJECT directly instead of
+    // calling AccessibleObjectFromEvent.
+    HWND rootHwnd = GetParent(
+        reinterpret_cast<HWND>(uintptr_t(mCachedData.mDynamicData.mHwnd)));
+    MOZ_ASSERT(rootHwnd);
+    LRESULT lresult = ::SendMessage(rootHwnd, WM_GETOBJECT, 0, OBJID_CLIENT);
+    if (lresult > 0) {
+      RefPtr<IAccessible2_3> rootAcc;
+      HRESULT hr = ::ObjectFromLresult(lresult, IID_IAccessible2_3, 0,
+                                       getter_AddRefs(rootAcc));
+      if (hr == S_OK) {
+        return rootAcc->get_accChild(varChild, ppdispChild);
+      }
+    }
+  }
+
   HRESULT hr = ResolveIA2();
   if (FAILED(hr)) {
     return hr;

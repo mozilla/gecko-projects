@@ -558,6 +558,12 @@ class PresShell final : public nsStubDocumentObserver,
 
   void ClearFrameRefs(nsIFrame* aFrame);
 
+  // Clears the selection of the older focused frame selection if any.
+  void FrameSelectionWillTakeFocus(nsFrameSelection&);
+
+  // Clears and repaint mFocusedFrameSelection if it matches the argument.
+  void FrameSelectionWillLoseFocus(nsFrameSelection&);
+
   /**
    * Get a reference rendering context. This is a context that should not
    * be rendered to, but is suitable for measuring text and performing
@@ -623,22 +629,10 @@ class PresShell final : public nsStubDocumentObserver,
   dom::Selection* GetCurrentSelection(SelectionType aSelectionType);
 
   /**
-   * Gets a selection controller for the focused content in the DOM window
-   * for mDocument.
-   *
-   * @param aFocusedContent     If there is focused content in the DOM window,
-   *                            the focused content will be returned.  This may
-   *                            be nullptr if it's not necessary.
-   * @return                    A selection controller for focused content.
-   *                            E.g., if an <input> element has focus, returns
-   *                            the independent selection controller of it.
-   *                            If the DOM window does not have focused content
-   *                            (similar to Document.activeElement), returns
-   *                            nullptr.
+   * Gets the last selection that took focus in this document. This is basically
+   * the frame selection that's visible to the user.
    */
-  already_AddRefed<nsISelectionController>
-  GetSelectionControllerForFocusedContent(
-      nsIContent** aFocusedContent = nullptr);
+  nsFrameSelection* GetLastFocusedFrameSelection();
 
   /**
    * Interface to dispatch events via the presshell
@@ -724,16 +718,6 @@ class PresShell final : public nsStubDocumentObserver,
    * Unsuppress painting.
    */
   void UnsuppressPainting();
-
-  /**
-   * Add an override style sheet for this presentation
-   */
-  nsresult AddOverrideStyleSheet(StyleSheet* aSheet);
-
-  /**
-   * Remove an override style sheet
-   */
-  nsresult RemoveOverrideStyleSheet(StyleSheet* aSheet);
 
   /**
    * Reconstruct frames for all elements in the document
@@ -989,12 +973,6 @@ class PresShell final : public nsStubDocumentObserver,
    * Returns true if the resolution has ever been changed by APZ.
    */
   bool IsResolutionUpdatedByApz() const { return mResolutionUpdatedByApz; }
-
-  /**
-   * Calculate the cumulative scale resolution from this document up to
-   * but not including the root document.
-   */
-  float GetCumulativeNonRootScaleResolution();
 
   /**
    * Used by session restore code to restore a resolution before the first
@@ -1272,6 +1250,8 @@ class PresShell final : public nsStubDocumentObserver,
                                      SelectionRegion aRegion,
                                      int16_t aFlags) override;
   NS_IMETHOD RepaintSelection(RawSelectionType aRawSelectionType) override;
+  void SelectionWillTakeFocus() override;
+  void SelectionWillLoseFocus() override;
 
   /**
    * Set a "resolution" for the document, which if not 1.0 will
@@ -1334,11 +1314,10 @@ class PresShell final : public nsStubDocumentObserver,
    * by the frames.  Visual effects may not effect layout, only display.
    * Takes effect on next repaint, does not force a repaint itself.
    *
-   * @param aInEnable  if true, visual selection effects are enabled
-   *                   if false visual selection effects are disabled
+   * @param aFlags may be multiple of nsISelectionDisplay::DISPLAY_*.
    */
-  NS_IMETHOD SetSelectionFlags(int16_t aInEnable) override;
-  NS_IMETHOD GetSelectionFlags(int16_t* aOutEnable) override;
+  NS_IMETHOD SetSelectionFlags(int16_t aFlags) override;
+  NS_IMETHOD GetSelectionFlags(int16_t* aFlags) override;
 
   /**
    * Gets the current state of non text selection effects
@@ -1352,10 +1331,7 @@ class PresShell final : public nsStubDocumentObserver,
   NS_IMETHOD PhysicalMove(int16_t aDirection, int16_t aAmount,
                           bool aExtend) override;
   NS_IMETHOD CharacterMove(bool aForward, bool aExtend) override;
-  NS_IMETHOD CharacterExtendForDelete() override;
-  NS_IMETHOD CharacterExtendForBackspace() override;
   NS_IMETHOD WordMove(bool aForward, bool aExtend) override;
-  NS_IMETHOD WordExtendForDelete(bool aForward) override;
   NS_IMETHOD LineMove(bool aForward, bool aExtend) override;
   NS_IMETHOD IntraLineMove(bool aForward, bool aExtend) override;
   MOZ_CAN_RUN_SCRIPT
@@ -1826,7 +1802,6 @@ class PresShell final : public nsStubDocumentObserver,
   void AddUserSheet(StyleSheet*);
   void AddAgentSheet(StyleSheet*);
   void AddAuthorSheet(StyleSheet*);
-  void RemoveSheet(StyleOrigin, StyleSheet*);
   void RemovePreferenceStyles();
 
   /**
@@ -1910,7 +1885,7 @@ class PresShell final : public nsStubDocumentObserver,
 
   class DelayedEvent {
    public:
-    virtual ~DelayedEvent() {}
+    virtual ~DelayedEvent() = default;
     virtual void Dispatch() {}
     virtual bool IsKeyPressEvent() { return false; }
   };
@@ -1940,6 +1915,7 @@ class PresShell final : public nsStubDocumentObserver,
   // Check if aEvent is a mouse event and record the mouse location for later
   // synth mouse moves.
   void RecordMouseLocation(WidgetGUIEvent* aEvent);
+  inline bool MouseLocationWasSetBySynthesizedMouseEventForTests() const;
   class nsSynthMouseMoveEvent final : public nsARefreshObserver {
    public:
     nsSynthMouseMoveEvent(PresShell* aPresShell, bool aFromScroll)
@@ -2759,7 +2735,7 @@ class PresShell final : public nsStubDocumentObserver,
     static StaticRefPtr<dom::Element> sLastKeyDownEventTargetElement;
   };
 
-  PresShell* GetRootPresShell();
+  PresShell* GetRootPresShell() const;
 
   nscolor GetDefaultBackgroundColorToDraw();
 
@@ -2832,6 +2808,10 @@ class PresShell final : public nsStubDocumentObserver,
   UniquePtr<nsCSSFrameConstructor> mFrameConstructor;
   nsViewManager* mViewManager;  // [WEAK] docViewer owns it so I don't have to
   RefPtr<nsFrameSelection> mSelection;
+  // The frame selection that last took focus on this shell, which we need to
+  // hide if we focus another selection. May or may not be the same as
+  // `mSelection`.
+  RefPtr<nsFrameSelection> mFocusedFrameSelection;
   RefPtr<nsCaret> mCaret;
   RefPtr<nsCaret> mOriginalCaret;
   RefPtr<AccessibleCaretEventHub> mAccessibleCaretEventHub;
@@ -2967,10 +2947,10 @@ class PresShell final : public nsStubDocumentObserver,
   // the mouse pointer may have changed without the mouse moving (eg scrolling,
   // change to the document contents).
   // It is set only on a presshell for a root document, this value represents
-  // the last observed location of the mouse relative to that root document. It
-  // is set to (NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE) if the mouse isn't
-  // over our window or there is no last observed mouse location for some
-  // reason.
+  // the last observed location of the mouse relative to that root document,
+  // in visual coordinates. It is set to (NS_UNCONSTRAINEDSIZE,
+  // NS_UNCONSTRAINEDSIZE) if the mouse isn't over our window or there is no
+  // last observed mouse location for some reason.
   nsPoint mMouseLocation;
   // This is an APZ state variable that tracks the target guid for the last
   // mouse event that was processed (corresponding to mMouseLocation). This is
@@ -3021,6 +3001,7 @@ class PresShell final : public nsStubDocumentObserver,
   uint32_t mFontSizeInflationMinTwips;
   uint32_t mFontSizeInflationLineThreshold;
 
+  // Can be multiple of nsISelectionDisplay::DISPLAY_*.
   int16_t mSelectionFlags;
 
   // This is used to protect ourselves from triggering reflow while in the
@@ -3160,6 +3141,10 @@ class PresShell final : public nsStubDocumentObserver,
   bool mForceUseLegacyNonPrimaryDispatch : 1;
   // Whether mForceUseLegacyNonPrimaryDispatch is initialised.
   bool mInitializedWithClickEventDispatchingBlacklist : 1;
+
+  // Set to true if mMouseLocation is set by a mouse event which is synthesized
+  // for tests.
+  bool mMouseLocationWasSetBySynthesizedMouseEventForTests : 1;
 
   struct CapturingContentInfo final {
     CapturingContentInfo()

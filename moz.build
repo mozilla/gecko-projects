@@ -42,7 +42,7 @@ with Files('GNUmakefile'):
     BUG_COMPONENT = ('Firefox Build System', 'General')
 
 with Files('*gradle*'):
-    BUG_COMPONENT = ('Firefox for Android', 'General')
+    BUG_COMPONENT = ('GeckoView', 'General')
     SCHEDULES.exclusive = ['android']
 
 with Files('*.json'):
@@ -78,21 +78,29 @@ with Files("**/reftest.list"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
     SCHEDULES.exclusive = ['reftest']
 
-with Files("**/crashtest*.list"):
+with Files("**/reftest-qr.list"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
     SCHEDULES.exclusive = ['reftest']
 
+with Files("**/crashtest*.list"):
+    SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
+    SCHEDULES.exclusive = ['crashtest']
+
+with Files("**/a11y.ini"):
+    SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
+    SCHEDULES.exclusive = ['mochitest-a11y']
+
 with Files("**/mochitest.ini"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
-    SCHEDULES.exclusive = ['mochitest']
+    SCHEDULES.exclusive = ['mochitest-plain']
 
 with Files("**/browser.ini"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
-    SCHEDULES.exclusive = ['mochitest']
+    SCHEDULES.exclusive = ['mochitest-browser-chrome']
 
 with Files("**/chrome.ini"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
-    SCHEDULES.exclusive = ['mochitest']
+    SCHEDULES.exclusive = ['mochitest-chrome']
 
 with Files("**/xpcshell.ini"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
@@ -104,7 +112,7 @@ with Files("**/reftest*/**"):
 
 with Files("**/crashtest*/**"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
-    SCHEDULES.exclusive = ['reftest']
+    SCHEDULES.exclusive = ['crashtest']
 
 with Files("**/mochitest*/**"):
     SCHEDULES.inclusive += ['test-verify', 'test-verify-gpu']
@@ -164,8 +172,6 @@ if not CONFIG['JS_STANDALONE'] or not CONFIG['MOZ_BUILD_APP']:
 
     GENERATED_FILES['buildid.h'].script = 'build/variables.py:buildid_header'
     GENERATED_FILES['source-repo.h'].script = 'build/variables.py:source_repo_header'
-    GENERATED_FILES['buildid.h'].py2 = True
-    GENERATED_FILES['source-repo.h'].py2 = True
 
     DIRS += [
         'build',
@@ -188,5 +194,7 @@ DEFINES['top_srcdir'] = TOPSRCDIR
 SPHINX_TREES['contributing'] = 'docs/contributing'
 
 SPHINX_TREES['code-quality'] = 'docs/code-quality'
+
+SPHINX_TREES['bug-mgmt'] = 'docs/bug-mgmt'
 
 include('build/templates.mozbuild')

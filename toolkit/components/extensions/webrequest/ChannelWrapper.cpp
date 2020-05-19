@@ -200,6 +200,9 @@ void ChannelWrapper::ClearCachedAttributes() {
   if (!mFiredErrorEvent) {
     ChannelWrapper_Binding::ClearCachedErrorStringValue(this);
   }
+
+  ChannelWrapper_Binding::ClearCachedRequestSizeValue(this);
+  ChannelWrapper_Binding::ClearCachedResponseSizeValue(this);
 }
 
 /*****************************************************************************
@@ -242,20 +245,35 @@ void ChannelWrapper::UpgradeToSecure(ErrorResult& aRv) {
   }
 }
 
-void ChannelWrapper::SetSuspended(bool aSuspended, ErrorResult& aRv) {
-  if (aSuspended != mSuspended) {
+void ChannelWrapper::Suspend(ErrorResult& aRv) {
+  if (!mSuspended) {
     nsresult rv = NS_ERROR_UNEXPECTED;
     if (nsCOMPtr<nsIChannel> chan = MaybeChannel()) {
-      if (aSuspended) {
-        rv = chan->Suspend();
-      } else {
-        rv = chan->Resume();
-      }
+      mSuspendTime = mozilla::TimeStamp::NowUnfuzzed();
+      rv = chan->Suspend();
     }
     if (NS_FAILED(rv)) {
       aRv.Throw(rv);
     } else {
-      mSuspended = aSuspended;
+      mSuspended = true;
+    }
+  }
+}
+
+void ChannelWrapper::Resume(const nsCString& aText, ErrorResult& aRv) {
+  if (mSuspended) {
+    nsresult rv = NS_ERROR_UNEXPECTED;
+    if (nsCOMPtr<nsIChannel> chan = MaybeChannel()) {
+      rv = chan->Resume();
+
+      PROFILER_ADD_TEXT_MARKER("Extension Suspend", aText,
+                               JS::ProfilingCategoryPair::NETWORK, mSuspendTime,
+                               mozilla::TimeStamp::NowUnfuzzed());
+    }
+    if (NS_FAILED(rv)) {
+      aRv.Throw(rv);
+    } else {
+      mSuspended = false;
     }
   }
 }
@@ -428,7 +446,7 @@ static inline bool IsSystemPrincipal(nsIPrincipal* aPrincipal) {
 
 bool ChannelWrapper::IsSystemLoad() const {
   if (nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo()) {
-    if (nsIPrincipal* prin = loadInfo->LoadingPrincipal()) {
+    if (nsIPrincipal* prin = loadInfo->GetLoadingPrincipal()) {
       return IsSystemPrincipal(prin);
     }
 
@@ -452,7 +470,7 @@ bool ChannelWrapper::CanModify() const {
   }
 
   if (nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo()) {
-    if (nsIPrincipal* prin = loadInfo->LoadingPrincipal()) {
+    if (nsIPrincipal* prin = loadInfo->GetLoadingPrincipal()) {
       if (IsSystemPrincipal(prin)) {
         return false;
       }
@@ -471,7 +489,8 @@ already_AddRefed<nsIURI> ChannelWrapper::GetOriginURI() const {
   if (nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo()) {
     if (nsIPrincipal* prin = loadInfo->TriggeringPrincipal()) {
       if (prin->GetIsContentPrincipal()) {
-        Unused << prin->GetURI(getter_AddRefs(uri));
+        auto* basePrin = BasePrincipal::Cast(prin);
+        Unused << basePrin->GetURI(getter_AddRefs(uri));
       }
     }
   }
@@ -481,9 +500,10 @@ already_AddRefed<nsIURI> ChannelWrapper::GetOriginURI() const {
 already_AddRefed<nsIURI> ChannelWrapper::GetDocumentURI() const {
   nsCOMPtr<nsIURI> uri;
   if (nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo()) {
-    if (nsIPrincipal* prin = loadInfo->LoadingPrincipal()) {
+    if (nsIPrincipal* prin = loadInfo->GetLoadingPrincipal()) {
       if (prin->GetIsContentPrincipal()) {
-        Unused << prin->GetURI(getter_AddRefs(uri));
+        auto* basePrin = BasePrincipal::Cast(prin);
+        Unused << basePrin->GetURI(getter_AddRefs(uri));
       }
     }
   }
@@ -569,7 +589,7 @@ bool ChannelWrapper::Matches(
     bool isProxy =
         aOptions.mIsProxy && aExtension->HasPermission(nsGkAtoms::proxy);
     // Proxies are allowed access to all urls, including restricted urls.
-    if (!aExtension->CanAccessURI(urlInfo, false, !isProxy)) {
+    if (!aExtension->CanAccessURI(urlInfo, false, !isProxy, true)) {
       return false;
     }
 
@@ -580,14 +600,12 @@ bool ChannelWrapper::Matches(
         return false;
       }
 
-      if (auto origin = DocumentURLInfo()) {
-        nsAutoCString baseURL;
-        aExtension->GetBaseURL(baseURL);
-
-        if (!StringBeginsWith(origin->CSpec(), baseURL) &&
-            !aExtension->CanAccessURI(*origin)) {
-          return false;
-        }
+      auto origin = DocumentURLInfo();
+      // Extensions with the file:-permission may observe requests from file:
+      // origins, because such documents can already be modified by content
+      // scripts anyway.
+      if (origin && !aExtension->CanAccessURI(*origin, false, true, true)) {
+        return false;
       }
     }
   }
@@ -681,12 +699,7 @@ nsresult ChannelWrapper::GetFrameAncestors(
 
   for (uint32_t i = 0; i < size; ++i) {
     auto ancestor = aFrameAncestors.AppendElement();
-    nsCOMPtr<nsIURI> uri;
-    MOZ_TRY(ancestorPrincipals[i]->GetURI(getter_AddRefs(uri)));
-    if (!uri) {
-      return NS_ERROR_UNEXPECTED;
-    }
-    MOZ_TRY(uri->GetSpec(ancestor->mUrl));
+    MOZ_TRY(ancestorPrincipals[i]->GetAsciiSpec(ancestor->mUrl));
     ancestor->mFrameId =
         NormalizeWindowID(aLoadInfo, ancestorOuterWindowIDs[i]);
   }
@@ -757,8 +770,6 @@ MozContentPolicyType GetContentPolicyType(uint32_t aType) {
     // TYPE_FETCH returns xmlhttprequest for cross-browser compatibility.
     case nsIContentPolicy::TYPE_FETCH:
       return MozContentPolicyType::Xmlhttprequest;
-    case nsIContentPolicy::TYPE_XBL:
-      return MozContentPolicyType::Xbl;
     case nsIContentPolicy::TYPE_XSLT:
       return MozContentPolicyType::Xslt;
     case nsIContentPolicy::TYPE_PING:
@@ -1023,8 +1034,8 @@ NS_IMPL_ISUPPORTS(ChannelWrapper::RequestListener, nsIStreamListener,
                   nsIRequestObserver, nsIThreadRetargetableStreamListener)
 
 ChannelWrapper::RequestListener::~RequestListener() {
-  NS_ReleaseOnMainThreadSystemGroup("RequestListener::mChannelWrapper",
-                                    mChannelWrapper.forget());
+  NS_ReleaseOnMainThread("RequestListener::mChannelWrapper",
+                         mChannelWrapper.forget());
 }
 
 nsresult ChannelWrapper::RequestListener::Init() {
@@ -1133,6 +1144,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ChannelWrapper,
                                                 DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStub)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ChannelWrapper,

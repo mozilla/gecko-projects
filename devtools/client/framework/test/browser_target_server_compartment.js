@@ -39,7 +39,7 @@ async function testChromeTab() {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
 
-  const [, threadFront] = await target.attachThread();
+  const threadFront = await target.attachThread();
   await threadFront.resume();
 
   const { sources } = await threadFront.getSources();
@@ -84,7 +84,7 @@ async function testMainProcess() {
   const { DevToolsServer } = customLoader.require(
     "devtools/server/devtools-server"
   );
-  const { DevToolsClient } = require("devtools/shared/client/devtools-client");
+  const { DevToolsClient } = require("devtools/client/devtools-client");
 
   DevToolsServer.init();
   DevToolsServer.registerAllActors();
@@ -104,10 +104,11 @@ async function testMainProcess() {
     Services.obs.addObserver(observe, "devtools-thread-instantiated");
   });
 
-  const target = await client.mainRoot.getMainProcess();
+  const targetDescriptor = await client.mainRoot.getMainProcess();
+  const target = await targetDescriptor.getTarget();
   await target.attach();
 
-  const [, threadFront] = await target.attachThread();
+  const threadFront = await target.attachThread();
   await threadFront.resume();
   const { sources } = await threadFront.getSources();
   ok(

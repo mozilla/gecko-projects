@@ -12,7 +12,7 @@ DISABLE_SCREEN_SAVER = False
 ADJUST_MOUSE_AND_SCREEN = False
 #####
 config = {
-    "virtualenv_modules": ['six==1.10.0', 'vcversioner==2.16.0.0'],
+    "virtualenv_modules": ['six==1.13.0', 'vcversioner==2.16.0.0'],
     ###
     "installer_path": INSTALLER_PATH,
     "xpcshell_name": XPCSHELL_NAME,
@@ -129,7 +129,6 @@ config = {
         "mochitest-webgl2-deqp": ["--subsuite=webgl2-deqp"],
         "mochitest-webgpu": ["--subsuite=webgpu"],
         "mochitest-devtools-chrome": ["--flavor=browser", "--subsuite=devtools", "--chunk-by-runtime"],
-        "mochitest-devtools-chrome-webreplay": ["--flavor=browser", "--subsuite=devtools-webreplay"],
         "mochitest-a11y": ["--flavor=a11y", "--disable-e10s"],
         "mochitest-remote": ["--flavor=browser", "--subsuite=remote"],
     },

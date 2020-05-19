@@ -1,6 +1,7 @@
 from __future__ import print_function
 import array
 import os
+import sys
 from collections import defaultdict, namedtuple
 
 from mozlog import structuredlog
@@ -325,8 +326,11 @@ def write_new_expected(metadata_path, expected):
         tmp_path = path + ".tmp"
         try:
             with open(tmp_path, "wb") as f:
-                f.write(manifest_str)
-            os.rename(tmp_path, path)
+                f.write(manifest_str.encode("utf8"))
+            if sys.version_info >= (3, 3):
+                os.replace(tmp_path, path)
+            else:
+                os.rename(tmp_path, path)
         except (Exception, KeyboardInterrupt):
             try:
                 os.unlink(tmp_path)
@@ -497,6 +501,9 @@ class ExpectedUpdater(object):
         return dir_id, self.id_test_map[dir_id]
 
     def lsan_leak(self, data):
+        if data["scope"] == "/":
+            logger.warning("Not updating lsan annotations for root scope")
+            return
         dir_id, test_data = self.test_for_scope(data)
         test_data.set(dir_id, None, "lsan",
                       self.run_info, (data["frames"], data.get("allowed_match")))
@@ -504,6 +511,9 @@ class ExpectedUpdater(object):
             test_data.set_requires_update()
 
     def mozleak_object(self, data):
+        if data["scope"] == "/":
+            logger.warning("Not updating mozleak annotations for root scope")
+            return
         dir_id, test_data = self.test_for_scope(data)
         test_data.set(dir_id, None, "leak-object",
                       self.run_info, ("%s:%s", (data["process"], data["name"]),
@@ -512,6 +522,9 @@ class ExpectedUpdater(object):
             test_data.set_requires_update()
 
     def mozleak_total(self, data):
+        if data["scope"] == "/":
+            logger.warning("Not updating mozleak annotations for root scope")
+            return
         if data["bytes"]:
             dir_id, test_data = self.test_for_scope(data)
             test_data.set(dir_id, None, "leak-threshold",

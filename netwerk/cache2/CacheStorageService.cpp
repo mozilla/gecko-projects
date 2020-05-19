@@ -1092,7 +1092,7 @@ static bool AddExactEntry(CacheEntryTable* aEntries, nsACString const& aKey,
   }
 
   LOG(("AddExactEntry [entry=%p put]", aEntry));
-  aEntries->Put(aKey, aEntry);
+  aEntries->Put(aKey, RefPtr{aEntry});
   return true;
 }
 
@@ -1587,7 +1587,7 @@ nsresult CacheStorageService::AddStorageEntry(
       // Entry is not in the hashtable or has just been truncated...
       entry = new CacheEntry(aContextKey, aURI, aIdExtension, aWriteToDisk,
                              aSkipSizeCheck, aPin);
-      entries->Put(entryKey, entry);
+      entries->Put(entryKey, RefPtr{entry});
       LOG(("  new entry %p for %s", entry.get(), entryKey.get()));
     }
 
@@ -2270,13 +2270,12 @@ CacheStorageService::CollectReports(nsIHandleReportCallback* aHandleReport,
         }
       }
 
-      // These key names are not privacy-sensitive.
       aHandleReport->Callback(
           EmptyCString(),
           nsPrintfCString(
               "explicit/network/cache2/%s-storage(%s)",
               table->Type() == CacheEntryTable::MEMORY_ONLY ? "memory" : "disk",
-              iter1.Key().BeginReading()),
+              aAnonymize ? "<anonymized>" : iter1.Key().BeginReading()),
           nsIMemoryReporter::KIND_HEAP, nsIMemoryReporter::UNITS_BYTES, size,
           NS_LITERAL_CSTRING("Memory used by the cache storage."), aData);
     }

@@ -15,6 +15,8 @@
 namespace mozilla {
 namespace layers {
 
+class SynchronousTask;
+
 class VideoBridgeChild final : public PVideoBridgeChild,
                                public TextureForwarder {
  public:
@@ -55,7 +57,7 @@ class VideoBridgeChild final : public PVideoBridgeChild,
 
   // ClientIPCAllocator
   base::ProcessId GetParentPid() const override { return OtherPid(); }
-  MessageLoop* GetMessageLoop() const override { return mMessageLoop; }
+  nsISerialEventTarget* GetThread() const override { return mThread; }
   void CancelWaitForNotifyNotUsed(uint64_t aTextureId) override {
     MOZ_ASSERT(false, "NO RECYCLING HERE");
   }
@@ -69,13 +71,22 @@ class VideoBridgeChild final : public PVideoBridgeChild,
 
  protected:
   void HandleFatalError(const char* aMsg) const override;
+  bool DispatchAllocShmemInternal(size_t aSize,
+                                  SharedMemory::SharedMemoryType aType,
+                                  mozilla::ipc::Shmem* aShmem, bool aUnsafe);
+  void ProxyAllocShmemNow(SynchronousTask* aTask, size_t aSize,
+                          SharedMemory::SharedMemoryType aType,
+                          mozilla::ipc::Shmem* aShmem, bool aUnsafe,
+                          bool* aSuccess);
+  void ProxyDeallocShmemNow(SynchronousTask* aTask, mozilla::ipc::Shmem* aShmem,
+                            bool* aResult);
 
  private:
   VideoBridgeChild();
   virtual ~VideoBridgeChild();
 
   RefPtr<VideoBridgeChild> mIPDLSelfRef;
-  MessageLoop* mMessageLoop;
+  nsCOMPtr<nsISerialEventTarget> mThread;
   bool mCanSend;
 };
 

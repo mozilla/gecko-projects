@@ -6,41 +6,31 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import os
 import platform
-import re
 import subprocess
+import six
 import sys
 from distutils.spawn import find_executable
 from distutils.version import StrictVersion
+from six.moves import input
 
 from mozbuild.base import MozbuildObject
+from mozbuild.util import ensure_subprocess_env
 from mozboot.util import get_state_dir
 from mozterm import Terminal
 
 from ..cli import BaseTryParser
 from ..tasks import generate_tasks, filter_tasks_by_paths
 from ..push import check_working_directory, push_to_try, generate_try_task_config
-from ..util.estimates import download_task_history_data, make_trimmed_taskgraph_cache
+from ..util.manage_estimates import download_task_history_data, make_trimmed_taskgraph_cache
+
+from taskgraph.target_tasks import filter_tasks_by_blacklist
 
 terminal = Terminal()
 
 here = os.path.abspath(os.path.dirname(__file__))
 build = MozbuildObject.from_environment(cwd=here)
 
-PREVIEW_SCRIPT = os.path.join(build.topsrcdir, 'tools/tryselect/preview.py')
-
-# Some tasks show up in the target task set, but are either special cases
-# or uncommon enough that they should only be selectable with --full.
-TARGET_TASK_FILTERS = (
-    '.*-ccov\/.*',
-    'windows10-aarch64/opt.*',
-    '.*win64-aarch64-laptop.*',
-    '.*windows10-64-ref-hw-2017.*',
-    'android-hw.*',
-    '.*android-geckoview-docs.*',
-    'linux1804-32.*',   # hide linux32 tests - bug 1599197
-    r'linux-.*',  # hide all linux32 tasks by default - bug 1599197
-)
-
+PREVIEW_SCRIPT = os.path.join(build.topsrcdir, 'tools/tryselect/selectors/preview.py')
 
 FZF_NOT_FOUND = """
 Could not find the `fzf` binary.
@@ -59,7 +49,7 @@ editor integrations, download the appropriate binary and put it on your $PATH:
 FZF_VERSION_FAILED = """
 Could not obtain the 'fzf' version.
 
-The 'mach try fuzzy' command depends on fzf, and requires version > 0.18.0
+The 'mach try fuzzy' command depends on fzf, and requires version > 0.20.0
 for some of the features. Please install it following the appropriate
 instructions for your platform:
 
@@ -150,20 +140,26 @@ class FuzzyParser(BaseTryParser):
           'default': False,
           'help': "Show task duration estimates.",
           }],
-
+        [['--disable-target-task-filter'],
+         {'action': 'store_true',
+          'default': False,
+          'help': "Some tasks run on mozilla-central but are filtered out "
+                  "of the default list due to resource constraints. This flag "
+                  "disables this filtering."
+          }],
     ]
     common_groups = ['push', 'task', 'preset']
     task_configs = [
         'artifact',
         'browsertime',
         'chemspill-prio',
-        'ubuntu-bionic',
         'disable-pgo',
         'env',
         'gecko-profile',
         'path',
         'pernosco',
         'rebuild',
+        'routes',
         'worker-overrides',
     ]
 
@@ -193,11 +189,11 @@ def should_force_fzf_update(fzf_bin):
         sys.exit(1)
 
     # Some fzf versions have extra, e.g 0.18.0 (ff95134)
-    fzf_version = fzf_version.split()[0]
+    fzf_version = six.ensure_text(fzf_version.split()[0])
 
-    # 0.18.0 introduced FZF_PREVIEW_COLUMNS as an env variable
-    # in preview subprocesses, which is a feature we use.
-    if StrictVersion(fzf_version) < StrictVersion('0.18.0'):
+    # 0.20.0 introduced passing selections through a temporary file,
+    # which is good for large ctrl-a actions.
+    if StrictVersion(fzf_version) < StrictVersion('0.20.0'):
         print("fzf version is old, forcing update.")
         return True
     return False
@@ -211,11 +207,17 @@ def fzf_bootstrap(update=False):
     the install script.
     """
     fzf_bin = find_executable('fzf')
+    if fzf_bin and should_force_fzf_update(fzf_bin):
+        update = True
+
     if fzf_bin and not update:
         return fzf_bin
 
     fzf_path = os.path.join(get_state_dir(), 'fzf')
-    if update and not os.path.isdir(fzf_path):
+
+    # Bug 1623197: We only want to run fzf's `install` if it's not in the $PATH
+    # Swap to os.path.commonpath when we're not on Py2
+    if fzf_bin and update and not fzf_bin.startswith(fzf_path):
         print("fzf installed somewhere other than {}, please update manually".format(fzf_path))
         sys.exit(1)
 
@@ -238,7 +240,7 @@ def fzf_bootstrap(update=False):
 
         return fzf_bin
 
-    install = raw_input("Could not detect fzf, install it now? [y/n]: ")
+    install = input("Could not detect fzf, install it now? [y/n]: ")
     if install.lower() != 'y':
         return
 
@@ -269,7 +271,10 @@ def format_header():
 def run_fzf(cmd, tasks):
     env = dict(os.environ)
     env.update({'PYTHONPATH': os.pathsep.join([p for p in sys.path if 'requests' in p])})
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, env=env)
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
+        env=ensure_subprocess_env(env), universal_newlines=True
+    )
     out = proc.communicate('\n'.join(tasks))[0].splitlines()
 
     selected = []
@@ -280,13 +285,10 @@ def run_fzf(cmd, tasks):
     return query, selected
 
 
-def filter_target_task(task):
-    return not any(re.search(pattern, task) for pattern in TARGET_TASK_FILTERS)
-
-
 def run(update=False, query=None, intersect_query=None, try_config=None, full=False,
         parameters=None, save_query=False, push=True, message='{msg}',
-        test_paths=None, exact=False, closed_tree=False, show_estimates=False):
+        test_paths=None, exact=False, closed_tree=False, show_estimates=False,
+        disable_target_task_filter=False):
     fzf = fzf_bootstrap(update)
 
     if not fzf:
@@ -312,15 +314,17 @@ def run(update=False, query=None, intersect_query=None, try_config=None, full=Fa
         download_task_history_data(cache_dir=cache_dir)
         make_trimmed_taskgraph_cache(graph_cache, dep_cache, target_file=target_set)
 
-    if not full:
-        all_tasks = filter(filter_target_task, all_tasks)
+    if not full and not disable_target_task_filter:
+        # Put all_tasks into a list because it's used multiple times, and "filter()"
+        # returns a consumable iterator.
+        all_tasks = list(filter(filter_tasks_by_blacklist, all_tasks))
 
     if test_paths:
         all_tasks = filter_tasks_by_paths(all_tasks, test_paths)
         if not all_tasks:
             return 1
 
-    key_shortcuts = [k + ':' + v for k, v in fzf_shortcuts.iteritems()]
+    key_shortcuts = [k + ':' + v for k, v in six.iteritems(fzf_shortcuts)]
     base_cmd = [
         fzf, '-m',
         '--bind', ','.join(key_shortcuts),
@@ -331,12 +335,12 @@ def run(update=False, query=None, intersect_query=None, try_config=None, full=Fa
 
     if show_estimates:
         base_cmd.extend([
-            '--preview', 'python {} -g {} -s -c {} "{{+}}"'.format(
+            '--preview', 'python {} -g {} -s -c {} -t "{{+f}}"'.format(
                 PREVIEW_SCRIPT, dep_cache, cache_dir),
         ])
     else:
         base_cmd.extend([
-            '--preview', 'python {} "{{+}}"'.format(PREVIEW_SCRIPT),
+            '--preview', 'python {} -t "{{+f}}"'.format(PREVIEW_SCRIPT),
         ])
 
     if exact:
@@ -382,6 +386,10 @@ def run(update=False, query=None, intersect_query=None, try_config=None, full=Fa
         args.append("paths={}".format(':'.join(test_paths)))
     if args:
         msg = "{} {}".format(msg, '&'.join(args))
-    return push_to_try('fuzzy', message.format(msg=msg),
-                       try_task_config=generate_try_task_config('fuzzy', selected, try_config),
-                       push=push, closed_tree=closed_tree)
+    return push_to_try('fuzzy',
+                       message.format(msg=msg),
+                       try_task_config=generate_try_task_config('fuzzy',
+                                                                selected,
+                                                                try_config),
+                       push=push,
+                       closed_tree=closed_tree)

@@ -46,11 +46,11 @@ ASSERT_NODE_FLAGS_SPACE(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + 2);
 const DOMTokenListSupportedToken HTMLAnchorElement::sSupportedRelValues[] = {
     "noreferrer", "noopener", nullptr};
 
-HTMLAnchorElement::~HTMLAnchorElement() {}
+HTMLAnchorElement::~HTMLAnchorElement() = default;
 
-bool HTMLAnchorElement::IsInteractiveHTMLContent(bool aIgnoreTabindex) const {
+bool HTMLAnchorElement::IsInteractiveHTMLContent() const {
   return HasAttr(kNameSpaceID_None, nsGkAtoms::href) ||
-         nsGenericHTMLElement::IsInteractiveHTMLContent(aIgnoreTabindex);
+         nsGenericHTMLElement::IsInteractiveHTMLContent();
 }
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLAnchorElement,
@@ -149,7 +149,7 @@ bool HTMLAnchorElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
     return true;
   }
 
-  if (!HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex)) {
+  if (GetTabIndexAttrValue().isNothing()) {
     // check whether we're actually a link
     if (!Link::HasURI()) {
       // Not tabbable or focusable without href (bug 17605), unless

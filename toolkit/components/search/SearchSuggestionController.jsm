@@ -24,6 +24,10 @@ const BROWSER_SUGGEST_PRIVATE_PREF = "browser.search.suggest.enabled.private";
 const REMOTE_TIMEOUT_PREF = "browser.search.suggest.timeout";
 const REMOTE_TIMEOUT_DEFAULT = 500; // maximum time (ms) to wait before giving up on a remote suggestions
 
+const SEARCH_DATA_TRANSFERRED_SCALAR = "browser.search.data_transferred";
+const SEARCH_TELEMETRY_KEY_PREFIX = "sggt";
+const SEARCH_TELEMETRY_PRIVATE_BROWSING_KEY_SUFFIX = "pb";
+
 XPCOMUtils.defineLazyServiceGetter(
   this,
   "UUIDGenerator",
@@ -40,6 +44,55 @@ XPCOMUtils.defineLazyServiceGetter(
 function uuid() {
   let uuid = UUIDGenerator.generateUUID().toString();
   return uuid.slice(1, uuid.length - 1);
+}
+
+/**
+ * Represents a search suggestion.
+ * TODO: Support other Google tail fields: `a`, `dc`, `i`, `q`, `ansa`,
+ * `ansb`, `ansc`, `du`. See bug 1626897 comment 2.
+ */
+class SearchSuggestionEntry {
+  /**
+   * Creates an entry.
+   * @param {string} value
+   *   The suggestion as a full-text string. Suitable for display directly to
+   *   the user.
+   * @param {string} [matchPrefix]
+   *   Represents the part of a tail suggestion that is already typed. For
+   *   example, Google returns "…" as the match prefix to replace
+   *   "what time is it in" in a tail suggestion for the query
+   *   "what time is it in t".
+   * @param {string} [tail]
+   *   Represents the suggested part of a tail suggestion. For example, Google
+   *   might return "toronto" as the tail for the query "what time is it in t".
+   */
+  constructor(value, { matchPrefix, tail } = {}) {
+    this._value = value;
+    this._matchPrefix = matchPrefix;
+    this._tail = tail;
+  }
+
+  /**
+   * Returns true if `otherEntry` is equivalent to this instance of
+   * SearchSuggestionEntry.
+   * @param {SearchSuggestionEntry} otherEntry
+   * @returns {boolean}
+   */
+  equals(otherEntry) {
+    return otherEntry.value == this.value;
+  }
+
+  get value() {
+    return this._value;
+  }
+
+  get matchPrefix() {
+    return this._matchPrefix;
+  }
+
+  get tail() {
+    return this._tail;
+  }
 }
 
 // Maps each engine name to a unique firstPartyDomain, so that requests to
@@ -130,7 +183,11 @@ SearchSuggestionController.prototype = {
    * @param {nsISearchEngine} engine - search engine for the suggestions.
    * @param {int} userContextId - the userContextId of the selected tab.
    *
-   * @returns {Promise} resolving to an object containing results or null.
+   * @returns {Promise} resolving to an object with the following contents:
+   * @returns {array<SearchSuggestionEntry>} results.local
+   *   Contains local search suggestions.
+   * @returns {array<SearchSuggestionEntry>} results.remote
+   *   Contains remote search suggestions.
    */
   fetch(searchTerm, privateMode, engine, userContextId = 0) {
     // There is no smart filtering from previous results here (as there is when looking through
@@ -275,6 +332,36 @@ SearchSuggestionController.prototype = {
   },
 
   /**
+   * Report bandwidth used by search activities. It only reports when it matches
+   * search provider information.
+   *
+   * @param {string} engineId the name of the search provider.
+   * @param {boolean} privateMode set to true if this is coming from a private browsing mode request.
+   */
+  _reportBandwidthForEngine(engineId, privateMode) {
+    if (!this._request || !this._request.channel) {
+      return;
+    }
+
+    let channel = ChannelWrapper.get(this._request.channel);
+    let bytesTransferred = channel.requestSize + channel.responseSize;
+    if (bytesTransferred == 0) {
+      return;
+    }
+
+    let telemetryKey = `${SEARCH_TELEMETRY_KEY_PREFIX}-${engineId}`;
+    if (privateMode) {
+      telemetryKey += `-${SEARCH_TELEMETRY_PRIVATE_BROWSING_KEY_SUFFIX}`;
+    }
+
+    Services.telemetry.keyedScalarAdd(
+      SEARCH_DATA_TRANSFERRED_SCALAR,
+      telemetryKey,
+      bytesTransferred
+    );
+  },
+
+  /**
    * Fetch suggestions from the search engine over the network.
    *
    * @param {string} searchTerm
@@ -324,18 +411,22 @@ SearchSuggestionController.prototype = {
 
     this._request.mozBackgroundRequest = true; // suppress dialogs and fail silently
 
+    let engineId = engine.identifier || "other";
+
     this._request.addEventListener(
       "load",
-      this._onRemoteLoaded.bind(this, deferredResponse)
+      this._onRemoteLoaded.bind(this, deferredResponse, engineId, privateMode)
     );
-    this._request.addEventListener("error", evt =>
-      deferredResponse.resolve("HTTP error")
-    );
+    this._request.addEventListener("error", evt => {
+      this._reportBandwidthForEngine(engineId, privateMode);
+      deferredResponse.resolve("HTTP error");
+    });
     // Reject for an abort assuming it's always from .stop() in which case we shouldn't return local
     // or remote results for existing searches.
-    this._request.addEventListener("abort", evt =>
-      deferredResponse.reject("HTTP request aborted")
-    );
+    this._request.addEventListener("abort", evt => {
+      this._reportBandwidthForEngine(engineId, privateMode);
+      deferredResponse.reject("HTTP request aborted");
+    });
 
     if (submission.postData) {
       this._request.sendInputStream(submission.postData);
@@ -352,15 +443,21 @@ SearchSuggestionController.prototype = {
    *
    * @param {Promise} deferredResponse
    *   The promise to resolve when a response is received.
+   * @param {string} engineId
+   *   The name of the search provider.
+   * @param {boolean} privateMode
+   *   Set to true if this is coming from a private browsing mode request.
    * @private
    */
-  _onRemoteLoaded(deferredResponse) {
+  _onRemoteLoaded(deferredResponse, engineId, privateMode) {
     if (!this._request) {
       deferredResponse.resolve(
         "Got HTTP response after the request was cancelled"
       );
       return;
     }
+
+    this._reportBandwidthForEngine(engineId, privateMode);
 
     let status, serverResults;
     try {
@@ -386,6 +483,7 @@ SearchSuggestionController.prototype = {
     }
 
     if (
+      !Array.isArray(serverResults) ||
       !serverResults[0] ||
       this._searchString.localeCompare(serverResults[0], undefined, {
         sensitivity: "base",
@@ -397,7 +495,10 @@ SearchSuggestionController.prototype = {
       );
       return;
     }
-    let results = serverResults[1] || [];
+
+    // Remove the search string from the server results since it is no longer
+    // needed.
+    let results = serverResults.slice(1) || [];
     deferredResponse.resolve({ result: results });
   },
 
@@ -438,17 +539,33 @@ SearchSuggestionController.prototype = {
       formHistoryResult: null,
     };
 
-    for (let result of suggestResults) {
+    for (let resultData of suggestResults) {
       if (typeof result === "string") {
         // Failure message
-        Cu.reportError("SearchSuggestionController: " + result);
-      } else if (result.formHistoryResult) {
+        Cu.reportError(
+          "SearchSuggestionController found an unexpected string value: " +
+            resultData
+        );
+      } else if (resultData.formHistoryResult) {
         // Local results have a formHistoryResult property.
-        results.formHistoryResult = result.formHistoryResult;
-        results.local = result.result || [];
-      } else {
+        results.formHistoryResult = resultData.formHistoryResult;
+        if (resultData.result) {
+          results.local = resultData.result.map(
+            s => new SearchSuggestionEntry(s)
+          );
+        }
+      } else if (resultData.result) {
         // Remote result
-        results.remote = result.result || [];
+        let richSuggestionData = this._getRichSuggestionData(resultData.result);
+        let fullTextSuggestions = resultData.result[0];
+        for (let i = 0; i < fullTextSuggestions.length; ++i) {
+          results.remote.push(
+            this._newSearchSuggestionEntry(
+              fullTextSuggestions[i],
+              richSuggestionData?.[i]
+            )
+          );
+        }
       }
     }
 
@@ -457,12 +574,13 @@ SearchSuggestionController.prototype = {
       results.local = results.local.slice(0, this.maxLocalResults);
     }
 
-    // We don't want things to appear in both history and suggestions so remove entries from
-    // remote results that are already in local.
+    // We don't want things to appear in both history and suggestions so remove
+    // entries from remote results that are already in local.
     if (results.remote.length && results.local.length) {
       for (let i = 0; i < results.local.length; ++i) {
-        let term = results.local[i];
-        let dupIndex = results.remote.indexOf(term);
+        let dupIndex = results.remote.findIndex(e =>
+          e.equals(results.local[i])
+        );
         if (dupIndex != -1) {
           results.remote.splice(dupIndex, 1);
         }
@@ -481,6 +599,58 @@ SearchSuggestionController.prototype = {
     this._reset();
 
     return results;
+  },
+
+  /**
+   * Returns rich suggestion data from a remote fetch, if available.
+   * @param {array} remoteResultData
+   *  The results.remote array returned by SearchSuggestionsController.fetch.
+   * @returns {array}
+   *  An array of additional rich suggestion data. Each element should
+   *  correspond to the array of text suggestions.
+   */
+  _getRichSuggestionData(remoteResultData) {
+    if (!remoteResultData || !Array.isArray(remoteResultData)) {
+      return undefined;
+    }
+
+    for (let entry of remoteResultData) {
+      if (
+        typeof entry == "object" &&
+        entry.hasOwnProperty("google:suggestdetail")
+      ) {
+        let richData = entry["google:suggestdetail"];
+        if (
+          Array.isArray(richData) &&
+          richData.length == remoteResultData[0].length
+        ) {
+          return richData;
+        }
+      }
+    }
+    return undefined;
+  },
+
+  /**
+   * Given a text suggestion and rich suggestion data, returns a
+   * SearchSuggestionEntry.
+   * @param {string} suggestion
+   *   A suggestion string.
+   * @param {object} richSuggestionData
+   *   Rich suggestion data returned by the engine. In Google's case, this is
+   *   the corresponding entry at "google:suggestdetail".
+   * @returns {SearchSuggestionEntry}
+   */
+  _newSearchSuggestionEntry(suggestion, richSuggestionData) {
+    if (richSuggestionData) {
+      // We have valid rich suggestions.
+      return new SearchSuggestionEntry(suggestion, {
+        matchPrefix: richSuggestionData?.mp,
+        tail: richSuggestionData?.t,
+      });
+    }
+    // Return a regular suggestion.
+    return new SearchSuggestionEntry(suggestion);
   },
 
   _reset() {

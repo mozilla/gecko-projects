@@ -113,7 +113,7 @@ gfxUserFontEntry::gfxUserFontEntry(
       mLoader(nullptr),
       mFontSet(aFontSet) {
   mIsUserFontContainer = true;
-  mSrcList = aFontFaceSrcList;
+  mSrcList = aFontFaceSrcList.Clone();
   mSrcIndex = 0;
   mWeightRange = aWeight;
   mStretchRange = aStretch;
@@ -139,8 +139,8 @@ void gfxUserFontEntry::UpdateAttributes(
   mWeightRange = aWeight;
   mStretchRange = aStretch;
   mStyleRange = aStyle;
-  mFeatureSettings = aFeatureSettings;
-  mVariationSettings = aVariationSettings;
+  mFeatureSettings = aFeatureSettings.Clone();
+  mVariationSettings = aVariationSettings.Clone();
   mLanguageOverride = aLanguageOverride;
   mCharacterMap = aUnicodeRanges;
   mRangeFlags = aRangeFlags;
@@ -705,11 +705,10 @@ bool gfxUserFontEntry::LoadPlatformFontSync(const uint8_t* aFontData,
                           std::move(messages));
 }
 
-void gfxUserFontEntry::StartPlatformFontLoadOnWorkerThread(
+void gfxUserFontEntry::StartPlatformFontLoadOnBackgroundThread(
     const uint8_t* aFontData, uint32_t aLength,
     nsMainThreadPtrHandle<nsIFontLoadCompleteCallback> aCallback) {
-  MOZ_ASSERT(sFontLoadingThread);
-  MOZ_ASSERT(sFontLoadingThread->IsOnCurrentThread());
+  MOZ_ASSERT(!NS_IsMainThread());
 
   uint32_t saneLen;
   gfxUserFontType fontType;
@@ -921,12 +920,6 @@ void gfxUserFontEntry::FontDataDownloadComplete(
 void gfxUserFontEntry::LoadPlatformFontAsync(
     const uint8_t* aFontData, uint32_t aLength,
     nsIFontLoadCompleteCallback* aCallback) {
-  // Ensure the font loading thread is available.
-  if (!sFontLoadingThread) {
-    sFontLoadingThread =
-        new LazyIdleThread(5000, NS_LITERAL_CSTRING("FontLoader"));
-  }
-
   nsMainThreadPtrHandle<nsIFontLoadCompleteCallback> cb(
       new nsMainThreadPtrHolder<nsIFontLoadCompleteCallback>("FontLoader",
                                                              aCallback));
@@ -943,11 +936,10 @@ void gfxUserFontEntry::LoadPlatformFontAsync(
   nsCOMPtr<nsIRunnable> event =
       NewRunnableMethod<const uint8_t*, uint32_t,
                         nsMainThreadPtrHandle<nsIFontLoadCompleteCallback>>(
-          "gfxUserFontEntry::StartPlatformFontLoadOnWorkerThread", this,
-          &gfxUserFontEntry::StartPlatformFontLoadOnWorkerThread, aFontData,
+          "gfxUserFontEntry::StartPlatformFontLoadOnBackgroundThread", this,
+          &gfxUserFontEntry::StartPlatformFontLoadOnBackgroundThread, aFontData,
           aLength, cb);
-  MOZ_ALWAYS_SUCCEEDS(
-      sFontLoadingThread->Dispatch(event.forget(), NS_DISPATCH_NORMAL));
+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchBackgroundTask(event.forget()));
 }
 
 void gfxUserFontEntry::ContinuePlatformFontLoadOnMainThread(
@@ -1138,7 +1130,7 @@ gfxUserFontFamily* gfxUserFontSet::GetFamily(const nsACString& aFamilyName) {
   gfxUserFontFamily* family = mFontFamilies.GetWeak(key);
   if (!family) {
     family = new gfxUserFontFamily(aFamilyName);
-    mFontFamilies.Put(key, family);
+    mFontFamilies.Put(key, RefPtr{family});
   }
   return family;
 }
@@ -1423,8 +1415,6 @@ gfxUserFontSet::UserFontCache::MemoryReporter::CollectReports(
 
   return NS_OK;
 }
-
-StaticRefPtr<LazyIdleThread> gfxUserFontEntry::sFontLoadingThread;
 
 #ifdef DEBUG_USERFONT_CACHE
 

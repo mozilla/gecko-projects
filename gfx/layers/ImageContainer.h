@@ -146,6 +146,7 @@ class SharedPlanarYCbCrImage;
 class SharedSurfacesAnimation;
 class PlanarYCbCrImage;
 class TextureClient;
+class TextureClientRecycleAllocator;
 class KnowsCompositor;
 class NVImage;
 #ifdef XP_WIN
@@ -157,7 +158,7 @@ struct ImageBackendData {
   virtual ~ImageBackendData() = default;
 
  protected:
-  ImageBackendData() {}
+  ImageBackendData() = default;
 };
 
 /* Forward declarations for Image derivatives. */
@@ -280,7 +281,7 @@ class BufferRecycleBin final {
   typedef mozilla::Mutex Mutex;
 
   // Private destructor, to discourage deletion outside of Release():
-  ~BufferRecycleBin() {}
+  ~BufferRecycleBin() = default;
 
   // This protects mRecycledBuffers, mRecycledBufferSize, mRecycledTextures
   // and mRecycledTextureSizes
@@ -314,7 +315,7 @@ class ImageFactory {
  protected:
   friend class ImageContainer;
 
-  ImageFactory() {}
+  ImageFactory() = default;
   virtual ~ImageFactory() = default;
 
   virtual RefPtr<PlanarYCbCrImage> CreatePlanarYCbCrImage(
@@ -546,9 +547,11 @@ class ImageContainer final : public SupportsWeakPtr<ImageContainer> {
 
   ImageFactory* GetImageFactory() const { return mImageFactory; }
 
+  void EnsureRecycleAllocatorForRDD(KnowsCompositor* aKnowsCompositor);
+
 #ifdef XP_WIN
   D3D11YCbCrRecycleAllocator* GetD3D11YCbCrRecycleAllocator(
-      KnowsCompositor* aAllocator);
+      KnowsCompositor* aKnowsCompositor);
 #endif
 
   /**
@@ -629,6 +632,8 @@ class ImageContainer final : public SupportsWeakPtr<ImageContainer> {
   // RecursiveMutex to protect thread safe access to the "current
   // image", and any other state which is shared between threads.
   RecursiveMutex mRecursiveMutex;
+
+  RefPtr<TextureClientRecycleAllocator> mRecycleAllocator;
 
 #ifdef XP_WIN
   RefPtr<D3D11YCbCrRecycleAllocator> mD3D11YCbCrRecycleAllocator;

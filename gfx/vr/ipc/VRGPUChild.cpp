@@ -5,7 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "VRGPUChild.h"
+
 #include "mozilla/layers/CompositorThread.h"
+#include "VRManager.h"
 
 namespace mozilla {
 namespace gfx {
@@ -54,7 +56,7 @@ void VRGPUChild::Shutdown() {
 
 void VRGPUChild::ActorDestroy(ActorDestroyReason aWhy) {
   VRManager* vm = VRManager::Get();
-  mozilla::layers::CompositorThreadHolder::Loop()->PostTask(
+  mozilla::layers::CompositorThread()->Dispatch(
       NewRunnableMethod("VRGPUChild::ActorDestroy", vm, &VRManager::Shutdown));
 
   mClosed = true;

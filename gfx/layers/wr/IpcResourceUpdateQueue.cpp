@@ -249,39 +249,26 @@ bool ShmSegmentsReader::Read(const layers::OffsetRange& aRange,
 }
 
 IpcResourceUpdateQueue::IpcResourceUpdateQueue(
-    layers::WebRenderBridgeChild* aAllocator, wr::RenderRoot aRenderRoot,
-    size_t aChunkSize)
-    : mWriter(aAllocator, aChunkSize), mRenderRoot(aRenderRoot) {}
+    layers::WebRenderBridgeChild* aAllocator, size_t aChunkSize)
+    : mWriter(aAllocator, aChunkSize) {}
 
 IpcResourceUpdateQueue::IpcResourceUpdateQueue(
     IpcResourceUpdateQueue&& aOther) noexcept
     : mWriter(std::move(aOther.mWriter)),
-      mUpdates(std::move(aOther.mUpdates)),
-      mRenderRoot(aOther.mRenderRoot) {
-  for (auto renderRoot : wr::kNonDefaultRenderRoots) {
-    mSubQueues[renderRoot] = std::move(aOther.mSubQueues[renderRoot]);
-  }
-}
+      mUpdates(std::move(aOther.mUpdates)) {}
 
 IpcResourceUpdateQueue& IpcResourceUpdateQueue::operator=(
     IpcResourceUpdateQueue&& aOther) noexcept {
   MOZ_ASSERT(IsEmpty(), "Will forget existing updates!");
   mWriter = std::move(aOther.mWriter);
   mUpdates = std::move(aOther.mUpdates);
-  mRenderRoot = aOther.mRenderRoot;
-  for (auto renderRoot : wr::kNonDefaultRenderRoots) {
-    mSubQueues[renderRoot] = std::move(aOther.mSubQueues[renderRoot]);
-  }
   return *this;
 }
 
 void IpcResourceUpdateQueue::ReplaceResources(IpcResourceUpdateQueue&& aOther) {
   MOZ_ASSERT(IsEmpty(), "Will forget existing updates!");
-  MOZ_ASSERT(!aOther.HasAnySubQueue(), "Subqueues will be lost!");
-  MOZ_ASSERT(mRenderRoot == aOther.mRenderRoot);
   mWriter = std::move(aOther.mWriter);
   mUpdates = std::move(aOther.mUpdates);
-  mRenderRoot = aOther.mRenderRoot;
 }
 
 bool IpcResourceUpdateQueue::AddImage(ImageKey key,
@@ -309,9 +296,15 @@ bool IpcResourceUpdateQueue::AddBlobImage(BlobImageKey key,
   return true;
 }
 
-void IpcResourceUpdateQueue::AddExternalImage(wr::ExternalImageId aExtId,
-                                              wr::ImageKey aKey) {
-  mUpdates.AppendElement(layers::OpAddExternalImage(aExtId, aKey));
+void IpcResourceUpdateQueue::AddPrivateExternalImage(
+    wr::ExternalImageId aExtId, wr::ImageKey aKey, wr::ImageDescriptor aDesc) {
+  mUpdates.AppendElement(
+      layers::OpAddPrivateExternalImage(aExtId, aKey, aDesc));
+}
+
+void IpcResourceUpdateQueue::AddSharedExternalImage(wr::ExternalImageId aExtId,
+                                                    wr::ImageKey aKey) {
+  mUpdates.AppendElement(layers::OpAddSharedExternalImage(aExtId, aKey));
 }
 
 void IpcResourceUpdateQueue::PushExternalImageForTexture(
@@ -351,11 +344,17 @@ bool IpcResourceUpdateQueue::UpdateBlobImage(BlobImageKey aKey,
   return true;
 }
 
-void IpcResourceUpdateQueue::UpdateExternalImage(wr::ExternalImageId aExtId,
-                                                 wr::ImageKey aKey,
-                                                 ImageIntRect aDirtyRect) {
+void IpcResourceUpdateQueue::UpdatePrivateExternalImage(
+    wr::ExternalImageId aExtId, wr::ImageKey aKey,
+    const wr::ImageDescriptor& aDesc, ImageIntRect aDirtyRect) {
   mUpdates.AppendElement(
-      layers::OpUpdateExternalImage(aExtId, aKey, aDirtyRect));
+      layers::OpUpdatePrivateExternalImage(aExtId, aKey, aDesc, aDirtyRect));
+}
+
+void IpcResourceUpdateQueue::UpdateSharedExternalImage(
+    wr::ExternalImageId aExtId, wr::ImageKey aKey, ImageIntRect aDirtyRect) {
+  mUpdates.AppendElement(
+      layers::OpUpdateSharedExternalImage(aExtId, aKey, aDirtyRect));
 }
 
 void IpcResourceUpdateQueue::SetBlobImageVisibleArea(
@@ -432,12 +431,6 @@ bool IpcResourceUpdateQueue::IsEmpty() const {
 void IpcResourceUpdateQueue::Clear() {
   mWriter.Clear();
   mUpdates.Clear();
-
-  for (auto& subQueue : mSubQueues) {
-    if (subQueue) {
-      subQueue->Clear();
-    }
-  }
 }
 
 // static

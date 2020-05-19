@@ -7,19 +7,19 @@
 #ifndef mozilla_dom_Promise_h
 #define mozilla_dom_Promise_h
 
+#include <type_traits>
 #include <utility>
 
+#include "js/Promise.h"
 #include "js/TypeDecls.h"
 #include "jspubtd.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/ToJSValue.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 
@@ -139,15 +139,15 @@ class Promise : public nsISupports, public SupportsWeakPtr<Promise> {
     MaybeReject(std::move(res));
   }
 
-  inline void MaybeRejectWithTypeError(const nsAString& aMessage) {
+  inline void MaybeRejectWithTypeError(const nsACString& aMessage) {
     ErrorResult res;
     res.ThrowTypeError(aMessage);
     MaybeReject(std::move(res));
   }
 
   template <int N>
-  void MaybeRejectWithTypeError(const char16_t (&aMessage)[N]) {
-    MaybeRejectWithTypeError(nsLiteralString(aMessage));
+  void MaybeRejectWithTypeError(const char (&aMessage)[N]) {
+    MaybeRejectWithTypeError(nsLiteralCString(aMessage));
   }
 
   template <ErrNum errorNumber, typename... Ts>
@@ -157,15 +157,15 @@ class Promise : public nsISupports, public SupportsWeakPtr<Promise> {
     MaybeReject(std::move(res));
   }
 
-  inline void MaybeRejectWithRangeError(const nsAString& aMessage) {
+  inline void MaybeRejectWithRangeError(const nsACString& aMessage) {
     ErrorResult res;
     res.ThrowRangeError(aMessage);
     MaybeReject(std::move(res));
   }
 
   template <int N>
-  void MaybeRejectWithRangeError(const char16_t (&aMessage)[N]) {
-    MaybeRejectWithRangeError(nsLiteralString(aMessage));
+  void MaybeRejectWithRangeError(const char (&aMessage)[N]) {
+    MaybeRejectWithRangeError(nsLiteralCString(aMessage));
   }
 
   // DO NOT USE MaybeRejectBrokenly with in new code.  Promises should be
@@ -179,6 +179,15 @@ class Promise : public nsISupports, public SupportsWeakPtr<Promise> {
   void MaybeRejectBrokenly(const T& aArg);  // Not implemented by default; see
                                             // specializations in the .cpp for
                                             // the T values we support.
+
+  // Mark a settled promise as already handled so that rejections will not
+  // be reported as unhandled.
+  void SetSettledPromiseIsHandled() {
+    AutoEntryScript aes(mGlobal, "Set settled promise handled");
+    JSContext* cx = aes.cx();
+    JS::RootedObject promiseObj(cx, mPromiseObj);
+    JS::SetSettledPromiseIsHandled(cx, promiseObj);
+  }
 
   // WebIDL
 
@@ -225,15 +234,16 @@ class Promise : public nsISupports, public SupportsWeakPtr<Promise> {
 
   template <typename Callback, typename... Args>
   using IsHandlerCallback =
-      IsSame<already_AddRefed<Promise>,
-             decltype(DeclVal<Callback>()((JSContext*)(nullptr),
-                                          DeclVal<JS::Handle<JS::Value>>(),
-                                          DeclVal<Args>()...))>;
+      std::is_same<already_AddRefed<Promise>,
+                   decltype(std::declval<Callback>()(
+                       (JSContext*)(nullptr),
+                       std::declval<JS::Handle<JS::Value>>(),
+                       std::declval<Args>()...))>;
 
   template <typename Callback, typename... Args>
   using ThenResult =
-      typename EnableIf<IsHandlerCallback<Callback, Args...>::value,
-                        Result<RefPtr<Promise>, nsresult>>::Type;
+      std::enable_if_t<IsHandlerCallback<Callback, Args...>::value,
+                       Result<RefPtr<Promise>, nsresult>>;
 
   // Similar to the JavaScript Then() function. Accepts a single lambda function
   // argument, which it attaches as a native resolution handler, and returns a

@@ -47,7 +47,7 @@ class WebPlatformTestsRunnerSetup(MozbuildObject):
 
             # Note that this import may fail in non-firefox-for-android trees
             from mozrunner.devices.android_device import (verify_android_device, InstallIntent)
-            install = InstallIntent.NO if kwargs.pop('no_install') else InstallIntent.PROMPT
+            install = InstallIntent.NO if kwargs.pop('no_install') else InstallIntent.YES
             verify_android_device(self, install=install, verbose=False, xre=True, app=package_name)
 
             if kwargs["certutil_binary"] is None:
@@ -100,7 +100,6 @@ class WebPlatformTestsRunnerSetup(MozbuildObject):
         if kwargs["webdriver_binary"] is None:
             kwargs["webdriver_binary"] = self.get_binary_path("geckodriver", validate_exists=False)
 
-
         if kwargs["install_fonts"] is None:
             kwargs["install_fonts"] = True
 
@@ -108,6 +107,9 @@ class WebPlatformTestsRunnerSetup(MozbuildObject):
             # On Windows 7 --install-fonts fails, so fall back to a Firefox-specific codepath
             self.setup_fonts_firefox()
             kwargs["install_fonts"] = False
+
+        if kwargs["preload_browser"] is None:
+            kwargs["preload_browser"] = False
 
         kwargs = wptcommandline.check_args(kwargs)
 

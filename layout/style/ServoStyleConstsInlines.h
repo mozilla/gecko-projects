@@ -441,7 +441,13 @@ inline imgRequestProxy* StyleComputedImageUrl::GetImage() const {
 
 template <>
 inline bool StyleGradient::Repeating() const {
-  return IsLinear() ? AsLinear().repeating : AsRadial().repeating;
+  if (IsLinear()) {
+    return AsLinear().repeating;
+  }
+  if (IsRadial()) {
+    return AsRadial().repeating;
+  }
+  return AsConic().repeating;
 }
 
 template <>
@@ -621,9 +627,7 @@ LengthPercentage LengthPercentage::FromPercentage(float aPercentage) {
   return l;
 }
 
-bool LengthPercentage::HasPercent() const {
-  return IsPercentage() || IsCalc();
-}
+bool LengthPercentage::HasPercent() const { return IsPercentage() || IsCalc(); }
 
 bool LengthPercentage::ConvertsToLength() const { return IsLength(); }
 
@@ -637,14 +641,7 @@ CSSCoord LengthPercentage::ToLengthInCSSPixels() const {
   return AsLength().ToCSSPixels();
 }
 
-bool LengthPercentage::ConvertsToPercentage() const {
-  if (IsPercentage()) {
-    return true;
-  }
-  MOZ_ASSERT(IsLength() || !AsCalc().length.IsZero(),
-             "Should've been simplified to a percentage");
-  return false;
-}
+bool LengthPercentage::ConvertsToPercentage() const { return IsPercentage(); }
 
 float LengthPercentage::ToPercentage() const {
   MOZ_ASSERT(ConvertsToPercentage());
@@ -667,10 +664,15 @@ bool LengthPercentage::IsDefinitelyZero() const {
   if (IsPercentage()) {
     return AsPercentage()._0 == 0.0f;
   }
-  MOZ_ASSERT(!AsCalc().length.IsZero(),
-             "Should've been simplified to a percentage");
+  // calc() should've been simplified to a percentage.
   return false;
 }
+
+template <>
+CSSCoord StyleCalcNode::ResolveToCSSPixels(CSSCoord aPercentageBasis) const;
+
+template <>
+void StyleCalcNode::ScaleLengthsBy(float);
 
 CSSCoord LengthPercentage::ResolveToCSSPixels(CSSCoord aPercentageBasis) const {
   if (IsLength()) {
@@ -679,8 +681,7 @@ CSSCoord LengthPercentage::ResolveToCSSPixels(CSSCoord aPercentageBasis) const {
   if (IsPercentage()) {
     return AsPercentage()._0 * aPercentageBasis;
   }
-  auto& calc = AsCalc();
-  return calc.length.ToCSSPixels() + calc.percentage._0 * aPercentageBasis;
+  return AsCalc().node.ResolveToCSSPixels(aPercentageBasis);
 }
 
 template <typename T>
@@ -694,13 +695,11 @@ CSSCoord LengthPercentage::ResolveToCSSPixelsWith(T aPercentageGetter) const {
 }
 
 template <typename T, typename U>
-nscoord LengthPercentage::Resolve(T aPercentageGetter,
-                                  U aPercentageRounder) const {
+nscoord LengthPercentage::Resolve(T aPercentageGetter, U aRounder) const {
   static_assert(std::is_same<decltype(aPercentageGetter()), nscoord>::value,
                 "Should return app units");
-  static_assert(
-      std::is_same<decltype(aPercentageRounder(1.0f)), nscoord>::value,
-      "Should return app units");
+  static_assert(std::is_same<decltype(aRounder(1.0f)), nscoord>::value,
+                "Should return app units");
   if (ConvertsToLength()) {
     return ToLength();
   }
@@ -709,11 +708,9 @@ nscoord LengthPercentage::Resolve(T aPercentageGetter,
   }
   nscoord basis = aPercentageGetter();
   if (IsPercentage()) {
-    return aPercentageRounder(basis * AsPercentage()._0);
+    return aRounder(basis * AsPercentage()._0);
   }
-  auto& calc = AsCalc();
-  return calc.length.ToAppUnits() +
-         aPercentageRounder(basis * calc.percentage._0);
+  return AsCalc().node.Resolve(basis, aRounder);
 }
 
 nscoord LengthPercentage::Resolve(nscoord aPercentageBasis) const {
@@ -737,7 +734,7 @@ void LengthPercentage::ScaleLengthsBy(float aScale) {
     AsLength().ScaleBy(aScale);
   }
   if (IsCalc()) {
-    AsCalc().length.ScaleBy(aScale);
+    AsCalc().node.ScaleLengthsBy(aScale);
   }
 }
 
@@ -816,6 +813,11 @@ const T& StyleRect<T>::Get(mozilla::Side aSide) const {
   static_assert(sizeof(StyleRect<T>) == sizeof(T) * 4, "");
   static_assert(alignof(StyleRect<T>) == alignof(T), "");
   return reinterpret_cast<const T*>(this)[aSide];
+}
+
+template <typename T>
+T& StyleRect<T>::Get(mozilla::Side aSide) {
+  return const_cast<T&>(static_cast<const StyleRect&>(*this).Get(aSide));
 }
 
 template <typename T>
@@ -905,16 +907,22 @@ inline nsRect StyleGenericClipRect<LengthOrAuto>::ToLayoutRect(
 using RestyleHint = StyleRestyleHint;
 
 inline RestyleHint RestyleHint::RestyleSubtree() {
-  return RestyleHint::RESTYLE_SELF | RestyleHint::RESTYLE_DESCENDANTS;
+  return RESTYLE_SELF | RESTYLE_DESCENDANTS;
 }
 
 inline RestyleHint RestyleHint::RecascadeSubtree() {
-  return RestyleHint::RECASCADE_SELF | RestyleHint::RECASCADE_DESCENDANTS;
+  return RECASCADE_SELF | RECASCADE_DESCENDANTS;
 }
 
 inline RestyleHint RestyleHint::ForAnimations() {
-  return RestyleHint::RESTYLE_CSS_TRANSITIONS |
-         RestyleHint::RESTYLE_CSS_ANIMATIONS | RestyleHint::RESTYLE_SMIL;
+  return RESTYLE_CSS_TRANSITIONS | RESTYLE_CSS_ANIMATIONS | RESTYLE_SMIL;
+}
+
+inline bool RestyleHint::DefinitelyRecascadesAllSubtree() const {
+  if (!(*this & (RECASCADE_DESCENDANTS | RESTYLE_DESCENDANTS))) {
+    return false;
+  }
+  return bool(*this & (RESTYLE_SELF | RECASCADE_SELF));
 }
 
 template <>

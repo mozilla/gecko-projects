@@ -48,7 +48,7 @@ function setupTestPreferences() {
   return SpecialPowers.pushPrefEnv({
     set: [
       ["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
-      ["media.autoplay.enabled.user-gestures-needed", true],
+      ["media.autoplay.blocking_policy", 0],
       ["media.autoplay.block-event.enabled", true],
       ["media.autoplay.block-webaudio", true],
       ["media.navigator.permission.fake", true],
@@ -140,10 +140,7 @@ async function testWebAudioWithGUM(testParameters) {
     "https://example.com"
   );
   info("- create audio context -");
-  // We want the same audio context be used between different content
-  // tasks, so it *must* be loaded by frame script.
-  const mm = tab.linkedBrowser.messageManager;
-  mm.loadFrameScript("data:,(" + createAudioContext.toString() + ")();", false);
+  await SpecialPowers.spawn(tab.linkedBrowser, [], createAudioContext);
 
   info("- check whether audio context starts running -");
   try {

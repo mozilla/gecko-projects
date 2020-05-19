@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use super::super::shader_source::SHADERS;
+use super::super::shader_source::{OPTIMIZED_SHADERS, UNOPTIMIZED_SHADERS};
 use api::{ColorF, ImageDescriptor, ImageFormat, MemoryReport};
 use api::{MixBlendMode, TextureTarget, VoidPtrToSizeFn};
 use api::units::*;
@@ -12,7 +12,6 @@ use crate::internal_types::{FastHashMap, LayerIndex, RenderTargetInfo, Swizzle, 
 use crate::util::round_up_to_multiple;
 use crate::profiler;
 use log::Level;
-use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use std::{
     borrow::Cow,
@@ -33,8 +32,10 @@ use std::{
     thread,
     time::Duration,
 };
-use webrender_build::shader::ProgramSourceDigest;
-use webrender_build::shader::{ShaderSourceParser, shader_source_from_file};
+use webrender_build::shader::{
+    ProgramSourceDigest, ShaderKind, ShaderVersion, build_shader_main_string,
+    build_shader_prefix_string, do_build_shader_string, shader_source_from_file,
+};
 
 /// Sequence number for frames, as tracked by the device layer.
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
@@ -79,12 +80,6 @@ impl Add<usize> for GpuFrameId {
         GpuFrameId(self.0 + other)
     }
 }
-
-const SHADER_VERSION_GL: &str = "#version 150\n";
-const SHADER_VERSION_GLES: &str = "#version 300 es\n";
-
-const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
-const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
 
 pub struct TextureSlot(pub usize);
 
@@ -189,110 +184,27 @@ fn supports_extension(extensions: &[String], extension: &str) -> bool {
     extensions.iter().any(|s| s == extension)
 }
 
-fn get_shader_version(gl: &dyn gl::Gl) -> &'static str {
+fn get_shader_version(gl: &dyn gl::Gl) -> ShaderVersion {
     match gl.get_type() {
-        gl::GlType::Gl => SHADER_VERSION_GL,
-        gl::GlType::Gles => SHADER_VERSION_GLES,
+        gl::GlType::Gl => ShaderVersion::Gl,
+        gl::GlType::Gles => ShaderVersion::Gles,
     }
 }
 
-// Get a shader string by name, from the built in resources or
+// Get an unoptimized shader string by name, from the built in resources or
 // an override path, if supplied.
-fn get_shader_source(shader_name: &str, base_path: Option<&PathBuf>) -> Cow<'static, str> {
+pub fn get_unoptimized_shader_source(shader_name: &str, base_path: Option<&PathBuf>) -> Cow<'static, str> {
     if let Some(ref base) = base_path {
         let shader_path = base.join(&format!("{}.glsl", shader_name));
         Cow::Owned(shader_source_from_file(&shader_path))
     } else {
         Cow::Borrowed(
-            SHADERS
+            UNOPTIMIZED_SHADERS
             .get(shader_name)
             .expect("Shader not found")
             .source
         )
     }
-}
-
-/// Creates heap-allocated strings for both vertex and fragment shaders. Public
-/// to be accessible to tests.
-pub fn build_shader_strings(
-     gl_version_string: &str,
-     features: &str,
-     base_filename: &str,
-     override_path: Option<&PathBuf>,
-) -> (String, String) {
-    let mut vs_source = String::new();
-    do_build_shader_string(
-        gl_version_string,
-        features,
-        SHADER_KIND_VERTEX,
-        base_filename,
-        override_path,
-        |s| vs_source.push_str(s),
-    );
-
-    let mut fs_source = String::new();
-    do_build_shader_string(
-        gl_version_string,
-        features,
-        SHADER_KIND_FRAGMENT,
-        base_filename,
-        override_path,
-        |s| fs_source.push_str(s),
-    );
-
-    (vs_source, fs_source)
-}
-
-/// Walks the given shader string and applies the output to the provided
-/// callback. Assuming an override path is not used, does no heap allocation
-/// and no I/O.
-fn do_build_shader_string<F: FnMut(&str)>(
-    gl_version_string: &str,
-    features: &str,
-    kind: &str,
-    base_filename: &str,
-    override_path: Option<&PathBuf>,
-    mut output: F,
-) {
-    build_shader_prefix_string(gl_version_string, features, kind, base_filename, &mut output);
-    build_shader_main_string(base_filename, override_path, &mut output);
-}
-
-/// Walks the prefix section of the shader string, which manages the various
-/// defines for features etc.
-fn build_shader_prefix_string<F: FnMut(&str)>(
-    gl_version_string: &str,
-    features: &str,
-    kind: &str,
-    base_filename: &str,
-    output: &mut F,
-) {
-    // GLSL requires that the version number comes first.
-    output(gl_version_string);
-
-    // Insert the shader name to make debugging easier.
-    let name_string = format!("// {}\n", base_filename);
-    output(&name_string);
-
-    // Define a constant depending on whether we are compiling VS or FS.
-    output(kind);
-
-    // Add any defines that were passed by the caller.
-    output(features);
-}
-
-/// Walks the main .glsl file, including any imports.
-fn build_shader_main_string<F: FnMut(&str)>(
-    base_filename: &str,
-    override_path: Option<&PathBuf>,
-    output: &mut F,
-) {
-    let shared_source = get_shader_source(base_filename, override_path);
-    ShaderSourceParser::new().parse(
-        shared_source,
-        &|f| get_shader_source(f, override_path),
-        output
-    );
 }
 
 pub trait FileWatcherHandler: Send {
@@ -486,20 +398,31 @@ pub struct ExternalTexture {
     id: gl::GLuint,
     target: gl::GLuint,
     swizzle: Swizzle,
+    uv_rect: TexelRect,
 }
 
 impl ExternalTexture {
-    pub fn new(id: u32, target: TextureTarget, swizzle: Swizzle) -> Self {
+    pub fn new(
+        id: u32,
+        target: TextureTarget,
+        swizzle: Swizzle,
+        uv_rect: TexelRect,
+    ) -> Self {
         ExternalTexture {
             id,
             target: get_gl_target(target),
             swizzle,
+            uv_rect,
         }
     }
 
     #[cfg(feature = "replay")]
     pub fn internal_id(&self) -> gl::GLuint {
         self.id
+    }
+
+    pub fn get_uv_rect(&self) -> TexelRect {
+        self.uv_rect
     }
 }
 
@@ -576,6 +499,10 @@ impl Texture {
         !self.fbos_with_depth.is_empty()
     }
 
+    pub fn last_frame_used(&self) -> GpuFrameId {
+        self.last_frame_used
+    }
+
     pub fn used_in_frame(&self, frame_id: GpuFrameId) -> bool {
         self.last_frame_used == frame_id
     }
@@ -618,6 +545,13 @@ impl Texture {
             id: self.id,
             target: self.target,
             swizzle: Swizzle::default(),
+            // TODO(gw): Support custom UV rect for external textures during captures
+            uv_rect: TexelRect::new(
+                0.0,
+                0.0,
+                self.size.width as f32,
+                self.size.height as f32,
+            ),
         };
         self.id = 0; // don't complain, moved out
         ext
@@ -728,10 +662,17 @@ pub struct VBOId(gl::GLuint);
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct IBOId(gl::GLuint);
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Debug)]
+enum ProgramSourceType {
+    Unoptimized,
+    Optimized(ShaderVersion),
+}
+
+#[derive(Clone, Debug)]
 pub struct ProgramSourceInfo {
     base_filename: &'static str,
-    features: String,
+    features: Vec<&'static str>,
+    source_type: ProgramSourceType,
     digest: ProgramSourceDigest,
 }
 
@@ -739,68 +680,135 @@ impl ProgramSourceInfo {
     fn new(
         device: &Device,
         name: &'static str,
-        features: String,
+        features: &[&'static str],
     ) -> Self {
+
         // Compute the digest. Assuming the device has a `ProgramCache`, this
-        // will always be needed, whereas the source is rarely needed. As such,
-        // we compute the hash by walking the static strings in the same order
-        // as we would when concatenating the source, to avoid heap-allocating
-        // in the common case.
-        //
-        // Note that we cheat a bit to make the hashing more efficient. First,
-        // the only difference between the vertex and fragment shader is a
-        // single deterministic define, so we don't need to hash both. Second,
-        // we precompute the digest of the expanded source file at build time,
-        // and then just hash that digest here.
+        // will always be needed, whereas the source is rarely needed.
+
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::Hasher;
 
         // Setup.
-        let mut hasher = Sha256::new();
-        let version_str = get_shader_version(&*device.gl());
-        let override_path = device.resource_override_path.as_ref();
-        let source_and_digest = SHADERS.get(&name).expect("Shader not found");
+        let mut hasher = DefaultHasher::new();
+        let gl_version = get_shader_version(&*device.gl());
 
         // Hash the renderer name.
-        hasher.input(device.renderer_name.as_bytes());
+        hasher.write(device.capabilities.renderer_name.as_bytes());
 
-        // Hash the prefix string.
-        build_shader_prefix_string(
-            version_str,
-            &features,
-            &"DUMMY",
-            &name,
-            &mut |s| hasher.input(s.as_bytes()),
-        );
+        let full_name = &Self::full_name(name, features);
 
-        // Hash the shader file contents. We use a precomputed digest, and
-        // verify it in debug builds.
-        if override_path.is_some() || cfg!(debug_assertions) {
-            let mut h = Sha256::new();
-            build_shader_main_string(&name, override_path, &mut |s| h.input(s.as_bytes()));
-            let d: ProgramSourceDigest = h.into();
-            let digest = format!("{}", d);
-            debug_assert!(override_path.is_some() || digest == source_and_digest.digest);
-            hasher.input(digest.as_bytes());
+        let optimized_source = if device.use_optimized_shaders {
+            OPTIMIZED_SHADERS.get(&(gl_version, full_name)).or_else(|| {
+                warn!("Missing optimized shader source for {}", full_name);
+                None
+            })
         } else {
-            hasher.input(source_and_digest.digest.as_bytes());
+            None
+        };
+
+        let source_type = match optimized_source {
+            Some(source_and_digest) => {
+                // Optimized shader sources are used as-is, without any run-time processing.
+                // The vertex and fragment shaders are different, so must both be hashed.
+                // We use the hashes that were computed at build time, and verify it in debug builds.
+                if cfg!(debug_assertions) {
+                    let mut h = DefaultHasher::new();
+                    h.write(source_and_digest.vert_source.as_bytes());
+                    h.write(source_and_digest.frag_source.as_bytes());
+                    let d: ProgramSourceDigest = h.into();
+                    let digest = d.to_string();
+                    debug_assert_eq!(digest, source_and_digest.digest);
+                    hasher.write(digest.as_bytes());
+                } else {
+                    hasher.write(source_and_digest.digest.as_bytes());
+                }
+
+                ProgramSourceType::Optimized(gl_version)
+            }
+            None => {
+                // For non-optimized sources we compute the hash by walking the static strings
+                // in the same order as we would when concatenating the source, to avoid
+                // heap-allocating in the common case.
+                //
+                // Note that we cheat a bit to make the hashing more efficient. First, the only
+                // difference between the vertex and fragment shader is a single deterministic
+                // define, so we don't need to hash both. Second, we precompute the digest of the
+                // expanded source file at build time, and then just hash that digest here.
+                let override_path = device.resource_override_path.as_ref();
+                let source_and_digest = UNOPTIMIZED_SHADERS.get(&name).expect("Shader not found");
+
+                // Hash the prefix string.
+                build_shader_prefix_string(
+                    gl_version,
+                    &features,
+                    ShaderKind::Vertex,
+                    &name,
+                    &mut |s| hasher.write(s.as_bytes()),
+                );
+
+                // Hash the shader file contents. We use a precomputed digest, and
+                // verify it in debug builds.
+                if override_path.is_some() || cfg!(debug_assertions) {
+                    let mut h = DefaultHasher::new();
+                    build_shader_main_string(
+                        &name,
+                        &|f| get_unoptimized_shader_source(f, override_path),
+                        &mut |s| h.write(s.as_bytes())
+                    );
+                    let d: ProgramSourceDigest = h.into();
+                    let digest = format!("{}", d);
+                    debug_assert!(override_path.is_some() || digest == source_and_digest.digest);
+                    hasher.write(digest.as_bytes());
+                } else {
+                    hasher.write(source_and_digest.digest.as_bytes());
+                }
+
+                ProgramSourceType::Unoptimized
+            }
         };
 
         // Finish.
         ProgramSourceInfo {
             base_filename: name,
-            features,
+            features: features.to_vec(),
+            source_type,
             digest: hasher.into(),
         }
     }
 
-    fn compute_source(&self, device: &Device, kind: &str) -> String {
-        let mut src = String::new();
-        device.build_shader_string(
-            &self.features,
-            kind,
-            self.base_filename,
-            |s| src.push_str(s),
-        );
-        src
+    fn compute_source(&self, device: &Device, kind: ShaderKind) -> String {
+        let full_name = Self::full_name(self.base_filename, &self.features);
+        match self.source_type {
+            ProgramSourceType::Optimized(gl_version) => {
+                let shader = OPTIMIZED_SHADERS
+                    .get(&(gl_version, &full_name))
+                    .unwrap_or_else(|| panic!("Missing optimized shader source for {}", full_name));
+
+                match kind {
+                    ShaderKind::Vertex => shader.vert_source.to_string(),
+                    ShaderKind::Fragment => shader.frag_source.to_string(),
+                }
+            },
+            ProgramSourceType::Unoptimized => {
+                let mut src = String::new();
+                device.build_shader_string(
+                    &self.features,
+                    kind,
+                    self.base_filename,
+                    |s| src.push_str(s),
+                );
+                src
+            }
+        }
+    }
+
+    fn full_name(base_filename: &'static str, features: &[&'static str]) -> String {
+        if features.is_empty() {
+            base_filename.to_string()
+        } else {
+            format!("{}_{}", base_filename, features.join("_"))
+        }
     }
 }
 
@@ -830,7 +838,8 @@ impl ProgramBinary {
 
 /// The interfaces that an application can implement to handle ProgramCache update
 pub trait ProgramCacheObserver {
-    fn update_disk_cache(&self, entries: Vec<Arc<ProgramBinary>>);
+    fn save_shaders_to_disk(&self, entries: Vec<Arc<ProgramBinary>>);
+    fn set_startup_shaders(&self, entries: Vec<Arc<ProgramBinary>>);
     fn try_load_shader_from_disk(&self, digest: &ProgramSourceDigest, program_cache: &Rc<ProgramCache>);
     fn notify_program_binary_failed(&self, program_binary: &Arc<ProgramBinary>);
 }
@@ -845,12 +854,12 @@ struct ProgramCacheEntry {
 pub struct ProgramCache {
     entries: RefCell<FastHashMap<ProgramSourceDigest, ProgramCacheEntry>>,
 
-    /// True if we've already updated the disk cache with the shaders used during startup.
-    updated_disk_cache: Cell<bool>,
-
     /// Optional trait object that allows the client
     /// application to handle ProgramCache updating
     program_cache_handler: Option<Box<dyn ProgramCacheObserver>>,
+
+    /// Programs that have not yet been cached to disk (by program_cache_handler)
+    pending_entries: RefCell<Vec<Arc<ProgramBinary>>>,
 }
 
 impl ProgramCache {
@@ -858,27 +867,42 @@ impl ProgramCache {
         Rc::new(
             ProgramCache {
                 entries: RefCell::new(FastHashMap::default()),
-                updated_disk_cache: Cell::new(false),
                 program_cache_handler: program_cache_observer,
+                pending_entries: RefCell::new(Vec::default()),
             }
         )
     }
 
-    /// Notify that we've rendered the first few frames, and that the shaders
-    /// we've loaded correspond to the shaders needed during startup, and thus
-    /// should be the ones cached to disk.
-    fn startup_complete(&self) {
-        if self.updated_disk_cache.get() {
-            return;
-        }
-
+    /// Save any new program binaries to the disk cache, and if startup has
+    /// just completed then write the list of shaders to load on next startup.
+    fn update_disk_cache(&self, startup_complete: bool) {
         if let Some(ref handler) = self.program_cache_handler {
-            let active_shaders = self.entries.borrow().values()
-                .filter(|e| e.linked).map(|e| e.binary.clone())
-                .collect::<Vec<_>>();
-            handler.update_disk_cache(active_shaders);
-            self.updated_disk_cache.set(true);
+            if !self.pending_entries.borrow().is_empty() {
+                let pending_entries = self.pending_entries.replace(Vec::default());
+                handler.save_shaders_to_disk(pending_entries);
+            }
+
+            if startup_complete {
+                let startup_shaders = self.entries.borrow().values()
+                    .filter(|e| e.linked).map(|e| e.binary.clone())
+                    .collect::<Vec<_>>();
+                handler.set_startup_shaders(startup_shaders);
+            }
         }
+    }
+
+    /// Add a new ProgramBinary to the cache.
+    /// This function is typically used after compiling and linking a new program.
+    /// The binary will be saved to disk the next time update_disk_cache() is called.
+    fn add_new_program_binary(&self, program_binary: Arc<ProgramBinary>) {
+        self.pending_entries.borrow_mut().push(program_binary.clone());
+
+        let digest = program_binary.source_digest.clone();
+        let entry = ProgramCacheEntry {
+            binary: program_binary,
+            linked: true,
+        };
+        self.entries.borrow_mut().insert(digest, entry);
     }
 
     /// Load ProgramBinary to ProgramCache.
@@ -941,6 +965,8 @@ pub struct Capabilities {
     pub supports_pixel_local_storage: bool,
     /// Whether advanced blend equations are supported.
     pub supports_advanced_blend_equation: bool,
+    /// Whether dual-source blending is supported.
+    pub supports_dual_source_blending: bool,
     /// Whether KHR_debug is supported for getting debug messages from
     /// the driver.
     pub supports_khr_debug: bool,
@@ -951,6 +977,8 @@ pub struct Capabilities {
     pub supports_nonzero_pbo_offsets: bool,
     /// Whether the driver supports specifying the texture usage up front.
     pub supports_texture_usage: bool,
+    /// The name of the renderer, as reported by GL
+    pub renderer_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -984,6 +1012,31 @@ enum TexStorageUsage {
     Always,
 }
 
+/// Describes a required alignment for a stride,
+/// which can either be represented in bytes or pixels.
+#[derive(Copy, Clone, Debug)]
+pub enum StrideAlignment {
+    Bytes(NonZeroUsize),
+    Pixels(NonZeroUsize),
+}
+
+impl StrideAlignment {
+    pub fn num_bytes(&self, format: ImageFormat) -> NonZeroUsize {
+        match *self {
+            Self::Bytes(bytes) => bytes,
+            Self::Pixels(pixels) => {
+                assert!(format.bytes_per_pixel() > 0);
+                NonZeroUsize::new(pixels.get() * format.bytes_per_pixel() as usize).unwrap()
+            }
+        }
+    }
+}
+
+// We get 24 bits of Z value - use up 22 bits of it to give us
+// 4 bits to account for GPU issues. This seems to manifest on
+// some GPUs under certain perspectives due to z interpolation
+// precision problems.
+const RESERVE_DEPTH_BITS: i32 = 2;
 
 pub struct Device {
     gl: Rc<dyn gl::Gl>,
@@ -1014,6 +1067,7 @@ pub struct Device {
     color_formats: TextureFormatPair<ImageFormat>,
     bgra_formats: TextureFormatPair<gl::GLuint>,
     swizzle_settings: SwizzleSettings,
+    depth_format: gl::GLuint,
 
     /// Map from texture dimensions to shared depth buffers for render targets.
     ///
@@ -1027,9 +1081,11 @@ pub struct Device {
     // resources
     resource_override_path: Option<PathBuf>,
 
+    /// Whether to use shaders that have been optimized at build time.
+    use_optimized_shaders: bool,
+
     max_texture_size: i32,
     max_texture_layers: u32,
-    renderer_name: String,
     cached_programs: Option<Rc<ProgramCache>>,
 
     // Frame counter. This is used to map between CPU
@@ -1043,7 +1099,7 @@ pub struct Device {
     /// format, we fall back to glTexImage*.
     texture_storage_usage: TexStorageUsage,
 
-    optimal_pbo_stride: NonZeroUsize,
+    optimal_pbo_stride: StrideAlignment,
 
     /// Whether we must ensure the source strings passed to glShaderSource()
     /// are null-terminated, to work around driver bugs.
@@ -1117,7 +1173,7 @@ pub enum DrawTarget {
 
 impl DrawTarget {
     pub fn new_default(size: DeviceIntSize, surface_origin_is_top_left: bool) -> Self {
-        let total_size = FramebufferIntSize::from_untyped(size.to_untyped());
+        let total_size = device_size_as_framebuffer_size(size);
         DrawTarget::Default {
             rect: total_size.into(),
             total_size,
@@ -1158,15 +1214,15 @@ impl DrawTarget {
     /// Returns the dimensions of this draw-target.
     pub fn dimensions(&self) -> DeviceIntSize {
         match *self {
-            DrawTarget::Default { total_size, .. } => DeviceIntSize::from_untyped(total_size.to_untyped()),
+            DrawTarget::Default { total_size, .. } => total_size.cast_unit(),
             DrawTarget::Texture { dimensions, .. } => dimensions,
-            DrawTarget::External { size, .. } => DeviceIntSize::from_untyped(size.to_untyped()),
+            DrawTarget::External { size, .. } => size.cast_unit(),
             DrawTarget::NativeSurface { dimensions, .. } => dimensions,
         }
     }
 
     pub fn to_framebuffer_rect(&self, device_rect: DeviceIntRect) -> FramebufferIntRect {
-        let mut fb_rect = FramebufferIntRect::from_untyped(&device_rect.to_untyped());
+        let mut fb_rect = device_rect_as_framebuffer_rect(&device_rect);
         match *self {
             DrawTarget::Default { ref rect, surface_origin_is_top_left, .. } => {
                 // perform a Y-flip here
@@ -1201,16 +1257,16 @@ impl DrawTarget {
                         .unwrap_or_else(FramebufferIntRect::zero)
                 }
                 DrawTarget::NativeSurface { offset, .. } => {
-                    FramebufferIntRect::from_untyped(&scissor_rect.translate(offset.to_vector()).to_untyped())
+                    device_rect_as_framebuffer_rect(&scissor_rect.translate(offset.to_vector()))
                 }
                 DrawTarget::Texture { .. } | DrawTarget::External { .. } => {
-                    FramebufferIntRect::from_untyped(&scissor_rect.to_untyped())
+                    device_rect_as_framebuffer_rect(&scissor_rect)
                 }
             }
             None => {
                 FramebufferIntRect::new(
                     FramebufferIntPoint::zero(),
-                    FramebufferIntSize::from_untyped(dimensions.to_untyped()),
+                    device_size_as_framebuffer_size(dimensions),
                 )
             }
         }
@@ -1263,6 +1319,7 @@ impl Device {
     pub fn new(
         mut gl: Rc<dyn gl::Gl>,
         resource_override_path: Option<PathBuf>,
+        use_optimized_shaders: bool,
         upload_method: UploadMethod,
         cached_programs: Option<Rc<ProgramCache>>,
         allow_pixel_local_storage_support: bool,
@@ -1362,13 +1419,19 @@ impl Device {
         let is_emulator = renderer_name.starts_with("Android Emulator");
         let avoid_tex_image = is_emulator;
 
+        let supports_texture_storage = allow_texture_storage_support &&
+            match gl.get_type() {
+                gl::GlType::Gl => supports_extension(&extensions, "GL_ARB_texture_storage"),
+                // ES 3 technically always supports glTexStorage, but only check here for the extension
+                // necessary to interact with BGRA.
+                gl::GlType::Gles => supports_extension(&extensions, "GL_EXT_texture_storage"),
+            };
+        let supports_texture_swizzle = allow_texture_swizzling &&
+            (gl.get_type() == gl::GlType::Gles || supports_extension(&extensions, "GL_ARB_texture_swizzle"));
+
         let (color_formats, bgra_formats, bgra8_sampling_swizzle, texture_storage_usage) = match gl.get_type() {
             // There is `glTexStorage`, use it and expect RGBA on the input.
-            gl::GlType::Gl if
-                allow_texture_storage_support &&
-                allow_texture_swizzling &&
-                supports_extension(&extensions, "GL_ARB_texture_storage")
-            => (
+            gl::GlType::Gl if supports_texture_storage && supports_texture_swizzle => (
                 TextureFormatPair::from(ImageFormat::RGBA8),
                 TextureFormatPair { internal: gl::RGBA8, external: gl::RGBA },
                 Swizzle::Bgra, // pretend it's RGBA, rely on swizzling
@@ -1382,7 +1445,7 @@ impl Device {
                 TexStorageUsage::Never
             ),
             // We can use glTexStorage with BGRA8 as the internal format.
-            gl::GlType::Gles if supports_gles_bgra && allow_texture_storage_support && supports_extension(&extensions, "GL_EXT_texture_storage") => (
+            gl::GlType::Gles if supports_gles_bgra && supports_texture_storage => (
                 TextureFormatPair::from(ImageFormat::BGRA8),
                 TextureFormatPair { internal: gl::BGRA8_EXT, external: gl::BGRA_EXT },
                 Swizzle::Rgba, // no conversion needed
@@ -1390,7 +1453,7 @@ impl Device {
             ),
             // For BGRA8 textures we must use the unsized BGRA internal
             // format and glTexImage. If texture storage is supported we can
-            // use it for other formats.
+            // use it for other formats, which is always the case for ES 3.
             // We can't use glTexStorage with BGRA8 as the internal format.
             gl::GlType::Gles if supports_gles_bgra && !avoid_tex_image => (
                 TextureFormatPair::from(ImageFormat::RGBA8),
@@ -1400,7 +1463,7 @@ impl Device {
             ),
             // BGRA is not supported as an internal format, therefore we will
             // use RGBA. The swizzling will happen at the texture unit.
-            gl::GlType::Gles if allow_texture_swizzling => (
+            gl::GlType::Gles if supports_texture_swizzle => (
                 TextureFormatPair::from(ImageFormat::RGBA8),
                 TextureFormatPair { internal: gl::RGBA8, external: gl::RGBA },
                 Swizzle::Bgra, // pretend it's RGBA, rely on swizzling
@@ -1415,8 +1478,15 @@ impl Device {
             ),
         };
 
-        info!("GL texture cache {:?}, bgra {:?} swizzle {:?}, texture storage {:?}",
-            color_formats, bgra_formats, bgra8_sampling_swizzle, texture_storage_usage);
+        let is_software_webrender = renderer_name.starts_with("Software WebRender");
+        let (depth_format, upload_method) = if is_software_webrender {
+            (gl::DEPTH_COMPONENT16, UploadMethod::Immediate)
+        } else {
+            (gl::DEPTH_COMPONENT24, upload_method)
+        };
+
+        info!("GL texture cache {:?}, bgra {:?} swizzle {:?}, texture storage {:?}, depth {:?}",
+            color_formats, bgra_formats, bgra8_sampling_swizzle, texture_storage_usage, depth_format);
         let supports_copy_image_sub_data = supports_extension(&extensions, "GL_EXT_copy_image") ||
             supports_extension(&extensions, "GL_ARB_copy_image");
 
@@ -1444,24 +1514,35 @@ impl Device {
             supports_extension(&extensions, "GL_KHR_blend_equation_advanced") &&
             !is_adreno;
 
-        let supports_texture_swizzle = allow_texture_swizzling &&
-            (gl.get_type() == gl::GlType::Gles || supports_extension(&extensions, "GL_ARB_texture_storage"));
+        let supports_dual_source_blending = match gl.get_type() {
+            gl::GlType::Gl => supports_extension(&extensions,"GL_ARB_blend_func_extended") &&
+                supports_extension(&extensions,"GL_ARB_explicit_attrib_location"),
+            gl::GlType::Gles => supports_extension(&extensions,"GL_EXT_blend_func_extended"),
+        };
 
+        // Software webrender relies on the unoptimized shader source.
+        let use_optimized_shaders = use_optimized_shaders && !is_software_webrender;
 
         // On the android emulator, glShaderSource can crash if the source
         // strings are not null-terminated. See bug 1591945.
         let requires_null_terminated_shader_source = is_emulator;
 
-        // On Adreno GPUs PBO texture upload is only performed asynchronously
-        // if the stride of the data in the PBO is a multiple of 256 bytes.
+        let is_amd_macos = cfg!(target_os = "macos") && renderer_name.starts_with("AMD");
+
+        // On certain GPUs PBO texture upload is only performed asynchronously
+        // if the stride of the data is a multiple of a certain value.
+        // On Adreno it must be a multiple of 64 pixels, meaning value in bytes
+        // varies with the texture format.
+        // On AMD Mac, it must always be a multiple of 256 bytes.
         // Other platforms may have similar requirements and should be added
         // here.
-        // The default value should be 4.
-        let is_amd_macos = cfg!(target_os = "macos") && renderer_name.starts_with("AMD");
-        let optimal_pbo_stride = if is_adreno || is_amd_macos {
-            NonZeroUsize::new(256).unwrap()
+        // The default value should be 4 bytes.
+        let optimal_pbo_stride = if is_adreno {
+            StrideAlignment::Pixels(NonZeroUsize::new(64).unwrap())
+        } else if is_amd_macos {
+            StrideAlignment::Bytes(NonZeroUsize::new(256).unwrap())
         } else {
-            NonZeroUsize::new(4).unwrap()
+            StrideAlignment::Bytes(NonZeroUsize::new(4).unwrap())
         };
 
         // On AMD Macs there is a driver bug which causes some texture uploads
@@ -1472,6 +1553,7 @@ impl Device {
             gl,
             base_gl: None,
             resource_override_path,
+            use_optimized_shaders,
             upload_method,
             inside_frame: false,
 
@@ -1481,10 +1563,12 @@ impl Device {
                 supports_blit_to_texture_array,
                 supports_pixel_local_storage,
                 supports_advanced_blend_equation,
+                supports_dual_source_blending,
                 supports_khr_debug,
                 supports_texture_swizzle,
                 supports_nonzero_pbo_offsets,
                 supports_texture_usage,
+                renderer_name,
             },
 
             color_formats,
@@ -1492,6 +1576,7 @@ impl Device {
             swizzle_settings: SwizzleSettings {
                 bgra8_sampling_swizzle,
             },
+            depth_format,
 
             depth_targets: FastHashMap::default(),
 
@@ -1508,7 +1593,6 @@ impl Device {
 
             max_texture_size,
             max_texture_layers,
-            renderer_name,
             cached_programs,
             frame_id: GpuFrameId(0),
             extensions,
@@ -1529,10 +1613,6 @@ impl Device {
 
     pub fn rc_gl(&self) -> &Rc<dyn gl::Gl> {
         &self.gl
-    }
-
-    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
-        self.cached_programs = Some(cached_programs);
     }
 
     /// Ensures that the maximum texture size is less than or equal to the
@@ -1572,7 +1652,29 @@ impl Device {
         }
     }
 
-    pub fn optimal_pbo_stride(&self) -> NonZeroUsize {
+    pub fn depth_bits(&self) -> i32 {
+        match self.depth_format {
+            gl::DEPTH_COMPONENT16 => 16,
+            gl::DEPTH_COMPONENT24 => 24,
+            _ => panic!("Unknown depth format {:?}", self.depth_format),
+        }
+    }
+
+    // See gpu_types.rs where we declare the number of possible documents and
+    // number of items per document. This should match up with that.
+    pub fn max_depth_ids(&self) -> i32 {
+        return 1 << (self.depth_bits() - RESERVE_DEPTH_BITS);
+    }
+
+    pub fn ortho_near_plane(&self) -> f32 {
+        return -self.max_depth_ids() as f32;
+    }
+
+    pub fn ortho_far_plane(&self) -> f32 {
+        return (self.max_depth_ids() - 1) as f32;
+    }
+
+    pub fn optimal_pbo_stride(&self) -> StrideAlignment {
         self.optimal_pbo_stride
     }
 
@@ -1803,7 +1905,7 @@ impl Device {
             DrawTarget::Texture { dimensions, fbo_id, with_depth, .. } => {
                 let rect = FramebufferIntRect::new(
                     FramebufferIntPoint::zero(),
-                    FramebufferIntSize::from_untyped(dimensions.to_untyped()),
+                    device_size_as_framebuffer_size(dimensions),
                 );
                 (fbo_id, rect, with_depth)
             },
@@ -1813,10 +1915,7 @@ impl Device {
             DrawTarget::NativeSurface { external_fbo_id, offset, dimensions, .. } => {
                 (
                     FBOId(external_fbo_id),
-                    FramebufferIntRect::new(
-                        FramebufferIntPoint::from_untyped(offset.to_untyped()),
-                        FramebufferIntSize::from_untyped(dimensions.to_untyped()),
-                    ),
+                    device_rect_as_framebuffer_rect(&DeviceIntRect::new(offset, dimensions)),
                     true
                 )
             }
@@ -1913,7 +2012,7 @@ impl Device {
                     error!(
                       "Failed to load a program object with a program binary: {} renderer {}\n{}",
                       &info.base_filename,
-                      self.renderer_name,
+                      self.capabilities.renderer_name,
                       error_log
                     );
                     if let Some(ref program_cache_handler) = cached_programs.program_cache_handler {
@@ -1929,14 +2028,14 @@ impl Device {
         // If not, we need to do a normal compile + link pass.
         if build_program {
             // Compile the vertex shader
-            let vs_source = info.compute_source(self, SHADER_KIND_VERTEX);
+            let vs_source = info.compute_source(self, ShaderKind::Vertex);
             let vs_id = match Device::compile_shader(&*self.gl, &info.base_filename, gl::VERTEX_SHADER, &vs_source, self.requires_null_terminated_shader_source) {
                     Ok(vs_id) => vs_id,
                     Err(err) => return Err(err),
                 };
 
             // Compile the fragment shader
-            let fs_source = info.compute_source(self, SHADER_KIND_FRAGMENT);
+            let fs_source = info.compute_source(self, ShaderKind::Fragment);
             let fs_id =
                 match Device::compile_shader(&*self.gl, &info.base_filename, gl::FRAGMENT_SHADER, &fs_source, self.requires_null_terminated_shader_source) {
                     Ok(fs_id) => fs_id,
@@ -2020,11 +2119,8 @@ impl Device {
                 if !cached_programs.entries.borrow().contains_key(&info.digest) {
                     let (buffer, format) = self.gl.get_program_binary(program.id);
                     if buffer.len() > 0 {
-                        let entry = ProgramCacheEntry {
-                            binary: Arc::new(ProgramBinary::new(buffer, format, info.digest.clone())),
-                            linked: true,
-                        };
-                        cached_programs.entries.borrow_mut().insert(info.digest.clone(), entry);
+                        let binary = Arc::new(ProgramBinary::new(buffer, format, info.digest.clone()));
+                        cached_programs.add_new_program_binary(binary);
                     }
                 }
             }
@@ -2247,7 +2343,7 @@ impl Device {
         } else {
             let rect = FramebufferIntRect::new(
                 FramebufferIntPoint::zero(),
-                FramebufferIntSize::from_untyped(src.get_dimensions().to_untyped()),
+                device_size_as_framebuffer_size(src.get_dimensions()),
             );
             for layer in 0..src.layer_count.min(dst.layer_count) as LayerIndex {
                 self.blit_render_target(
@@ -2371,13 +2467,14 @@ impl Device {
 
     fn acquire_depth_target(&mut self, dimensions: DeviceIntSize) -> RBOId {
         let gl = &self.gl;
+        let depth_format = self.depth_format;
         let target = self.depth_targets.entry(dimensions).or_insert_with(|| {
             let renderbuffer_ids = gl.gen_renderbuffers(1);
             let depth_rb = renderbuffer_ids[0];
             gl.bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
             gl.renderbuffer_storage(
                 gl::RENDERBUFFER,
-                gl::DEPTH_COMPONENT24,
+                depth_format,
                 dimensions.width as _,
                 dimensions.height as _,
             );
@@ -2571,7 +2668,7 @@ impl Device {
     pub fn create_program_linked(
         &mut self,
         base_filename: &'static str,
-        features: String,
+        features: &[&'static str],
         descriptor: &VertexDescriptor,
     ) -> Result<Program, ShaderError> {
         let mut program = self.create_program(base_filename, features)?;
@@ -2587,7 +2684,7 @@ impl Device {
     pub fn create_program(
         &mut self,
         base_filename: &'static str,
-        features: String,
+        features: &[&'static str],
     ) -> Result<Program, ShaderError> {
         debug_assert!(self.inside_frame);
 
@@ -2617,8 +2714,8 @@ impl Device {
 
     fn build_shader_string<F: FnMut(&str)>(
         &self,
-        features: &str,
-        kind: &str,
+        features: &[&'static str],
+        kind: ShaderKind,
         base_filename: &str,
         output: F,
     ) {
@@ -2627,7 +2724,7 @@ impl Device {
             features,
             kind,
             base_filename,
-            self.resource_override_path.as_ref(),
+            &|f| get_unoptimized_shader_source(f, self.resource_override_path.as_ref()),
             output,
         )
     }
@@ -2775,7 +2872,7 @@ impl Device {
         let bytes_pp = format.bytes_per_pixel() as usize;
         let width_bytes = size.width as usize * bytes_pp;
 
-        let dst_stride = round_up_to_multiple(width_bytes, self.optimal_pbo_stride);
+        let dst_stride = round_up_to_multiple(width_bytes, self.optimal_pbo_stride.num_bytes(format));
 
         // The size of the chunk should only need to be (height - 1) * dst_stride + width_bytes,
         // however, the android emulator will error unless it is height * dst_stride.
@@ -3281,13 +3378,11 @@ impl Device {
 
         self.frame_id.0 += 1;
 
-        // Declare startup complete after the first ten frames. This number is
-        // basically a heuristic, which dictates how early a shader needs to be
-        // used in order to be cached to disk.
-        if self.frame_id.0 == 10 {
-            if let Some(ref cache) = self.cached_programs {
-                cache.startup_complete();
-            }
+        // Save any shaders compiled this frame to disk.
+        // If this is the tenth frame then treat startup as complete, meaning the
+        // current set of in-use shaders are the ones to load on the next startup.
+        if let Some(ref cache) = self.cached_programs {
+            cache.update_disk_cache(self.frame_id.0 == 10);
         }
     }
 
@@ -3703,7 +3798,7 @@ impl<'a> PixelBuffer<'a> {
     }
 
     fn flush_chunks(&mut self, target: &mut UploadTarget) {
-        for chunk in self.chunks.drain() {
+        for chunk in self.chunks.drain(..) {
             target.update_impl(chunk);
         }
         self.size_used = 0;

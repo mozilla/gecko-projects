@@ -7,6 +7,8 @@
 #ifndef nsAtom_h
 #define nsAtom_h
 
+#include <type_traits>
+
 #include "nsISupportsImpl.h"
 #include "nsString.h"
 #include "mozilla/Atomics.h"
@@ -87,7 +89,7 @@ class nsAtom {
   inline MozExternalRefCountType AddRef();
   inline MozExternalRefCountType Release();
 
-  typedef mozilla::TrueType HasThreadSafeRefCnt;
+  using HasThreadSafeRefCnt = std::true_type;
 
  protected:
   // Used by nsStaticAtom.
@@ -192,9 +194,7 @@ class nsDynamicAtom : public nsAtom {
   friend class nsAtomSubTable;
   friend int32_t NS_GetUnusedAtomCount();
 
-  static mozilla::Atomic<int32_t, mozilla::ReleaseAcquire,
-                         mozilla::recordreplay::Behavior::DontPreserve>
-      gUnusedAtomCount;
+  static mozilla::Atomic<int32_t, mozilla::ReleaseAcquire> gUnusedAtomCount;
   static void GCAtomTable();
 
   // These shouldn't be used directly, even by friend classes. The

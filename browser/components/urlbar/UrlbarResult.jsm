@@ -19,6 +19,8 @@ const { XPCOMUtils } = ChromeUtils.import(
 );
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
+  JsonSchemaValidator:
+    "resource://gre/modules/components-utils/JsonSchemaValidator.jsm",
   Services: "resource://gre/modules/Services.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
@@ -72,7 +74,7 @@ class UrlbarResult {
     if (!payload || typeof payload != "object") {
       throw new Error("Invalid result payload");
     }
-    this.payload = payload;
+    this.payload = this.validatePayload(payload);
 
     if (!payloadHighlights || typeof payloadHighlights != "object") {
       throw new Error("Invalid result payload highlights");
@@ -126,9 +128,12 @@ class UrlbarResult {
           case UrlbarUtils.KEYWORD_OFFER.HIDE:
             return ["", []];
         }
-        return this.payload.suggestion
-          ? [this.payload.suggestion, this.payloadHighlights.suggestion]
-          : [this.payload.query, this.payloadHighlights.query];
+        if (this.payload.tail) {
+          return [this.payload.tail, this.payloadHighlights.tail];
+        } else if (this.payload.suggestion) {
+          return [this.payload.suggestion, this.payloadHighlights.suggestion];
+        }
+        return [this.payload.query, this.payloadHighlights.query];
       default:
         return ["", []];
     }
@@ -140,6 +145,28 @@ class UrlbarResult {
    */
   get icon() {
     return this.payload.icon;
+  }
+
+  /**
+   * Returns the given payload if it's valid or throws an error if it's not.
+   * The schemas in UrlbarUtils.RESULT_PAYLOAD_SCHEMA are used for validation.
+   *
+   * @param {object} payload The payload object.
+   * @returns {object} `payload` if it's valid.
+   */
+  validatePayload(payload) {
+    let schema = UrlbarUtils.getPayloadSchema(this.type);
+    if (!schema) {
+      throw new Error(`Unrecognized result type: ${this.type}`);
+    }
+    let result = JsonSchemaValidator.validate(payload, schema, {
+      allowExplicitUndefinedProperties: true,
+      allowNullAsUndefinedProperties: true,
+    });
+    if (!result.valid) {
+      throw result.error;
+    }
+    return payload;
   }
 
   /**
@@ -201,22 +228,15 @@ class UrlbarResult {
       payloadInfo.displayUrl = [...payloadInfo.url];
       let url = payloadInfo.displayUrl[0];
       if (url && UrlbarPrefs.get("trimURLs")) {
-        if (UrlbarPrefs.get("update1.view.stripHttps")) {
-          url = BrowserUtils.removeSingleTrailingSlashFromURL(url);
-          if (url.startsWith("https://")) {
-            url = url.substring(8);
-            if (url.startsWith("www.")) {
-              url = url.substring(4);
-            }
+        url = BrowserUtils.removeSingleTrailingSlashFromURL(url);
+        if (url.startsWith("https://")) {
+          url = url.substring(8);
+          if (url.startsWith("www.")) {
+            url = url.substring(4);
           }
-        } else {
-          url = BrowserUtils.trimURL(url);
         }
       }
-      payloadInfo.displayUrl[0] = Services.textToSubURI.unEscapeURIForUI(
-        "UTF-8",
-        url
-      );
+      payloadInfo.displayUrl[0] = Services.textToSubURI.unEscapeURIForUI(url);
     }
 
     // For performance reasons limit excessive string lengths, to reduce the

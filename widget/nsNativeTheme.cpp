@@ -63,7 +63,14 @@ EventStates nsNativeTheme::GetContentState(nsIFrame* aFrame,
   }
 
   if (isXULCheckboxRadio && aAppearance == StyleAppearance::Radio) {
-    if (IsFocused(aFrame)) flags |= NS_EVENT_STATE_FOCUS;
+    if (IsFocused(aFrame)) {
+      flags |= NS_EVENT_STATE_FOCUS;
+      nsPIDOMWindowOuter* window =
+          aFrame->GetContent()->OwnerDoc()->GetWindow();
+      if (window && window->ShouldShowFocusRing()) {
+        flags |= NS_EVENT_STATE_FOCUSRING;
+      }
+    }
   }
 
   // On Windows and Mac, only draw focus rings if they should be shown. This
@@ -85,11 +92,10 @@ EventStates nsNativeTheme::GetContentState(nsIFrame* aFrame,
   if (aAppearance == StyleAppearance::Button) return flags;
 #endif
 #if defined(XP_MACOSX) || defined(XP_WIN)
-  Document* doc = aFrame->GetContent()->OwnerDoc();
-  nsPIDOMWindowOuter* window = doc->GetWindow();
-  if (window && !window->ShouldShowFocusRing()) flags &= ~NS_EVENT_STATE_FOCUS;
+  if (!flags.HasState(NS_EVENT_STATE_FOCUSRING)) {
+    flags &= ~NS_EVENT_STATE_FOCUS;
+  }
 #endif
-
   return flags;
 }
 
@@ -292,8 +298,7 @@ bool nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext,
           aAppearance == StyleAppearance::MenulistButton) &&
          aFrame->GetContent()->IsHTMLElement() &&
          aPresContext->HasAuthorSpecifiedRules(
-             aFrame,
-             NS_AUTHOR_SPECIFIED_BORDER | NS_AUTHOR_SPECIFIED_BACKGROUND);
+             aFrame, NS_AUTHOR_SPECIFIED_BORDER_OR_BACKGROUND);
 }
 
 bool nsNativeTheme::IsDisabled(nsIFrame* aFrame, EventStates aEventStates) {
@@ -558,10 +563,9 @@ bool nsNativeTheme::QueueAnimatedContentForRefresh(nsIContent* aContent,
     mAnimatedContentTimeout = timeout;
   }
 
-  if (!mAnimatedContentList.AppendElement(aContent)) {
-    NS_WARNING("Out of memory!");
-    return false;
-  }
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  mAnimatedContentList.AppendElement(aContent);
 
   return true;
 }
@@ -689,6 +693,8 @@ bool nsNativeTheme::IsWidgetScrollbarPart(StyleAppearance aAppearance) {
     case StyleAppearance::ScrollbarbuttonRight:
     case StyleAppearance::ScrollbarthumbVertical:
     case StyleAppearance::ScrollbarthumbHorizontal:
+    case StyleAppearance::ScrollbartrackHorizontal:
+    case StyleAppearance::ScrollbartrackVertical:
     case StyleAppearance::Scrollcorner:
       return true;
     default:

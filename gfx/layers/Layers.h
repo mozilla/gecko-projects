@@ -800,14 +800,14 @@ class LayerManager : public FrameRecorder {
    */
   virtual bool SetPendingScrollUpdateForNextTransaction(
       ScrollableLayerGuid::ViewID aScrollId,
-      const ScrollUpdateInfo& aUpdateInfo, wr::RenderRoot aRenderRoot);
+      const ScrollUpdateInfo& aUpdateInfo);
   Maybe<ScrollUpdateInfo> GetPendingScrollInfoUpdate(
       ScrollableLayerGuid::ViewID aScrollId);
   std::unordered_set<ScrollableLayerGuid::ViewID>
   ClearPendingScrollInfoUpdate();
 
  protected:
-  wr::RenderRootArray<ScrollUpdatesMap> mPendingScrollUpdates;
+  ScrollUpdatesMap mPendingScrollUpdates;
 };
 
 /**
@@ -897,7 +897,12 @@ class Layer {
      * This layer is hidden if the backface of the layer is visible
      * to user.
      */
-    CONTENT_BACKFACE_HIDDEN = 0x80
+    CONTENT_BACKFACE_HIDDEN = 0x80,
+
+    /**
+     * This layer should be snapped to the pixel grid.
+     */
+    CONTENT_SNAP_TO_GRID = 0x100
   };
   /**
    * CONSTRUCTION PHASE ONLY
@@ -984,7 +989,7 @@ class Layer {
     if (mScrollMetadata != aMetadataArray) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this,
                                    ("Layer::Mutated(%p) FrameMetrics", this));
-      mScrollMetadata = aMetadataArray;
+      mScrollMetadata = aMetadataArray.Clone();
       ScrollMetadataChanged();
       Mutated();
     }
@@ -1160,7 +1165,7 @@ class Layer {
     if (aLayers != mAncestorMaskLayers) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(
           this, ("Layer::Mutated(%p) AncestorMaskLayers", this));
-      mAncestorMaskLayers = aLayers;
+      mAncestorMaskLayers = aLayers.Clone();
       Mutated();
     }
   }
@@ -1461,8 +1466,8 @@ class Layer {
   nsTArray<PropertyAnimationGroup>& GetPropertyAnimationGroups() {
     return mAnimationInfo.GetPropertyAnimationGroups();
   }
-  const CompositorAnimationData* GetTransformLikeMetaData() const {
-    return mAnimationInfo.GetTransformLikeMetaData();
+  const Maybe<TransformData>& GetTransformData() const {
+    return mAnimationInfo.GetTransformData();
   }
 
   Maybe<uint64_t> GetAnimationGeneration() const {
@@ -2447,7 +2452,7 @@ class ColorLayer : public Layer {
    * CONSTRUCTION PHASE ONLY
    * Set the color of the layer.
    */
-  virtual void SetColor(const gfx::Color& aColor) {
+  virtual void SetColor(const gfx::DeviceColor& aColor) {
     if (mColor != aColor) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) Color", this));
       mColor = aColor;
@@ -2465,7 +2470,7 @@ class ColorLayer : public Layer {
   const gfx::IntRect& GetBounds() { return mBounds; }
 
   // This getter can be used anytime.
-  virtual const gfx::Color& GetColor() { return mColor; }
+  virtual const gfx::DeviceColor& GetColor() { return mColor; }
 
   MOZ_LAYER_DECL_NAME("ColorLayer", TYPE_COLOR)
 
@@ -2486,7 +2491,7 @@ class ColorLayer : public Layer {
                   const void* aParent) override;
 
   gfx::IntRect mBounds;
-  gfx::Color mColor;
+  gfx::DeviceColor mColor;
 };
 
 /**

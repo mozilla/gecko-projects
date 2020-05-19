@@ -55,6 +55,8 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/NullPrincipal.h"
 #include <stdint.h>
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -613,9 +615,9 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
   }
 
   nsCOMPtr<nsIURI> sourceURI;
-  aPrincipal->GetURI(getter_AddRefs(sourceURI));
+  auto* basePrin = BasePrincipal::Cast(aPrincipal);
+  basePrin->GetURI(getter_AddRefs(sourceURI));
   if (!sourceURI) {
-    auto* basePrin = BasePrincipal::Cast(aPrincipal);
     if (basePrin->Is<ExpandedPrincipal>()) {
       auto expanded = basePrin->As<ExpandedPrincipal>();
       for (auto& prin : expanded->AllowList()) {
@@ -925,6 +927,15 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
             return NS_OK;
           }
         }
+      } else if (targetScheme.EqualsLiteral("moz-page-thumb")) {
+        if (XRE_IsParentProcess()) {
+          return NS_OK;
+        }
+
+        auto& remoteType = dom::ContentChild::GetSingleton()->GetRemoteType();
+        if (remoteType.EqualsLiteral(PRIVILEGEDABOUT_REMOTE_TYPE)) {
+          return NS_OK;
+        }
       }
     }
 
@@ -961,38 +972,22 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
     return NS_ERROR_DOM_BAD_URI;
   }
 
-  // OK, everyone is allowed to load this, since unflagged handlers are
-  // deprecated but treated as URI_LOADABLE_BY_ANYONE.  But check whether we
-  // need to warn.  At some point we'll want to make this warning into an
-  // error and treat unflagged handlers as URI_DANGEROUS_TO_LOAD.
-  rv = NS_URIChainHasFlags(
-      aTargetBaseURI, nsIProtocolHandler::URI_LOADABLE_BY_ANYONE, &hasFlags);
-  NS_ENSURE_SUCCESS(rv, rv);
-  // NB: we also get here if the base URI is URI_LOADABLE_BY_SUBSUMERS,
-  // and none of the rest of the nested chain of URIs for aTargetURI
-  // prohibits the load, so avoid warning in that case:
-  bool hasSubsumersFlag = false;
-  rv = NS_URIChainHasFlags(aTargetBaseURI,
-                           nsIProtocolHandler::URI_LOADABLE_BY_SUBSUMERS,
-                           &hasSubsumersFlag);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!hasFlags && !hasSubsumersFlag) {
-    nsCOMPtr<nsIStringBundle> bundle = BundleHelper::GetOrCreate();
-    if (bundle) {
-      nsAutoString message;
-      AutoTArray<nsString, 1> formatStrings;
-      CopyASCIItoUTF16(targetScheme, *formatStrings.AppendElement());
-      rv = bundle->FormatStringFromName("ProtocolFlagError", formatStrings,
-                                        message);
-      if (NS_SUCCEEDED(rv)) {
-        nsCOMPtr<nsIConsoleService> console(
-            do_GetService("@mozilla.org/consoleservice;1"));
-        NS_ENSURE_TRUE(console, NS_ERROR_FAILURE);
-
-        console->LogStringMessage(message.get());
-      }
-    }
+#ifdef DEBUG
+  {
+    // Everyone is allowed to load this. The case URI_LOADABLE_BY_SUBSUMERS
+    // is handled by the caller which is just delegating to us as a helper.
+    bool hasSubsumersFlag = false;
+    NS_URIChainHasFlags(aTargetBaseURI,
+                        nsIProtocolHandler::URI_LOADABLE_BY_SUBSUMERS,
+                        &hasSubsumersFlag);
+    bool hasLoadableByAnyone = false;
+    NS_URIChainHasFlags(aTargetBaseURI,
+                        nsIProtocolHandler::URI_LOADABLE_BY_ANYONE,
+                        &hasLoadableByAnyone);
+    MOZ_ASSERT(hasLoadableByAnyone || hasSubsumersFlag,
+               "why do we get here and do not have any of the two flags set?");
   }
+#endif
 
   return NS_OK;
 }
@@ -1087,13 +1082,12 @@ nsScriptSecurityManager::CheckLoadURIStrWithPrincipal(
     return rv;
   }
 
+  // URIFixup's keyword and alternate flags can only fixup to http/https, so we
+  // can skip testing them. This simplifies our life because this code can be
+  // invoked from the content process where the search service would not be
+  // available.
   uint32_t flags[] = {nsIURIFixup::FIXUP_FLAG_NONE,
-                      nsIURIFixup::FIXUP_FLAG_FIX_SCHEME_TYPOS,
-                      nsIURIFixup::FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP,
-                      nsIURIFixup::FIXUP_FLAGS_MAKE_ALTERNATE_URI,
-                      nsIURIFixup::FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP |
-                          nsIURIFixup::FIXUP_FLAGS_MAKE_ALTERNATE_URI};
-
+                      nsIURIFixup::FIXUP_FLAG_FIX_SCHEME_TYPOS};
   for (uint32_t i = 0; i < ArrayLength(flags); ++i) {
     uint32_t fixupFlags = flags[i];
     if (aPrincipal->OriginAttributesRef().mPrivateBrowsingId > 0) {

@@ -24,8 +24,6 @@ with Files('IdpSandbox.jsm'):
     BUG_COMPONENT = component_signaling
 with Files('PeerConnection*'):
     BUG_COMPONENT = component_signaling
-with Files('RTC*'):
-    BUG_COMPONENT = component_signaling
 
 component_av = ('Core', 'WebRTC: Audio/Video')
 with Files('GetUserMedia*'):
@@ -356,6 +354,7 @@ LOCAL_INCLUDES += [
     '/layout/xul',
     '/media/libyuv/libyuv/include',
     '/netwerk/base',
+    '/toolkit/content/tests/browser/',
 ]
 
 if CONFIG['MOZ_WEBRTC']:
@@ -378,13 +377,13 @@ if CONFIG['COMPILE_ENVIRONMENT']:
     ]
 
     GeneratedFile('audioipc_client_ffi_generated.h',
-                  script='/layout/style/RunCbindgen.py', entry_point='generate',
+                  script='/build/RunCbindgen.py', entry_point='generate',
                   inputs=[
                       '/media/audioipc/client',
                   ])
 
     GeneratedFile('audioipc_server_ffi_generated.h',
-                  script='/layout/style/RunCbindgen.py', entry_point='generate',
+                  script='/build/RunCbindgen.py', entry_point='generate',
                   inputs=[
                       '/media/audioipc/server',
                   ])

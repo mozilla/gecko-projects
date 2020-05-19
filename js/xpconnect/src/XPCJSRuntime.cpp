@@ -126,6 +126,7 @@ const char* const XPCJSRuntime::mStrings[] = {
     "classId",           // IDX_CLASS_ID
     "interfaceId",       // IDX_INTERFACE_ID
     "initializer",       // IDX_INITIALIZER
+    "print",             // IDX_PRINT
 };
 
 /***************************************************************************/
@@ -196,7 +197,6 @@ CompartmentPrivate::CompartmentPrivate(
       wantXrays(false),
       allowWaivers(true),
       isWebExtensionContentScript(false),
-      allowCPOWs(false),
       isUAWidgetCompartment(false),
       hasExclusiveExpandos(false),
       wasShutdown(false),
@@ -393,6 +393,11 @@ static bool PrincipalImmuneToScriptPolicy(nsIPrincipal* aPrincipal) {
     return true;
   }
 
+  // pdf.js is a special-case too.
+  if (nsContentUtils::IsPDFJS(principal)) {
+    return true;
+  }
+
   // Check whether our URI is an "about:" URI that allows scripts.  If it is,
   // we need to allow JS to run.
   if (aPrincipal->SchemeIs("about")) {
@@ -454,23 +459,21 @@ Scriptability::Scriptability(JS::Realm* realm)
       mDocShellAllowsScript(true),
       mScriptBlockedByPolicy(false) {
   nsIPrincipal* prin = nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
-  mImmuneToScriptPolicy = PrincipalImmuneToScriptPolicy(prin);
 
-  // If we're not immune, we should have a real principal with a URI.
-  // Check the URI against the new-style domain policy.
-  if (!mImmuneToScriptPolicy) {
-    nsCOMPtr<nsIURI> codebase;
-    nsresult rv = prin->GetURI(getter_AddRefs(codebase));
-    bool policyAllows;
-    if (NS_SUCCEEDED(rv) && codebase &&
-        NS_SUCCEEDED(nsXPConnect::SecurityManager()->PolicyAllowsScript(
-            codebase, &policyAllows))) {
-      mScriptBlockedByPolicy = !policyAllows;
-    } else {
-      // Something went wrong - be safe and block script.
-      mScriptBlockedByPolicy = true;
-    }
+  mImmuneToScriptPolicy = PrincipalImmuneToScriptPolicy(prin);
+  if (mImmuneToScriptPolicy) {
+    return;
   }
+  // If we're not immune, we should have a real principal with a URI.
+  // Check the principal against the new-style domain policy.
+  bool policyAllows;
+  nsresult rv = prin->GetIsScriptAllowedByPolicy(&policyAllows);
+  if (NS_SUCCEEDED(rv)) {
+    mScriptBlockedByPolicy = !policyAllows;
+    return;
+  }
+  // Something went wrong - be safe and block script.
+  mScriptBlockedByPolicy = true;
 }
 
 bool Scriptability::Allowed() {
@@ -770,7 +773,7 @@ void XPCJSRuntime::DoCycleCollectionCallback(JSContext* cx) {
 }
 
 void XPCJSRuntime::CustomGCCallback(JSGCStatus status) {
-  nsTArray<xpcGCCallback> callbacks(extraGCCallbacks);
+  nsTArray<xpcGCCallback> callbacks(extraGCCallbacks.Clone());
   for (uint32_t i = 0; i < callbacks.Length(); ++i) {
     callbacks[i](status);
   }
@@ -1061,8 +1064,9 @@ StaticAutoPtr<HelperThreadPool> gHelperThreads;
 
 void InitializeHelperThreadPool() { gHelperThreads = new HelperThreadPool(); }
 
-void DispatchOffThreadTask(RunnableTask* task) {
-  gHelperThreads->Dispatch(MakeAndAddRef<HelperThreadTaskHandler>(task));
+void DispatchOffThreadTask(js::UniquePtr<RunnableTask> task) {
+  gHelperThreads->Dispatch(
+      MakeAndAddRef<HelperThreadTaskHandler>(std::move(task)));
 }
 
 void XPCJSRuntime::Shutdown(JSContext* cx) {
@@ -1077,10 +1081,6 @@ void XPCJSRuntime::Shutdown(JSContext* cx) {
   JS::SetGCSliceCallback(cx, mPrevGCSliceCallback);
 
   nsScriptSecurityManager::ClearJSCallbacks(cx);
-
-  // Shut down the helper threads
-  gHelperThreads->Shutdown();
-  gHelperThreads = nullptr;
 
   // Clean up and destroy maps. Any remaining entries in mWrappedJSMap will be
   // cleaned up by the weak pointer callbacks.
@@ -1142,7 +1142,7 @@ static void GetRealmName(JS::Realm* realm, nsCString& name, int* anonymizeID,
           }
         }
         if (lastSlashPos != -1) {
-          name.ReplaceASCII(pathPos, lastSlashPos - pathPos, "<anonymized>");
+          name.ReplaceLiteral(pathPos, lastSlashPos - pathPos, "<anonymized>");
         } else {
           // Something went wrong. Anonymize the entire path to be
           // safe.
@@ -1231,7 +1231,7 @@ static int64_t JSMainRuntimeRealmsUserDistinguishedAmount() {
 }
 
 class JSMainRuntimeTemporaryPeakReporter final : public nsIMemoryReporter {
-  ~JSMainRuntimeTemporaryPeakReporter() {}
+  ~JSMainRuntimeTemporaryPeakReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -2072,7 +2072,7 @@ void ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
 }  // namespace xpc
 
 class JSMainRuntimeRealmsReporter final : public nsIMemoryReporter {
-  ~JSMainRuntimeRealmsReporter() {}
+  ~JSMainRuntimeRealmsReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -2603,6 +2603,9 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
     case JS_TELEMETRY_GC_MAX_PAUSE_MS_2:
       Telemetry::Accumulate(Telemetry::GC_MAX_PAUSE_MS_2, sample);
       break;
+    case JS_TELEMETRY_GC_PREPARE_MS:
+      Telemetry::Accumulate(Telemetry::GC_PREPARE_MS, sample);
+      break;
     case JS_TELEMETRY_GC_MARK_MS:
       Telemetry::Accumulate(Telemetry::GC_MARK_MS, sample);
       break;
@@ -2617,6 +2620,9 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
       break;
     case JS_TELEMETRY_GC_MARK_GRAY_MS:
       Telemetry::Accumulate(Telemetry::GC_MARK_GRAY_MS, sample);
+      break;
+    case JS_TELEMETRY_GC_MARK_WEAK_MS:
+      Telemetry::Accumulate(Telemetry::GC_MARK_WEAK_MS, sample);
       break;
     case JS_TELEMETRY_GC_SLICE_MS:
       Telemetry::Accumulate(Telemetry::GC_SLICE_MS, sample);
@@ -2636,20 +2642,11 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
     case JS_TELEMETRY_GC_RESET_REASON:
       Telemetry::Accumulate(Telemetry::GC_RESET_REASON, sample);
       break;
-    case JS_TELEMETRY_GC_INCREMENTAL_DISABLED:
-      Telemetry::Accumulate(Telemetry::GC_INCREMENTAL_DISABLED, sample);
-      break;
     case JS_TELEMETRY_GC_NON_INCREMENTAL:
       Telemetry::Accumulate(Telemetry::GC_NON_INCREMENTAL, sample);
       break;
     case JS_TELEMETRY_GC_NON_INCREMENTAL_REASON:
       Telemetry::Accumulate(Telemetry::GC_NON_INCREMENTAL_REASON, sample);
-      break;
-    case JS_TELEMETRY_GC_SCC_SWEEP_TOTAL_MS:
-      Telemetry::Accumulate(Telemetry::GC_SCC_SWEEP_TOTAL_MS, sample);
-      break;
-    case JS_TELEMETRY_GC_SCC_SWEEP_MAX_PAUSE_MS:
-      Telemetry::Accumulate(Telemetry::GC_SCC_SWEEP_MAX_PAUSE_MS, sample);
       break;
     case JS_TELEMETRY_GC_MINOR_REASON:
       Telemetry::Accumulate(Telemetry::GC_MINOR_REASON, sample);
@@ -2661,7 +2658,6 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
       Telemetry::Accumulate(Telemetry::GC_MINOR_US, sample);
       break;
     case JS_TELEMETRY_GC_NURSERY_BYTES:
-      Telemetry::Accumulate(Telemetry::GC_NURSERY_BYTES, sample);
       Telemetry::Accumulate(Telemetry::GC_NURSERY_BYTES_2, sample);
       break;
     case JS_TELEMETRY_GC_PRETENURE_COUNT:
@@ -2967,6 +2963,29 @@ void ConstructUbiNode(void* storage, JSObject* ptr) {
   JS::ubi::ReflectorNode::construct(storage, ptr);
 }
 
+class HelperThreadPoolShutdownObserver : public nsIObserver {
+ public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+ protected:
+  virtual ~HelperThreadPoolShutdownObserver() = default;
+};
+
+NS_IMPL_ISUPPORTS(HelperThreadPoolShutdownObserver, nsIObserver, nsISupports)
+
+NS_IMETHODIMP
+HelperThreadPoolShutdownObserver::Observe(nsISupports* aSubject,
+                                          const char* aTopic,
+                                          const char16_t* aData) {
+  MOZ_RELEASE_ASSERT(!strcmp(aTopic, "xpcom-shutdown-threads"));
+
+  // Shut down the helper threads
+  gHelperThreads->Shutdown();
+  gHelperThreads = nullptr;
+
+  return NS_OK;
+}
+
 void XPCJSRuntime::Initialize(JSContext* cx) {
   mUnprivilegedJunkScope.init(cx, nullptr);
   mLoaderGlobal.init(cx, nullptr);
@@ -3013,6 +3032,9 @@ void XPCJSRuntime::Initialize(JSContext* cx) {
 
   // Initialize a helper thread pool for JS offthread tasks. Set the
   // task callback to divert tasks to the helperthreads.
+  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+  nsCOMPtr<nsIObserver> obs = new HelperThreadPoolShutdownObserver();
+  obsService->AddObserver(obs, "xpcom-shutdown-threads", false);
   InitializeHelperThreadPool();
   SetHelperThreadTaskCallback(&DispatchOffThreadTask);
 
@@ -3068,7 +3090,7 @@ bool XPCJSRuntime::InitializeStrings(JSContext* cx) {
         mStrIDs[0] = JSID_VOID;
         return false;
       }
-      mStrIDs[i] = INTERNED_STRING_TO_JSID(cx, str);
+      mStrIDs[i] = PropertyKey::fromPinnedString(str);
       mStrJSVals[i].setString(str);
     }
 

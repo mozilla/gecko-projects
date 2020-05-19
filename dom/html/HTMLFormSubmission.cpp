@@ -6,6 +6,7 @@
 
 #include "HTMLFormSubmission.h"
 
+#include "HTMLFormElement.h"
 #include "nsCOMPtr.h"
 #include "nsIForm.h"
 #include "mozilla/dom/Document.h"
@@ -29,6 +30,7 @@
 #include "nsCExternalHandlerService.h"
 #include "nsContentUtils.h"
 
+#include "mozilla/dom/AncestorIterator.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/StaticPrefs_dom.h"
@@ -282,7 +284,13 @@ nsresult FSURLEncoded::GetEncodedSubmission(nsIURI* aURI,
 
     nsCOMPtr<nsIURL> url = do_QueryInterface(aURI);
     if (url) {
-      rv = NS_MutateURI(aURI).SetQuery(mQueryString).Finalize(aOutURI);
+      // Make sure that we end up with a query component in the URL.  If
+      // mQueryString is empty, nsIURI::SetQuery() will remove the query
+      // component, which is not what we want.
+      rv = NS_MutateURI(aURI)
+               .SetQuery(mQueryString.IsEmpty() ? NS_LITERAL_CSTRING("?")
+                                                : mQueryString)
+               .Finalize(aOutURI);
     } else {
       nsAutoCString path;
       rv = aURI->GetPathQueryRef(path);
@@ -720,7 +728,7 @@ EncodingFormSubmission::EncodingFormSubmission(
   }
 }
 
-EncodingFormSubmission::~EncodingFormSubmission() {}
+EncodingFormSubmission::~EncodingFormSubmission() = default;
 
 // i18n helper routines
 nsresult EncodingFormSubmission::EncodeVal(const nsAString& aStr,
@@ -822,6 +830,27 @@ nsresult HTMLFormSubmission::GetFromForm(HTMLFormElement* aForm,
   } else {
     GetEnumAttr(aForm, nsGkAtoms::method, &method);
   }
+
+  if (method == NS_FORM_METHOD_DIALOG) {
+    HTMLDialogElement* dialog =
+        AncestorsOfType<HTMLDialogElement>::First(*aForm);
+
+    // If there isn't one, or if it does not have an open attribute, do
+    // nothing.
+    if (!dialog || !dialog->Open()) {
+      return NS_OK;
+    }
+
+    nsAutoString result;
+    if (aSubmitter) {
+      aSubmitter->ResultForDialogSubmit(result);
+    }
+    *aFormSubmission = new DialogFormSubmission(result, actionURL, target,
+                                                aEncoding, aSubmitter, dialog);
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(method != NS_FORM_METHOD_DIALOG);
 
   // Choose encoder
   if (method == NS_FORM_METHOD_POST && enctype == NS_FORM_ENCTYPE_MULTIPART) {

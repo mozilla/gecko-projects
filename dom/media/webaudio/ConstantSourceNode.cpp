@@ -156,7 +156,7 @@ ConstantSourceNode::ConstantSourceNode(AudioContext* aContext)
     : AudioScheduledSourceNode(aContext, 2, ChannelCountMode::Max,
                                ChannelInterpretation::Speakers),
       mStartCalled(false) {
-  CreateAudioParam(mOffset, ConstantSourceNodeEngine::OFFSET, "offset", 1.0f);
+  CreateAudioParam(mOffset, ConstantSourceNodeEngine::OFFSET, u"offset", 1.0f);
   ConstantSourceNodeEngine* engine =
       new ConstantSourceNodeEngine(this, aContext->Destination());
   mTrack = AudioNodeTrack::Create(aContext, engine,
@@ -166,7 +166,7 @@ ConstantSourceNode::ConstantSourceNode(AudioContext* aContext)
   mTrack->AddMainThreadListener(this);
 }
 
-ConstantSourceNode::~ConstantSourceNode() {}
+ConstantSourceNode::~ConstantSourceNode() = default;
 
 size_t ConstantSourceNode::SizeOfExcludingThis(
     MallocSizeOf aMallocSizeOf) const {
@@ -203,7 +203,7 @@ void ConstantSourceNode::DestroyMediaTrack() {
 
 void ConstantSourceNode::Start(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"start time");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("start time");
     return;
   }
 
@@ -226,7 +226,7 @@ void ConstantSourceNode::Start(double aWhen, ErrorResult& aRv) {
 
 void ConstantSourceNode::Stop(double aWhen, ErrorResult& aRv) {
   if (!WebAudioUtils::IsTimeValid(aWhen)) {
-    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(u"stop time");
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>("stop time");
     return;
   }
 

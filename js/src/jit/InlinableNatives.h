@@ -29,6 +29,27 @@
                                                    \
   _(Boolean)                                       \
                                                    \
+  _(DataViewGetInt8)                               \
+  _(DataViewGetUint8)                              \
+  _(DataViewGetInt16)                              \
+  _(DataViewGetUint16)                             \
+  _(DataViewGetInt32)                              \
+  _(DataViewGetUint32)                             \
+  _(DataViewGetFloat32)                            \
+  _(DataViewGetFloat64)                            \
+  _(DataViewGetBigInt64)                           \
+  _(DataViewGetBigUint64)                          \
+  _(DataViewSetInt8)                               \
+  _(DataViewSetUint8)                              \
+  _(DataViewSetInt16)                              \
+  _(DataViewSetUint16)                             \
+  _(DataViewSetInt32)                              \
+  _(DataViewSetUint32)                             \
+  _(DataViewSetFloat32)                            \
+  _(DataViewSetFloat64)                            \
+  _(DataViewSetBigInt64)                           \
+  _(DataViewSetBigUint64)                          \
+                                                   \
   _(IntlGuardToCollator)                           \
   _(IntlGuardToDateTimeFormat)                     \
   _(IntlGuardToListFormat)                         \
@@ -115,13 +136,15 @@
   _(IntrinsicToObject)                             \
   _(IntrinsicIsObject)                             \
   _(IntrinsicIsCrossRealmArrayConstructor)         \
-  _(IntrinsicToIntegerPositiveZero)                \
+  _(IntrinsicToInteger)                            \
   _(IntrinsicToString)                             \
   _(IntrinsicIsConstructing)                       \
   _(IntrinsicSubstringKernel)                      \
   _(IntrinsicObjectHasPrototype)                   \
   _(IntrinsicFinishBoundFunctionInit)              \
   _(IntrinsicIsPackedArray)                        \
+                                                   \
+  _(IntrinsicIsSuspendedGenerator)                 \
                                                    \
   _(IntrinsicGuardToArrayIterator)                 \
   _(IntrinsicGuardToMapIterator)                   \

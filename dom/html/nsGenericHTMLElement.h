@@ -18,6 +18,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/ValidityState.h"
+#include "mozilla/dom/Element.h"
 
 class nsDOMTokenList;
 class nsIFormControlFrame;
@@ -140,6 +141,18 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
     return false;
   }
 
+  void SetNonce(const nsAString& aNonce) {
+    SetProperty(nsGkAtoms::nonce, new nsString(aNonce),
+                nsINode::DeleteProperty<nsString>);
+  }
+  void RemoveNonce() { RemoveProperty(nsGkAtoms::nonce); }
+  void GetNonce(nsAString& aNonce) const {
+    nsString* cspNonce = static_cast<nsString*>(GetProperty(nsGkAtoms::nonce));
+    if (cspNonce) {
+      aNonce = *cspNonce;
+    }
+  }
+
   /**
    * Returns the count of descendants (inclusive of this node) in
    * the uncomposed document that are explicitly set as editable.
@@ -159,6 +172,13 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   void GetInnerText(mozilla::dom::DOMString& aValue,
                     mozilla::ErrorResult& aError);
   void SetInnerText(const nsAString& aValue);
+
+  void GetInputMode(nsAString& aValue) {
+    GetEnumAttr(nsGkAtoms::inputmode, nullptr, aValue);
+  }
+  void SetInputMode(const nsAString& aValue, ErrorResult& aRv) {
+    SetHTMLAttr(nsGkAtoms::inputmode, aValue, aRv);
+  }
 
   /**
    * Determine whether an attribute is an event (onclick, etc.)
@@ -232,7 +252,7 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
       ErrorResult& aRv);
 
  protected:
-  virtual ~nsGenericHTMLElement() {}
+  virtual ~nsGenericHTMLElement() = default;
 
  public:
   /**
@@ -622,8 +642,6 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
 
   already_AddRefed<nsINodeList> Labels();
 
-  virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
-
   static bool LegacyTouchAPIEnabled(JSContext* aCx, JSObject* aObj);
 
   static inline bool CanHaveName(nsAtom* aTag) {
@@ -643,6 +661,10 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
     // name (which doesn't have to match the id or anything).
     // HasName() is true precisely when name is nonempty.
     return aElement->IsHTMLElement(nsGkAtoms::img) && aElement->HasName();
+  }
+
+  virtual inline void ResultForDialogSubmit(nsAString& aResult) {
+    GetAttr(kNameSpaceID_None, nsGkAtoms::value, aResult);
   }
 
  protected:
@@ -1181,20 +1203,26 @@ typedef nsGenericHTMLElement* (*HTMLContentCreatorFunction)(
 /**
  * A macro to implement the NS_NewHTMLXXXElement() functions.
  */
-#define NS_IMPL_NS_NEW_HTML_ELEMENT(_elementName)           \
-  nsGenericHTMLElement* NS_NewHTML##_elementName##Element(  \
-      already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo, \
-      mozilla::dom::FromParser aFromParser) {               \
-    return new mozilla::dom::HTML##_elementName##Element(   \
-        std::move(aNodeInfo));                              \
+#define NS_IMPL_NS_NEW_HTML_ELEMENT(_elementName)                     \
+  nsGenericHTMLElement* NS_NewHTML##_elementName##Element(            \
+      already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,           \
+      mozilla::dom::FromParser aFromParser) {                         \
+    RefPtr<mozilla::dom::NodeInfo> nodeInfo(aNodeInfo);               \
+    auto* nim = nodeInfo->NodeInfoManager();                          \
+    MOZ_ASSERT(nim);                                                  \
+    return new (nim)                                                  \
+        mozilla::dom::HTML##_elementName##Element(nodeInfo.forget()); \
   }
 
-#define NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(_elementName)                 \
-  nsGenericHTMLElement* NS_NewHTML##_elementName##Element(                     \
-      already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,                    \
-      mozilla::dom::FromParser aFromParser) {                                  \
-    return new mozilla::dom::HTML##_elementName##Element(std::move(aNodeInfo), \
-                                                         aFromParser);         \
+#define NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(_elementName)  \
+  nsGenericHTMLElement* NS_NewHTML##_elementName##Element(      \
+      already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,     \
+      mozilla::dom::FromParser aFromParser) {                   \
+    RefPtr<mozilla::dom::NodeInfo> nodeInfo(aNodeInfo);         \
+    auto* nim = nodeInfo->NodeInfoManager();                    \
+    MOZ_ASSERT(nim);                                            \
+    return new (nim) mozilla::dom::HTML##_elementName##Element( \
+        nodeInfo.forget(), aFromParser);                        \
   }
 
 // Here, we expand 'NS_DECLARE_NS_NEW_HTML_ELEMENT()' by hand.

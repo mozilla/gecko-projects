@@ -92,6 +92,10 @@ nsPrintDialogServiceWin::ShowPageSetup(nsPIDOMWindowOuter* aParent,
     return status == 0 ? NS_ERROR_ABORT : NS_OK;
   }
 
+  // We don't call nsPrintSettingsService::SavePrintSettingsToPrefs here since
+  // it's called for us in printPageSetup.js.  Maybe we should move that call
+  // here for consistency with the other platforms though?
+
   return rv;
 }
 
@@ -161,7 +165,8 @@ HWND nsPrintDialogServiceWin::GetHWNDForDOMWindow(mozIDOMWindowProxy* aWindow) {
   // Now we might be the Browser so check this path
   nsCOMPtr<nsPIDOMWindowOuter> window = nsPIDOMWindowOuter::From(aWindow);
 
-  nsCOMPtr<nsIWebBrowserChrome> webBrowserChrome = window->GetWebBrowserChrome();
+  nsCOMPtr<nsIWebBrowserChrome> webBrowserChrome =
+      window->GetWebBrowserChrome();
   if (!webBrowserChrome) return nullptr;
 
   nsCOMPtr<nsIBaseWindow> baseWin(do_QueryInterface(webBrowserChrome));

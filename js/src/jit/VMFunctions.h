@@ -13,6 +13,7 @@
 #include "jspubtd.h"
 
 #include "jit/CompileInfo.h"
+#include "jit/IonScript.h"
 #include "jit/JitFrames.h"
 #include "vm/Interpreter.h"
 
@@ -24,6 +25,7 @@ class WithScope;
 class InlineTypedObject;
 class AbstractGeneratorObject;
 class AsyncFunctionGeneratorObject;
+class PlainObject;
 class RegExpObject;
 class TypedArrayObject;
 
@@ -773,19 +775,19 @@ struct LastArg;
 
 template <>
 struct LastArg<> {
-  typedef void Type;
+  using Type = void;
   static constexpr size_t nbArgs = 0;
 };
 
 template <typename HeadType>
 struct LastArg<HeadType> {
-  typedef HeadType Type;
+  using Type = HeadType;
   static constexpr size_t nbArgs = 1;
 };
 
 template <typename HeadType, typename... TailTypes>
 struct LastArg<HeadType, TailTypes...> {
-  typedef typename LastArg<TailTypes...>::Type Type;
+  using Type = typename LastArg<TailTypes...>::Type;
   static constexpr size_t nbArgs = LastArg<TailTypes...>::nbArgs + 1;
 };
 
@@ -878,15 +880,6 @@ template <EqualityKind Kind>
 bool StrictlyEqual(JSContext* cx, MutableHandleValue lhs,
                    MutableHandleValue rhs, bool* res);
 
-bool LessThan(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs,
-              bool* res);
-bool LessThanOrEqual(JSContext* cx, MutableHandleValue lhs,
-                     MutableHandleValue rhs, bool* res);
-bool GreaterThan(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs,
-                 bool* res);
-bool GreaterThanOrEqual(JSContext* cx, MutableHandleValue lhs,
-                        MutableHandleValue rhs, bool* res);
-
 template <EqualityKind Kind>
 bool StringsEqual(JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
 
@@ -944,6 +937,10 @@ enum class IndexInBounds { Yes, Maybe };
 
 template <IndexInBounds InBounds>
 void PostWriteElementBarrier(JSRuntime* rt, JSObject* obj, int32_t index);
+
+// If |str| represents an int32, assign it to |result| and return true.
+// Otherwise return false.
+bool GetInt32FromStringPure(JSContext* cx, JSString* str, int32_t* result);
 
 // If |str| is an index in the range [0, INT32_MAX], return it. If the string
 // is not an index in this range, return -1.
@@ -1015,7 +1012,6 @@ MOZ_MUST_USE bool DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame,
 
 MOZ_MUST_USE bool PushVarEnv(JSContext* cx, BaselineFrame* frame,
                              HandleScope scope);
-MOZ_MUST_USE bool PopVarEnv(JSContext* cx, BaselineFrame* frame);
 
 MOZ_MUST_USE bool InitBaselineFrameForOsr(BaselineFrame* frame,
                                           InterpreterFrame* interpFrame,
@@ -1070,7 +1066,8 @@ MOZ_MUST_USE bool ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber);
 
 MOZ_MUST_USE bool ThrowBadDerivedReturn(JSContext* cx, HandleValue v);
 
-MOZ_MUST_USE bool ThrowObjectCoercible(JSContext* cx, HandleValue v);
+MOZ_MUST_USE bool ThrowBadDerivedReturnOrUninitializedThis(JSContext* cx,
+                                                           HandleValue v);
 
 MOZ_MUST_USE bool BaselineGetFunctionThis(JSContext* cx, BaselineFrame* frame,
                                           MutableHandleValue res);
@@ -1086,9 +1083,6 @@ MOZ_MUST_USE bool CallNativeSetter(JSContext* cx, HandleFunction callee,
                                    HandleObject obj, HandleValue rhs);
 
 MOZ_MUST_USE bool EqualStringsHelperPure(JSString* str1, JSString* str2);
-
-MOZ_MUST_USE bool CheckIsCallable(JSContext* cx, HandleValue v,
-                                  CheckIsCallableKind kind);
 
 void HandleCodeCoverageAtPC(BaselineFrame* frame, jsbytecode* pc);
 void HandleCodeCoverageAtPrologue(BaselineFrame* frame);
@@ -1129,10 +1123,16 @@ MOZ_MUST_USE bool TrySkipAwait(JSContext* cx, HandleValue val,
 
 bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result);
 
-bool DoToNumber(JSContext* cx, HandleValue arg, MutableHandleValue ret);
-bool DoToNumeric(JSContext* cx, HandleValue arg, MutableHandleValue ret);
-
 void* AllocateBigIntNoGC(JSContext* cx, bool requestMinorGC);
+bool DoStringToInt64(JSContext* cx, HandleString str, uint64_t* res);
+
+#if JS_BITS_PER_WORD == 32
+BigInt* CreateBigIntFromInt64(JSContext* cx, uint32_t low, uint32_t high);
+BigInt* CreateBigIntFromUint64(JSContext* cx, uint32_t low, uint32_t high);
+#else
+BigInt* CreateBigIntFromInt64(JSContext* cx, uint64_t i64);
+BigInt* CreateBigIntFromUint64(JSContext* cx, uint64_t i64);
+#endif
 
 template <EqualityKind Kind>
 bool BigIntEqual(BigInt* x, BigInt* y);

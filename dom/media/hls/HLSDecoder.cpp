@@ -7,14 +7,13 @@
 #include "HLSDecoder.h"
 #include "AndroidBridge.h"
 #include "DecoderTraits.h"
-#include "GeneratedJNINatives.h"
-#include "GeneratedJNIWrappers.h"
 #include "HLSDemuxer.h"
 #include "HLSUtils.h"
 #include "MediaContainerType.h"
 #include "MediaDecoderStateMachine.h"
 #include "MediaFormatReader.h"
 #include "MediaShutdownManager.h"
+#include "mozilla/java/GeckoHLSResourceWrapperNatives.h"
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"
@@ -137,7 +136,6 @@ bool HLSDecoder::IsSupportedType(const MediaContainerType& aContainerType) {
 
 nsresult HLSDecoder::Load(nsIChannel* aChannel) {
   MOZ_ASSERT(NS_IsMainThread());
-  AbstractThread::AutoEnter context(AbstractMainThread());
 
   nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(mURI));
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -231,7 +229,6 @@ void HLSDecoder::Shutdown() {
 void HLSDecoder::NotifyDataArrived() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
-  AbstractThread::AutoEnter context(AbstractMainThread());
   NotifyReaderDataArrived();
   GetOwner()->DownloadProgressed();
 }

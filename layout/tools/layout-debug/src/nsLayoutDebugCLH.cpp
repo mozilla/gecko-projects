@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsLayoutDebugCLH.h"
+#include "mozIDOMWindow.h"
 #include "nsArray.h"
 #include "nsString.h"
 #include "plstr.h"
@@ -16,9 +17,9 @@
 #include "nsIURI.h"
 #include "nsServiceManagerUtils.h"
 
-nsLayoutDebugCLH::nsLayoutDebugCLH() {}
+nsLayoutDebugCLH::nsLayoutDebugCLH() = default;
 
-nsLayoutDebugCLH::~nsLayoutDebugCLH() {}
+nsLayoutDebugCLH::~nsLayoutDebugCLH() = default;
 
 NS_IMPL_ISUPPORTS(nsLayoutDebugCLH, ICOMMANDLINEHANDLER)
 

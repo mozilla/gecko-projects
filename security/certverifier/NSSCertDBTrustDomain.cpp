@@ -35,6 +35,7 @@
 #include "nsNSSCertValidity.h"
 #include "nsNSSCertificate.h"
 #include "nsNSSCertificateDB.h"
+#include "nsPrintfCString.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nss.h"
@@ -231,10 +232,10 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
   nsTArray<uint8_t> subject;
-  if (!subject.AppendElements(encodedIssuerName.UnsafeGetData(),
-                              encodedIssuerName.GetLength())) {
-    return Result::FATAL_ERROR_NO_MEMORY;
-  }
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  subject.AppendElements(encodedIssuerName.UnsafeGetData(),
+                         encodedIssuerName.GetLength());
   nsTArray<nsTArray<uint8_t>> certs;
   nsresult rv = mCertStorage->FindCertsBySubject(subject, certs);
   if (NS_FAILED(rv)) {
@@ -1673,6 +1674,33 @@ Result BuildRevocationCheckStrings(Input certDER, EndEntityOrCA endEntityOrCA,
 }
 #endif
 
+#ifdef MOZ_NEW_CERT_STORAGE
+bool CertIsInCertStorage(CERTCertificate* cert, nsICertStorage* certStorage) {
+  MOZ_ASSERT(cert);
+  MOZ_ASSERT(certStorage);
+  if (!cert || !certStorage) {
+    return false;
+  }
+  nsTArray<uint8_t> subject;
+  subject.AppendElements(cert->derSubject.data, cert->derSubject.len);
+  nsTArray<nsTArray<uint8_t>> certStorageCerts;
+  nsresult rv = certStorage->FindCertsBySubject(subject, certStorageCerts);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+  for (const auto& certStorageCert : certStorageCerts) {
+    if (certStorageCert.Length() != cert->derCert.len) {
+      continue;
+    }
+    if (memcmp(certStorageCert.Elements(), cert->derCert.data,
+               certStorageCert.Length()) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 /**
  * Given a list of certificates representing a verified certificate path from an
  * end-entity certificate to a trust anchor, imports the intermediate
@@ -1741,9 +1769,19 @@ void SaveIntermediateCerts(const UniqueCERTCertList& certList) {
           if (!slot) {
             return;
           }
+#ifdef MOZ_NEW_CERT_STORAGE
+          nsCOMPtr<nsICertStorage> certStorage(
+              do_GetService(NS_CERT_STORAGE_CID));
+#endif
+          size_t numCertsImported = 0;
           for (CERTCertListNode* node = CERT_LIST_HEAD(intermediates);
                !CERT_LIST_END(node, intermediates);
                node = CERT_LIST_NEXT(node)) {
+#ifdef MOZ_NEW_CERT_STORAGE
+            if (CertIsInCertStorage(node->cert, certStorage)) {
+              continue;
+            }
+#endif
             // This is a best-effort attempt at avoiding unknown issuer errors
             // in the future, so ignore failures here.
             nsAutoCString nickname;
@@ -1752,15 +1790,19 @@ void SaveIntermediateCerts(const UniqueCERTCertList& certList) {
             }
             Unused << PK11_ImportCert(slot.get(), node->cert, CK_INVALID_HANDLE,
                                       nickname.get(), false);
+            numCertsImported++;
           }
 
           nsCOMPtr<nsIRunnable> runnable(NS_NewRunnableFunction(
-              "IdleSaveIntermediateCertsDone", []() -> void {
+              "IdleSaveIntermediateCertsDone", [numCertsImported]() -> void {
                 nsCOMPtr<nsIObserverService> observerService =
                     mozilla::services::GetObserverService();
                 if (observerService) {
+                  NS_ConvertUTF8toUTF16 numCertsImportedString(
+                      nsPrintfCString("%zu", numCertsImported));
                   observerService->NotifyObservers(
-                      nullptr, "psm:intermediate-certs-cached", nullptr);
+                      nullptr, "psm:intermediate-certs-cached",
+                      numCertsImportedString.get());
                 }
               }));
           Unused << NS_DispatchToMainThread(runnable.forget());

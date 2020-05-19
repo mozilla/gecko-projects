@@ -262,7 +262,7 @@ nsresult nsHttpTransaction::Init(
   MOZ_ASSERT(cinfo);
   MOZ_ASSERT(requestHead);
   MOZ_ASSERT(target);
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(target->IsOnCurrentThread());
 
   mChannelId = channelId;
   mTransactionObserver = std::move(transactionObserver);
@@ -731,7 +731,8 @@ nsresult nsHttpTransaction::Status() { return mStatus; }
 uint32_t nsHttpTransaction::Caps() { return mCaps & ~mCapsToClear; }
 
 void nsHttpTransaction::SetDNSWasRefreshed() {
-  MOZ_ASSERT(NS_IsMainThread(), "SetDNSWasRefreshed on main thread only!");
+  MOZ_ASSERT(mConsumerTarget->IsOnCurrentThread(),
+             "SetDNSWasRefreshed on target thread only!");
   mCapsToClear |= NS_HTTP_REFRESH_DNS;
 }
 
@@ -1002,6 +1003,8 @@ nsresult nsHttpTransaction::WriteSegments(nsAHttpSegmentWriter* writer,
 
 bool nsHttpTransaction::ProxyConnectFailed() { return mProxyConnectFailed; }
 
+bool nsHttpTransaction::DataAlreadySent() { return false; }
+
 nsISupports* nsHttpTransaction::SecurityInfo() { return mSecurityInfo; }
 
 bool nsHttpTransaction::HasStickyConnection() const {
@@ -1016,7 +1019,7 @@ int64_t nsHttpTransaction::GetRequestSize() { return mRequestSize; }
 
 already_AddRefed<Http2PushedStreamWrapper>
 nsHttpTransaction::TakePushedStreamById(uint32_t aStreamId) {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mConsumerTarget->IsOnCurrentThread());
   MOZ_ASSERT(aStreamId);
 
   auto entry = mIDToStreamMap.Lookup(aStreamId);
@@ -1032,10 +1035,21 @@ nsHttpTransaction::TakePushedStreamById(uint32_t aStreamId) {
 void nsHttpTransaction::OnPush(Http2PushedStreamWrapper* aStream) {
   LOG(("nsHttpTransaction::OnPush %p aStream=%p", this, aStream));
   MOZ_ASSERT(aStream);
-  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mOnPushCallback);
+  MOZ_ASSERT(mConsumerTarget);
 
   RefPtr<Http2PushedStreamWrapper> stream = aStream;
+  if (!mConsumerTarget->IsOnCurrentThread()) {
+    RefPtr<nsHttpTransaction> self = this;
+    if (NS_FAILED(mConsumerTarget->Dispatch(
+            NS_NewRunnableFunction("nsHttpTransaction::OnPush",
+                                   [self, stream]() { self->OnPush(stream); }),
+            NS_DISPATCH_NORMAL))) {
+      stream->OnPushFailed();
+    }
+    return;
+  }
+
   auto entry = mIDToStreamMap.LookupForAdd(stream->StreamID());
   MOZ_ASSERT(!entry);
   if (!entry) {
@@ -1043,7 +1057,7 @@ void nsHttpTransaction::OnPush(Http2PushedStreamWrapper* aStream) {
   }
 
   if (NS_FAILED(mOnPushCallback(stream->StreamID(), stream->GetResourceUrl(),
-                                stream->GetRequestString()))) {
+                                stream->GetRequestString(), this))) {
     stream->OnPushFailed();
     mIDToStreamMap.Remove(stream->StreamID());
   }
@@ -1073,6 +1087,27 @@ void nsHttpTransaction::Close(nsresult reason) {
   if (mClosed) {
     LOG(("  already closed\n"));
     return;
+  }
+
+  // When we capture 407 from H2 proxy via CONNECT, prepare the response headers
+  // for authentication in http channel.
+  if (mTunnelProvider && reason == NS_ERROR_PROXY_AUTHENTICATION_FAILED) {
+    MOZ_ASSERT(mProxyConnectResponseCode == 407, "non-407 proxy auth failed");
+    MOZ_ASSERT(!mFlat407Headers.IsEmpty(), "Contain status line at least");
+    uint32_t unused = 0;
+
+    // Reset the reason to avoid nsHttpChannel::ProcessFallback
+    reason = ProcessData(mFlat407Headers.BeginWriting(),
+                         mFlat407Headers.Length(), &unused);
+
+    if (NS_SUCCEEDED(reason)) {
+      // prevent restarting the transaction
+      mReceivedData = true;
+    }
+
+    LOG(("nsHttpTransaction::Close [this=%p] overwrite reason to %" PRIx32
+         " for 407 proxy via CONNECT\n",
+         this, static_cast<uint32_t>(reason)));
   }
 
   NotifyTransactionObserver(reason);
@@ -1238,7 +1273,7 @@ void nsHttpTransaction::Close(nsresult reason) {
     // response will be usable (see bug 88792).
     if (!mHaveAllHeaders) {
       char data = '\n';
-      uint32_t unused;
+      uint32_t unused = 0;
       Unused << ParseHead(&data, 1, &unused);
 
       if (mResponseHead->Version() == HttpVersion::v0_9) {
@@ -1388,9 +1423,9 @@ char* nsHttpTransaction::LocateHttpStart(char* buf, uint32_t len,
 
   static const char HTTPHeader[] = "HTTP/1.";
   static const uint32_t HTTPHeaderLen = sizeof(HTTPHeader) - 1;
-  static const char HTTP2Header[] = "HTTP/2.0";
+  static const char HTTP2Header[] = "HTTP/2";
   static const uint32_t HTTP2HeaderLen = sizeof(HTTP2Header) - 1;
-  static const char HTTP3Header[] = "HTTP/3.0";
+  static const char HTTP3Header[] = "HTTP/3";
   static const uint32_t HTTP3HeaderLen = sizeof(HTTP3Header) - 1;
   // ShoutCast ICY is treated as HTTP/1.0
   static const char ICYHeader[] = "ICY ";
@@ -1726,7 +1761,8 @@ nsresult nsHttpTransaction::HandleContentStart() {
         break;
       case 421:
         LOG(("Misdirected Request.\n"));
-        gHttpHandler->AltServiceCache()->ClearHostMapping(mConnInfo);
+        gHttpHandler->ClearHostMapping(mConnInfo);
+        mCaps |= NS_HTTP_REFRESH_DNS;
 
         // retry on a new connection - just in case
         if (!mRestartCount) {
@@ -2541,10 +2577,12 @@ int32_t nsHttpTransaction::GetProxyConnectResponseCode() {
   return mProxyConnectResponseCode;
 }
 
-void nsHttpTransaction::GetTransactionObserverResult(
-    TransactionObserverResult& aResult) {
-  MutexAutoLock lock(mLock);
-  aResult = mTransactionObserverResult;
+void nsHttpTransaction::SetFlat407Headers(const nsACString& aHeaders) {
+  MOZ_ASSERT(mProxyConnectResponseCode == 407);
+  MOZ_ASSERT(!mResponseHead);
+
+  LOG(("nsHttpTransaction::SetFlat407Headers %p", this));
+  mFlat407Headers = aHeaders;
 }
 
 void nsHttpTransaction::NotifyTransactionObserver(nsresult reason) {
@@ -2579,16 +2617,14 @@ void nsHttpTransaction::NotifyTransactionObserver(nsresult reason) {
     }
   }
 
-  {
-    MutexAutoLock lock(mLock);
-    mTransactionObserverResult.versionOk() = versionOk;
-    mTransactionObserverResult.authOk() = authOk;
-    mTransactionObserverResult.closeReason() = reason;
-  }
+  TransactionObserverResult result;
+  result.versionOk() = versionOk;
+  result.authOk() = authOk;
+  result.closeReason() = reason;
 
   TransactionObserverFunc obs = nullptr;
   std::swap(obs, mTransactionObserver);
-  obs();
+  obs(std::move(result));
 }
 
 }  // namespace net

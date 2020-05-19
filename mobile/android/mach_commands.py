@@ -363,12 +363,13 @@ class AndroidEmulatorCommands(MachCommandBase):
     """
     @Command('android-emulator', category='devenv',
              conditions=[],
-             description='Run the Android emulator with an AVD from test automation.')
+             description='Run the Android emulator with an AVD from test automation. '
+                         'Environment variable MOZ_EMULATOR_COMMAND_ARGS, if present, will '
+                         'over-ride the command line arguments used to launch the emulator.')
     @CommandArgument('--version', metavar='VERSION',
-                     choices=['arm-4.3', 'x86-4.2', 'x86-7.0'],
+                     choices=['arm-4.3', 'x86-7.0'],
                      help='Specify which AVD to run in emulator. '
-                     'One of "arm-4.3" (Android 4.3 supporting armv7 binaries), '
-                     '"x86-4.2" (Android 4.2 supporting x86 binaries), or '
+                     'One of "arm-4.3" (Android 4.3 supporting armv7 binaries), or '
                      '"x86-7.0" (Android 7.0 supporting x86 or x86_64 binaries, '
                      'recommended for most applications). '
                      'By default, "arm-4.3" will be used if the current build environment '
@@ -377,9 +378,11 @@ class AndroidEmulatorCommands(MachCommandBase):
                      help='Wait for emulator to be closed.')
     @CommandArgument('--force-update', action='store_true',
                      help='Update AVD definition even when AVD is already installed.')
+    @CommandArgument('--gpu',
+                     help='Over-ride the emulator -gpu argument.')
     @CommandArgument('--verbose', action='store_true',
                      help='Log informative status messages.')
-    def emulator(self, version, wait=False, force_update=False, verbose=False):
+    def emulator(self, version, wait=False, force_update=False, gpu=None, verbose=False):
         from mozrunner.devices.android_device import AndroidEmulator
 
         emulator = AndroidEmulator(version, verbose, substs=self.substs,
@@ -410,7 +413,7 @@ class AndroidEmulatorCommands(MachCommandBase):
         self.log(logging.INFO, "emulator", {},
                  "Starting Android emulator running %s..." %
                  emulator.get_avd_description())
-        emulator.start()
+        emulator.start(gpu)
         if emulator.wait_for_start():
             self.log(logging.INFO, "emulator", {},
                      "Android emulator is running.")

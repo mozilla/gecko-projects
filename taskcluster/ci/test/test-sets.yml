@@ -15,22 +15,12 @@
 
 ### Feature-specific test groups
 
-common-tests:
-    - marionette
-    - mochitest-browser-chrome
-
 web-platform-tests:
     - web-platform-tests
-    - web-platform-tests-crashtests
-    - web-platform-tests-reftests
-    - web-platform-tests-wdspec
-
-web-platform-tests-1804:
-    - web-platform-tests
-    - web-platform-tests-crashtests
-    - web-platform-tests-reftests
-
-web-platform-tests-1604:
+    - web-platform-tests-backlog
+    - web-platform-tests-crashtest
+    - web-platform-tests-reftest
+    - web-platform-tests-reftest-backlog
     - web-platform-tests-wdspec
 
 web-platform-tests-wdspec-headless:
@@ -93,6 +83,7 @@ raptor-firefox:
     - raptor-tp6-8-firefox
     - raptor-tp6-9-firefox
     - raptor-tp6-10-firefox
+    - raptor-tp6-11-firefox
     - raptor-tp6-binast-1-firefox
     - raptor-speedometer-firefox
     - raptor-stylebench-firefox
@@ -102,6 +93,12 @@ raptor-firefox:
     - raptor-sunspider-firefox
     - raptor-wasm-godot-firefox
     - raptor-youtube-playback-firefox
+    - raptor-youtube-playback-av1-sfr-firefox
+    - raptor-youtube-playback-h264-sfr-firefox
+    - raptor-youtube-playback-vp9-sfr-firefox
+    - raptor-youtube-playback-widevine-hfr-firefox
+    - raptor-youtube-playback-widevine-h264-sfr-firefox
+    - raptor-youtube-playback-widevine-vp9-sfr-firefox
     - raptor-tp6-1-firefox-cold
     - raptor-tp6-2-firefox-cold
     - raptor-tp6-3-firefox-cold
@@ -132,6 +129,7 @@ raptor-firefox:
     - raptor-tp6-28-firefox-cold
     - raptor-tp6-29-firefox-cold
     - raptor-tp6-30-firefox-cold
+    - raptor-tp6-31-firefox-cold
     - raptor-ares6-firefox
     - raptor-jetstream2-firefox
 
@@ -146,6 +144,7 @@ raptor-chrome:
     - raptor-tp6-8-chrome
     - raptor-tp6-9-chrome
     - raptor-tp6-10-chrome
+    - raptor-tp6-11-chrome
     - raptor-speedometer-chrome
     - raptor-stylebench-chrome
     - raptor-motionmark-htmlsuite-chrome
@@ -183,9 +182,16 @@ raptor-chrome:
     - raptor-tp6-28-chrome-cold
     - raptor-tp6-29-chrome-cold
     - raptor-tp6-30-chrome-cold
+    - raptor-tp6-31-chrome-cold
     - raptor-ares6-chrome
     - raptor-jetstream2-chrome
     - raptor-youtube-playback-chrome
+    - raptor-youtube-playback-av1-sfr-chrome
+    - raptor-youtube-playback-h264-sfr-chrome
+    - raptor-youtube-playback-vp9-sfr-chrome
+    - raptor-youtube-playback-widevine-hfr-chrome
+    - raptor-youtube-playback-widevine-h264-sfr-chrome
+    - raptor-youtube-playback-widevine-vp9-sfr-chrome
 
 raptor-profiling:
     - raptor-tp6-1-firefox-profiling
@@ -198,6 +204,7 @@ raptor-profiling:
     - raptor-tp6-8-firefox-profiling
     - raptor-tp6-9-firefox-profiling
     - raptor-tp6-10-firefox-profiling
+    - raptor-tp6-11-firefox-profiling
     - raptor-speedometer-firefox-profiling
     - raptor-stylebench-firefox-profiling
     - raptor-motionmark-htmlsuite-firefox-profiling
@@ -220,6 +227,7 @@ raptor-chromium:
     - raptor-tp6-8-chromium
     - raptor-tp6-9-chromium
     - raptor-tp6-10-chromium
+    - raptor-tp6-11-chromium
     - raptor-speedometer-chromium
     - raptor-stylebench-chromium
     - raptor-motionmark-htmlsuite-chromium
@@ -257,6 +265,7 @@ raptor-chromium:
     - raptor-tp6-28-chromium-cold
     - raptor-tp6-29-chromium-cold
     - raptor-tp6-30-chromium-cold
+    - raptor-tp6-31-chromium-cold
     - raptor-ares6-chromium
     - raptor-jetstream2-chromium
 
@@ -339,30 +348,29 @@ desktop-screenshot-capture:
 linux32-tests:
     - web-platform-tests
 
-linux-common-tests:
-    - marionette
-    - mochitest-browser-chrome
-
 linux1804-tests:
     - cppunit
     - crashtest
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
     - gtest
-    - jsreftest
     - jittest
-    - mochitest
+    - jsreftest
+    - marionette
     - mochitest-a11y
+    - mochitest-browser-chrome
     - mochitest-chrome
+    - mochitest-chrome-gpu
     - mochitest-devtools-chrome
-    - mochitest-gpu
     - mochitest-media
+    - mochitest-plain
+    - mochitest-plain-gpu
     - mochitest-remote
-    - mochitest-webgpu
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
+    - mochitest-webgpu
     - reftest
     - reftest-no-accel
     - telemetry-tests-client
@@ -377,33 +385,12 @@ linux1804-qr-tests:
     - gtest
     - jittest
     - jsreftest
-    - mochitest
     - mochitest-a11y
     - mochitest-chrome
-    - mochitest-gpu
+    - mochitest-chrome-gpu
     - mochitest-media
-    - mochitest-webgpu
-    - mochitest-webgl1-core
-    - mochitest-webgl1-ext
-    - mochitest-webgl2-core
-    - mochitest-webgl2-ext
-    - reftest
-    - xpcshell
-
-linux1804-ccov-tests:
-    - cppunit
-    - crashtest
-    - firefox-ui-functional-local
-    - firefox-ui-functional-remote
-    - gtest
-    - jittest
-    - jsreftest
-    - mochitest
-    - mochitest-a11y
-    - mochitest-chrome
-    - mochitest-devtools-chrome
-    - mochitest-gpu
-    - mochitest-media
+    - mochitest-plain
+    - mochitest-plain-gpu
     - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
@@ -411,11 +398,6 @@ linux1804-ccov-tests:
     - mochitest-webgl2-ext
     - mochitest-webgpu
     - reftest
-    - reftest-no-accel
-    - telemetry-tests-client
-    - test-verify
-    - test-verify-gpu
-    - test-verify-wpt
     - xpcshell
 
 linux-qr-smoketests:
@@ -429,9 +411,10 @@ linux-talos-flex:
 
 windows-qr-tests:
     - crashtest
-    - mochitest
+    - mochitest-chrome-gpu
     - mochitest-browser-chrome
-    - mochitest-gpu
+    - mochitest-plain
+    - mochitest-plain-gpu
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl2-core
@@ -450,13 +433,14 @@ windows-tests:
     - jittest
     - jsreftest
     - marionette
-    - mochitest
     - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
+    - mochitest-chrome-gpu
     - mochitest-devtools-chrome
-    - mochitest-gpu
     - mochitest-media
+    - mochitest-plain
+    - mochitest-plain-gpu
     - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
@@ -476,7 +460,8 @@ mingwclang-tests-debug:
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
     - mochitest-a11y
-    - mochitest-gpu
+    - mochitest-chrome-gpu
+    - mochitest-plain-gpu
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
@@ -487,31 +472,13 @@ mingwclang-tests-debug:
 
 mingwclang-tests-opt:
     - cppunit
-    - mochitest-gpu
+    - mochitest-chrome-gpu
+    - mochitest-plain-gpu
 
 windows-aarch64-tests:
-    - cppunit
     - crashtest
-    - gtest
-    - marionette
-    - mochitest
-    - mochitest-a11y
-    - mochitest-browser-chrome
-    - mochitest-chrome
-    - mochitest-devtools-chrome
-    - mochitest-gpu
     - mochitest-media
-    - mochitest-remote
-    - mochitest-webgl1-core
-    - mochitest-webgl1-ext
-    - mochitest-webgl2-core
-    - mochitest-webgl2-ext
-    - mochitest-webgpu
     - reftest
-    - web-platform-tests
-    - web-platform-tests-crashtests
-    - web-platform-tests-reftests
-    - xpcshell
 
 windows-talos:
     - talos-bcv
@@ -544,12 +511,13 @@ macosx1014-64-tests:
     - jittest
     - jsreftest
     - marionette
-    - mochitest
     - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
+    - mochitest-chrome-gpu
     - mochitest-devtools-chrome
-    - mochitest-gpu
+    - mochitest-plain
+    - mochitest-plain-gpu
     - mochitest-media
     - mochitest-remote
     - mochitest-webgl1-core
@@ -563,8 +531,10 @@ macosx1014-64-tests:
     - test-verify-gpu
     - test-verify-wpt
     - web-platform-tests
-    - web-platform-tests-crashtests
-    - web-platform-tests-reftests
+    - web-platform-tests-backlog
+    - web-platform-tests-crashtest
+    - web-platform-tests-reftest
+    - web-platform-tests-reftest-backlog
     - web-platform-tests-wdspec
     - xpcshell
 
@@ -598,8 +568,9 @@ android-x86_64-tests:
     - crashtest
     - geckoview-junit
     - gtest
-    - mochitest
-    - mochitest-gpu
+    - mochitest-media
+    - mochitest-plain
+    - mochitest-plain-gpu
     # - mochitest-webgl1-core # Harness issues?
     # - mochitest-webgl1-ext
     # - mochitest-webgl2-core # Emulator not creating ES3?
@@ -607,8 +578,10 @@ android-x86_64-tests:
     - reftest
     - test-verify
     - web-platform-tests
-    - web-platform-tests-crashtests
-    - web-platform-tests-reftests
+    - web-platform-tests-backlog
+    - web-platform-tests-crashtest
+    - web-platform-tests-reftest
+    - web-platform-tests-reftest-backlog
     - xpcshell
 
 android-x86_64-qr-tests:
@@ -626,6 +599,7 @@ android-hw-arm7-pgo-unittests:
     - jsreftest
 
 android-hw-aarch64-pgo-unittests:
+    - jittest
     - mochitest-media
 
 android-hw-arm7-debug-unittests:
@@ -633,14 +607,15 @@ android-hw-arm7-debug-unittests:
     - jsreftest
 
 android-hw-aarch64-debug-unittests:
+    - jittest
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
 
 android-hw-aarch64-qr:
-    - crashtest
-    - reftest
+    - crashtest-qr
+    - reftest-qr
 
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
@@ -648,8 +623,26 @@ android-hw-arm7-raptor:
     - raptor-speedometer-fenix
     - raptor-speedometer-fennec68
     - raptor-youtube-playback-fenix
+    - raptor-youtube-playback-av1-sfr-fenix
+    - raptor-youtube-playback-h264-sfr-fenix
+    - raptor-youtube-playback-vp9-sfr-fenix
+    - raptor-youtube-playback-widevine-hfr-fenix
+    - raptor-youtube-playback-widevine-h264-sfr-fenix
+    - raptor-youtube-playback-widevine-vp9-sfr-fenix
     - raptor-youtube-playback-geckoview
+    - raptor-youtube-playback-av1-sfr-geckoview
+    - raptor-youtube-playback-h264-sfr-geckoview
+    - raptor-youtube-playback-vp9-sfr-geckoview
+    - raptor-youtube-playback-widevine-hfr-geckoview
+    - raptor-youtube-playback-widevine-h264-sfr-geckoview
+    - raptor-youtube-playback-widevine-vp9-sfr-geckoview
     - raptor-youtube-playback-fennec68
+    - raptor-youtube-playback-av1-sfr-fennec68
+    - raptor-youtube-playback-h264-sfr-fennec68
+    - raptor-youtube-playback-vp9-sfr-fennec68
+    - raptor-youtube-playback-widevine-hfr-fennec68
+    - raptor-youtube-playback-widevine-h264-sfr-fennec68
+    - raptor-youtube-playback-widevine-vp9-sfr-fennec68
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -659,17 +652,6 @@ android-hw-arm7-raptor:
     - raptor-tp6m-7-geckoview
     - raptor-tp6m-8-geckoview
     - raptor-tp6m-9-geckoview
-    - raptor-tp6m-10-geckoview
-    - raptor-tp6m-1-fenix
-    - raptor-tp6m-2-fenix
-    - raptor-tp6m-3-fenix
-    - raptor-tp6m-4-fenix
-    - raptor-tp6m-5-fenix
-    - raptor-tp6m-6-fenix
-    - raptor-tp6m-7-fenix
-    - raptor-tp6m-8-fenix
-    - raptor-tp6m-9-fenix
-    - raptor-tp6m-10-fenix
     - raptor-tp6m-1-refbrow
     - raptor-tp6m-2-refbrow
     - raptor-tp6m-3-refbrow
@@ -679,35 +661,6 @@ android-hw-arm7-raptor:
     - raptor-tp6m-7-refbrow
     - raptor-tp6m-8-refbrow
     - raptor-tp6m-9-refbrow
-    - raptor-tp6m-10-refbrow
-    - raptor-tp6m-1-fenix-cold
-    - raptor-tp6m-2-fenix-cold
-    - raptor-tp6m-3-fenix-cold
-    - raptor-tp6m-4-fenix-cold
-    - raptor-tp6m-5-fenix-cold
-    - raptor-tp6m-6-fenix-cold
-    - raptor-tp6m-7-fenix-cold
-    - raptor-tp6m-8-fenix-cold
-    - raptor-tp6m-9-fenix-cold
-    - raptor-tp6m-10-fenix-cold
-    - raptor-tp6m-11-fenix-cold
-    - raptor-tp6m-12-fenix-cold
-    - raptor-tp6m-13-fenix-cold
-    - raptor-tp6m-14-fenix-cold
-    - raptor-tp6m-15-fenix-cold
-    - raptor-tp6m-16-fenix-cold
-    - raptor-tp6m-17-fenix-cold
-    - raptor-tp6m-18-fenix-cold
-    - raptor-tp6m-19-fenix-cold
-    - raptor-tp6m-20-fenix-cold
-    - raptor-tp6m-21-fenix-cold
-    - raptor-tp6m-22-fenix-cold
-    - raptor-tp6m-23-fenix-cold
-    - raptor-tp6m-24-fenix-cold
-    - raptor-tp6m-25-fenix-cold
-    - raptor-tp6m-26-fenix-cold
-    - raptor-tp6m-27-fenix-cold
-    - raptor-tp6m-28-fenix-cold
     - raptor-tp6m-1-geckoview-cold
     - raptor-tp6m-2-geckoview-cold
     - raptor-tp6m-3-geckoview-cold
@@ -733,7 +686,6 @@ android-hw-arm7-raptor:
     - raptor-tp6m-23-geckoview-cold
     - raptor-tp6m-24-geckoview-cold
     - raptor-tp6m-25-geckoview-cold
-    - raptor-tp6m-26-geckoview-cold
     - raptor-tp6m-27-geckoview-cold
     - raptor-tp6m-28-geckoview-cold
     - raptor-tp6m-1-fennec68
@@ -745,7 +697,6 @@ android-hw-arm7-raptor:
     - raptor-tp6m-7-fennec68
     - raptor-tp6m-8-fennec68
     - raptor-tp6m-9-fennec68
-    - raptor-tp6m-10-fennec68
     - raptor-tp6m-1-fennec68-cold
     - raptor-tp6m-2-fennec68-cold
     - raptor-tp6m-3-fennec68-cold
@@ -785,7 +736,6 @@ android-hw-arm7-raptor:
     - raptor-tp6m-23-refbrow-cold
     - raptor-tp6m-24-refbrow-cold
     - raptor-tp6m-25-refbrow-cold
-    - raptor-tp6m-26-refbrow-cold
     - raptor-tp6m-27-refbrow-cold
     - raptor-tp6m-28-refbrow-cold
 
@@ -795,8 +745,26 @@ android-hw-aarch64-raptor:
     - raptor-speedometer-fenix
     - raptor-speedometer-fennec68
     - raptor-youtube-playback-fenix
+    - raptor-youtube-playback-av1-sfr-fenix
+    - raptor-youtube-playback-h264-sfr-fenix
+    - raptor-youtube-playback-vp9-sfr-fenix
+    - raptor-youtube-playback-widevine-hfr-fenix
+    - raptor-youtube-playback-widevine-h264-sfr-fenix
+    - raptor-youtube-playback-widevine-vp9-sfr-fenix
     - raptor-youtube-playback-geckoview
+    - raptor-youtube-playback-av1-sfr-geckoview
+    - raptor-youtube-playback-h264-sfr-geckoview
+    - raptor-youtube-playback-vp9-sfr-geckoview
+    - raptor-youtube-playback-widevine-hfr-geckoview
+    - raptor-youtube-playback-widevine-h264-sfr-geckoview
+    - raptor-youtube-playback-widevine-vp9-sfr-geckoview
     - raptor-youtube-playback-fennec68
+    - raptor-youtube-playback-av1-sfr-fennec68
+    - raptor-youtube-playback-h264-sfr-fennec68
+    - raptor-youtube-playback-vp9-sfr-fennec68
+    - raptor-youtube-playback-widevine-hfr-fennec68
+    - raptor-youtube-playback-widevine-h264-sfr-fennec68
+    - raptor-youtube-playback-widevine-vp9-sfr-fennec68
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -806,17 +774,6 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-7-geckoview
     - raptor-tp6m-8-geckoview
     - raptor-tp6m-9-geckoview
-    - raptor-tp6m-10-geckoview
-    - raptor-tp6m-1-fenix
-    - raptor-tp6m-2-fenix
-    - raptor-tp6m-3-fenix
-    - raptor-tp6m-4-fenix
-    - raptor-tp6m-5-fenix
-    - raptor-tp6m-6-fenix
-    - raptor-tp6m-7-fenix
-    - raptor-tp6m-8-fenix
-    - raptor-tp6m-9-fenix
-    - raptor-tp6m-10-fenix
     - raptor-tp6m-1-refbrow
     - raptor-tp6m-2-refbrow
     - raptor-tp6m-3-refbrow
@@ -826,35 +783,6 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-7-refbrow
     - raptor-tp6m-8-refbrow
     - raptor-tp6m-9-refbrow
-    - raptor-tp6m-10-refbrow
-    - raptor-tp6m-1-fenix-cold
-    - raptor-tp6m-2-fenix-cold
-    - raptor-tp6m-3-fenix-cold
-    - raptor-tp6m-4-fenix-cold
-    - raptor-tp6m-5-fenix-cold
-    - raptor-tp6m-6-fenix-cold
-    - raptor-tp6m-7-fenix-cold
-    - raptor-tp6m-8-fenix-cold
-    - raptor-tp6m-9-fenix-cold
-    - raptor-tp6m-10-fenix-cold
-    - raptor-tp6m-11-fenix-cold
-    - raptor-tp6m-12-fenix-cold
-    - raptor-tp6m-13-fenix-cold
-    - raptor-tp6m-14-fenix-cold
-    - raptor-tp6m-15-fenix-cold
-    - raptor-tp6m-16-fenix-cold
-    - raptor-tp6m-17-fenix-cold
-    - raptor-tp6m-18-fenix-cold
-    - raptor-tp6m-19-fenix-cold
-    - raptor-tp6m-20-fenix-cold
-    - raptor-tp6m-21-fenix-cold
-    - raptor-tp6m-22-fenix-cold
-    - raptor-tp6m-23-fenix-cold
-    - raptor-tp6m-24-fenix-cold
-    - raptor-tp6m-25-fenix-cold
-    - raptor-tp6m-26-fenix-cold
-    - raptor-tp6m-27-fenix-cold
-    - raptor-tp6m-28-fenix-cold
     - raptor-tp6m-1-geckoview-cold
     - raptor-tp6m-2-geckoview-cold
     - raptor-tp6m-3-geckoview-cold
@@ -880,7 +808,6 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-23-geckoview-cold
     - raptor-tp6m-24-geckoview-cold
     - raptor-tp6m-25-geckoview-cold
-    - raptor-tp6m-26-geckoview-cold
     - raptor-tp6m-27-geckoview-cold
     - raptor-tp6m-28-geckoview-cold
     - raptor-tp6m-1-fennec68
@@ -892,7 +819,6 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-7-fennec68
     - raptor-tp6m-8-fennec68
     - raptor-tp6m-9-fennec68
-    - raptor-tp6m-10-fennec68
     - raptor-tp6m-1-fennec68-cold
     - raptor-tp6m-2-fennec68-cold
     - raptor-tp6m-3-fennec68-cold
@@ -932,7 +858,6 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-23-refbrow-cold
     - raptor-tp6m-24-refbrow-cold
     - raptor-tp6m-25-refbrow-cold
-    - raptor-tp6m-26-refbrow-cold
     - raptor-tp6m-27-refbrow-cold
     - raptor-tp6m-28-refbrow-cold
 
@@ -1000,14 +925,16 @@ android-hw-aarch64-raptor-cpu-memory-power:
 
 android-hw-aarch64-browsertime:
     - browsertime-tp6m
+    - browsertime-tp6m-live
     - browsertime-tp6m-profiling
-    - browsertime-benchmark-speedometer
+    - browsertime-speedometer-mobile
 
 android-hw-arm7-browsertime:
     - browsertime-tp6m
+    - browsertime-tp6m-live
     - browsertime-tp6m-profiling
-    - browsertime-benchmark-speedometer
+    - browsertime-speedometer-mobile
 
 linux-tsan-tests:
-    - mochitest
+    - mochitest-plain
     - xpcshell

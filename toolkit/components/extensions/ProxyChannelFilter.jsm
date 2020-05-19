@@ -168,22 +168,30 @@ const ProxyInfoData = {
   },
 
   proxyAuthorizationHeader(proxyData) {
-    let { proxyauthorizationheader } = proxyData;
-    if (
-      proxyauthorizationheader !== undefined &&
-      typeof username !== "string"
-    ) {
+    let { proxyAuthorizationHeader, type } = proxyData;
+    if (proxyAuthorizationHeader === undefined) {
+      return;
+    }
+    if (typeof proxyAuthorizationHeader !== "string") {
       throw new ExtensionError(
-        `ProxyInfoData: Invalid proxy server authorization header: "${proxyauthorizationheader}"`
+        `ProxyInfoData: Invalid proxy server authorization header: "${proxyAuthorizationHeader}"`
+      );
+    }
+    if (type !== "https") {
+      throw new ExtensionError(
+        `ProxyInfoData: ProxyAuthorizationHeader requires type "https"`
       );
     }
   },
 
   connectionIsolationKey(proxyData) {
-    let { connectionisolationkey } = proxyData;
-    if (connectionisolationkey !== undefined && typeof username !== "string") {
+    let { connectionIsolationKey } = proxyData;
+    if (
+      connectionIsolationKey !== undefined &&
+      typeof connectionIsolationKey !== "string"
+    ) {
       throw new ExtensionError(
-        `ProxyInfoData: Invalid proxy server authorization header: "${connectionisolationkey}"`
+        `ProxyInfoData: Invalid proxy connection isolation key: "${connectionIsolationKey}"`
       );
     }
   },
@@ -326,13 +334,12 @@ class ProxyChannelFilter {
    * is called to apply proxy filter rules for the given URI and proxy object
    * (or list of proxy objects).
    *
-   * @param {nsIProtocolProxyService} service A reference to the Protocol Proxy Service.
    * @param {nsIChannel} channel The channel for which these proxy settings apply.
    * @param {nsIProxyInfo} defaultProxyInfo The proxy (or list of proxies) that
    *     would be used by default for the given URI. This may be null.
    * @param {nsIProxyProtocolFilterResult} proxyFilter
    */
-  async applyFilter(service, channel, defaultProxyInfo, proxyFilter) {
+  async applyFilter(channel, defaultProxyInfo, proxyFilter) {
     let proxyInfo;
     try {
       let wrapper = ChannelWrapper.get(channel);

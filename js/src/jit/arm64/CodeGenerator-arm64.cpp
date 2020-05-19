@@ -197,16 +197,6 @@ void CodeGenerator::visitMinMaxF(LMinMaxF* ins) {
   }
 }
 
-void CodeGenerator::visitAbsD(LAbsD* ins) {
-  ARMFPRegister input(ToFloatRegister(ins->input()), 64);
-  masm.Fabs(input, input);
-}
-
-void CodeGenerator::visitAbsF(LAbsF* ins) {
-  ARMFPRegister input(ToFloatRegister(ins->input()), 32);
-  masm.Fabs(input, input);
-}
-
 void CodeGenerator::visitSqrtD(LSqrtD* ins) {
   ARMFPRegister input(ToFloatRegister(ins->input()), 64);
   ARMFPRegister output(ToFloatRegister(ins->output()), 64);
@@ -335,20 +325,22 @@ void CodeGenerator::visitMulI(LMulI* ins) {
           }
         }
 
-        // Otherwise, just multiply.
+        // Otherwise, just multiply. We have to check for overflow.
+        // Negative zero was handled above.
         Label bailout;
-        Label* onZero = mul->canBeNegativeZero() ? &bailout : nullptr;
         Label* onOverflow = mul->canOverflow() ? &bailout : nullptr;
 
         vixl::UseScratchRegisterScope temps(&masm.asVIXL());
         const Register scratch = temps.AcquireW().asUnsized();
 
         masm.move32(Imm32(constant), scratch);
-        masm.mul32(lhsreg, scratch, destreg, onOverflow, onZero);
-        if (onZero || onOverflow) {
+        masm.mul32(lhsreg, scratch, destreg, onOverflow);
+
+        if (onOverflow) {
+          MOZ_ASSERT(lhsreg != destreg);
           bailoutFrom(&bailout, ins->snapshot());
         }
-        return;  // escape overflow check;
+        return;
     }
 
     // Overflow check.
@@ -357,14 +349,44 @@ void CodeGenerator::visitMulI(LMulI* ins) {
     }
   } else {
     Register rhsreg = ToRegister(rhs);
+    const ARMRegister rhsreg32 = ARMRegister(rhsreg, 32);
 
     Label bailout;
-    // TODO: x64 (but not other platforms) have an OOL path for onZero.
-    Label* onZero = mul->canBeNegativeZero() ? &bailout : nullptr;
     Label* onOverflow = mul->canOverflow() ? &bailout : nullptr;
 
-    masm.mul32(lhsreg, rhsreg, destreg, onOverflow, onZero);
-    if (onZero || onOverflow) {
+    if (mul->canBeNegativeZero()) {
+      // The product of two integer operands is negative zero iff one
+      // operand is zero, and the other is negative. Therefore, the
+      // sum of the two operands will also be negative (specifically,
+      // it will be the non-zero operand). If the result of the
+      // multiplication is 0, we can check the sign of the sum to
+      // determine whether we should bail out.
+
+      // This code can bailout, so lowering guarantees that the input
+      // operands are not overwritten.
+      MOZ_ASSERT(destreg != lhsreg);
+      MOZ_ASSERT(destreg != rhsreg);
+
+      // Do the multiplication.
+      masm.mul32(lhsreg, rhsreg, destreg, onOverflow);
+
+      // Set Zero flag if destreg is 0.
+      masm.test32(destreg, destreg);
+
+      // ccmn is 'conditional compare negative'.
+      // If the Zero flag is set:
+      //    perform a compare negative (compute lhs+rhs and set flags)
+      // else:
+      //    clear flags
+      masm.Ccmn(lhsreg32, rhsreg32, vixl::NoFlag, Assembler::Zero);
+
+      // Bails out if (lhs * rhs == 0) && (lhs + rhs < 0):
+      bailoutIf(Assembler::LessThan, ins->snapshot());
+
+    } else {
+      masm.mul32(lhsreg, rhsreg, destreg, onOverflow);
+    }
+    if (onOverflow) {
       bailoutFrom(&bailout, ins->snapshot());
     }
   }
@@ -1011,7 +1033,9 @@ MoveOperand CodeGeneratorARM64::toMoveOperand(const LAllocation a) const {
   if (a.isFloatReg()) {
     return MoveOperand(ToFloatRegister(a));
   }
-  return MoveOperand(AsRegister(masm.getStackPointer()), ToStackOffset(a));
+  MoveOperand::Kind kind =
+      a.isStackArea() ? MoveOperand::EFFECTIVE_ADDRESS : MoveOperand::MEMORY;
+  return MoveOperand(ToAddress(a), kind);
 }
 
 class js::jit::OutOfLineTableSwitch
@@ -1776,13 +1800,9 @@ void CodeGeneratorARM64::generateInvalidateEpilogue() {
   // is).
   invalidateEpilogueData_ = masm.pushWithPatch(ImmWord(uintptr_t(-1)));
 
+  // Jump to the invalidator which will replace the current frame.
   TrampolinePtr thunk = gen->jitRuntime()->getInvalidationThunk();
-  masm.call(thunk);
-
-  // We should never reach this point in JIT code -- the invalidation thunk
-  // should pop the invalidated JS frame and return directly to its caller.
-  masm.assumeUnreachable(
-      "Should have returned directly to its caller instead of here.");
+  masm.jump(thunk);
 }
 
 template <class U>
@@ -1900,9 +1920,9 @@ void CodeGenerator::visitUMod(LUMod* ins) {
 
 void CodeGenerator::visitEffectiveAddress(LEffectiveAddress* ins) {
   const MEffectiveAddress* mir = ins->mir();
-  const ARMRegister base = toXRegister(ins->base());
-  const ARMRegister index = toXRegister(ins->index());
-  const ARMRegister output = toXRegister(ins->output());
+  const ARMRegister base = toWRegister(ins->base());
+  const ARMRegister index = toWRegister(ins->index());
+  const ARMRegister output = toWRegister(ins->output());
 
   masm.Add(output, base, Operand(index, vixl::LSL, mir->scale()));
   masm.Add(output, output, Operand(mir->displacement()));

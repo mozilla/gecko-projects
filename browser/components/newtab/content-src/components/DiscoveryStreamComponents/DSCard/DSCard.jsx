@@ -10,6 +10,7 @@ import React from "react";
 import { SafeAnchor } from "../SafeAnchor/SafeAnchor";
 import { DSContextFooter } from "../DSContextFooter/DSContextFooter.jsx";
 import { FluentOrText } from "../../FluentOrText/FluentOrText.jsx";
+import { connect } from "react-redux";
 
 // Default Meta that displays CTA as link if cta_variant in layout is set as "link"
 export const DefaultMeta = ({
@@ -83,7 +84,7 @@ export const CTAButtonMeta = ({
   </div>
 );
 
-export class DSCard extends React.PureComponent {
+export class _DSCard extends React.PureComponent {
   constructor(props) {
     super(props);
 
@@ -95,6 +96,40 @@ export class DSCard extends React.PureComponent {
     this.state = {
       isSeen: false,
     };
+
+    // If this is for the about:home startup cache, then we always want
+    // to render the DSCard, regardless of whether or not its been seen.
+    if (props.App.isForStartupCache) {
+      this.state.isSeen = true;
+    }
+
+    // We want to choose the optimal thumbnail for the underlying DSImage, but
+    // want to do it in a performant way. The breakpoints used in the
+    // CSS of the page are, unfortuntely, not easy to retrieve without
+    // causing a style flush. To avoid that, we hardcode them here.
+    //
+    // The values chosen here were the dimensions of the card thumbnails as
+    // computed by getBoundingClientRect() for each type of viewport width
+    // across both high-density and normal-density displays.
+    this.dsImageSizes = [
+      {
+        mediaMatcher: "(min-width: 1122px)",
+        width: 296,
+        height: 148,
+      },
+
+      {
+        mediaMatcher: "(min-width: 866px)",
+        width: 218,
+        height: 109,
+      },
+
+      {
+        mediaMatcher: "(max-width: 610px)",
+        width: 202,
+        height: 101,
+      },
+    ];
   }
 
   onLinkClick(event) {
@@ -195,6 +230,7 @@ export class DSCard extends React.PureComponent {
               extraClassNames="img"
               source={this.props.image_src}
               rawSource={this.props.raw_image_src}
+              sizes={this.dsImageSizes}
             />
           </div>
           {isButtonCTA ? (
@@ -255,8 +291,12 @@ export class DSCard extends React.PureComponent {
   }
 }
 
-DSCard.defaultProps = {
+_DSCard.defaultProps = {
   windowObj: window, // Added to support unit tests
 };
+
+export const DSCard = connect(state => ({
+  App: state.App,
+}))(_DSCard);
 
 export const PlaceholderDSCard = props => <DSCard placeholder={true} />;

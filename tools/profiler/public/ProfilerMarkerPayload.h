@@ -9,15 +9,15 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/BlocksRingBuffer.h"
+#include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/net/TimingStruct.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/ProfileBufferEntrySerialization.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/UniquePtrExtensions.h"
-#include "mozilla/ipc/ProtocolUtils.h"
-#include "mozilla/net/TimingStruct.h"
 
 #include "nsString.h"
 #include "nsCRTGlue.h"
@@ -57,11 +57,11 @@ class ProfilerMarkerPayload {
       UniqueProfilerBacktrace aStack = nullptr)
       : mCommonProps{aStartTime, aEndTime, std::move(aStack), aInnerWindowID} {}
 
-  virtual ~ProfilerMarkerPayload() {}
+  virtual ~ProfilerMarkerPayload() = default;
 
   // Compute the number of bytes needed to serialize the `DeserializerTag` and
   // payload, including in the no-payload (nullptr) case.
-  static mozilla::BlocksRingBuffer::Length TagAndSerializationBytes(
+  static mozilla::ProfileBufferEntryWriter::Length TagAndSerializationBytes(
       const ProfilerMarkerPayload* aPayload) {
     if (!aPayload) {
       return sizeof(DeserializerTag);
@@ -72,9 +72,8 @@ class ProfilerMarkerPayload {
   // Serialize the payload into an EntryWriter, including in the no-payload
   // (nullptr) case. Must be of the exact size given by
   // `TagAndSerializationBytes(aPayload)`.
-  static void TagAndSerialize(
-      const ProfilerMarkerPayload* aPayload,
-      mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) {
+  static void TagAndSerialize(const ProfilerMarkerPayload* aPayload,
+                              mozilla::ProfileBufferEntryWriter& aEntryWriter) {
     if (!aPayload) {
       aEntryWriter.WriteObject(DeserializerTag(0));
       return;
@@ -85,7 +84,7 @@ class ProfilerMarkerPayload {
   // Deserialize a payload from an EntryReader, including in the no-payload
   // (nullptr) case.
   static mozilla::UniquePtr<ProfilerMarkerPayload> DeserializeTagAndPayload(
-      mozilla::BlocksRingBuffer::EntryReader& aER) {
+      mozilla::ProfileBufferEntryReader& aER) {
     const auto tag = aER.ReadObject<DeserializerTag>();
     Deserializer deserializer = DeserializerForTag(tag);
     return deserializer(aER);
@@ -102,7 +101,7 @@ class ProfilerMarkerPayload {
   // an `EntryReader` and return a reconstructed `ProfilerMarkerPayload`
   // sub-object (may be null if there was no payload).
   typedef mozilla::UniquePtr<ProfilerMarkerPayload> (*Deserializer)(
-      mozilla::BlocksRingBuffer::EntryReader&);
+      mozilla::ProfileBufferEntryReader&);
 
   // A `DeserializerTag` will be added before the payload, to help select the
   // correct deserializer when reading back the payload.
@@ -117,8 +116,7 @@ class ProfilerMarkerPayload {
   using DeserializerTagAtomic = int;
 
   // Number of currently-registered deserializers.
-  static mozilla::Atomic<DeserializerTagAtomic, mozilla::ReleaseAcquire,
-                         mozilla::recordreplay::Behavior::DontPreserve>
+  static mozilla::Atomic<DeserializerTagAtomic, mozilla::ReleaseAcquire>
       sDeserializerCount;
 
   // List of currently-registered deserializers.
@@ -146,12 +144,13 @@ class ProfilerMarkerPayload {
       : mCommonProps(std::move(aCommonProps)) {}
 
   // Serialization/deserialization of common props in ProfilerMarkerPayload.
-  mozilla::BlocksRingBuffer::Length CommonPropsTagAndSerializationBytes() const;
+  mozilla::ProfileBufferEntryWriter::Length
+  CommonPropsTagAndSerializationBytes() const;
   void SerializeTagAndCommonProps(
       DeserializerTag aDeserializerTag,
-      mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) const;
+      mozilla::ProfileBufferEntryWriter& aEntryWriter) const;
   static CommonProps DeserializeCommonProps(
-      mozilla::BlocksRingBuffer::EntryReader& aEntryReader);
+      mozilla::ProfileBufferEntryReader& aEntryReader);
 
   void StreamType(const char* aMarkerType, SpliceableJSONWriter& aWriter) const;
 
@@ -162,13 +161,13 @@ class ProfilerMarkerPayload {
  private:
   // Compute the number of bytes needed to serialize payload in
   // `SerializeTagAndPayload` below.
-  virtual mozilla::BlocksRingBuffer::Length TagAndSerializationBytes()
+  virtual mozilla::ProfileBufferEntryWriter::Length TagAndSerializationBytes()
       const = 0;
 
   // Serialize the payload into an EntryWriter.
   // Must be of the exact size given by `TagAndSerializationBytes()`.
   virtual void SerializeTagAndPayload(
-      mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) const = 0;
+      mozilla::ProfileBufferEntryWriter& aEntryWriter) const = 0;
 
   CommonProps mCommonProps;
 };
@@ -178,10 +177,11 @@ class ProfilerMarkerPayload {
                      const mozilla::TimeStamp& aProcessStartTime,              \
                      UniqueStacks& aUniqueStacks) const override;              \
   static mozilla::UniquePtr<ProfilerMarkerPayload> Deserialize(                \
-      mozilla::BlocksRingBuffer::EntryReader& aEntryReader);                   \
-  mozilla::BlocksRingBuffer::Length TagAndSerializationBytes() const override; \
-  void SerializeTagAndPayload(                                                 \
-      mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) const override;
+      mozilla::ProfileBufferEntryReader& aEntryReader);                        \
+  mozilla::ProfileBufferEntryWriter::Length TagAndSerializationBytes()         \
+      const override;                                                          \
+  void SerializeTagAndPayload(mozilla::ProfileBufferEntryWriter& aEntryWriter) \
+      const override;
 
 // TODO: Increase the coverage of tracing markers that include InnerWindowID
 // information
@@ -207,7 +207,7 @@ class TracingMarkerPayload : public ProfilerMarkerPayload {
   // May be used by derived classes.
   void SerializeTagAndPayload(
       DeserializerTag aDeserializerTag,
-      mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) const;
+      mozilla::ProfileBufferEntryWriter& aEntryWriter) const;
 
  private:
   const char* mCategory;
@@ -401,7 +401,9 @@ class NetworkMarkerPayload : public ProfilerMarkerPayload {
                        uint64_t aInnerWindowID,
                        const mozilla::net::TimingStruct* aTimings = nullptr,
                        const char* aRedirectURI = nullptr,
-                       UniqueProfilerBacktrace aSource = nullptr)
+                       UniqueProfilerBacktrace aSource = nullptr,
+                       const mozilla::Maybe<nsDependentCString>& aContentType =
+                           mozilla::Nothing())
       : ProfilerMarkerPayload(aStartTime, aEndTime,
                               mozilla::Some(aInnerWindowID),
                               std::move(aSource)),
@@ -413,7 +415,8 @@ class NetworkMarkerPayload : public ProfilerMarkerPayload {
         mType(aType),
         mPri(aPri),
         mCount(aCount),
-        mCacheDisposition(aCacheDisposition) {
+        mCacheDisposition(aCacheDisposition),
+        mContentType(aContentType) {
     if (aTimings) {
       mTimings = *aTimings;
     }
@@ -427,7 +430,8 @@ class NetworkMarkerPayload : public ProfilerMarkerPayload {
                        mozilla::UniqueFreePtr<char>&& aRedirectURI,
                        NetworkLoadType aType, int32_t aPri, int64_t aCount,
                        mozilla::net::TimingStruct aTimings,
-                       mozilla::net::CacheDisposition aCacheDisposition)
+                       mozilla::net::CacheDisposition aCacheDisposition,
+                       mozilla::Maybe<nsAutoCString>&& aContentType)
       : ProfilerMarkerPayload(std::move(aCommonProps)),
         mID(aID),
         mURI(std::move(aURI)),
@@ -436,7 +440,8 @@ class NetworkMarkerPayload : public ProfilerMarkerPayload {
         mPri(aPri),
         mCount(aCount),
         mTimings(aTimings),
-        mCacheDisposition(aCacheDisposition) {}
+        mCacheDisposition(aCacheDisposition),
+        mContentType(std::move(aContentType)) {}
 
   int64_t mID;
   mozilla::UniqueFreePtr<char> mURI;
@@ -446,6 +451,10 @@ class NetworkMarkerPayload : public ProfilerMarkerPayload {
   int64_t mCount;
   mozilla::net::TimingStruct mTimings;
   mozilla::net::CacheDisposition mCacheDisposition;
+  // Content type is usually short, so we use nsAutoCString to reduce
+  // heap usage; the bigger object size is acceptable here because
+  // markers are short-lived on-stack objects.
+  mozilla::Maybe<nsAutoCString> mContentType;
 };
 
 class ScreenshotPayload : public ProfilerMarkerPayload {
@@ -578,6 +587,19 @@ class LongTaskMarkerPayload : public ProfilerMarkerPayload {
       : ProfilerMarkerPayload(std::move(aCommonProps)) {}
 };
 
+class TimingMarkerPayload : public ProfilerMarkerPayload {
+ public:
+  TimingMarkerPayload(const mozilla::TimeStamp& aStartTime,
+                      const mozilla::TimeStamp& aEndTime)
+      : ProfilerMarkerPayload(aStartTime, aEndTime) {}
+
+  DECL_STREAM_PAYLOAD
+
+ private:
+  explicit TimingMarkerPayload(CommonProps&& aCommonProps)
+      : ProfilerMarkerPayload(std::move(aCommonProps)) {}
+};
+
 class TextMarkerPayload : public ProfilerMarkerPayload {
  public:
   TextMarkerPayload(const nsACString& aText,
@@ -640,6 +662,21 @@ class LogMarkerPayload : public ProfilerMarkerPayload {
 
   nsAutoCStringN<32> mModule;  // longest known LazyLogModule name is ~24
   nsCString mText;
+};
+
+class MediaSampleMarkerPayload : public ProfilerMarkerPayload {
+ public:
+  MediaSampleMarkerPayload(const int64_t aSampleStartTimeUs,
+                           const int64_t aSampleEndTimeUs);
+  DECL_STREAM_PAYLOAD
+
+ private:
+  MediaSampleMarkerPayload(CommonProps&& aCommonProps,
+                           const int64_t aSampleStartTimeUs,
+                           const int64_t aSampleEndTimeUs);
+
+  int64_t mSampleStartTimeUs;
+  int64_t mSampleEndTimeUs;
 };
 
 class JsAllocationMarkerPayload : public ProfilerMarkerPayload {
@@ -766,12 +803,13 @@ namespace mozilla {
 // Serialize a pointed-at ProfilerMarkerPayload, may be null when there are no
 // payloads.
 template <>
-struct BlocksRingBuffer::Serializer<const ProfilerMarkerPayload*> {
+struct ProfileBufferEntryWriter::Serializer<const ProfilerMarkerPayload*> {
   static Length Bytes(const ProfilerMarkerPayload* aPayload) {
     return ProfilerMarkerPayload::TagAndSerializationBytes(aPayload);
   }
 
-  static void Write(EntryWriter& aEW, const ProfilerMarkerPayload* aPayload) {
+  static void Write(ProfileBufferEntryWriter& aEW,
+                    const ProfilerMarkerPayload* aPayload) {
     ProfilerMarkerPayload::TagAndSerialize(aPayload, aEW);
   }
 };
@@ -779,12 +817,12 @@ struct BlocksRingBuffer::Serializer<const ProfilerMarkerPayload*> {
 // Serialize a pointed-at ProfilerMarkerPayload, may be null when there are no
 // payloads.
 template <>
-struct BlocksRingBuffer::Serializer<UniquePtr<ProfilerMarkerPayload>> {
+struct ProfileBufferEntryWriter::Serializer<UniquePtr<ProfilerMarkerPayload>> {
   static Length Bytes(const UniquePtr<ProfilerMarkerPayload>& aPayload) {
     return ProfilerMarkerPayload::TagAndSerializationBytes(aPayload.get());
   }
 
-  static void Write(EntryWriter& aEW,
+  static void Write(ProfileBufferEntryWriter& aEW,
                     const UniquePtr<ProfilerMarkerPayload>& aPayload) {
     ProfilerMarkerPayload::TagAndSerialize(aPayload.get(), aEW);
   }
@@ -793,13 +831,14 @@ struct BlocksRingBuffer::Serializer<UniquePtr<ProfilerMarkerPayload>> {
 // Deserialize a ProfilerMarkerPayload into a UniquePtr, may be null if there
 // are no payloads.
 template <>
-struct BlocksRingBuffer::Deserializer<UniquePtr<ProfilerMarkerPayload>> {
-  static void ReadInto(EntryReader& aER,
+struct ProfileBufferEntryReader::Deserializer<
+    UniquePtr<ProfilerMarkerPayload>> {
+  static void ReadInto(ProfileBufferEntryReader& aER,
                        UniquePtr<ProfilerMarkerPayload>& aPayload) {
     aPayload = Read(aER);
   }
 
-  static UniquePtr<ProfilerMarkerPayload> Read(EntryReader& aER) {
+  static UniquePtr<ProfilerMarkerPayload> Read(ProfileBufferEntryReader& aER) {
     return ProfilerMarkerPayload::DeserializeTagAndPayload(aER);
   }
 };

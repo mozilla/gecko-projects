@@ -20,8 +20,8 @@
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
+#  include "mozilla/java/GeckoSurfaceTextureWrappers.h"
 #  include "mozilla/widget/AndroidCompositorWidget.h"
-#  include "GeneratedJNIWrappers.h"
 #  include <android/native_window.h>
 #  include <android/native_window_jni.h>
 #endif
@@ -32,7 +32,8 @@ namespace mozilla::wr {
 UniquePtr<RenderCompositor> RenderCompositorEGL::Create(
     RefPtr<widget::CompositorWidget> aWidget) {
 #ifdef MOZ_WAYLAND
-  if (GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (!gdk_display_get_default() ||
+      GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
     return nullptr;
   }
 #endif
@@ -60,7 +61,6 @@ RenderCompositorEGL::RenderCompositorEGL(
 RenderCompositorEGL::~RenderCompositorEGL() {
 #ifdef MOZ_WIDGET_ANDROID
   java::GeckoSurfaceTexture::DestroyUnused((int64_t)gl());
-  java::GeckoSurfaceTexture::DetachAllFromGLContext((int64_t)gl());
 #endif
   DestroyEGLSurface();
 }
@@ -99,10 +99,6 @@ RenderedFrameId RenderCompositorEGL::EndFrame(
 }
 
 void RenderCompositorEGL::Pause() {
-#ifdef MOZ_WIDGET_ANDROID
-  java::GeckoSurfaceTexture::DestroyUnused((int64_t)gl());
-  java::GeckoSurfaceTexture::DetachAllFromGLContext((int64_t)gl());
-#endif
   DestroyEGLSurface();
 }
 
@@ -173,6 +169,14 @@ LayoutDeviceIntSize RenderCompositorEGL::GetBufferSize() {
 #else
   return mWidget->GetClientSize();
 #endif
+}
+
+CompositorCapabilities RenderCompositorEGL::GetCompositorCapabilities() {
+  CompositorCapabilities caps;
+
+  caps.virtual_surface_size = 0;
+
+  return caps;
 }
 
 }  // namespace mozilla::wr

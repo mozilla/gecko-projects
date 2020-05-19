@@ -11,6 +11,7 @@ from urlparse import urlparse
 import json
 import os
 import tempfile
+import sys
 
 from mozprofile import DEFAULT_PORTS
 import mozinfo
@@ -393,6 +394,12 @@ class MochitestArguments(ArgumentContainer):
           "default": False,
           "help": "Start the browser JS debugger before running the test. Implies --no-autorun.",
           }],
+        [["--jsdebugger-path"],
+         {"default": None,
+          "dest": "jsdebuggerPath",
+          "help": "Path to a Firefox binary that will be used to run the toolbox. Should "
+                  "be used together with --jsdebugger."
+          }],
         [["--debug-on-failure"],
          {"action": "store_true",
           "default": False,
@@ -510,11 +517,6 @@ class MochitestArguments(ArgumentContainer):
           "default": None,
           "help": "Arguments to pass to the debugger.",
           }],
-        [["--save-recordings"],
-         {"dest": "recordingPath",
-          "default": None,
-          "help": "Directory to save Web Replay recordings in.",
-          }],
         [["--valgrind"],
          {"default": None,
           "help": "Valgrind binary to run tests with. Program name or path.",
@@ -631,7 +633,12 @@ class MochitestArguments(ArgumentContainer):
         if parser.app != 'android':
             if options.app is None:
                 if build_obj:
-                    options.app = build_obj.get_binary_path()
+                    from mozbuild.base import BinaryNotFoundException
+                    try:
+                        options.app = build_obj.get_binary_path()
+                    except BinaryNotFoundException as e:
+                        print('{}\n\n{}\n'.format(e, e.help()))
+                        sys.exit(1)
                 else:
                     parser.error(
                         "could not find the application path, --appname must be specified")
@@ -721,6 +728,10 @@ class MochitestArguments(ArgumentContainer):
         if options.debugOnFailure and not options.jsdebugger:
             parser.error(
                 "--debug-on-failure requires --jsdebugger.")
+
+        if options.jsdebuggerPath and not options.jsdebugger:
+            parser.error(
+                "--jsdebugger-path requires --jsdebugger.")
 
         if options.debuggerArgs and not options.debugger:
             parser.error(

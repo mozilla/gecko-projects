@@ -31,6 +31,7 @@
 #include "nsTextNode.h"
 #include "nsIController.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/InputEventOptions.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Event.h"
@@ -173,10 +174,6 @@ class RestoreSelectionState : public Runnable {
         mFrame->SetSelectionRange(properties.GetStart(), properties.GetEnd(),
                                   properties.GetDirection());
       }
-      if (!mTextControlState->mSelectionRestoreEagerInit) {
-        mTextControlState->HideSelectionIfBlurred();
-      }
-      mTextControlState->mSelectionRestoreEagerInit = false;
     }
 
     if (mTextControlState) {
@@ -216,7 +213,6 @@ class MOZ_RAII AutoRestoreEditorState final {
     // appearing the method in profile.  So, this class should check if it's
     // necessary to call.
     uint32_t flags = mSavedFlags;
-    flags &= ~(nsIEditor::eEditorDisabledMask);
     flags &= ~(nsIEditor::eEditorReadonlyMask);
     flags |= nsIEditor::eEditorDontEchoPassword;
     if (mSavedFlags != flags) {
@@ -312,8 +308,7 @@ class TextInputSelectionController final : public nsSupportsWeakReference,
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(TextInputSelectionController,
                                            nsISelectionController)
 
-  TextInputSelectionController(nsFrameSelection* aSel, PresShell* aPresShell,
-                               nsIContent* aLimiter);
+  TextInputSelectionController(PresShell* aPresShell, nsIContent* aLimiter);
 
   void SetScrollableFrame(nsIScrollableFrame* aScrollableFrame);
   nsFrameSelection* GetConstFrameSelection() { return mFrameSelection; }
@@ -341,10 +336,7 @@ class TextInputSelectionController final : public nsSupportsWeakReference,
   NS_IMETHOD PhysicalMove(int16_t aDirection, int16_t aAmount,
                           bool aExtend) override;
   NS_IMETHOD CharacterMove(bool aForward, bool aExtend) override;
-  NS_IMETHOD CharacterExtendForDelete() override;
-  NS_IMETHOD CharacterExtendForBackspace() override;
   NS_IMETHOD WordMove(bool aForward, bool aExtend) override;
-  NS_IMETHOD WordExtendForDelete(bool aForward) override;
   NS_IMETHOD LineMove(bool aForward, bool aExtend) override;
   NS_IMETHOD IntraLineMove(bool aForward, bool aExtend) override;
   MOZ_CAN_RUN_SCRIPT
@@ -361,10 +353,11 @@ class TextInputSelectionController final : public nsSupportsWeakReference,
                                           int16_t aStartOffset,
                                           int16_t aEndOffset,
                                           bool* aRetval) override;
+  void SelectionWillTakeFocus() override;
+  void SelectionWillLoseFocus() override;
 
  private:
   RefPtr<nsFrameSelection> mFrameSelection;
-  nsCOMPtr<nsIContent> mLimiter;
   nsIScrollableFrame* mScrollFrame;
   nsWeakPtr mPresShellWeak;
 };
@@ -377,18 +370,16 @@ NS_INTERFACE_TABLE_HEAD(TextInputSelectionController)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(TextInputSelectionController)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(TextInputSelectionController, mFrameSelection,
-                         mLimiter)
+NS_IMPL_CYCLE_COLLECTION_WEAK(TextInputSelectionController, mFrameSelection)
 
 TextInputSelectionController::TextInputSelectionController(
-    nsFrameSelection* aSel, PresShell* aPresShell, nsIContent* aLimiter)
+    PresShell* aPresShell, nsIContent* aLimiter)
     : mScrollFrame(nullptr) {
-  if (aSel && aPresShell) {
-    mFrameSelection = aSel;  // we are the owner now!
-    mLimiter = aLimiter;
+  if (aPresShell) {
     bool accessibleCaretEnabled =
         PresShell::AccessibleCaretEnabled(aLimiter->OwnerDoc()->GetDocShell());
-    mFrameSelection->Init(aPresShell, mLimiter, accessibleCaretEnabled);
+    mFrameSelection =
+        new nsFrameSelection(aPresShell, aLimiter, accessibleCaretEnabled);
     mPresShellWeak = do_GetWeakReference(aPresShell);
   }
 }
@@ -598,39 +589,12 @@ TextInputSelectionController::CharacterMove(bool aForward, bool aExtend) {
 }
 
 NS_IMETHODIMP
-TextInputSelectionController::CharacterExtendForDelete() {
-  if (!mFrameSelection) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
-  return frameSelection->CharacterExtendForDelete();
-}
-
-NS_IMETHODIMP
-TextInputSelectionController::CharacterExtendForBackspace() {
-  if (!mFrameSelection) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
-  return frameSelection->CharacterExtendForBackspace();
-}
-
-NS_IMETHODIMP
 TextInputSelectionController::WordMove(bool aForward, bool aExtend) {
   if (!mFrameSelection) {
     return NS_ERROR_NULL_POINTER;
   }
   RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
   return frameSelection->WordMove(aForward, aExtend);
-}
-
-NS_IMETHODIMP
-TextInputSelectionController::WordExtendForDelete(bool aForward) {
-  if (!mFrameSelection) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
-  return frameSelection->WordExtendForDelete(aForward);
 }
 
 NS_IMETHODIMP
@@ -771,6 +735,22 @@ TextInputSelectionController::SelectAll() {
   return frameSelection->SelectAll();
 }
 
+void TextInputSelectionController::SelectionWillTakeFocus() {
+  if (mFrameSelection) {
+    if (PresShell* shell = mFrameSelection->GetPresShell()) {
+      shell->FrameSelectionWillTakeFocus(*mFrameSelection);
+    }
+  }
+}
+
+void TextInputSelectionController::SelectionWillLoseFocus() {
+  if (mFrameSelection) {
+    if (PresShell* shell = mFrameSelection->GetPresShell()) {
+      shell->FrameSelectionWillLoseFocus(*mFrameSelection);
+    }
+  }
+}
+
 NS_IMETHODIMP
 TextInputSelectionController::CheckVisibility(nsINode* node,
                                               int16_t startOffset,
@@ -828,7 +808,12 @@ NS_INTERFACE_MAP_BEGIN(TextInputListener)
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(TextInputListener)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_0(TextInputListener)
+NS_IMPL_CYCLE_COLLECTION_CLASS(TextInputListener)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(TextInputListener)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(TextInputListener)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 void TextInputListener::OnSelectionChange(Selection& aSelection,
                                           int16_t aReason) {
@@ -944,6 +929,15 @@ TextInputListener::HandleEvent(Event* aEvent) {
     return NS_ERROR_UNEXPECTED;
   }
 
+  {
+    auto* input = HTMLInputElement::FromNode(mTxtCtrlElement);
+    if (input && input->StepsInputValue(*widgetKeyEvent)) {
+      // As an special case, don't handle key events that would step the value
+      // of our <input type=number>.
+      return NS_OK;
+    }
+  }
+
   KeyEventHandler* keyHandlers = ShortcutKeys::GetHandlers(
       mTxtCtrlElement->IsTextArea() ? HandlerType::eTextArea
                                     : HandlerType::eInput);
@@ -1042,8 +1036,7 @@ void TextInputListener::HandleValueChanged(nsTextControlFrame* aFrame) {
   }
 
   if (!mSettingValue) {
-    mTxtCtrlElement->OnValueChanged(/* aNotify = */ true,
-                                    ValueChangeKind::UserInteraction);
+    mTxtCtrlElement->OnValueChanged(ValueChangeKind::UserInteraction);
   }
 }
 
@@ -1244,7 +1237,7 @@ class MOZ_STACK_CLASS AutoTextControlHandlingState {
       if (!(mSetValueFlags & TextControlState::eSetValue_Notify)) {
         // Listener doesn't update frame, but it is required for
         // placeholder
-        mTextControlState.ValueWasChanged(true);
+        mTextControlState.ValueWasChanged();
       }
     }
     if (!IsOriginalTextControlFrameAlive()) {
@@ -1383,7 +1376,6 @@ TextControlState::TextControlState(TextControlElement* aOwningElement)
       mEditorInitialized(false),
       mValueTransferInProgress(false),
       mSelectionCached(true),
-      mSelectionRestoreEagerInit(false),
       mPlaceholderVisibility(false),
       mPreviewVisibility(false)
 // When adding more member variable initializations here, add the same
@@ -1406,7 +1398,6 @@ TextControlState* TextControlState::Construct(
     state->mEditorInitialized = false;
     state->mValueTransferInProgress = false;
     state->mSelectionCached = true;
-    state->mSelectionRestoreEagerInit = false;
     state->mPlaceholderVisibility = false;
     state->mPreviewVisibility = false;
     // When adding more member variable initializations here, add the same
@@ -1621,16 +1612,15 @@ nsresult TextControlState::BindToFrame(nsTextControlFrame* aFrame) {
   PresShell* presShell = aFrame->PresContext()->GetPresShell();
   MOZ_ASSERT(presShell);
 
-  // Create selection
-  RefPtr<nsFrameSelection> frameSel = new nsFrameSelection();
-
   // Create a SelectionController
-  mSelCon = new TextInputSelectionController(frameSel, presShell, rootNode);
+  mSelCon = new TextInputSelectionController(presShell, rootNode);
   MOZ_ASSERT(!mTextListener, "Should not overwrite the object");
   mTextListener = new TextInputListener(mTextCtrlElement);
 
   mTextListener->SetFrame(mBoundFrame);
-  mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_ON);
+
+  // Editor will override this as needed from InitializeSelection.
+  mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_HIDDEN);
 
   // Get the caret and make it a selection listener.
   // FYI: It's safe to use raw pointer for calling
@@ -1869,24 +1859,16 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
   }
 
   // Set max text field length
-  newTextEditor->SetMaxTextLength(GetMaxLength());
+  newTextEditor->SetMaxTextLength(mTextCtrlElement->UsedMaxLength());
 
   editorFlags = newTextEditor->Flags();
 
   // Check if the readonly attribute is set.
-  if (mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::readonly)) {
+  //
+  // TODO: Should probably call IsDisabled(), as it is cheaper.
+  if (mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::readonly) ||
+      mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::disabled)) {
     editorFlags |= nsIEditor::eEditorReadonlyMask;
-  }
-
-  // Check if the disabled attribute is set.
-  // TODO: call IsDisabled() here!
-  if (mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::disabled)) {
-    editorFlags |= nsIEditor::eEditorDisabledMask;
-  }
-
-  // Disable the selection if necessary.
-  if (newTextEditor->IsDisabled()) {
-    mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_OFF);
   }
 
   SetEditorFlagsIfNecessary(*newTextEditor, editorFlags);
@@ -2099,7 +2081,7 @@ void TextControlState::SetSelectionRange(
       return;
     }
     if (mBoundFrame) {
-      rv = mBoundFrame->ScrollSelectionIntoView();
+      mBoundFrame->ScrollSelectionIntoViewAsync();
     }
     // Press on to firing the event even if that failed, like our old code did.
     // But is that really what we want?  Firing the event _and_ throwing from
@@ -2375,6 +2357,10 @@ void TextControlState::UnbindFromFrame(nsTextControlFrame* aFrame) {
   AutoTextControlHandlingState handlingUnbindFromFrame(
       *this, TextControlAction::UnbindFromFrame);
 
+  if (mSelCon) {
+    mSelCon->SelectionWillLoseFocus();
+  }
+
   // We need to start storing the value outside of the editor if we're not
   // going to use it anymore, so retrieve it for now.
   nsAutoString value;
@@ -2480,17 +2466,6 @@ void TextControlState::UnbindFromFrame(nsTextControlFrame* aFrame) {
     // TODO Find something better to do if this fails...
     NS_WARNING_ASSERTION(ok, "SetValue() couldn't allocate memory");
   }
-}
-
-int32_t TextControlState::GetMaxLength() {
-  if (NS_WARN_IF(!mTextCtrlElement)) {
-    return -1;
-  }
-
-  const nsAttrValue* attr =
-      mTextCtrlElement->GetParsedAttr(nsGkAtoms::maxlength);
-  return attr && attr->Type() == nsAttrValue::eInteger ? attr->GetIntegerValue()
-                                                       : -1;
 }
 
 void TextControlState::GetValue(nsAString& aValue, bool aIgnoreWrap) const {
@@ -2696,10 +2671,7 @@ bool TextControlState::SetValue(const nsAString& aValue,
   auto changeKind = (aFlags & eSetValue_Internal) ? ValueChangeKind::Internal
                                                   : ValueChangeKind::Script;
 
-  // XXX Should we stop notifying "value changed" if mTextCtrlElement has
-  //     been cleared?
-  handlingSetValue.GetTextControlElement()->OnValueChanged(
-      /* aNotify = */ !!mBoundFrame, changeKind);
+  handlingSetValue.GetTextControlElement()->OnValueChanged(changeKind);
   return true;
 }
 
@@ -2816,7 +2788,7 @@ bool TextControlState::SetValueWithTextEditor(
       // event so that passing nullptr as nsIPrincipal is safe for
       // now.
       nsresult rv = textEditor->DeleteSelectionAsAction(
-          nsIEditor::eNone, nsIEditor::eStrip, nullptr);
+          nsIEditor::eNone, nsIEditor::eNoStrip, nullptr);
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                            "TextEditor::DeleteSelectionAsAction() failed");
       return rv != NS_ERROR_OUT_OF_MEMORY;
@@ -2905,7 +2877,7 @@ bool TextControlState::SetValueWithoutTextEditor(
       DebugOnly<nsresult> rvIgnored = nsContentUtils::DispatchInputEvent(
           MOZ_KnownLive(aHandlingSetValue.GetTextControlElement()),
           eEditorBeforeInput, EditorInputType::eInsertReplacementText, nullptr,
-          nsContentUtils::InputEventOptions(inputEventData), &status);
+          InputEventOptions(inputEventData), &status);
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                            "Failed to dispatch beforeinput event");
       if (status == nsEventStatus_eConsumeNoDefault) {
@@ -2985,13 +2957,13 @@ bool TextControlState::SetValueWithoutTextEditor(
       // Update validity state before dispatching "input" event for its
       // listeners like `EditorBase::NotifyEditorObservers()`.
       aHandlingSetValue.GetTextControlElement()->OnValueChanged(
-          true, ValueChangeKind::UserInteraction);
+          ValueChangeKind::UserInteraction);
 
       MOZ_ASSERT(!aHandlingSetValue.GetSettingValue().IsVoid());
       DebugOnly<nsresult> rvIgnored = nsContentUtils::DispatchInputEvent(
           MOZ_KnownLive(aHandlingSetValue.GetTextControlElement()),
           eEditorInput, EditorInputType::eInsertReplacementText, nullptr,
-          nsContentUtils::InputEventOptions(inputEventData));
+          InputEventOptions(inputEventData));
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                            "Failed to dispatch input event");
     }
@@ -3006,9 +2978,7 @@ bool TextControlState::SetValueWithoutTextEditor(
     }
   }
 
-  // If we've reached the point where the root node has been created, we
-  // can assume that it's safe to notify.
-  ValueWasChanged(!!mBoundFrame);
+  ValueWasChanged();
   return true;
 }
 
@@ -3043,9 +3013,7 @@ void TextControlState::InitializeKeyboardEventListeners() {
   mSelCon->SetScrollableFrame(mBoundFrame->GetScrollTargetFrame());
 }
 
-void TextControlState::ValueWasChanged(bool aNotify) {
-  UpdateOverlayTextVisibility(aNotify);
-}
+void TextControlState::ValueWasChanged() { UpdateOverlayTextVisibility(true); }
 
 void TextControlState::SetPreviewText(const nsAString& aValue, bool aNotify) {
   // If we don't have a preview div, there's nothing to do.
@@ -3092,13 +3060,6 @@ void TextControlState::UpdateOverlayTextVisibility(bool aNotify) {
 
   if (mBoundFrame && aNotify) {
     mBoundFrame->InvalidateFrame();
-  }
-}
-
-void TextControlState::HideSelectionIfBlurred() {
-  MOZ_ASSERT(mSelCon, "Should have a selection controller if we have a frame!");
-  if (!nsContentUtils::IsFocusedContent(mTextCtrlElement)) {
-    mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_HIDDEN);
   }
 }
 

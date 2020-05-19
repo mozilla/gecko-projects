@@ -38,7 +38,7 @@ Operand CodeGeneratorX64::ToOperand64(const LInt64Allocation& a64) {
   if (a.isGeneralReg()) {
     return Operand(a.toGeneralReg()->reg());
   }
-  return Operand(masm.getStackPointer(), ToStackOffset(a));
+  return Operand(ToAddress(a));
 }
 
 FrameSizeClass FrameSizeClass::FromDepth(uint32_t frameDepth) {
@@ -380,6 +380,7 @@ void CodeGeneratorX64::wasmStore(const wasm::MemoryAccessDesc& access,
         masm.movl(cst, dstAddr);
         break;
       case Scalar::Int64:
+      case Scalar::V128:
       case Scalar::Float32:
       case Scalar::Float64:
       case Scalar::Uint8Clamped:
@@ -443,7 +444,7 @@ void CodeGeneratorX64::emitWasmStore(T* ins) {
 void CodeGenerator::visitWasmStore(LWasmStore* ins) { emitWasmStore(ins); }
 
 void CodeGenerator::visitWasmStoreI64(LWasmStoreI64* ins) {
-  emitWasmStore(ins);
+  MOZ_CRASH("Unused on this platform");
 }
 
 void CodeGenerator::visitWasmCompareExchangeHeap(

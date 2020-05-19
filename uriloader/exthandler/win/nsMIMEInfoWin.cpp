@@ -11,7 +11,6 @@
 #include "nsNetUtil.h"
 #include <windows.h>
 #include <shellapi.h>
-#include "nsAutoPtr.h"
 #include "nsIMutableArray.h"
 #include "nsTArray.h"
 #include "shlobj.h"
@@ -280,13 +279,38 @@ nsresult nsMIMEInfoWin::LoadUriInternal(nsIURI* aURL) {
     _variant_t workingDir;
     _variant_t showCmd(SW_SHOWNORMAL);
 
-    // Ask Explorer to ShellExecute on our behalf, as some URL handlers do not
-    // start correctly when inheriting our process's process migitations.
+    // To open a uri, we first try ShellExecuteByExplorer, which starts a new
+    // process as a child process of explorer.exe, because applications may not
+    // support the mitigation policies inherited from our process.  If it fails,
+    // we fall back to ShellExecuteExW.
+    //
+    // For Thunderbird, however, there is a known issue that
+    // ShellExecuteByExplorer succeeds but explorer.exe shows an error popup
+    // if a uri to open includes credentials.  This does not happen in Firefox
+    // because Firefox does not have to launch a process to open a uri.
+    //
+    // Since Thunderbird does not use mitigation policies which could cause
+    // compatibility issues, we get no benefit from using
+    // ShellExecuteByExplorer.  Thus we skip it and go straight to
+    // ShellExecuteExW for Thunderbird.
+#ifndef MOZ_THUNDERBIRD
     mozilla::LauncherVoidResult shellExecuteOk =
-        mozilla::ShellExecuteByExplorer(validatedUri.unwrap(), args, verb,
+        mozilla::ShellExecuteByExplorer(validatedUri.inspect(), args, verb,
                                         workingDir, showCmd);
-    if (shellExecuteOk.isErr()) {
-      return NS_ERROR_FAILURE;
+    if (shellExecuteOk.isOk()) {
+      return NS_OK;
+    }
+#endif  // MOZ_THUNDERBIRD
+
+    SHELLEXECUTEINFOW sinfo = {sizeof(sinfo)};
+    sinfo.fMask = SEE_MASK_NOASYNC;
+    sinfo.lpVerb = V_BSTR(&verb);
+    sinfo.nShow = showCmd;
+    sinfo.lpFile = validatedUri.inspect();
+
+    BOOL result = ShellExecuteExW(&sinfo);
+    if (!result || reinterpret_cast<LONG_PTR>(sinfo.hInstApp) < 32) {
+      rv = NS_ERROR_FAILURE;
     }
   }
 
@@ -835,5 +859,22 @@ nsMIMEInfoWin::GetPossibleLocalHandlers(nsIArray** _retval) {
   *_retval = appList;
   NS_ADDREF(*_retval);
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMIMEInfoWin::IsCurrentAppOSDefault(bool* _retval) {
+  *_retval = false;
+  if (mDefaultApplication) {
+    // Determine if the default executable is our executable.
+    nsCOMPtr<nsIFile> ourBinary;
+    XRE_GetBinaryPath(getter_AddRefs(ourBinary));
+    bool isSame = false;
+    nsresult rv = mDefaultApplication->Equals(ourBinary, &isSame);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    *_retval = isSame;
+  }
   return NS_OK;
 }

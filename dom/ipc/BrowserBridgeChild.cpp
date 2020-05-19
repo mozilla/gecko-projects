@@ -66,6 +66,10 @@ already_AddRefed<BrowserBridgeHost> BrowserBridgeChild::FinishInit(
   return MakeAndAddRef<BrowserBridgeHost>(this);
 }
 
+nsILoadContext* BrowserBridgeChild::GetLoadContext() {
+  return mBrowsingContext;
+}
+
 void BrowserBridgeChild::NavigateByKey(bool aForward,
                                        bool aForDocumentNavigation) {
   Unused << SendNavigateByKey(aForward, aForDocumentNavigation);
@@ -171,18 +175,21 @@ BrowserBridgeChild::RecvSetEmbeddedDocAccessibleCOMProxy(
 }
 
 mozilla::ipc::IPCResult BrowserBridgeChild::RecvMaybeFireEmbedderLoadEvents(
-    bool aIsTrusted, bool aFireLoadAtEmbeddingElement) {
+    EmbedderElementEventType aFireEventAtEmbeddingElement) {
   RefPtr<Element> owner = mFrameLoader->GetOwnerContent();
   if (!owner) {
     return IPC_OK();
   }
 
-  if (aFireLoadAtEmbeddingElement) {
+  if (aFireEventAtEmbeddingElement == EmbedderElementEventType::LoadEvent) {
     nsEventStatus status = nsEventStatus_eIgnore;
-    WidgetEvent event(aIsTrusted, eLoad);
+    WidgetEvent event(/* aIsTrusted = */ true, eLoad);
     event.mFlags.mBubbles = false;
     event.mFlags.mCancelable = false;
     EventDispatcher::Dispatch(owner, nullptr, &event, nullptr, &status);
+  } else if (aFireEventAtEmbeddingElement ==
+             EmbedderElementEventType::ErrorEvent) {
+    mFrameLoader->FireErrorEvent();
   }
 
   UnblockOwnerDocsLoadEvent();
@@ -222,25 +229,35 @@ mozilla::ipc::IPCResult BrowserBridgeChild::RecvScrollRectIntoView(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult BrowserBridgeChild::RecvSubFrameCrashed(
-    BrowsingContext* aContext) {
-  if (aContext) {
-    RefPtr<nsFrameLoaderOwner> frameLoaderOwner =
-        do_QueryObject(aContext->GetEmbedderElement());
-    IgnoredErrorResult rv;
-    RemotenessOptions options;
-    options.mError.Construct(static_cast<uint32_t>(NS_ERROR_FRAME_CRASHED));
-    frameLoaderOwner->ChangeRemoteness(options, rv);
+mozilla::ipc::IPCResult BrowserBridgeChild::RecvSubFrameCrashed() {
+  if (RefPtr<nsFrameLoaderOwner> frameLoaderOwner =
+          do_QueryObject(mFrameLoader->GetOwnerContent())) {
+    frameLoaderOwner->SubframeCrashed();
+  }
+  return IPC_OK();
+}
 
-    if (NS_WARN_IF(rv.Failed())) {
-      return IPC_FAIL(this, "Remoteness change failed");
-    }
+mozilla::ipc::IPCResult BrowserBridgeChild::RecvAddBlockedNodeByClassifier() {
+  RefPtr<Element> owner = mFrameLoader->GetOwnerContent();
+  if (!owner) {
+    return IPC_OK();
   }
 
+  RefPtr<Document> doc = mFrameLoader->GetOwnerDoc();
+  if (!doc) {
+    return IPC_OK();
+  }
+
+  doc->AddBlockedNodeByClassifier(owner);
   return IPC_OK();
 }
 
 void BrowserBridgeChild::ActorDestroy(ActorDestroyReason aWhy) {
+  if (!mBrowsingContext) {
+    // This BBC was never valid, skip teardown.
+    return;
+  }
+
   // Ensure we unblock our document's 'load' event (in case the OOP-iframe has
   // been removed before it finished loading, or its subprocess crashed):
   UnblockOwnerDocsLoadEvent();

@@ -11,6 +11,7 @@
 
 #include "GLLibraryLoader.h"
 #include "mozilla/StaticMutex.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/ThreadLocal.h"
 #include "GeckoProfiler.h"
 
@@ -24,6 +25,9 @@
 #endif
 
 class nsIGfxInfo;
+
+template <typename T>
+class nsCOMPtr;
 
 namespace angle {
 class Platform;
@@ -45,7 +49,7 @@ void AfterEGLCall(const char* funcName);
 
 class GLLibraryEGL final {
  protected:
-  ~GLLibraryEGL() {}
+  ~GLLibraryEGL() = default;
 
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GLLibraryEGL)

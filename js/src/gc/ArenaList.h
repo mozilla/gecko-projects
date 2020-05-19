@@ -262,8 +262,7 @@ class ArenaLists {
   };
 
   using ConcurrentUseState =
-      mozilla::Atomic<ConcurrentUse, mozilla::SequentiallyConsistent,
-                      mozilla::recordreplay::Behavior::DontPreserve>;
+      mozilla::Atomic<ConcurrentUse, mozilla::SequentiallyConsistent>;
 
   // Whether this structure can be accessed by other threads.
   UnprotectedData<AllAllocKindArray<ConcurrentUseState>> concurrentUseState_;
@@ -350,6 +349,10 @@ class ArenaLists {
   static void backgroundFinalize(JSFreeOp* fop, Arena* listHead, Arena** empty);
 
   void setParallelAllocEnabled(bool enabled);
+
+  void checkSweepStateNotInUse();
+  void checkNoArenasToUpdate();
+  void checkNoArenasToUpdateForKind(AllocKind kind);
 
  private:
   inline JSRuntime* runtime();

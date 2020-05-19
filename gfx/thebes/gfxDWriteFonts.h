@@ -21,7 +21,7 @@
 /**
  * \brief Class representing a font face for a font entry.
  */
-class gfxDWriteFont : public gfxFont {
+class gfxDWriteFont final : public gfxFont {
  public:
   gfxDWriteFont(const RefPtr<mozilla::gfx::UnscaledFontDWrite>& aUnscaledFont,
                 gfxFontEntry* aFontEntry, const gfxFontStyle* aFontStyle,
@@ -34,8 +34,6 @@ class gfxDWriteFont : public gfxFont {
 
   mozilla::UniquePtr<gfxFont> CopyWithAntialiasOption(
       AntialiasOption anAAOption) override;
-
-  uint32_t GetSpaceGlyph() override;
 
   bool AllowSubpixelAA() override { return mAllowManualShowGlyphs; }
 
@@ -89,8 +87,6 @@ class gfxDWriteFont : public gfxFont {
 
   // cache of glyph widths in 16.16 fixed-point pixels
   mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey, int32_t>> mGlyphWidths;
-
-  uint32_t mSpaceGlyph;
 
   bool mUseSubpixelPositions;
   bool mAllowManualShowGlyphs;

@@ -1,13 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* exported TestActor, TestActorFront */
+/* exported TestActor, TestFront */
 
 "use strict";
 
 // A helper actor for inspector and markupview tests.
-
-const { Ci, Cu } = require("chrome");
+const { Ci, Cu, Cc } = require("chrome");
 const Services = require("Services");
 const {
   getRect,
@@ -20,7 +19,6 @@ const {
   getCSSStyleRules,
 } = require("devtools/shared/inspector/css-logic");
 const InspectorUtils = require("InspectorUtils");
-const Debugger = require("Debugger");
 
 // Set up a dummy environment so that EventUtils works. We need to be careful to
 // pass a window object into each EventUtils method we call rather than having
@@ -61,7 +59,7 @@ function getHighlighterCanvasFrameHelper(conn, actorID) {
 }
 
 var testSpec = protocol.generateActorSpec({
-  typeName: "testActor",
+  typeName: "test",
 
   methods: {
     getNumberOfElementMatches: {
@@ -297,8 +295,9 @@ var testSpec = protocol.generateActorSpec({
   },
 });
 
-var TestActor = (exports.TestActor = protocol.ActorClassWithSpec(testSpec, {
+var TestActor = protocol.ActorClassWithSpec(testSpec, {
   initialize: function(conn, targetActor, options) {
+    protocol.Actor.prototype.initialize.call(this, conn);
     this.conn = conn;
     this.targetActor = targetActor;
   },
@@ -477,8 +476,8 @@ var TestActor = (exports.TestActor = protocol.ActorClassWithSpec(testSpec, {
         resolve();
       }
 
-      const docShell = this.content.docShell;
-      docShell.contentViewer.fullZoom = level;
+      const bc = this.content.docShell.browsingContext;
+      bc.fullZoom = level;
     });
   },
 
@@ -502,13 +501,6 @@ var TestActor = (exports.TestActor = protocol.ActorClassWithSpec(testSpec, {
    * Get the window which mouse events on node should be delivered to.
    */
   windowForMouseEvent: function(node) {
-    // When replaying, the node is a proxy for an element in the replaying
-    // process. Use the window which the server is running against, which is
-    // able to receive events. We can't use isReplaying here because this actor
-    // is loaded into its own sandbox.
-    if (Debugger.recordReplayProcessKind() == "Middleman") {
-      return this.targetActor.window;
-    }
     return node.ownerDocument.defaultView;
   },
 
@@ -846,11 +838,21 @@ var TestActor = (exports.TestActor = protocol.ActorClassWithSpec(testSpec, {
   getWindowDimensions: function() {
     return getWindowDimensions(this.content);
   },
-}));
+});
+exports.TestActor = TestActor;
 
-class TestActorFront extends protocol.FrontClassWithSpec(testSpec) {
-  constructor(client, highlighter) {
-    super(client);
+class TestFront extends protocol.FrontClassWithSpec(testSpec) {
+  constructor(client, targetFront, parentFront) {
+    super(client, targetFront, parentFront);
+    this.formAttributeName = "testActor";
+  }
+
+  async initialize() {
+    const inspectorFront = await this.targetFront.getFront("inspector");
+    this.highlighter = inspectorFront.highlighter;
+  }
+
+  setHighlighter(highlighter) {
     this.highlighter = highlighter;
   }
 
@@ -1180,8 +1182,7 @@ class TestActorFront extends protocol.FrontClassWithSpec(testSpec) {
     return { d, points };
   }
 }
-exports.TestActorFront = TestActorFront;
-
+protocol.registerFront(TestFront);
 /**
  * Check whether a point is included in a polygon.
  * Taken and tweaked from:

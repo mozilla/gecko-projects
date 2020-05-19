@@ -11,7 +11,6 @@ const { XPCOMUtils } = ChromeUtils.import(
 Cu.importGlobalProperties(["fetch"]);
 
 const PREF_ABUSE_REPORT_URL = "extensions.abuseReport.url";
-const PREF_ABUSE_REPORT_OPEN_DIALOG = "extensions.abuseReport.openDialog";
 const PREF_AMO_DETAILS_API_URL = "extensions.abuseReport.amoDetailsURL";
 
 // Name associated with the report dialog window.
@@ -44,13 +43,6 @@ XPCOMUtils.defineLazyPreferenceGetter(
   this,
   "AMO_DETAILS_API_URL",
   PREF_AMO_DETAILS_API_URL
-);
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  this,
-  "SHOULD_OPEN_DIALOG",
-  PREF_ABUSE_REPORT_OPEN_DIALOG,
-  false
 );
 
 const PRIVATE_REPORT_PROPS = Symbol("privateReportProps");
@@ -430,9 +422,7 @@ const AbuseReporter = {
 
     if (!SUPPORTED_ADDON_TYPES.includes(report.addon.type)) {
       throw new Error(
-        `Addon type "${
-          report.addon.type
-        }" is not currently supported by the integrated abuse reporting feature`
+        `Addon type "${report.addon.type}" is not currently supported by the integrated abuse reporting feature`
       );
     }
 
@@ -502,10 +492,6 @@ const AbuseReporter = {
       promiseReportPanel,
       window: win,
     };
-  },
-
-  get openDialogDisabled() {
-    return !SHOULD_OPEN_DIALOG;
   },
 };
 

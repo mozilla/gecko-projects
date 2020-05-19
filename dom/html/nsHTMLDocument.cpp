@@ -18,6 +18,7 @@
 #include "nsUnicharUtils.h"
 #include "nsGlobalWindowInner.h"
 #include "nsIHTMLContentSink.h"
+#include "nsIProtocolHandler.h"
 #include "nsIXMLContentSink.h"
 #include "nsHTMLParts.h"
 #include "nsHTMLStyleSheet.h"
@@ -133,7 +134,7 @@ nsHTMLDocument::nsHTMLDocument()
   mCompatMode = eCompatibility_NavQuirks;
 }
 
-nsHTMLDocument::~nsHTMLDocument() {}
+nsHTMLDocument::~nsHTMLDocument() = default;
 
 JSObject* nsHTMLDocument::WrapNode(JSContext* aCx,
                                    JS::Handle<JSObject*> aGivenProto) {

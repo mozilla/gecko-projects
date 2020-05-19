@@ -12,6 +12,7 @@
 #include "mozilla/WindowsDllBlocklist.h"
 
 #include "DllBlocklist.h"
+#include "FunctionTableResolver.h"
 #include "LoaderPrivateAPI.h"
 #include "ModuleLoadFrame.h"
 
@@ -38,8 +39,6 @@
 DLL_BLOCKLIST_DEFINITIONS_BEGIN
 DLL_BLOCKLIST_DEFINITIONS_END
 #endif
-
-static const HANDLE kCurrentProcess = reinterpret_cast<HANDLE>(-1);
 
 class MOZ_STATIC_CLASS MOZ_TRIVIAL_CTOR_DTOR NativeNtBlockSet final {
   struct NativeNtBlockSetEntry {
@@ -156,9 +155,11 @@ enum class BlockAction {
   SubstituteLSP,
   Error,
   Deny,
+  NoOpEntryPoint,
 };
 
-static BlockAction CheckBlockInfo(const DllBlockInfo* aInfo, void* aBaseAddress,
+static BlockAction CheckBlockInfo(const DllBlockInfo* aInfo,
+                                  const mozilla::nt::PEHeaders& aHeaders,
                                   uint64_t& aVersion) {
   aVersion = DllBlockInfo::ALL_VERSIONS;
 
@@ -186,18 +187,22 @@ static BlockAction CheckBlockInfo(const DllBlockInfo* aInfo, void* aBaseAddress,
     return BlockAction::Allow;
   }
 
+  if ((aInfo->mFlags & DllBlockInfo::BROWSER_PROCESS_ONLY) &&
+      (gBlocklistInitFlags & eDllBlocklistInitFlagIsChildProcess)) {
+    return BlockAction::Allow;
+  }
+
   if (aInfo->mMaxVersion == DllBlockInfo::ALL_VERSIONS) {
     return BlockAction::Deny;
   }
 
-  mozilla::nt::PEHeaders headers(aBaseAddress);
-  if (!headers) {
+  if (!aHeaders) {
     return BlockAction::Error;
   }
 
   if (aInfo->mFlags & DllBlockInfo::USE_TIMESTAMP) {
     DWORD timestamp;
-    if (!headers.GetTimeStamp(timestamp)) {
+    if (!aHeaders.GetTimeStamp(timestamp)) {
       return BlockAction::Error;
     }
 
@@ -210,7 +215,7 @@ static BlockAction CheckBlockInfo(const DllBlockInfo* aInfo, void* aBaseAddress,
 
   // Else we try to get the file version information. Note that we don't have
   // access to GetFileVersionInfo* APIs.
-  if (!headers.GetVersionInfo(aVersion)) {
+  if (!aHeaders.GetVersionInfo(aVersion)) {
     return BlockAction::Error;
   }
 
@@ -233,8 +238,10 @@ struct DllBlockInfoComparator {
   PCUNICODE_STRING mTarget;
 };
 
-static BlockAction IsDllAllowed(const UNICODE_STRING& aLeafName,
-                                void* aBaseAddress) {
+static BOOL WINAPI NoOp_DllMain(HINSTANCE, DWORD, LPVOID) { return TRUE; }
+
+static BlockAction DetermineBlockAction(const UNICODE_STRING& aLeafName,
+                                        void* aBaseAddress) {
   if (mozilla::nt::Contains12DigitHexString(aLeafName) ||
       mozilla::nt::IsFileNameAtLeast16HexDigits(aLeafName)) {
     return BlockAction::Deny;
@@ -252,10 +259,37 @@ static BlockAction IsDllAllowed(const UNICODE_STRING& aLeafName,
 
   const DllBlockInfo& entry = info[match];
 
+  mozilla::nt::PEHeaders headers(aBaseAddress);
   uint64_t version;
-  BlockAction checkResult = CheckBlockInfo(&entry, aBaseAddress, version);
-  if (checkResult != BlockAction::Allow) {
-    gBlockSet.Add(entry.mName, version);
+  BlockAction checkResult = CheckBlockInfo(&entry, headers, version);
+  if (checkResult == BlockAction::Allow) {
+    return checkResult;
+  }
+
+  gBlockSet.Add(entry.mName, version);
+
+  if (entry.mFlags & DllBlockInfo::REDIRECT_TO_NOOP_ENTRYPOINT) {
+    // For modules with REDIRECT_TO_NOOP_ENTRYPOINT, we allow a module to be
+    // loaded but detour the entrypoint to NoOp_DllMain so that the module has
+    // no chance to interact with our code.  We need this technique to safely
+    // block a module injected by IAT tampering because blocking such a module
+    // makes a process fail to launch.
+    // If we fail to detour a module's entrypoint, we reluctantly allow the
+    // module for free.
+
+    static RTL_RUN_ONCE sRunOnce = RTL_RUN_ONCE_INIT;
+    mozilla::freestanding::gK32.Resolve(sRunOnce);
+    if (!mozilla::freestanding::gK32.IsResolved()) {
+      return BlockAction::Allow;
+    }
+
+    mozilla::interceptor::WindowsDllEntryPointInterceptor interceptor(
+        mozilla::freestanding::gK32);
+    if (!interceptor.Set(headers, NoOp_DllMain)) {
+      return BlockAction::Allow;
+    }
+
+    return BlockAction::NoOpEntryPoint;
   }
 
   return checkResult;
@@ -292,7 +326,7 @@ NTSTATUS NTAPI patched_NtMapViewOfSection(
     return stubStatus;
   }
 
-  if (aProcess != kCurrentProcess) {
+  if (aProcess != nt::kCurrentProcess) {
     // We're only interested in mapping for the current process.
     return stubStatus;
   }
@@ -325,7 +359,7 @@ NTSTATUS NTAPI patched_NtMapViewOfSection(
   nt::GetLeafName(&leafOnStack, sectionFileName);
 
   // Check blocklist
-  BlockAction blockAction = IsDllAllowed(leafOnStack, *aBaseAddress);
+  BlockAction blockAction = DetermineBlockAction(leafOnStack, *aBaseAddress);
 
   if (blockAction == BlockAction::Allow) {
     if (nt::RtlGetProcessHeap()) {
@@ -346,6 +380,10 @@ NTSTATUS NTAPI patched_NtMapViewOfSection(
     // Notify patched_LdrLoadDll that it will be necessary to perform a
     // substitution before returning.
     ModuleLoadFrame::NotifyLSPSubstitutionRequired(&leafOnStack);
+  }
+
+  if (blockAction == BlockAction::NoOpEntryPoint) {
+    return stubStatus;
   }
 
   ::NtUnmapViewOfSection(aProcess, *aBaseAddress);

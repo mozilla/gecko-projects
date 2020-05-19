@@ -198,22 +198,25 @@ void xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aToStringResult,
                         : NS_LITERAL_CSTRING("content javascript");
   mWindowID = aWindowID;
 
-  ErrorReportToMessageString(aReport, mErrorMsg);
-  if (mErrorMsg.IsEmpty() && aToStringResult) {
+  if (aToStringResult) {
     AppendUTF8toUTF16(mozilla::MakeStringSpan(aToStringResult), mErrorMsg);
+  }
+  if (mErrorMsg.IsEmpty()) {
+    ErrorReportToMessageString(aReport, mErrorMsg);
+  }
+  if (mErrorMsg.IsEmpty()) {
+    mErrorMsg.AssignLiteral("<unknown>");
   }
 
   mSourceLine.Assign(aReport->linebuf(), aReport->linebufLength());
-  const JSErrorFormatString* efs =
-      js::GetErrorMessage(nullptr, aReport->errorNumber);
 
-  if (efs == nullptr) {
-    mErrorMsgName.AssignLiteral("");
+  if (aReport->errorMessageName) {
+    mErrorMsgName.AssignASCII(aReport->errorMessageName);
   } else {
-    mErrorMsgName.AssignASCII(efs->name);
+    mErrorMsgName.Truncate();
   }
 
-  mFlags = aReport->flags;
+  mIsWarning = aReport->isWarning();
   mIsMuted = aReport->isMuted;
 
   if (aReport->notes) {
@@ -244,8 +247,6 @@ void xpc::ErrorReport::Init(JSContext* aCx, mozilla::dom::Exception* aException,
   mSourceId = aException->SourceId(aCx);
   mLineNumber = aException->LineNumber(aCx);
   mColumn = aException->ColumnNumber();
-
-  mFlags = JSREPORT_EXCEPTION;
 }
 
 static LazyLogModule gJSDiagnostics("JSDiagnostics");
@@ -278,10 +279,7 @@ void xpc::ErrorReport::LogToStderr() {
 
   nsAutoCString error;
   error.AssignLiteral("JavaScript ");
-  if (JSREPORT_IS_STRICT(mFlags)) {
-    error.AppendLiteral("strict ");
-  }
-  if (JSREPORT_IS_WARNING(mFlags)) {
+  if (IsWarning()) {
     error.AppendLiteral("warning: ");
   } else {
     error.AppendLiteral("error: ");
@@ -298,18 +296,12 @@ void xpc::ErrorReport::LogToStderr() {
 }
 
 void xpc::ErrorReport::LogToConsole() {
-  LogToConsoleWithStack(nullptr, nullptr);
+  LogToConsoleWithStack(nullptr, JS::NothingHandleValue, nullptr, nullptr);
 }
 
 void xpc::ErrorReport::LogToConsoleWithStack(
-    JS::HandleObject aStack, JS::HandleObject aStackGlobal,
-    uint64_t aTimeWarpTarget /* = 0 */) {
-  // Don't log failures after diverging from a recording during replay, as
-  // this will cause the associated debugger operation to fail.
-  if (recordreplay::HasDivergedFromRecording()) {
-    return;
-  }
-
+    nsGlobalWindowInner* aWin, JS::Handle<mozilla::Maybe<JS::Value>> aException,
+    JS::HandleObject aStack, JS::HandleObject aStackGlobal) {
   if (aStack) {
     MOZ_ASSERT(aStackGlobal);
     MOZ_ASSERT(JS_IsGlobalObject(aStackGlobal));
@@ -320,8 +312,7 @@ void xpc::ErrorReport::LogToConsoleWithStack(
 
   LogToStderr();
 
-  MOZ_LOG(gJSDiagnostics,
-          JSREPORT_IS_WARNING(mFlags) ? LogLevel::Warning : LogLevel::Error,
+  MOZ_LOG(gJSDiagnostics, IsWarning() ? LogLevel::Warning : LogLevel::Error,
           ("file %s, line %u\n%s", NS_ConvertUTF16toUTF8(mFileName).get(),
            mLineNumber, NS_ConvertUTF16toUTF8(mErrorMsg).get()));
 
@@ -332,26 +323,21 @@ void xpc::ErrorReport::LogToConsoleWithStack(
       do_GetService(NS_CONSOLESERVICE_CONTRACTID);
   NS_ENSURE_TRUE_VOID(consoleService);
 
-  RefPtr<nsScriptErrorBase> errorObject;
-  if (mWindowID && aStack) {
-    // Only set stack on messages related to a document
-    // As we cache messages in the console service,
-    // we have to ensure not leaking them after the related
-    // context is destroyed and we only track document lifecycle for now.
-    errorObject = new nsScriptErrorWithStack(aStack, aStackGlobal);
-  } else {
-    errorObject = new nsScriptError();
-  }
+  RefPtr<nsScriptErrorBase> errorObject =
+      CreateScriptError(aWin, aException, aStack, aStackGlobal);
   errorObject->SetErrorMessageName(mErrorMsgName);
-  errorObject->SetTimeWarpTarget(aTimeWarpTarget);
 
+  uint32_t flags =
+      mIsWarning ? nsIScriptError::warningFlag : nsIScriptError::errorFlag;
   nsresult rv = errorObject->InitWithWindowID(
-      mErrorMsg, mFileName, mSourceLine, mLineNumber, mColumn, mFlags,
-      mCategory, mWindowID,
-      mCategory.Equals(NS_LITERAL_CSTRING("chrome javascript")));
+      mErrorMsg, mFileName, mSourceLine, mLineNumber, mColumn, flags, mCategory,
+      mWindowID, mCategory.Equals(NS_LITERAL_CSTRING("chrome javascript")));
   NS_ENSURE_SUCCESS_VOID(rv);
 
   rv = errorObject->InitSourceId(mSourceId);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  rv = errorObject->InitIsPromiseRejection(mIsPromiseRejection);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   for (size_t i = 0, len = mNotes.Length(); i < len; i++) {
@@ -380,11 +366,14 @@ void xpc::ErrorReport::ErrorReportToMessageString(JSErrorReport* aReport,
                                                   nsAString& aString) {
   aString.Truncate();
   if (aReport->message()) {
-    JSLinearString* name = js::GetErrorTypeName(
-        CycleCollectedJSContext::Get()->Context(), aReport->exnType);
-    if (name) {
-      AssignJSLinearString(aString, name);
-      aString.AppendLiteral(": ");
+    // Don't prefix warnings with an often misleading name like "Error: ".
+    if (!aReport->isWarning()) {
+      JSLinearString* name = js::GetErrorTypeName(
+          CycleCollectedJSContext::Get()->Context(), aReport->exnType);
+      if (name) {
+        AssignJSLinearString(aString, name);
+        aString.AppendLiteral(": ");
+      }
     }
     aString.Append(NS_ConvertUTF8toUTF16(aReport->message().c_str()));
   }
@@ -484,7 +473,6 @@ JSObject* CreateGlobalObject(JSContext* cx, const JSClass* clasp,
 void InitGlobalObjectOptions(JS::RealmOptions& aOptions,
                              nsIPrincipal* aPrincipal) {
   bool shouldDiscardSystemSource = ShouldDiscardSystemSource();
-  bool extraWarningsForSystemJS = ExtraWarningsForSystemJS();
 
   bool isSystem = aPrincipal->IsSystemPrincipal();
 
@@ -500,12 +488,6 @@ void InitGlobalObjectOptions(JS::RealmOptions& aOptions,
     bool discardSource = isSystem;
 
     aOptions.behaviors().setDiscardSource(discardSource);
-  }
-
-  if (extraWarningsForSystemJS) {
-    if (isSystem) {
-      aOptions.behaviors().extraWarningsOverride().set(true);
-    }
   }
 }
 
@@ -882,7 +864,8 @@ bool Base64Encode(JSContext* cx, HandleValue val, MutableHandleValue out) {
   MOZ_ASSERT(cx);
 
   nsAutoCString encodedString;
-  if (!ConvertJSValueToByteString(cx, val, false, encodedString)) {
+  BindingCallContext callCx(cx, "Base64Encode");
+  if (!ConvertJSValueToByteString(callCx, val, false, "value", encodedString)) {
     return false;
   }
 
@@ -905,7 +888,8 @@ bool Base64Decode(JSContext* cx, HandleValue val, MutableHandleValue out) {
   MOZ_ASSERT(cx);
 
   nsAutoCString encodedString;
-  if (!ConvertJSValueToByteString(cx, val, false, encodedString)) {
+  BindingCallContext callCx(cx, "Base64Decode");
+  if (!ConvertJSValueToByteString(callCx, val, false, "value", encodedString)) {
     return false;
   }
 

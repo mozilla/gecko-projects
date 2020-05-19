@@ -71,7 +71,19 @@ static const MimeTypeAssociation appTypes[] = {
 #define kDesktopDrawBGGSKey "draw-background"
 #define kDesktopColorGSKey "primary-color"
 
-static bool IsRunningAsASnap() { return (PR_GetEnv("SNAP") != nullptr); }
+static bool IsRunningAsASnap() {
+  // SNAP holds the path to the snap, use SNAP_NAME
+  // which is easier to parse.
+  const char* snap_name = PR_GetEnv("SNAP_NAME");
+
+  // return early if not set.
+  if (snap_name == nullptr) {
+    return false;
+  }
+
+  // snap_name as defined on https://snapcraft.io/firefox
+  return (strcmp(snap_name, "firefox") == 0);
+}
 
 nsresult nsGNOMEShellService::Init() {
   nsresult rv;
@@ -88,6 +100,14 @@ nsresult nsGNOMEShellService::Init() {
       do_GetService(NS_GSETTINGSSERVICE_CONTRACTID);
 
   if (!giovfs && !gsettings) return NS_ERROR_NOT_AVAILABLE;
+
+#ifdef MOZ_ENABLE_DBUS
+  const char* currentDesktop = getenv("XDG_CURRENT_DESKTOP");
+  if (currentDesktop && strstr(currentDesktop, "GNOME") != nullptr &&
+      Preferences::GetBool("browser.gnome-search-provider.enabled", false)) {
+    mSearchProvider.Startup();
+  }
+#endif
 
   // Check G_BROKEN_FILENAMES.  If it's set, then filenames in glib use
   // the locale encoding.  If it's not set, they use UTF-8.

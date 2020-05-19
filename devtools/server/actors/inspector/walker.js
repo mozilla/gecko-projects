@@ -117,6 +117,13 @@ loader.lazyRequireGetter(
 
 loader.lazyRequireGetter(
   this,
+  "noAnonymousContentTreeWalkerFilter",
+  "devtools/server/actors/inspector/utils",
+  true
+);
+
+loader.lazyRequireGetter(
+  this,
   "CustomElementWatcher",
   "devtools/server/actors/inspector/custom-element-watcher",
   true
@@ -193,7 +200,6 @@ const MUTATIONS_THROTTLING_DELAY = 100;
 const IMMEDIATE_MUTATIONS = [
   "documentUnload",
   "frameLoad",
-  "newRoot",
   "pseudoClassLock",
 
   // These should be delivered right away in order to be sure that the
@@ -343,6 +349,16 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     // managed.
     this.rootNode = this.document();
 
+    // By default the walker will not notify about new root nodes and waits for
+    // a consumer to explicitly ask to be notified about root nodes to start
+    // emitting related events.
+    this._isWatchingRootNode = false;
+    // XXX: Ideally the walker would also use a watch API on the target actor to
+    // know if "window-ready" has already been fired. Without such an API there
+    // is a risk that the walker will fire several new-root-available for the
+    // same node.
+    this._emittedRootNode = null;
+
     this.layoutChangeObserver = getLayoutChangesObserver(this.targetActor);
     this._onReflows = this._onReflows.bind(this);
     this.layoutChangeObserver.on("reflows", this._onReflows);
@@ -351,6 +367,48 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     this._onEventListenerChange = this._onEventListenerChange.bind(this);
     eventListenerService.addListenerChangeListener(this._onEventListenerChange);
+  },
+
+  watchRootNode() {
+    if (this._isWatchingRootNode) {
+      throw new Error("WalkerActor::watchRootNode should only be called once");
+    }
+
+    this._isWatchingRootNode = true;
+    if (this.rootNode && this._isRootDocumentReady()) {
+      this._emitNewRoot();
+    }
+  },
+
+  unwatchRootNode() {
+    this._isWatchingRootNode = false;
+    this._emittedRootNode = null;
+  },
+
+  _emitNewRoot() {
+    if (!this._isWatchingRootNode || this._emittedRootNode === this.rootNode) {
+      return;
+    }
+
+    this._emittedRootNode = this.rootNode;
+    this.emit("root-available", this.rootNode);
+  },
+
+  _isRootDocumentReady() {
+    if (this.rootDoc) {
+      const { readyState } = this.rootDoc;
+      if (readyState == "interactive" || readyState == "complete") {
+        return true;
+      }
+    }
+
+    // A document might stay forever in unitialized state.
+    // If the target actor is not currently loading a document,
+    // assume the document is ready.
+    const webProgress = this.rootDoc.defaultView.docShell.QueryInterface(
+      Ci.nsIWebProgress
+    );
+    return !webProgress.isLoadingDocument;
   },
 
   /**
@@ -380,8 +438,8 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       actor: this.actorID,
       root: this.rootNode.form(),
       traits: {
-        // Firefox 71: getNodeActorFromContentDomReference is available.
-        retrieveNodeFromContentDomReference: true,
+        // watch/unwatchRootNode are available starting with Fx77
+        watchRootNode: true,
       },
     };
   },
@@ -750,7 +808,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       rawNode.nodeName === "SLOT" &&
       isDirectShadowHostChild(firstChild);
 
-    const isFlexItem = !!(firstChild && firstChild.parentFlexElement);
+    const isFlexItem = !!firstChild?.parentFlexElement;
 
     if (
       !firstChild ||
@@ -1269,6 +1327,46 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   },
 
   /**
+   * Get a list of nodes that match the given XPath in all known frames of
+   * the current content page.
+   * @param {String} xPath.
+   * @return {Array}
+   */
+  _multiFrameXPath: function(xPath) {
+    const nodes = [];
+
+    for (const window of this.targetActor.windows) {
+      const document = window.document;
+      try {
+        const result = document.evaluate(
+          xPath,
+          document.documentElement,
+          null,
+          window.XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+          null
+        );
+
+        for (let i = 0; i < result.snapshotLength; i++) {
+          nodes.push(result.snapshotItem(i));
+        }
+      } catch (e) {
+        // Bad XPath. Do nothing as the XPath can come from a searchbox.
+      }
+    }
+
+    return nodes;
+  },
+
+  /**
+   * Return a NodeListActor with all nodes that match the given XPath in all
+   * frames of the current content page.
+   * @param {String} xPath
+   */
+  multiFrameXPath: function(xPath) {
+    return new NodeListActor(this, this._multiFrameXPath(xPath));
+  },
+
+  /**
    * Search the document for a given string.
    * Results will be searched with the walker-search module (searches through
    * tag names, attribute names and values, and text contents).
@@ -1280,7 +1378,10 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    */
   search: function(query) {
     const results = this.walkerSearch.search(query);
-    const nodeList = new NodeListActor(this, results.map(r => r.node));
+    const nodeList = new NodeListActor(
+      this,
+      results.map(r => r.node)
+    );
 
     return {
       list: nodeList,
@@ -2137,7 +2238,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
   onNodeRemoved: function(evt) {
     const mutationBpInfo = this._breakpointInfoForNode(evt.target);
-    const hasNodeRemovalEvent = mutationBpInfo && mutationBpInfo.removal;
+    const hasNodeRemovalEvent = mutationBpInfo?.removal;
 
     this._clearMutationBreakpointsFromSubtree(evt.target);
 
@@ -2150,7 +2251,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
   onAttributeModified: function(evt) {
     const mutationBpInfo = this._breakpointInfoForNode(evt.target);
-    if (mutationBpInfo && mutationBpInfo.attribute) {
+    if (mutationBpInfo?.attribute) {
       this._breakOnMutation("attributeModified", evt.target);
     }
   },
@@ -2159,7 +2260,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     let node = evt.target;
     while ((node = node.parentNode) !== null) {
       const mutationBpInfo = this._breakpointInfoForNode(node);
-      if (mutationBpInfo && mutationBpInfo.subtree) {
+      if (mutationBpInfo?.subtree) {
         this._breakOnMutation("subtreeModified", evt.target, node, action);
         break;
       }
@@ -2179,21 +2280,29 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     // need to ensure that we stop walking when we leave the subtree.
     const nextWalkerSibling = this._getNextTraversalSibling(targetNode);
 
-    const walker = this.getDocumentWalker(targetNode);
+    const walker = new DocumentWalker(targetNode, this.rootWin, {
+      filter: noAnonymousContentTreeWalkerFilter,
+      skipTo: SKIP_TO_SIBLING,
+    });
+
     do {
       this._updateMutationBreakpointState("detach", walker.currentNode, null);
-    } while (
-      walker.nextNode() &&
-      !(nextWalkerSibling || walker.currentNode !== nextWalkerSibling)
-    );
+    } while (walker.nextNode() && walker.currentNode !== nextWalkerSibling);
   },
 
   _getNextTraversalSibling(targetNode) {
-    let current = targetNode;
-    while (current && !current.nextSibling) {
-      current = current.parentNode;
+    const walker = new DocumentWalker(targetNode, this.rootWin, {
+      filter: noAnonymousContentTreeWalkerFilter,
+      skipTo: SKIP_TO_SIBLING,
+    });
+
+    while (!walker.nextSibling()) {
+      if (!walker.parentNode()) {
+        // If we try to step past the walker root, there is no next sibling.
+        return null;
+      }
     }
-    return current ? current.nextSibling : null;
+    return walker.currentNode;
   },
 
   /**
@@ -2465,10 +2574,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       this.rootWin = window;
       this.rootDoc = window.document;
       this.rootNode = this.document();
-      this.queueMutation({
-        type: "newRoot",
-        target: this.rootNode.form(),
-      });
+      this._emitNewRoot();
       return;
     }
     const frame = getFrameElement(window);
@@ -2544,6 +2650,9 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     if (this.rootDoc === doc) {
       this.rootDoc = null;
+      if (this._isWatchingRootNode) {
+        this.emit("root-destroyed", this.rootNode);
+      }
       this.rootNode = null;
     }
 

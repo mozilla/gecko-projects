@@ -40,11 +40,6 @@ class XULFrameElement final : public nsXULElement, public nsFrameLoaderOwner {
   Nullable<WindowProxyHolder> GetContentWindow();
   Document* GetContentDocument();
 
-  void PresetOpenerWindow(const Nullable<WindowProxyHolder>& aWindow,
-                          ErrorResult& aRv) {
-    mOpener = aWindow.IsNull() ? nullptr : aWindow.Value().get();
-  }
-
   void SwapFrameLoaders(mozilla::dom::HTMLIFrameElement& aOtherLoaderOwner,
                         mozilla::ErrorResult& rv);
   void SwapFrameLoaders(XULFrameElement& aOtherLoaderOwner,
@@ -69,9 +64,7 @@ class XULFrameElement final : public nsXULElement, public nsFrameLoaderOwner {
                                              nsGkAtoms::editor))
 
  protected:
-  virtual ~XULFrameElement() {}
-
-  RefPtr<BrowsingContext> mOpener;
+  virtual ~XULFrameElement() = default;
 
   JSObject* WrapNode(JSContext* aCx,
                      JS::Handle<JSObject*> aGivenProto) override;

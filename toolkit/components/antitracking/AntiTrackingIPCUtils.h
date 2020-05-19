@@ -9,20 +9,38 @@
 
 #include "ipc/IPCMessageUtils.h"
 
-#include "mozilla/AntiTrackingCommon.h"
+#include "mozilla/ContentBlockingNotifier.h"
+#include "mozilla/ContentBlocking.h"
 
 namespace IPC {
 
-// For allowing passing the enum AntiTrackingCommon::StorageAccessGrantedReason
-// over IPC.
+// For allowing passing the enum
+// ContentBlockingNotifier::StorageAccessGrantedReason over IPC.
 template <>
-struct ParamTraits<mozilla::AntiTrackingCommon::StorageAccessGrantedReason>
+struct ParamTraits<mozilla::ContentBlockingNotifier::StorageAccessGrantedReason>
     : public ContiguousEnumSerializerInclusive<
-          mozilla::AntiTrackingCommon::StorageAccessGrantedReason,
-          mozilla::AntiTrackingCommon::StorageAccessGrantedReason::
+          mozilla::ContentBlockingNotifier::StorageAccessGrantedReason,
+          mozilla::ContentBlockingNotifier::StorageAccessGrantedReason::
               eStorageAccessAPI,
-          mozilla::AntiTrackingCommon::StorageAccessGrantedReason::eOpener> {};
+          mozilla::ContentBlockingNotifier::StorageAccessGrantedReason::
+              eOpener> {};
 
+// ContentBlockingNotifier::BlockingDecision over IPC.
+template <>
+struct ParamTraits<mozilla::ContentBlockingNotifier::BlockingDecision>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::ContentBlockingNotifier::BlockingDecision,
+          mozilla::ContentBlockingNotifier::BlockingDecision::eBlock,
+          mozilla::ContentBlockingNotifier::BlockingDecision::eAllow> {};
+
+// ContentBlocking::StorageAccessPromptChoices over IPC.
+template <>
+struct ParamTraits<mozilla::ContentBlocking::StorageAccessPromptChoices>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::ContentBlocking::StorageAccessPromptChoices,
+          mozilla::ContentBlocking::StorageAccessPromptChoices::eAllow,
+          mozilla::ContentBlocking::StorageAccessPromptChoices::
+              eAllowAutoGrant> {};
 }  // namespace IPC
 
 #endif  // mozilla_antitrackingipcutils_h

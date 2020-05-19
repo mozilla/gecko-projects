@@ -94,7 +94,7 @@ InternalResponse::InternalResponse(uint16_t aStatus,
   return response;
 }
 
-InternalResponse::~InternalResponse() {}
+InternalResponse::~InternalResponse() = default;
 
 template void InternalResponse::ToIPC<mozilla::ipc::PBackgroundChild>(
     IPCInternalResponse* aIPCResponse, mozilla::ipc::PBackgroundChild* aManager,
@@ -311,7 +311,6 @@ already_AddRefed<InternalResponse> InternalResponse::OpaqueResponse() {
              "Can't OpaqueResponse a already wrapped response");
   RefPtr<InternalResponse> response = new InternalResponse(0, EmptyCString());
   response->mType = ResponseType::Opaque;
-  response->mTerminationReason = mTerminationReason;
   response->mChannelInfo = mChannelInfo;
   if (mPrincipalInfo) {
     response->mPrincipalInfo =
@@ -328,15 +327,14 @@ already_AddRefed<InternalResponse> InternalResponse::OpaqueRedirectResponse() {
              "URLList should not be emtpy for internalResponse");
   RefPtr<InternalResponse> response = OpaqueResponse();
   response->mType = ResponseType::Opaqueredirect;
-  response->mURLList = mURLList;
+  response->mURLList = mURLList.Clone();
   return response.forget();
 }
 
 already_AddRefed<InternalResponse> InternalResponse::CreateIncompleteCopy() {
   RefPtr<InternalResponse> copy = new InternalResponse(mStatus, mStatusText);
   copy->mType = mType;
-  copy->mTerminationReason = mTerminationReason;
-  copy->mURLList = mURLList;
+  copy->mURLList = mURLList.Clone();
   copy->mChannelInfo = mChannelInfo;
   if (mPrincipalInfo) {
     copy->mPrincipalInfo =

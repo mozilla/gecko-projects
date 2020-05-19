@@ -9,7 +9,6 @@ from __future__ import absolute_import
 import json
 import os
 
-from distutils.util import strtobool
 from abc import ABCMeta, abstractmethod
 from logger.logger import RaptorLogger
 from output import RaptorOutput, BrowsertimeOutput
@@ -28,6 +27,7 @@ class PerftestResultsHandler(object):
         power_test=False,
         cpu_test=False,
         memory_test=False,
+        live_sites=False,
         app=None,
         no_conditioned_profile=False,
         **kwargs
@@ -36,6 +36,7 @@ class PerftestResultsHandler(object):
         self.power_test = power_test
         self.cpu_test = cpu_test
         self.memory_test = memory_test
+        self.live_sites = live_sites
         self.app = app
         self.results = []
         self.page_timeout_list = []
@@ -64,8 +65,12 @@ class PerftestResultsHandler(object):
             {"screenshot": screenshot, "test_name": test_name, "page_cycle": page_cycle}
         )
 
-    def add_page_timeout(self, test_name, page_url, pending_metrics):
-        timeout_details = {"test_name": test_name, "url": page_url}
+    def add_page_timeout(self, test_name, page_url, page_cycle, pending_metrics):
+        timeout_details = {
+            "test_name": test_name,
+            "url": page_url,
+            "page_cycle": page_cycle,
+        }
         if pending_metrics:
             pending_metrics = [key for key, value in pending_metrics.items() if value]
             timeout_details["pending_metrics"] = ", ".join(pending_metrics)
@@ -126,6 +131,11 @@ class PerftestResultsHandler(object):
             return None
 
         expected_perfherder = 1
+
+        if output.mozproxy_data:
+            # Check if we have mozproxy data available.
+            expected_perfherder += 1
+
         if is_resource_test():
             # when resource tests are run, no perfherder data is output
             # for the regular raptor tests (i.e. speedometer) so we
@@ -187,7 +197,8 @@ class RaptorResultsHandler(PerftestResultsHandler):
 
     def add(self, new_result_json):
         # add to results
-        new_result_json["extra_options"] = []
+        if new_result_json.get("extra_options") is None:
+            new_result_json["extra_options"] = []
         LOG.info("received results in RaptorResultsHandler.add")
         if self.no_conditioned_profile:
             new_result_json["extra_options"].append("nocondprof")
@@ -223,7 +234,7 @@ class RaptorResultsHandler(PerftestResultsHandler):
                 output, out_sup_perfdata + out_perfdata
             )
 
-        return sup_success and success and validate_success
+        return sup_success and success and validate_success and not self.page_timeout_list
 
 
 class BrowsertimeResultsHandler(PerftestResultsHandler):
@@ -580,22 +591,15 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
                     new_result["subtest_unit"] = "ms"
                     LOG.info("parsed new result: %s" % str(new_result))
 
-                    # `extra_options` will be populated with Gecko profiling flags in
-                    # the future.
                     new_result["extra_options"] = []
                     if self.no_conditioned_profile:
                         new_result["extra_options"].append("nocondprof")
                     if self.fission_enabled:
                         new_result["extra_options"].append("fission")
-
-                    # TODO: Once Bug 1593198 is fixed remove this part
-                    # Currently perfherder doesn't split data / recognize 'application` and for
-                    # browsertime tests we don't use the browser name in the test name as we use
-                    # simplified test INIs; therefore in order to differentiate in perfherder
-                    # between browsers/apps, until Bug 1593198 is fixed, we must add the app name
-                    # to the perfherder data extraOptions fields
-                    if self.app != "firefox":
-                        new_result["extra_options"].append(self.app)
+                    if self.live_sites:
+                        new_result["extra_options"].append("live")
+                    if self.gecko_profile:
+                        new_result["extra_options"].append("gecko_profile")
 
                     return new_result
 
@@ -616,17 +620,18 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
 
                     # Try to get subtest values or use the defaults
                     # If values not available use the defaults
-                    subtest_lower_is_better = test.get("subtest_lower_is_better", "True")
-                    new_result["subtest_lower_is_better"] = bool(
-                        strtobool(subtest_lower_is_better)
-                    ) if isinstance(subtest_lower_is_better, str) else subtest_lower_is_better
+                    subtest_lower_is_better = test.get("subtest_lower_is_better", True)
+                    new_result["subtest_lower_is_better"] = subtest_lower_is_better
 
                     new_result["subtest_unit"] = test.get("subtest_unit", "ms")
                     LOG.info("parsed new result: %s" % str(new_result))
 
-                    # `extra_options` will be populated with Gecko profiling flags in
-                    # the future.
                     new_result["extra_options"] = []
+                    if self.app != "firefox":
+                        new_result["extra_options"].append(self.app)
+                    if self.gecko_profile:
+                        new_result["extra_options"].append("gecko_profile")
+
                     return new_result
 
                 if test["type"] == "pageload":
@@ -658,7 +663,11 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
         if len(video_jobs) > 0:
             # The video list and application metadata (browser name and
             # optionally version) that will be used in the visual metrics task.
-            jobs_json = {"jobs": video_jobs, "application": {"name": self.browser_name}}
+            jobs_json = {
+                "jobs": video_jobs,
+                "application": {"name": self.browser_name},
+                "extra_options": output.summarized_results["suites"][0]["extraOptions"]
+            }
 
             if self.browser_version is not None:
                 jobs_json["application"]["version"] = self.browser_version

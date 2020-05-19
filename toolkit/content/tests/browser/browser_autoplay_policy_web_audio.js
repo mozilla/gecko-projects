@@ -19,7 +19,7 @@ function setup_test_preference() {
   return SpecialPowers.pushPrefEnv({
     set: [
       ["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
-      ["media.autoplay.enabled.user-gestures-needed", true],
+      ["media.autoplay.blocking_policy", 0],
       ["media.autoplay.block-webaudio", true],
       ["media.autoplay.block-event.enabled", true],
     ],
@@ -128,7 +128,7 @@ async function testAutoplayExistingPermission({ name, permission }) {
   ok(!promptShow(), `should not be showing permission prompt yet`);
 
   info(`- create audio context -`);
-  loadFrameScript(browser, createAudioContext);
+  await SpecialPowers.spawn(browser, [], createAudioContext);
 
   info(`- check AudioContext status -`);
   const isAllowedToStart = permission === Services.perms.ALLOW_ACTION;
@@ -163,7 +163,7 @@ async function testAutoplayUnknownPermission({ name, method }) {
   ok(!promptShow(), `should not be showing permission prompt yet`);
 
   info(`- create AudioContext which should not start -`);
-  loadFrameScript(browser, createAudioContext);
+  await SpecialPowers.spawn(browser, [], createAudioContext);
   await SpecialPowers.spawn(
     browser,
     [false],

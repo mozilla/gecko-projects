@@ -34,17 +34,13 @@
 
 use crate::{
     conv,
-    hub::{GfxBackend, Global, IdentityFilter, Token},
+    hub::{GfxBackend, Global, GlobalIdentityHandlerFactory, Input, Token},
     id::{DeviceId, SwapChainId, TextureViewId},
-    resource,
-    Extent3d,
-    Features,
-    LifeGuard,
-    Stored,
+    resource, Features, LifeGuard, Stored,
 };
 
 use hal::{self, device::Device as _, queue::CommandQueue as _, window::PresentationSurface as _};
-
+use wgt::SwapChainDescriptor;
 
 const FRAME_TIMEOUT_MS: u64 = 1000;
 pub const DESIRED_NUM_FRAMES: u32 = 3;
@@ -60,66 +56,32 @@ pub struct SwapChain<B: hal::Backend> {
     pub(crate) acquired_framebuffers: Vec<B::Framebuffer>,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub enum PresentMode {
-    NoVsync = 0,
-    Vsync = 1,
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct SwapChainDescriptor {
-    pub usage: resource::TextureUsage,
-    pub format: resource::TextureFormat,
-    pub width: u32,
-    pub height: u32,
-    pub present_mode: PresentMode,
-}
-
-impl SwapChainDescriptor {
-    pub(crate) fn to_hal(
-        &self,
-        num_frames: u32,
-        features: Features,
-    ) -> hal::window::SwapchainConfig {
-        let mut config = hal::window::SwapchainConfig::new(
-            self.width,
-            self.height,
-            conv::map_texture_format(self.format, features),
-            num_frames,
-        );
-        //TODO: check for supported
-        config.image_usage = conv::map_texture_usage(self.usage, hal::format::Aspects::COLOR);
-        config.composite_alpha_mode = hal::window::CompositeAlphaMode::OPAQUE;
-        config.present_mode = match self.present_mode {
-            PresentMode::NoVsync => hal::window::PresentMode::IMMEDIATE,
-            PresentMode::Vsync => hal::window::PresentMode::FIFO,
-        };
-        config
-    }
-
-    pub fn to_texture_desc(&self) -> resource::TextureDescriptor {
-        resource::TextureDescriptor {
-            size: Extent3d {
-                width: self.width,
-                height: self.height,
-                depth: 1,
-            },
-            mip_level_count: 1,
-            array_layer_count: 1,
-            sample_count: 1,
-            dimension: resource::TextureDimension::D2,
-            format: self.format,
-            usage: self.usage,
-        }
-    }
+pub(crate) fn swap_chain_descriptor_to_hal(
+    desc: &SwapChainDescriptor,
+    num_frames: u32,
+    features: Features,
+) -> hal::window::SwapchainConfig {
+    let mut config = hal::window::SwapchainConfig::new(
+        desc.width,
+        desc.height,
+        conv::map_texture_format(desc.format, features),
+        num_frames,
+    );
+    //TODO: check for supported
+    config.image_usage = conv::map_texture_usage(desc.usage, hal::format::Aspects::COLOR);
+    config.composite_alpha_mode = hal::window::CompositeAlphaMode::OPAQUE;
+    config.present_mode = match desc.present_mode {
+        wgt::PresentMode::Immediate => hal::window::PresentMode::IMMEDIATE,
+        wgt::PresentMode::Mailbox => hal::window::PresentMode::MAILBOX,
+        wgt::PresentMode::Fifo => hal::window::PresentMode::FIFO,
+    };
+    config
 }
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct SwapChainOutput {
-    pub view_id: TextureViewId,
+    pub view_id: Option<TextureViewId>,
 }
 
 #[derive(Debug)]
@@ -127,11 +89,11 @@ pub enum SwapChainGetNextTextureError {
     GpuProcessingTimeout,
 }
 
-impl<F: IdentityFilter<TextureViewId>> Global<F> {
+impl<G: GlobalIdentityHandlerFactory> Global<G> {
     pub fn swap_chain_get_next_texture<B: GfxBackend>(
         &self,
         swap_chain_id: SwapChainId,
-        view_id_in: F::Input,
+        view_id_in: Input<G, TextureViewId>,
     ) -> Result<SwapChainOutput, SwapChainGetNextTextureError> {
         let hub = B::hub(self);
         let mut token = Token::root();
@@ -152,7 +114,8 @@ impl<F: IdentityFilter<TextureViewId>> Global<F> {
                 }
                 Err(e) => {
                     log::warn!("acquire_image() failed ({:?}), reconfiguring swapchain", e);
-                    let desc = sc.desc.to_hal(sc.num_frames, device.features);
+                    let desc =
+                        swap_chain_descriptor_to_hal(&sc.desc, sc.num_frames, device.features);
                     unsafe {
                         suf.configure_swapchain(&device.raw, desc).unwrap();
                         suf.acquire_image(FRAME_TIMEOUT_MS * 1_000_000).unwrap()
@@ -178,13 +141,13 @@ impl<F: IdentityFilter<TextureViewId>> Global<F> {
             samples: 1,
             range: hal::image::SubresourceRange {
                 aspects: hal::format::Aspects::COLOR,
-                layers: 0 .. 1,
-                levels: 0 .. 1,
+                layers: 0..1,
+                levels: 0..1,
             },
             life_guard: LifeGuard::new(),
         };
         let ref_count = view.life_guard.add_ref();
-        let view_id = hub
+        let id = hub
             .texture_views
             .register_identity(view_id_in, view, &mut token);
 
@@ -193,11 +156,11 @@ impl<F: IdentityFilter<TextureViewId>> Global<F> {
             "Swap chain image is already acquired"
         );
         sc.acquired_view_id = Some(Stored {
-            value: view_id,
+            value: id,
             ref_count,
         });
 
-        Ok(SwapChainOutput { view_id })
+        Ok(SwapChainOutput { view_id: Some(id) })
     }
 
     pub fn swap_chain_present<B: GfxBackend>(&self, swap_chain_id: SwapChainId) {

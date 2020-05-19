@@ -6,12 +6,13 @@
 
 #include "DrawTargetTiled.h"
 #include "Logging.h"
+#include "nsRegion.h"
 #include "PathHelpers.h"
 
 namespace mozilla {
 namespace gfx {
 
-DrawTargetTiled::DrawTargetTiled() {}
+DrawTargetTiled::DrawTargetTiled() = default;
 
 bool DrawTargetTiled::Init(const TileSet& aTiles) {
   if (!aTiles.mTileCount) {

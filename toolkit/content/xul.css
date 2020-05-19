@@ -12,11 +12,8 @@
  *
  * This file should also not contain any app specific styling.  Defaults for
  * widgets of a particular application should be in that application's style
- * sheet.  For example, style definitions for navigator can be found in
- * navigator.css.
- *
- * THIS FILE IS LOCKED DOWN.  YOU ARE NOT ALLOWED TO MODIFY IT WITHOUT FIRST
- * HAVING YOUR CHANGES REVIEWED BY enndeakin@gmail.com
+ * sheet.  For example, style definitions for browser can be found in
+ * browser.css.
  */
 
 @import url("chrome://global/skin/tooltip.css");
@@ -115,6 +112,7 @@ label.text-link, label[onclick] {
 
 label html|span.accesskey {
   text-decoration: underline;
+  text-decoration-skip-ink: none;
 }
 
 /********** toolbarbutton **********/
@@ -241,7 +239,10 @@ tooltip {
   margin-top: 21px;
 }
 
+% excluding Android here to work around bug 1637975:
+%ifndef ANDROID
 @supports -moz-bool-pref("xul.panel-animations.enabled") {
+@media (prefers-reduced-motion: no-preference) {
 %ifdef MOZ_WIDGET_COCOA
   /* On Mac, use the properties "-moz-window-transform" and "-moz-window-opacity"
      instead of "transform" and "opacity" for these animations.
@@ -306,6 +307,8 @@ tooltip {
   }
 %endif
 }
+}
+%endif
 
 panel[type="arrow"][animating] {
   pointer-events: none;
@@ -383,7 +386,8 @@ stack {
   position: relative;
 }
 
-stack > *|* {
+/* We shouldn't style native anonymous children like scrollbars or what not */
+stack > *|*:not(:-moz-native-anonymous) {
   grid-area: 1 / 1;
   z-index: 0;
 
@@ -493,7 +497,7 @@ search-textbox {
 
 /********** menulist **********/
 
-menulist[popuponly="true"] {
+menulist[popuponly] {
   -moz-appearance: none !important;
   margin: 0 !important;
   height: 0 !important;
@@ -581,8 +585,6 @@ label, button, image {
   display: -moz-inline-box;
 }
 
-.menulist-highlightable-label:not([highlightable="true"]),
-.menulist-label[highlightable="true"],
 .menu-iconic-highlightable-text:not([highlightable="true"]),
 .menu-iconic-text[highlightable="true"] {
   display: none;

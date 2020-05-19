@@ -24,7 +24,7 @@
 #include "js/UniquePtr.h"    // UniquePtr
 #include "js/Vector.h"       // Vector
 
-class JSAtom;
+class JS_PUBLIC_API JSAtom;
 struct JS_PUBLIC_API JSContext;
 
 namespace js {
@@ -42,8 +42,7 @@ struct BinaryASTSupport {
   struct CharSlice {
     const char* start_;
     uint32_t byteLen_;
-    CharSlice(const CharSlice& other)
-        : start_(other.start_), byteLen_(other.byteLen_) {}
+    CharSlice(const CharSlice& other) = default;
     CharSlice(const char* start, const uint32_t byteLen)
         : start_(start), byteLen_(byteLen) {}
     explicit CharSlice(JSContext*) : CharSlice(nullptr, 0) {}
@@ -55,11 +54,11 @@ struct BinaryASTSupport {
         fprintf(stderr, "%c", c);
       }
 
-      fprintf(stderr, " (%d)", byteLen_);
+      fprintf(stderr, " (%u)", byteLen_);
     }
 #endif  // DEBUG
 
-    typedef const CharSlice Lookup;
+    using Lookup = const CharSlice;
     static js::HashNumber hash(Lookup l) {
       return mozilla::HashString(l.start_, l.byteLen_);
     }

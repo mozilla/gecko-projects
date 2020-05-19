@@ -20,6 +20,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StaticPrefs_svg.h"
+#include "mozilla/StaticPresData.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/BinarySearch.h"
@@ -73,6 +74,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 #ifdef ACCESSIBILITY
 #  include "nsAccessibilityService.h"
 #endif
@@ -2181,9 +2183,9 @@ already_AddRefed<gfxTextRun> BuildTextRunsScanner::BuildTextRunForFrames(
   nsTextFrame* nextBreakBeforeFrame = GetNextBreakBeforeFrame(&nextBreakIndex);
   bool isSVG = nsSVGUtils::IsInSVGTextSubtree(mLineContainer);
   bool enabledJustification =
-      (mLineContainer->StyleText()->mTextAlign == NS_STYLE_TEXT_ALIGN_JUSTIFY ||
+      (mLineContainer->StyleText()->mTextAlign == StyleTextAlign::Justify ||
        mLineContainer->StyleText()->mTextAlignLast ==
-           NS_STYLE_TEXT_ALIGN_JUSTIFY);
+           StyleTextAlignLast::Justify);
 
   const nsStyleText* textStyle = nullptr;
   const nsStyleFont* fontStyle = nullptr;
@@ -2784,7 +2786,7 @@ static bool MayCharacterHaveEmphasisMark(uint32_t aCh) {
   // Comparing an unsigned variable against zero is a compile error,
   // so we use static assert here to ensure we really don't need to
   // compare it with the given constant.
-  static_assert(IsUnsigned<decltype(category)>::value &&
+  static_assert(std::is_unsigned_v<decltype(category)> &&
                     HB_UNICODE_GENERAL_CATEGORY_CONTROL == 0,
                 "if this constant is not zero, or category is signed, "
                 "we need to explicitly do the comparison below");
@@ -4035,7 +4037,7 @@ bool nsTextPaintStyle::InitSelectionColorsAndShadow() {
   if (mInitSelectionColorsAndShadow) return true;
 
   int16_t selectionFlags;
-  int16_t selectionStatus = mFrame->GetSelectionStatus(&selectionFlags);
+  const int16_t selectionStatus = mFrame->GetSelectionStatus(&selectionFlags);
   if (!(selectionFlags & nsISelectionDisplay::DISPLAY_TEXT) ||
       selectionStatus < nsISelectionController::SELECTION_ON) {
     // Not displaying the normal selection.
@@ -4061,18 +4063,25 @@ bool nsTextPaintStyle::InitSelectionColorsAndShadow() {
   nscolor selectionBGColor =
       LookAndFeel::GetColor(LookAndFeel::ColorID::TextSelectBackground);
 
-  if (selectionStatus == nsISelectionController::SELECTION_ATTENTION) {
-    mSelectionBGColor = LookAndFeel::GetColor(
-        LookAndFeel::ColorID::TextSelectBackgroundAttention);
-    mSelectionBGColor =
-        EnsureDifferentColors(mSelectionBGColor, selectionBGColor);
-  } else if (selectionStatus != nsISelectionController::SELECTION_ON) {
-    mSelectionBGColor = LookAndFeel::GetColor(
-        LookAndFeel::ColorID::TextSelectBackgroundDisabled);
-    mSelectionBGColor =
-        EnsureDifferentColors(mSelectionBGColor, selectionBGColor);
-  } else {
-    mSelectionBGColor = selectionBGColor;
+  switch (selectionStatus) {
+    case nsISelectionController::SELECTION_ATTENTION: {
+      mSelectionBGColor = LookAndFeel::GetColor(
+          LookAndFeel::ColorID::TextSelectBackgroundAttention);
+      mSelectionBGColor =
+          EnsureDifferentColors(mSelectionBGColor, selectionBGColor);
+      break;
+    }
+    case nsISelectionController::SELECTION_ON: {
+      mSelectionBGColor = selectionBGColor;
+      break;
+    }
+    default: {
+      mSelectionBGColor = LookAndFeel::GetColor(
+          LookAndFeel::ColorID::TextSelectBackgroundDisabled);
+      mSelectionBGColor =
+          EnsureDifferentColors(mSelectionBGColor, selectionBGColor);
+      break;
+    }
   }
 
   mSelectionTextColor =
@@ -4571,10 +4580,10 @@ nsIFrame* NS_NewContinuingTextFrame(PresShell* aPresShell,
 
 NS_IMPL_FRAMEARENA_HELPERS(nsContinuingTextFrame)
 
-nsTextFrame::~nsTextFrame() {}
+nsTextFrame::~nsTextFrame() = default;
 
 Maybe<nsIFrame::Cursor> nsTextFrame::GetCursor(const nsPoint& aPoint) {
-  StyleCursorKind kind = StyleUI()->mCursor;
+  StyleCursorKind kind = StyleUI()->mCursor.keyword;
   if (kind == StyleCursorKind::Auto) {
     if (!IsSelectable(nullptr)) {
       kind = StyleCursorKind::Default;
@@ -4628,7 +4637,7 @@ void nsTextFrame::InvalidateFrameWithRect(const nsRect& aRect,
                                    aRebuildDisplayItems);
 }
 
-gfxTextRun* nsTextFrame::GetUninflatedTextRun() {
+gfxTextRun* nsTextFrame::GetUninflatedTextRun() const {
   return GetProperty(UninflatedTextRunProperty());
 }
 
@@ -4867,45 +4876,16 @@ void nsTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   aLists.Content()->AppendNewToTop<nsDisplayText>(aBuilder, this, isSelected);
 }
 
-static nsIFrame* GetGeneratedContentOwner(nsIFrame* aFrame, bool* aIsBefore) {
-  *aIsBefore = false;
-  while (aFrame && (aFrame->GetStateBits() & NS_FRAME_GENERATED_CONTENT)) {
-    if (aFrame->Style()->GetPseudoType() == PseudoStyleType::before) {
-      *aIsBefore = true;
-    }
-    aFrame = aFrame->GetParent();
-  }
-  return aFrame;
-}
-
 UniquePtr<SelectionDetails> nsTextFrame::GetSelectionDetails() {
   const nsFrameSelection* frameSelection = GetConstFrameSelection();
-  if (frameSelection->GetTableCellSelection()) {
+  if (frameSelection->IsInTableSelectionMode()) {
     return nullptr;
   }
-  if (!(GetStateBits() & NS_FRAME_GENERATED_CONTENT)) {
-    UniquePtr<SelectionDetails> details = frameSelection->LookUpSelection(
-        mContent, GetContentOffset(), GetContentLength(), false);
-    for (SelectionDetails* sd = details.get(); sd; sd = sd->mNext.get()) {
-      sd->mStart += mContentOffset;
-      sd->mEnd += mContentOffset;
-    }
-    return details;
-  }
-
-  // Check if the beginning or end of the element is selected, depending on
-  // whether we're :before content or :after content.
-  bool isBefore;
-  nsIFrame* owner = GetGeneratedContentOwner(this, &isBefore);
-  if (!owner || !owner->GetContent()) return nullptr;
-
   UniquePtr<SelectionDetails> details = frameSelection->LookUpSelection(
-      owner->GetContent(), isBefore ? 0 : owner->GetContent()->GetChildCount(),
-      0, false);
+      mContent, GetContentOffset(), GetContentLength(), false);
   for (SelectionDetails* sd = details.get(); sd; sd = sd->mNext.get()) {
-    // The entire text is selected!
-    sd->mStart = GetContentOffset();
-    sd->mEnd = GetContentEnd();
+    sd->mStart += mContentOffset;
+    sd->mEnd += mContentOffset;
   }
   return details;
 }
@@ -5284,9 +5264,8 @@ nsRect nsTextFrame::UpdateTextEmphasis(WritingMode aWM,
 // https://drafts.csswg.org/css-text-decor-4/#text-decoration-width-property
 // Returns the thickness in device pixels.
 static gfxFloat ComputeDecorationLineThickness(
-    const StyleTextDecorationLength& aThickness,
-    const gfxFloat aAutoValue, const gfxFont::Metrics& aFontMetrics,
-    const gfxFloat aAppUnitsPerDevPixel) {
+    const StyleTextDecorationLength& aThickness, const gfxFloat aAutoValue,
+    const gfxFont::Metrics& aFontMetrics, const gfxFloat aAppUnitsPerDevPixel) {
   if (aThickness.IsAuto()) {
     return aAutoValue;
   }
@@ -5371,9 +5350,10 @@ static gfxFloat ComputeDecorationLineOffset(
     // to a minimum of 1/16 em (equivalent to 1px at font-size 16px) to mitigate
     // skip-ink issues with fonts that leave the underlineOffset field as zero.
     MOZ_ASSERT(aPosition.IsAuto());
-    return aOffset.IsAuto()
-            ? std::min(aFontMetrics.underlineOffset, -aFontMetrics.emHeight / 16.0)
-            : -aOffset.AsLengthPercentage().Resolve(em) / aAppUnitsPerDevPixel;
+    return aOffset.IsAuto() ? std::min(aFontMetrics.underlineOffset,
+                                       -aFontMetrics.emHeight / 16.0)
+                            : -aOffset.AsLengthPercentage().Resolve(em) /
+                                  aAppUnitsPerDevPixel;
   }
 
   if (aLineType == StyleTextDecorationLine::OVERLINE) {
@@ -6118,7 +6098,7 @@ void nsTextFrame::PaintOneShadow(const PaintShadowParams& aParams,
   if (!shadowContext) return;
 
   aParams.context->Save();
-  aParams.context->SetColor(Color::FromABGR(shadowColor));
+  aParams.context->SetColor(sRGBColor::FromABGR(shadowColor));
 
   // Draw the text onto our alpha-only surface to capture the alpha values.
   // Remember that the box blur context has a device offset on it, so we don't
@@ -6413,7 +6393,7 @@ void nsTextFrame::PaintTextSelectionDecorations(
 bool nsTextFrame::PaintTextWithSelection(
     const PaintTextSelectionParams& aParams,
     const nsDisplayText::ClipEdges& aClipEdges) {
-  NS_ASSERTION(GetContent()->IsSelectionDescendant(), "wrong paint path");
+  NS_ASSERTION(GetContent()->IsMaybeSelected(), "wrong paint path");
 
   UniquePtr<SelectionDetails> details = GetSelectionDetails();
   if (!details) {
@@ -6472,7 +6452,7 @@ void nsTextFrame::DrawEmphasisMarks(gfxContext* aContext, WritingMode aWM,
       aDecorationOverrideColor
           ? *aDecorationOverrideColor
           : nsLayoutUtils::GetColor(this, &nsStyleText::mTextEmphasisColor);
-  aContext->SetColor(Color::FromABGR(color));
+  aContext->SetColor(sRGBColor::FromABGR(color));
   gfx::Point pt;
   if (!isTextCombined) {
     pt = aTextBaselinePt;
@@ -6794,7 +6774,7 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
                                 ? NS_RGBA(0, 0, 0, 255)
                                 : textPaintStyle.GetTextColor();
   if (aOpacity != 1.0f) {
-    gfx::Color gfxColor = gfx::Color::FromABGR(foregroundColor);
+    gfx::sRGBColor gfxColor = gfx::sRGBColor::FromABGR(foregroundColor);
     gfxColor.a *= aOpacity;
     foregroundColor = gfxColor.ToABGR();
   }
@@ -6803,7 +6783,7 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
                                 ? NS_RGBA(0, 0, 0, 255)
                                 : textPaintStyle.GetWebkitTextStrokeColor();
   if (aOpacity != 1.0f) {
-    gfx::Color gfxColor = gfx::Color::FromABGR(textStrokeColor);
+    gfx::sRGBColor gfxColor = gfx::sRGBColor::FromABGR(textStrokeColor);
     gfxColor.a *= aOpacity;
     textStrokeColor = gfxColor.ToABGR();
   }
@@ -6858,7 +6838,7 @@ static void DrawTextRun(const gfxTextRun* aTextRun,
     auto* textDrawer = aParams.context->GetTextDrawer();
     if (NS_GET_A(aParams.textColor) != 0 || textDrawer ||
         aParams.textStrokeWidth == 0.0f) {
-      aParams.context->SetColor(Color::FromABGR(aParams.textColor));
+      aParams.context->SetColor(sRGBColor::FromABGR(aParams.textColor));
     } else {
       params.drawMode = DrawMode::GLYPH_STROKE;
     }
@@ -7406,7 +7386,7 @@ bool nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
 }
 
 bool nsTextFrame::IsFrameSelected() const {
-  NS_ASSERTION(!GetContent() || GetContent()->IsSelectionDescendant(),
+  NS_ASSERTION(!GetContent() || GetContent()->IsMaybeSelected(),
                "use the public IsSelected() instead");
   return GetContent()->IsSelected(GetContentOffset(), GetContentEnd());
 }
@@ -7713,22 +7693,22 @@ class MOZ_STACK_CLASS ClusterIterator {
                   bool aTrimSpaces = true);
 
   bool NextCluster();
-  bool IsWhitespace();
-  bool IsPunctuation();
-  bool HaveWordBreakBefore() { return mHaveWordBreak; }
+  bool IsWhitespace() const;
+  bool IsPunctuation() const;
+  bool HaveWordBreakBefore() const { return mHaveWordBreak; }
 
   // Get the charIndex that corresponds to the "before" side of the current
   // character, according to the direction of iteration: so for a forward
   // iterator, this is simply mCharIndex, while for a reverse iterator it will
   // be mCharIndex + <number of code units in the character>.
-  int32_t GetBeforeOffset() {
+  int32_t GetBeforeOffset() const {
     MOZ_ASSERT(mCharIndex >= 0);
     return mDirection < 0 ? GetAfterInternal() : mCharIndex;
   }
   // Get the charIndex that corresponds to the "before" side of the current
   // character, according to the direction of iteration: the opposite side
   // to what GetBeforeOffset returns.
-  int32_t GetAfterOffset() {
+  int32_t GetAfterOffset() const {
     MOZ_ASSERT(mCharIndex >= 0);
     return mDirection > 0 ? GetAfterInternal() : mCharIndex;
   }
@@ -7736,7 +7716,7 @@ class MOZ_STACK_CLASS ClusterIterator {
  private:
   // Helper for Get{After,Before}Offset; returns the charIndex after the
   // current position in the text, accounting for surrogate pairs.
-  int32_t GetAfterInternal();
+  int32_t GetAfterInternal() const;
 
   gfxSkipCharsIterator mIterator;
   // Usually, mFrag is pointer to `dom::CharacterData::mText`.  However, if
@@ -7858,12 +7838,12 @@ nsIFrame::FrameSearchResult nsTextFrame::PeekOffsetCharacter(
   return CONTINUE;
 }
 
-bool ClusterIterator::IsWhitespace() {
+bool ClusterIterator::IsWhitespace() const {
   NS_ASSERTION(mCharIndex >= 0, "No cluster selected");
   return IsSelectionSpace(mFrag, mCharIndex);
 }
 
-bool ClusterIterator::IsPunctuation() {
+bool ClusterIterator::IsPunctuation() const {
   NS_ASSERTION(mCharIndex >= 0, "No cluster selected");
   // The pref is cached on first call; changes will require a browser restart.
   static bool sStopAtUnderscore =
@@ -7896,7 +7876,7 @@ bool ClusterIterator::IsPunctuation() {
   }
 }
 
-int32_t ClusterIterator::GetAfterInternal() {
+int32_t ClusterIterator::GetAfterInternal() const {
   if (mFrag->IsHighSurrogateFollowedByLowSurrogateAt(mCharIndex)) {
     return mCharIndex + 2;
   }
@@ -7992,10 +7972,9 @@ ClusterIterator::ClusterIterator(nsTextFrame* aTextFrame, int32_t aPosition,
 
   int32_t textOffset = aTextFrame->GetContentOffset();
   int32_t textLen = aTextFrame->GetContentLength();
-  if (!mWordBreaks.AppendElements(textLen + 1)) {
-    mDirection = 0;  // signal failure
-    return;
-  }
+  // XXX(Bug 1631371) Check if this should use a fallible operation as it
+  // pretended earlier.
+  mWordBreaks.AppendElements(textLen + 1);
   memset(mWordBreaks.Elements(), false, (textLen + 1) * sizeof(bool));
   int32_t textStart;
   if (aDirection > 0) {
@@ -8016,11 +7995,15 @@ ClusterIterator::ClusterIterator(nsTextFrame* aTextFrame, int32_t aPosition,
     aContext.Insert(str, 0);
   }
   mozilla::intl::WordBreaker* wordBreaker = nsContentUtils::WordBreaker();
-  for (int32_t i = 0; i <= textLen; ++i) {
-    int32_t indexInText = i + textStart;
-    mWordBreaks[i] |= wordBreaker->BreakInBetween(
-        aContext.get(), indexInText, aContext.get() + indexInText,
-        aContext.Length() - indexInText);
+  int32_t nextWord = textStart > 0 ? textStart - 1 : textStart;
+  while (true) {
+    nextWord =
+        wordBreaker->NextWord(aContext.get(), aContext.Length(), nextWord);
+    if (NS_WORDBREAKER_NEED_MORE_TEXT == nextWord ||
+        nextWord > textStart + textLen) {
+      break;
+    }
+    mWordBreaks[nextWord - textStart] = true;
   }
 }
 
@@ -8814,10 +8797,9 @@ void nsTextFrame::SetLength(int32_t aLength, nsLineLayout* aLineLayout,
       // We also skip this optimization if we were called during bidi
       // resolution, so as not to create a new frame which doesn't appear in
       // the bidi resolver's list of frames
-      nsPresContext* presContext = PresContext();
       nsIFrame* newFrame =
-          presContext->PresShell()->FrameConstructor()->CreateContinuingFrame(
-              presContext, this, GetParent());
+          PresShell()->FrameConstructor()->CreateContinuingFrame(this,
+                                                                 GetParent());
       nsTextFrame* next = static_cast<nsTextFrame*>(newFrame);
       nsFrameList temp(next, next);
       GetParent()->InsertFrames(kNoReflowPrincipalList, this,
@@ -9544,9 +9526,9 @@ void nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
 
   // Compute space and letter counts for justification, if required
   if (!textStyle->WhiteSpaceIsSignificant() &&
-      (lineContainer->StyleText()->mTextAlign == NS_STYLE_TEXT_ALIGN_JUSTIFY ||
+      (lineContainer->StyleText()->mTextAlign == StyleTextAlign::Justify ||
        lineContainer->StyleText()->mTextAlignLast ==
-           NS_STYLE_TEXT_ALIGN_JUSTIFY ||
+           StyleTextAlignLast::Justify ||
        shouldSuppressLineBreak) &&
       !nsSVGUtils::IsInSVGTextSubtree(lineContainer)) {
     AddStateBits(TEXT_JUSTIFICATION_ENABLED);
@@ -10019,7 +10001,7 @@ nsresult nsTextFrame::GetFrameName(nsAString& aResult) const {
   return NS_OK;
 }
 
-void nsTextFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const {
+void nsTextFrame::List(FILE* out, const char* aPrefix, ListFlags aFlags) const {
   nsCString str;
   ListGeneric(str, aPrefix, aFlags);
 
@@ -10165,7 +10147,7 @@ uint32_t nsTextFrame::CountGraphemeClusters() const {
   return unicode::CountGraphemeClusters(content.Data(), content.Length());
 }
 
-bool nsTextFrame::HasNonSuppressedText() {
+bool nsTextFrame::HasNonSuppressedText() const {
   if (HasAnyStateBits(TEXT_ISNOT_ONLY_WHITESPACE |
                       // If we haven't reflowed yet, or are currently doing so,
                       // just return true because we can't be sure.

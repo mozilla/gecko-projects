@@ -112,6 +112,10 @@ class DataChannelConnection final : public net::NeckoTargetHolder
                                     public sigslot::has_slots<>
 #endif
 {
+  friend class DataChannel;
+  friend class DataChannelOnMessageAvailable;
+  friend class DataChannelConnectRunnable;
+
   virtual ~DataChannelConnection();
 
  public:
@@ -173,8 +177,7 @@ class DataChannelConnection final : public net::NeckoTargetHolder
     PARTIAL_RELIABLE_TIMED = 2
   } Type;
 
-  MOZ_MUST_USE
-  already_AddRefed<DataChannel> Open(
+  [[nodiscard]] already_AddRefed<DataChannel> Open(
       const nsACString& label, const nsACString& protocol, Type type,
       bool inOrder, uint32_t prValue, DataChannelListener* aListener,
       nsISupports* aContext, bool aExternalNegotiated, uint16_t aStream);
@@ -206,7 +209,6 @@ class DataChannelConnection final : public net::NeckoTargetHolder
   // Find out state
   enum { CONNECTING = 0U, OPEN = 1U, CLOSING = 2U, CLOSED = 3U };
 
-  friend class DataChannel;
   Mutex mLock;
 
   void ReadBlob(already_AddRefed<DataChannelConnection> aThis, uint16_t aStream,
@@ -215,14 +217,11 @@ class DataChannelConnection final : public net::NeckoTargetHolder
   bool SendDeferredMessages();
 
  protected:
-  friend class DataChannelOnMessageAvailable;
   // Avoid cycles with PeerConnectionImpl
   // Use from main thread only as WeakPtr is not threadsafe
   WeakPtr<DataConnectionListener> mListener;
 
  private:
-  friend class DataChannelConnectRunnable;
-
   DataChannelConnection(DataConnectionListener* aListener,
                         nsIEventTarget* aTarget,
                         MediaTransportHandler* aHandler);
@@ -243,7 +242,8 @@ class DataChannelConnection final : public net::NeckoTargetHolder
 #ifdef SCTP_DTLS_SUPPORTED
   static void DTLSConnectThread(void* data);
   void SendPacket(std::unique_ptr<MediaPacket>&& packet);
-  void SctpDtlsInput(const std::string& aTransportId, MediaPacket& packet);
+  void SctpDtlsInput(const std::string& aTransportId,
+                     const MediaPacket& packet);
   static int SctpDtlsOutput(void* addr, void* buffer, size_t length,
                             uint8_t tos, uint8_t set_df);
 #endif
@@ -323,7 +323,7 @@ class DataChannelConnection final : public net::NeckoTargetHolder
     typedef AutoTArray<RefPtr<DataChannel>, 16> ChannelArray;
     ChannelArray GetAll() const {
       MutexAutoLock lock(mMutex);
-      return mChannels;
+      return mChannels.Clone();
     }
     RefPtr<DataChannel> GetNextChannel(uint16_t aCurrentId) const;
 
@@ -400,6 +400,9 @@ class DataChannelConnection final : public net::NeckoTargetHolder
   } while (0)
 
 class DataChannel {
+  friend class DataChannelOnMessageAvailable;
+  friend class DataChannelConnection;
+
  public:
   enum { CONNECTING = 0U, OPEN = 1U, CLOSING = 2U, CLOSED = 3U };
 
@@ -511,9 +514,6 @@ class DataChannel {
   nsCOMPtr<nsISupports> mContext;
 
  private:
-  friend class DataChannelOnMessageAvailable;
-  friend class DataChannelConnection;
-
   nsresult AddDataToBinaryMsg(const char* data, uint32_t size);
   bool EnsureValidStream(ErrorResult& aRv);
 

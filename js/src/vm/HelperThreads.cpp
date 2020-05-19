@@ -429,13 +429,6 @@ bool js::HasOffThreadIonCompile(Realm* realm) {
 }
 #endif
 
-struct MOZ_RAII AutoSetContextRuntime {
-  explicit AutoSetContextRuntime(JSRuntime* rt) {
-    TlsContext.get()->setRuntime(rt);
-  }
-  ~AutoSetContextRuntime() { TlsContext.get()->setRuntime(nullptr); }
-};
-
 struct MOZ_RAII AutoSetContextParse {
   explicit AutoSetContextParse(ParseTask* task) {
     TlsContext.get()->setParseTask(task);
@@ -601,9 +594,10 @@ void ScriptParseTask<Unit>::parse(JSContext* cx) {
   // initialized SSO.
   sourceObjects.infallibleAppend(compilationInfo.sourceObject);
 
-  frontend::GlobalSharedContext globalsc(
-      cx, scopeKind, compilationInfo, compilationInfo.directives,
-      compilationInfo.options.extraWarningsOption);
+  uint32_t len = data.length();
+  SourceExtent extent = SourceExtent::makeGlobalExtent(len, options);
+  frontend::GlobalSharedContext globalsc(cx, scopeKind, compilationInfo,
+                                         compilationInfo.directives, extent);
   JSScript* script =
       frontend::CompileGlobalScript(compilationInfo, globalsc, data);
 
@@ -1709,145 +1703,6 @@ bool GlobalHelperThreadState::canStartGCParallelTask(
          checkTaskThreadLimit<GCParallelTask*>(maxGCParallelThreads());
 }
 
-js::GCParallelTask::~GCParallelTask() {
-  // Only most-derived classes' destructors may do the join: base class
-  // destructors run after those for derived classes' members, so a join in a
-  // base class can't ensure that the task is done using the members. All we
-  // can do now is check that someone has previously stopped the task.
-  assertIdle();
-}
-
-void js::GCParallelTask::startWithLockHeld(AutoLockHelperThreadState& lock) {
-  MOZ_ASSERT(CanUseExtraThreads());
-  MOZ_ASSERT(HelperThreadState().threads);
-  assertIdle();
-
-  HelperThreadState().gcParallelWorklist(lock).insertBack(this);
-  setDispatched(lock);
-
-  HelperThreadState().notifyOne(GlobalHelperThreadState::PRODUCER, lock);
-}
-
-void js::GCParallelTask::start() {
-  AutoLockHelperThreadState lock;
-  startWithLockHeld(lock);
-}
-
-void js::GCParallelTask::startOrRunIfIdle(AutoLockHelperThreadState& lock) {
-  if (wasStarted(lock)) {
-    return;
-  }
-
-  // Join the previous invocation of the task. This will return immediately
-  // if the thread has never been started.
-  joinWithLockHeld(lock);
-
-  if (!CanUseExtraThreads()) {
-    AutoUnlockHelperThreadState unlock(lock);
-    runFromMainThread();
-    return;
-  }
-
-  startWithLockHeld(lock);
-}
-
-void js::GCParallelTask::join() {
-  AutoLockHelperThreadState lock;
-  joinWithLockHeld(lock);
-}
-
-void js::GCParallelTask::joinWithLockHeld(AutoLockHelperThreadState& lock) {
-  // Task has not been started; there's nothing to do.
-  if (isIdle(lock)) {
-    return;
-  }
-
-  // If the task was dispatched but has not yet started then cancel the task and
-  // run it from the main thread. This stops us from blocking here when the
-  // helper threads are busy with other tasks.
-  if (isDispatched(lock)) {
-    cancelDispatchedTask(lock);
-    AutoUnlockHelperThreadState unlock(lock);
-    runFromMainThread();
-    return;
-  }
-
-  joinRunningOrFinishedTask(lock);
-}
-
-void js::GCParallelTask::joinRunningOrFinishedTask(
-    AutoLockHelperThreadState& lock) {
-  MOZ_ASSERT(isRunning(lock) || isFinishing(lock) || isFinished(lock));
-
-  // Wait for the task to run to completion.
-  while (!isFinished(lock)) {
-    HelperThreadState().wait(lock, GlobalHelperThreadState::CONSUMER);
-  }
-
-  setIdle(lock);
-  cancel_ = false;
-}
-
-void js::GCParallelTask::cancelDispatchedTask(AutoLockHelperThreadState& lock) {
-  MOZ_ASSERT(isDispatched(lock));
-  MOZ_ASSERT(isInList());
-  remove();
-  setIdle(lock);
-}
-
-static inline TimeDuration TimeSince(TimeStamp prev) {
-  TimeStamp now = ReallyNow();
-  // Sadly this happens sometimes.
-  MOZ_ASSERT(now >= prev);
-  if (now < prev) {
-    now = prev;
-  }
-  return now - prev;
-}
-
-void js::GCParallelTask::runFromMainThread() {
-  assertIdle();
-  MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(gc->rt));
-  runTask();
-}
-
-void js::GCParallelTask::runFromHelperThread(AutoLockHelperThreadState& lock) {
-  setRunning(lock);
-
-  {
-    AutoUnlockHelperThreadState parallelSection(lock);
-    AutoSetHelperThreadContext usesContext;
-    AutoSetContextRuntime ascr(gc->rt);
-    gc::AutoSetThreadIsPerformingGC performingGC;
-    runTask();
-  }
-
-  setFinished(lock);
-  HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, lock);
-}
-
-void GCParallelTask::runTask() {
-  // Run the task from either the main thread or a helper thread.
-
-  // The hazard analysis can't tell what the call to func_ will do but it's not
-  // allowed to GC.
-  JS::AutoSuppressGCAnalysis nogc;
-
-  TimeStamp timeStart = ReallyNow();
-  func_(this);
-  duration_ = TimeSince(timeStart);
-}
-
-bool js::GCParallelTask::isIdle() const {
-  AutoLockHelperThreadState lock;
-  return isIdle(lock);
-}
-
-bool js::GCParallelTask::wasStarted() const {
-  AutoLockHelperThreadState lock;
-  return wasStarted(lock);
-}
-
 void HelperThread::handleGCParallelWorkload(AutoLockHelperThreadState& lock) {
   MOZ_ASSERT(HelperThreadState().canStartGCParallelTask(lock));
   MOZ_ASSERT(idle());
@@ -1962,13 +1817,19 @@ UniquePtr<ParseTask> GlobalHelperThreadState::finishParseTaskCommon(
           continue;
         }
         JSObject* obj = &gcThing.as<JSObject>();
+
         if (!obj->is<JSFunction>()) {
           continue;
         }
         JSFunction* fun = &obj->as<JSFunction>();
-        if (!fun->hasScript()) {
+
+        // Ignore asm.js functions
+        if (!fun->isInterpreted()) {
           continue;
         }
+
+        MOZ_ASSERT(fun->hasBytecode(),
+                   "No lazy scripts exist when collecting coverage");
         if (!workList.append(fun->nonLazyScript())) {
           return nullptr;
         }
@@ -2005,7 +1866,9 @@ JSScript* GlobalHelperThreadState::finishSingleParseTask(
 
   // The Debugger only needs to be told about the topmost script that was
   // compiled.
-  DebugAPI::onNewScript(cx, script);
+  if (!parseTask->options.hideScriptFromDebugger) {
+    DebugAPI::onNewScript(cx, script);
+  }
 
   return script;
 }
@@ -2040,14 +1903,16 @@ bool GlobalHelperThreadState::finishMultiParseTask(
     return false;
   }
 
-  // The Debugger only needs to be told about the topmost script that was
+  // The Debugger only needs to be told about the topmost scripts that were
   // compiled.
-  JS::RootedScript rooted(cx);
-  for (auto& script : scripts) {
-    MOZ_ASSERT(script->isGlobalCode());
+  if (!parseTask->options.hideScriptFromDebugger) {
+    JS::RootedScript rooted(cx);
+    for (auto& script : scripts) {
+      MOZ_ASSERT(script->isGlobalCode());
 
-    rooted = script;
-    DebugAPI::onNewScript(cx, rooted);
+      rooted = script;
+      DebugAPI::onNewScript(cx, rooted);
+    }
   }
 
   return true;
@@ -2146,7 +2011,7 @@ void HelperThread::destroy() {
 }
 
 void HelperThread::ensureRegisteredWithProfiler() {
-  if (profilingStack || mozilla::recordreplay::IsRecordingOrReplaying()) {
+  if (profilingStack) {
     return;
   }
 
@@ -2179,10 +2044,6 @@ void HelperThread::unregisterWithProfilerIfNeeded() {
 void HelperThread::ThreadMain(void* arg) {
   ThisThread::SetName("JS Helper");
 
-  // Helper threads are allowed to run differently during recording and
-  // replay, as compiled scripts and GCs are allowed to vary. Because of
-  // this, no recorded events at all should occur while on helper threads.
-  mozilla::recordreplay::AutoDisallowThreadEvents d;
   auto helper = static_cast<HelperThread*>(arg);
 
   helper->ensureRegisteredWithProfiler();

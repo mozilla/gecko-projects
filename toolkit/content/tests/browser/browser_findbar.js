@@ -39,16 +39,15 @@ add_task(async function test_hotkey_event_propagation() {
   }
 
   // Stop propagation for all keyboard events.
-  let frameScript = () => {
-    const stopPropagation = e => e.stopImmediatePropagation();
+  await SpecialPowers.spawn(browser, [], () => {
+    const stopPropagation = e => {
+      e.stopImmediatePropagation();
+    };
     let window = content.document.defaultView;
-    window.removeEventListener("keydown", stopPropagation);
-    window.removeEventListener("keypress", stopPropagation);
-    window.removeEventListener("keyup", stopPropagation);
-  };
-
-  let mm = browser.messageManager;
-  mm.loadFrameScript("data:,(" + frameScript.toString() + ")();", false);
+    window.addEventListener("keydown", stopPropagation);
+    window.addEventListener("keypress", stopPropagation);
+    window.addEventListener("keyup", stopPropagation);
+  });
 
   // Checking if findbar still appears when any hotkey is pressed.
   for (let key of HOTKEYS) {
@@ -314,7 +313,7 @@ add_task(async function test_hotkey_insubframe() {
 
   // Focus the editable area within the frame.
   let browser = gBrowser.selectedBrowser;
-  let frameBC = browser.browsingContext.getChildren()[0];
+  let frameBC = browser.browsingContext.children[0];
   await SpecialPowers.spawn(frameBC, [], async () => {
     content.document.body.focus();
     content.document.defaultView.focus();

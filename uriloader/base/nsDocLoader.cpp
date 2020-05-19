@@ -25,7 +25,6 @@
 #include "nsCOMPtr.h"
 #include "nscore.h"
 #include "nsIWeakReferenceUtils.h"
-#include "nsAutoPtr.h"
 #include "nsQueryObject.h"
 
 #include "nsPIDOMWindow.h"
@@ -38,7 +37,6 @@
 #include "mozilla/dom/DocGroup.h"
 #include "nsPresContext.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
-#include "nsILoadURIDelegate.h"
 #include "nsIBrowserDOMWindow.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/ThrottledEventQueue.h"
@@ -181,7 +179,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocLoader)
   NS_INTERFACE_MAP_ENTRY_CONCRETE(nsDocLoader)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(nsDocLoader, mChildrenInOnload)
+NS_IMPL_CYCLE_COLLECTION_WEAK(nsDocLoader, mChildrenInOnload)
 
 /*
  * Implementation of nsIInterfaceRequestor methods...
@@ -808,7 +806,7 @@ void nsDocLoader::NotifyDoneWithOnload(nsDocLoader* aParent) {
   if (bc->IsContentSubframe() && !bc->GetParent()->IsInProcess()) {
     if (BrowserChild* browserChild = BrowserChild::GetFrom(docShell)) {
       mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
-          /*aIsTrusted*/ true, /*aFireLoadAtEmbeddingElement*/ false);
+          dom::EmbedderElementEventType::NoEvent);
     }
   }
 }
@@ -1071,8 +1069,8 @@ int64_t nsDocLoader::GetMaxTotalProgress() {
 // on this information.
 ////////////////////////////////////////////////////////////////////////////////////
 
-NS_IMETHODIMP nsDocLoader::OnProgress(nsIRequest* aRequest, nsISupports* ctxt,
-                                      int64_t aProgress, int64_t aProgressMax) {
+NS_IMETHODIMP nsDocLoader::OnProgress(nsIRequest* aRequest, int64_t aProgress,
+                                      int64_t aProgressMax) {
   int64_t progressDelta = 0;
 
   //
@@ -1167,8 +1165,7 @@ NS_IMETHODIMP nsDocLoader::OnProgress(nsIRequest* aRequest, nsISupports* ctxt,
   return NS_OK;
 }
 
-NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsISupports* ctxt,
-                                    nsresult aStatus,
+NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsresult aStatus,
                                     const char16_t* aStatusArg) {
   //
   // Fire progress notifications out to any registered nsIWebProgressListeners
@@ -1207,7 +1204,7 @@ NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsISupports* ctxt,
     // already done.
     if (info) {
       if (!info->mLastStatus) {
-        info->mLastStatus = new nsStatusInfo(aRequest);
+        info->mLastStatus = MakeUnique<nsStatusInfo>(aRequest);
       } else {
         // We're going to move it to the front of the list, so remove
         // it from wherever it is now.
@@ -1216,7 +1213,7 @@ NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsISupports* ctxt,
       info->mLastStatus->mStatusMessage = msg;
       info->mLastStatus->mStatusCode = aStatus;
       // Put the info at the front of the list
-      mStatusInfoList.insertFront(info->mLastStatus);
+      mStatusInfoList.insertFront(info->mLastStatus.get());
     }
     FireOnStatusChange(this, aRequest, aStatus, msg.get());
   }
@@ -1356,8 +1353,8 @@ void nsDocLoader::FireOnLocationChange(nsIWebProgress* aWebProgress,
   NOTIFY_LISTENERS(
       nsIWebProgress::NOTIFY_LOCATION,
       MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
-              ("DocLoader [%p] calling %p->OnLocationChange", this,
-               listener.get()));
+              ("DocLoader [%p] calling %p->OnLocationChange to %s %x", this,
+               listener.get(), aUri->GetSpecOrDefault().get(), aFlags));
       listener->OnLocationChange(aWebProgress, aRequest, aUri, aFlags););
 
   // Pass the notification up to the parent...
@@ -1444,43 +1441,6 @@ int64_t nsDocLoader::CalculateMaxProgress() {
 NS_IMETHODIMP nsDocLoader::AsyncOnChannelRedirect(
     nsIChannel* aOldChannel, nsIChannel* aNewChannel, uint32_t aFlags,
     nsIAsyncVerifyRedirectCallback* cb) {
-  if (aFlags & (nsIChannelEventSink::REDIRECT_TEMPORARY |
-                nsIChannelEventSink::REDIRECT_PERMANENT)) {
-    nsCOMPtr<nsIDocShell> docShell =
-        do_QueryInterface(static_cast<nsIRequestObserver*>(this));
-
-    nsCOMPtr<nsILoadURIDelegate> delegate;
-    if (docShell) {
-      docShell->GetLoadURIDelegate(getter_AddRefs(delegate));
-    }
-
-    nsCOMPtr<nsIURI> newURI;
-    nsCOMPtr<nsILoadInfo> info = nullptr;
-    if (delegate) {
-      // No point in getting the URI if we don't have a LoadURIDelegate.
-      aNewChannel->GetURI(getter_AddRefs(newURI));
-      info = aNewChannel->LoadInfo();
-    }
-
-    RefPtr<Document> loadingDoc;
-    if (info) {
-      info->GetLoadingDocument(getter_AddRefs(loadingDoc));
-    }
-
-    if (newURI && info && !loadingDoc) {
-      const int where = nsIBrowserDOMWindow::OPEN_CURRENTWINDOW;
-      bool loadURIHandled = false;
-      nsresult rv = delegate->LoadURI(
-          newURI, where, nsIWebNavigation::LOAD_FLAGS_IS_REDIRECT,
-          /* triggering principal */ nullptr, &loadURIHandled);
-      if (NS_SUCCEEDED(rv) && loadURIHandled) {
-        aOldChannel->Cancel(NS_ERROR_ABORT);
-        cb->OnRedirectVerifyCallback(NS_ERROR_ABORT);
-        return NS_OK;
-      }
-    }
-  }
-
   if (aOldChannel) {
     nsLoadFlags loadFlags = 0;
     int32_t stateFlags = nsIWebProgressListener::STATE_REDIRECTING |

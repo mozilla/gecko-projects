@@ -9,6 +9,7 @@ import copy
 import logging
 import re
 import shlex
+import six
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -97,9 +98,9 @@ UNITTEST_ALIASES = {
     'web-platform-test': alias_prefix('web-platform-tests'),
     'web-platform-tests': alias_prefix('web-platform-tests'),
     'web-platform-tests-e10s': alias_prefix('web-platform-tests-e10s'),
-    'web-platform-tests-crashtests': alias_prefix('web-platform-tests-crashtests'),
-    'web-platform-tests-reftests': alias_prefix('web-platform-tests-reftests'),
-    'web-platform-tests-reftests-e10s': alias_prefix('web-platform-tests-reftests-e10s'),
+    'web-platform-tests-crashtests': alias_prefix('web-platform-tests-crashtest'),
+    'web-platform-tests-reftests': alias_prefix('web-platform-tests-reftest'),
+    'web-platform-tests-reftests-e10s': alias_prefix('web-platform-tests-reftest-e10s'),
     'web-platform-tests-wdspec': alias_prefix('web-platform-tests-wdspec'),
     'web-platform-tests-wdspec-e10s': alias_prefix('web-platform-tests-wdspec-e10s'),
     'xpcshell': alias_prefix('xpcshell'),
@@ -218,7 +219,17 @@ def parse_message(message):
     # In order to run test jobs multiple times
     parser.add_argument('--rebuild', dest='trigger_tests', type=int, default=1)
     args, _ = parser.parse_known_args(parts)
-    return vars(args)
+
+    try_options = vars(args)
+    try_task_config = {
+        "use-artifact-builds": try_options.pop("artifact"),
+        "gecko-profile": try_options.pop("profile"),
+        "env": dict(arg.split("=") for arg in try_options.pop("env") or [])
+    }
+    return {
+        "try_options": try_options,
+        "try_task_config": try_task_config,
+    }
 
 
 class TryOptionSyntax(object):
@@ -237,8 +248,6 @@ class TryOptionSyntax(object):
         - interactive: true if --interactive
         - notifications: either None if no notifications or one of 'all' or 'failure'
         - talos_trigger_tests: the number of time talos tests should be triggered (--rebuild-talos)
-        - env: additional environment variables (ENV=value)
-        - profile: run talos in profile mode
         - tag: restrict tests to the specified tag
         - no_retry: do not retry failed jobs
 
@@ -263,11 +272,8 @@ class TryOptionSyntax(object):
         self.notifications = None
         self.talos_trigger_tests = 0
         self.raptor_trigger_tests = 0
-        self.env = []
-        self.profile = False
         self.tag = None
         self.no_retry = False
-        self.artifact = False
 
         options = parameters['try_options']
         if not options:
@@ -284,18 +290,15 @@ class TryOptionSyntax(object):
         self.notifications = options['notifications']
         self.talos_trigger_tests = options['talos_trigger_tests']
         self.raptor_trigger_tests = options['raptor_trigger_tests']
-        self.env = options['env']
-        self.profile = options['profile']
         self.tag = options['tag']
         self.no_retry = options['no_retry']
-        self.artifact = options['artifact']
         self.include_nightly = options['include_nightly']
 
         self.test_tiers = self.generate_test_tiers(full_task_graph)
 
     def generate_test_tiers(self, full_task_graph):
         retval = defaultdict(set)
-        for t in full_task_graph.tasks.itervalues():
+        for t in six.itervalues(full_task_graph.tasks):
             if t.attributes.get('kind') == 'test':
                 try:
                     tier = t.task['extra']['treeherder']['tier']
@@ -320,11 +323,11 @@ class TryOptionSyntax(object):
         if build_types_arg is None:
             build_types_arg = []
 
-        build_types = filter(None, [BUILD_TYPE_ALIASES.get(build_type) for
-                             build_type in build_types_arg])
+        build_types = [_f for _f in (BUILD_TYPE_ALIASES.get(build_type) for
+                       build_type in build_types_arg) if _f]
 
         all_types = set(t.attributes['build_type']
-                        for t in full_task_graph.tasks.itervalues()
+                        for t in six.itervalues(full_task_graph.tasks)
                         if 'build_type' in t.attributes)
         bad_types = set(build_types) - all_types
         if bad_types:
@@ -349,10 +352,10 @@ class TryOptionSyntax(object):
                             (build, ', '.join(RIDEALONG_BUILDS[build])))
 
         test_platforms = set(t.attributes['test_platform']
-                             for t in full_task_graph.tasks.itervalues()
+                             for t in six.itervalues(full_task_graph.tasks)
                              if 'test_platform' in t.attributes)
         build_platforms = set(t.attributes['build_platform']
-                              for t in full_task_graph.tasks.itervalues()
+                              for t in six.itervalues(full_task_graph.tasks)
                               if 'build_platform' in t.attributes)
         all_platforms = test_platforms | build_platforms
         bad_platforms = set(results) - all_platforms
@@ -378,7 +381,7 @@ class TryOptionSyntax(object):
             return []
 
         all_platforms = set(t.attributes['test_platform'].split('/')[0]
-                            for t in full_task_graph.tasks.itervalues()
+                            for t in six.itervalues(full_task_graph.tasks)
                             if 'test_platform' in t.attributes)
 
         tests = self.parse_test_opts(test_arg, all_platforms)
@@ -387,7 +390,7 @@ class TryOptionSyntax(object):
             return []
 
         all_tests = set(t.attributes[attr_name]
-                        for t in full_task_graph.tasks.itervalues()
+                        for t in six.itervalues(full_task_graph.tasks)
                         if attr_name in t.attributes)
 
         # Special case where tests is 'all' and must be expanded
@@ -544,7 +547,7 @@ class TryOptionSyntax(object):
 
     def find_all_attribute_suffixes(self, graph, prefix):
         rv = set()
-        for t in graph.tasks.itervalues():
+        for t in six.itervalues(graph.tasks):
             for a in t.attributes:
                 if a.startswith(prefix):
                     rv.add(a[len(prefix):])
@@ -557,18 +560,6 @@ class TryOptionSyntax(object):
             if attr('nightly') and not self.include_nightly:
                 return False
             return set(['try', 'all']) & set(attr('run_on_projects', []))
-
-        # Don't schedule code coverage when try option syntax is used
-        if 'ccov' in attr('build_platform', []):
-            return False
-
-        # Don't schedule tasks for windows10-aarch64 unless try fuzzy is used
-        if 'windows10-aarch64' in attr("test_platform", ""):
-            return False
-
-        # Don't schedule android-hw tests when try option syntax is used
-        if 'android-hw' in task.label:
-            return False
 
         # Don't schedule fission tests when try option syntax is used
         if attr('unittest_variant') == 'fission':
@@ -681,9 +672,6 @@ class TryOptionSyntax(object):
             "notifications: " + str(self.notifications),
             "talos_trigger_tests: " + str(self.talos_trigger_tests),
             "raptor_trigger_tests: " + str(self.raptor_trigger_tests),
-            "env: " + str(self.env),
-            "profile: " + str(self.profile),
             "tag: " + str(self.tag),
             "no_retry: " + str(self.no_retry),
-            "artifact: " + str(self.artifact),
         ])

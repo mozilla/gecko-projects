@@ -383,8 +383,7 @@ MediaEncoder::MediaEncoder(TaskQueue* aEncoderThread,
       mMIMEType(aMIMEType),
       mInitialized(false),
       mCompleted(false),
-      mError(false),
-      mShutdown(false) {
+      mError(false) {
   if (mAudioEncoder) {
     mAudioListener = MakeAndAddRef<AudioTrackListener>(
         aDriftCompensator, mAudioEncoder, mEncoderThread);
@@ -757,7 +756,7 @@ nsresult MediaEncoder::GetEncodedData(
   return rv;
 }
 
-RefPtr<GenericNonExclusivePromise> MediaEncoder::Shutdown() {
+RefPtr<GenericNonExclusivePromise::AllPromiseType> MediaEncoder::Shutdown() {
   MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
   if (mShutdownPromise) {
     return mShutdownPromise;
@@ -772,6 +771,16 @@ RefPtr<GenericNonExclusivePromise> MediaEncoder::Shutdown() {
   }
   mEncoderListener->Forget();
 
+  for (auto& l : mListeners.Clone()) {
+    // We dispatch here since this method is typically called from
+    // a DataAvailable() handler.
+    nsresult rv = mEncoderThread->Dispatch(
+        NewRunnableMethod("mozilla::MediaEncoderListener::Shutdown", l,
+                          &MediaEncoderListener::Shutdown));
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+    Unused << rv;
+  }
+
   AutoTArray<RefPtr<GenericNonExclusivePromise>, 2> shutdownPromises;
   if (mAudioListener) {
     shutdownPromises.AppendElement(mAudioListener->OnShutdown());
@@ -781,29 +790,10 @@ RefPtr<GenericNonExclusivePromise> MediaEncoder::Shutdown() {
   }
 
   return mShutdownPromise =
-             GenericNonExclusivePromise::All(mEncoderThread, shutdownPromises)
-                 ->Then(mEncoderThread, __func__,
-                        [self = RefPtr<MediaEncoder>(this), this](
-                            const GenericNonExclusivePromise::AllPromiseType::
-                                ResolveOrRejectValue& aValue) {
-                          MOZ_DIAGNOSTIC_ASSERT(aValue.IsResolve());
-                          LOG(LogLevel::Info, ("MediaEncoder has shut down."));
-                          mShutdown = true;
-                          auto listeners(mListeners);
-                          for (auto& l : listeners) {
-                            l->Shutdown();
-                          }
-                          return GenericNonExclusivePromise::CreateAndResolve(
-                              true, __func__);
-                        });
+             GenericNonExclusivePromise::All(mEncoderThread, shutdownPromises);
 }
 
-bool MediaEncoder::IsShutdown() {
-  MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
-  return mShutdown;
-}
-
-RefPtr<GenericNonExclusivePromise> MediaEncoder::Cancel() {
+RefPtr<GenericNonExclusivePromise::AllPromiseType> MediaEncoder::Cancel() {
   MOZ_ASSERT(NS_IsMainThread());
 
   Stop();
@@ -833,8 +823,7 @@ void MediaEncoder::SetError() {
   }
 
   mError = true;
-  auto listeners(mListeners);
-  for (auto& l : listeners) {
+  for (auto& l : mListeners.Clone()) {
     l->Error();
   }
 }
@@ -896,8 +885,7 @@ void MediaEncoder::NotifyInitialized() {
 
   mInitialized = true;
 
-  auto listeners(mListeners);
-  for (auto& l : listeners) {
+  for (auto& l : mListeners.Clone()) {
     l->Initialized();
   }
 }
@@ -909,8 +897,7 @@ void MediaEncoder::NotifyDataAvailable() {
     return;
   }
 
-  auto listeners(mListeners);
-  for (auto& l : listeners) {
+  for (auto& l : mListeners.Clone()) {
     l->DataAvailable();
   }
 }

@@ -16,6 +16,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PlacesSearchAutocompleteProvider:
     "resource://gre/modules/PlacesSearchAutocompleteProvider.jsm",
+  Services: "resource://gre/modules/Services.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
   UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.jsm",
@@ -69,13 +70,18 @@ class ProviderTopSites extends UrlbarProvider {
    * @returns {boolean} Whether this provider should be invoked for the search.
    */
   isActive(queryContext) {
-    // We don't want to show Top sites in private windows or if they are
-    // disabled in about:newtab, but the provider is not disabled in those cases
-    // because the user may still want to show them by pressing down.
+    // If top sites on new tab are disabled, the pref below will be false, and
+    // activity stream's top sites will be unavailable (an empty array), so we
+    // make this provider inactive.  For empty search strings, we instead show
+    // the most frecent URLs in the user's history from the UnifiedComplete
+    // provider.
     return (
-      UrlbarPrefs.get("update1") &&
       UrlbarPrefs.get("openViewOnFocus") &&
-      !queryContext.searchString
+      !queryContext.searchString &&
+      Services.prefs.getBoolPref(
+        "browser.newtabpage.activity-stream.feeds.topsites",
+        false
+      )
     );
   }
 
@@ -111,11 +117,12 @@ class ProviderTopSites extends UrlbarProvider {
     sites = sites.map(link => ({
       type: link.searchTopSite ? "search" : "url",
       url: link.url,
+      isPinned: link.isPinned,
       // The newtab page allows the user to set custom site titles, which
       // are stored in `label`, so prefer it.  Search top sites currently
       // don't have titles but `hostname` instead.
       title: link.label || link.title || link.hostname || "",
-      favicon: link.favicon || link.tippyTopIcon || null,
+      favicon: link.smallFavicon || link.favicon || null,
     }));
 
     for (let site of sites) {
@@ -128,17 +135,21 @@ class ProviderTopSites extends UrlbarProvider {
               title: site.title,
               url: site.url,
               icon: site.favicon,
+              isPinned: site.isPinned,
             })
           );
 
-          let tabs = UrlbarProviderOpenTabs.openTabs.get(
-            queryContext.userContextId || 0
-          );
+          let tabs;
+          if (UrlbarPrefs.get("suggest.openpage")) {
+            tabs = UrlbarProviderOpenTabs.openTabs.get(
+              queryContext.userContextId || 0
+            );
+          }
 
           if (tabs && tabs.includes(site.url.replace(/#.*$/, ""))) {
             result.type = UrlbarUtils.RESULT_TYPE.TAB_SWITCH;
             result.source = UrlbarUtils.RESULT_SOURCE.TABS;
-          } else {
+          } else if (UrlbarPrefs.get("suggest.bookmark")) {
             let bookmark = await PlacesUtils.bookmarks.fetch({
               url: new URL(result.payload.url),
             });
@@ -192,6 +203,7 @@ class ProviderTopSites extends UrlbarProvider {
               engine: engine.name,
               query: "",
               icon: site.favicon,
+              isPinned: site.isPinned,
             })
           );
           addCallback(this, result);

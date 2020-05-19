@@ -137,13 +137,14 @@ static nsresult ResolveURL(nsString& aURL, nsIURI* aBaseURI) {
 
 void MediaMetadata::SetArtworkInternal(const Sequence<MediaImage>& aArtwork,
                                        ErrorResult& aRv) {
-  nsTArray<MediaImage> artwork(aArtwork);
+  nsTArray<MediaImage> artwork;
+  artwork.Assign(aArtwork);
 
   nsCOMPtr<nsIURI> baseURI = GetEntryBaseURL();
   for (MediaImage& image : artwork) {
     nsresult rv = ResolveURL(image.mSrc, baseURI);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      aRv.ThrowTypeError<MSG_INVALID_URL>(image.mSrc);
+      aRv.ThrowTypeError<MSG_INVALID_URL>(NS_ConvertUTF16toUTF8(image.mSrc));
       return;
     }
   }

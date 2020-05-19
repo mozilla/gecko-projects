@@ -2,7 +2,7 @@
  * Bug 1277803 - A test caes for testing favicon loading across different userContextId.
  */
 
-if (Services.prefs.getBoolPref("fission.autostart")) {
+if (SpecialPowers.useRemoteSubframes) {
   requestLongerTimeout(2);
 }
 
@@ -265,6 +265,8 @@ async function doTestForAllTabsFavicon(aTestPage, aFaviconHost, aFaviconURL) {
   // We need to clear the image cache here for making sure the network request will
   // be made for the favicon of allTabs menuitem.
   clearAllImageCaches();
+
+  gTabsPanel.init();
 
   // Make the popup of allTabs showing up and trigger the loading of the favicon.
   let allTabsView = document.getElementById("allTabsMenu-allTabsView");

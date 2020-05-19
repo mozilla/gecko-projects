@@ -2,6 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#![warn(
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_extern_crates,
+    unused_qualifications
+)]
+
 pub mod backend {
     #[cfg(windows)]
     pub use gfx_backend_dx11::Backend as Dx11;
@@ -19,7 +26,7 @@ pub mod backend {
 
 pub mod binding_model;
 pub mod command;
-pub mod conv;
+mod conv;
 pub mod device;
 pub mod hub;
 pub mod id;
@@ -28,13 +35,9 @@ pub mod pipeline;
 pub mod power;
 pub mod resource;
 pub mod swap_chain;
-pub mod track;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+mod track;
 
 pub use hal::pso::read_spirv;
-use peek_poke::{PeekCopy, Poke};
 
 use std::{
     os::raw::c_char,
@@ -46,20 +49,6 @@ type SubmissionIndex = usize;
 type Index = u32;
 type Epoch = u32;
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Backend {
-    Empty = 0,
-    Vulkan = 1,
-    Metal = 2,
-    Dx12 = 3,
-    Dx11 = 4,
-    Gl = 5,
-}
-
-pub type BufferAddress = u64;
-pub type DynamicOffset = u32;
 pub type RawString = *const c_char;
 
 //TODO: make it private. Currently used for swapchain creation impl.
@@ -114,8 +103,7 @@ impl LifeGuard {
 
     /// Returns `true` if the resource is still needed by the user.
     fn use_at(&self, submit_index: SubmissionIndex) -> bool {
-        self.submission_index
-            .store(submit_index, Ordering::Release);
+        self.submission_index.store(submit_index, Ordering::Release);
         self.ref_count.is_some()
     }
 }
@@ -124,84 +112,6 @@ impl LifeGuard {
 struct Stored<T> {
     value: T,
     ref_count: RefCount,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PeekCopy, Poke)]
-pub struct Color {
-    pub r: f64,
-    pub g: f64,
-    pub b: f64,
-    pub a: f64,
-}
-
-impl Color {
-    pub const TRANSPARENT: Self = Color {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-        a: 0.0,
-    };
-    pub const BLACK: Self = Color {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-        a: 1.0,
-    };
-    pub const WHITE: Self = Color {
-        r: 1.0,
-        g: 1.0,
-        b: 1.0,
-        a: 1.0,
-    };
-    pub const RED: Self = Color {
-        r: 1.0,
-        g: 0.0,
-        b: 0.0,
-        a: 1.0,
-    };
-    pub const GREEN: Self = Color {
-        r: 0.0,
-        g: 1.0,
-        b: 0.0,
-        a: 1.0,
-    };
-    pub const BLUE: Self = Color {
-        r: 0.0,
-        g: 0.0,
-        b: 1.0,
-        a: 1.0,
-    };
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct Origin3d {
-    pub x: u32,
-    pub y: u32,
-    pub z: u32,
-}
-
-impl Origin3d {
-    pub const ZERO: Self = Origin3d {
-        x: 0,
-        y: 0,
-        z: 0,
-    };
-}
-
-impl Default for Origin3d {
-    fn default() -> Self {
-        Origin3d::ZERO
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct Extent3d {
-    pub width: u32,
-    pub height: u32,
-    pub depth: u32,
 }
 
 #[repr(C)]
@@ -222,13 +132,13 @@ macro_rules! gfx_select {
     ($id:expr => $global:ident.$method:ident( $($param:expr),+ )) => {
         match $id.backend() {
             #[cfg(any(not(any(target_os = "ios", target_os = "macos")), feature = "gfx-backend-vulkan"))]
-            $crate::Backend::Vulkan => $global.$method::<$crate::backend::Vulkan>( $($param),+ ),
+            wgt::Backend::Vulkan => $global.$method::<$crate::backend::Vulkan>( $($param),+ ),
             #[cfg(any(target_os = "ios", target_os = "macos"))]
-            $crate::Backend::Metal => $global.$method::<$crate::backend::Metal>( $($param),+ ),
+            wgt::Backend::Metal => $global.$method::<$crate::backend::Metal>( $($param),+ ),
             #[cfg(windows)]
-            $crate::Backend::Dx12 => $global.$method::<$crate::backend::Dx12>( $($param),+ ),
+            wgt::Backend::Dx12 => $global.$method::<$crate::backend::Dx12>( $($param),+ ),
             #[cfg(windows)]
-            $crate::Backend::Dx11 => $global.$method::<$crate::backend::Dx11>( $($param),+ ),
+            wgt::Backend::Dx11 => $global.$method::<$crate::backend::Dx11>( $($param),+ ),
             _ => unreachable!()
         }
     };

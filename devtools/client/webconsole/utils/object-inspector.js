@@ -29,14 +29,14 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "LongStringFront",
-  "devtools/shared/fronts/string",
+  "devtools/client/fronts/string",
   true
 );
 
 loader.lazyRequireGetter(
   this,
   "ObjectFront",
-  "devtools/shared/fronts/object",
+  "devtools/client/fronts/object",
   true
 );
 
@@ -88,6 +88,8 @@ function getObjectInspector(
     recordTelemetryEvent: serviceContainer.recordTelemetryEvent,
     openLink: serviceContainer.openLink,
     sourceMapService: serviceContainer.sourceMapService,
+    customFormat: override.customFormat !== false,
+    urlCropLimit: 120,
     renderStacktrace: stacktrace =>
       createElement(SmartTrace, {
         key: "stacktrace",

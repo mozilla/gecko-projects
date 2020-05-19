@@ -83,6 +83,7 @@ struct PropertyStyleAnimationValuePair;
 using ComputedKeyframeValues = nsTArray<PropertyStyleAnimationValuePair>;
 
 class ComputedStyle;
+enum LogicalAxis : uint8_t;
 class SeenPtrs;
 class SharedFontList;
 class StyleSheet;
@@ -212,6 +213,6 @@ using StyleAtomicUsize = std::atomic<size_t>;
 static_assert(sizeof(void*) == 4, "");
 #    define SERVO_32_BITS 1
 #  endif
-#define CBINDGEN_IS_GECKO
+#  define CBINDGEN_IS_GECKO
 
 #endif

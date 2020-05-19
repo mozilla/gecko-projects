@@ -62,12 +62,14 @@ nsIPrincipal* GetStoragePrincipalFromThreadSafeWorkerRef(
 class InitializeRunnable final : public WorkerMainThreadRunnable {
  public:
   InitializeRunnable(ThreadSafeWorkerRef* aWorkerRef, nsACString& aOrigin,
+                     nsACString& aOriginNoSuffix,
                      PrincipalInfo& aStoragePrincipalInfo, ErrorResult& aRv)
       : WorkerMainThreadRunnable(
             aWorkerRef->Private(),
             NS_LITERAL_CSTRING("BroadcastChannel :: Initialize")),
         mWorkerRef(aWorkerRef),
         mOrigin(aOrigin),
+        mOriginNoSuffix(aOriginNoSuffix),
         mStoragePrincipalInfo(aStoragePrincipalInfo),
         mRv(aRv) {
     MOZ_ASSERT(mWorkerRef);
@@ -93,6 +95,11 @@ class InitializeRunnable final : public WorkerMainThreadRunnable {
       return true;
     }
 
+    mRv = storagePrincipal->GetOriginNoSuffix(mOriginNoSuffix);
+    if (NS_WARN_IF(mRv.Failed())) {
+      return true;
+    }
+
     // Walk up to our containing page
     WorkerPrivate* wp = mWorkerRef->Private();
     while (wp->GetParent()) {
@@ -111,6 +118,7 @@ class InitializeRunnable final : public WorkerMainThreadRunnable {
  private:
   RefPtr<ThreadSafeWorkerRef> mWorkerRef;
   nsACString& mOrigin;
+  nsACString& mOriginNoSuffix;
   PrincipalInfo& mStoragePrincipalInfo;
   ErrorResult& mRv;
 };
@@ -129,7 +137,7 @@ class CloseRunnable final : public nsIRunnable, public nsICancelableRunnable {
   nsresult Cancel() override { return NS_OK; }
 
  private:
-  ~CloseRunnable() {}
+  ~CloseRunnable() = default;
 
   RefPtr<BroadcastChannel> mBC;
 };
@@ -235,11 +243,12 @@ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
       new BroadcastChannel(global, aChannel, portUUID);
 
   nsAutoCString origin;
+  nsAutoCString originNoSuffix;
   PrincipalInfo storagePrincipalInfo;
 
   StorageAccess storageAccess;
 
-  nsCOMPtr<nsICookieSettings> cs;
+  nsCOMPtr<nsICookieJarSettings> cjs;
   if (NS_IsMainThread()) {
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global);
     if (NS_WARN_IF(!window)) {
@@ -271,6 +280,11 @@ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
       return nullptr;
     }
 
+    aRv = storagePrincipal->GetOriginNoSuffix(originNoSuffix);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
+
     aRv = PrincipalToPrincipalInfo(storagePrincipal, &storagePrincipalInfo);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
@@ -280,7 +294,7 @@ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
 
     Document* doc = window->GetExtantDoc();
     if (doc) {
-      cs = doc->CookieSettings();
+      cjs = doc->CookieJarSettings();
     }
   } else {
     JSContext* cx = aGlobal.Context();
@@ -299,8 +313,8 @@ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
 
     RefPtr<ThreadSafeWorkerRef> tsr = new ThreadSafeWorkerRef(workerRef);
 
-    RefPtr<InitializeRunnable> runnable =
-        new InitializeRunnable(tsr, origin, storagePrincipalInfo, aRv);
+    RefPtr<InitializeRunnable> runnable = new InitializeRunnable(
+        tsr, origin, originNoSuffix, storagePrincipalInfo, aRv);
     runnable->Dispatch(Canceling, aRv);
     if (aRv.Failed()) {
       return nullptr;
@@ -309,14 +323,14 @@ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
     storageAccess = workerPrivate->StorageAccess();
     bc->mWorkerRef = workerRef;
 
-    cs = workerPrivate->CookieSettings();
+    cjs = workerPrivate->CookieJarSettings();
   }
 
   // We want to allow opaque origins.
   if (storagePrincipalInfo.type() != PrincipalInfo::TNullPrincipalInfo &&
       (storageAccess == StorageAccess::eDeny ||
        (ShouldPartitionStorage(storageAccess) &&
-        !StoragePartitioningEnabled(storageAccess, cs)))) {
+        !StoragePartitioningEnabled(storageAccess, cjs)))) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
   }
@@ -336,7 +350,7 @@ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
   MOZ_ASSERT(bc->mActor);
 
   bc->mActor->SetParent(bc);
-  CopyUTF8toUTF16(origin, bc->mOrigin);
+  CopyUTF8toUTF16(originNoSuffix, bc->mOriginNoSuffix);
 
   return bc.forget();
 }
@@ -450,6 +464,11 @@ void BroadcastChannel::MessageReceived(const MessageData& aData) {
     return;
   }
 
+  // Let's ignore messages after a close/shutdown.
+  if (mState != StateActive) {
+    return;
+  }
+
   nsCOMPtr<nsIGlobalObject> globalObject;
 
   if (NS_IsMainThread()) {
@@ -491,7 +510,7 @@ void BroadcastChannel::MessageReceived(const MessageData& aData) {
   RootedDictionary<MessageEventInit> init(cx);
   init.mBubbles = false;
   init.mCancelable = false;
-  init.mOrigin = mOrigin;
+  init.mOrigin = mOriginNoSuffix;
   init.mData = value;
 
   RefPtr<MessageEvent> event =
@@ -511,7 +530,7 @@ void BroadcastChannel::DispatchError(JSContext* aCx) {
   RootedDictionary<MessageEventInit> init(aCx);
   init.mBubbles = false;
   init.mCancelable = false;
-  init.mOrigin = mOrigin;
+  init.mOrigin = mOriginNoSuffix;
 
   RefPtr<Event> event =
       MessageEvent::Constructor(this, NS_LITERAL_STRING("messageerror"), init);

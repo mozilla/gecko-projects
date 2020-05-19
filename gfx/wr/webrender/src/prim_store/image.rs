@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{
-    AlphaType, ColorDepth, ColorF, ColorU, PrimitiveFlags,
+    AlphaType, ColorDepth, ColorF, ColorU,
     ImageKey as ApiImageKey, ImageRendering,
     PremultipliedColorF, Shadow, YuvColorSpace, ColorRange, YuvFormat,
 };
@@ -15,7 +15,7 @@ use crate::intern::{Internable, InternDebug, Handle as InternHandle};
 use crate::internal_types::{LayoutPrimitiveInfo};
 use crate::prim_store::{
     EdgeAaSegmentMask, OpacityBindingIndex, PrimitiveInstanceKind,
-    PrimitiveOpacity, PrimitiveSceneData, PrimKey, PrimKeyCommonData,
+    PrimitiveOpacity, PrimKey,
     PrimTemplate, PrimTemplateCommonData, PrimitiveStore, SegmentInstanceIndex,
     SizeKey, InternablePrimitive,
 };
@@ -85,15 +85,11 @@ pub type ImageKey = PrimKey<Image>;
 
 impl ImageKey {
     pub fn new(
-        flags: PrimitiveFlags,
-        prim_size: LayoutSize,
+        info: &LayoutPrimitiveInfo,
         image: Image,
     ) -> Self {
         ImageKey {
-            common: PrimKeyCommonData {
-                flags,
-                prim_size: prim_size.into(),
-            },
+            common: info.into(),
             kind: image,
         }
     }
@@ -118,7 +114,7 @@ pub enum ImageSource {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(MallocSizeOf)]
+#[derive(Debug, MallocSizeOf)]
 pub struct ImageData {
     pub key: ApiImageKey,
     pub stretch_size: LayoutSize,
@@ -307,7 +303,7 @@ pub type ImageDataHandle = InternHandle<Image>;
 impl Internable for Image {
     type Key = ImageKey;
     type StoreData = ImageTemplate;
-    type InternData = PrimitiveSceneData;
+    type InternData = ();
 }
 
 impl InternablePrimitive for Image {
@@ -315,11 +311,7 @@ impl InternablePrimitive for Image {
         self,
         info: &LayoutPrimitiveInfo,
     ) -> ImageKey {
-        ImageKey::new(
-            info.flags,
-            info.rect.size,
-            self
-        )
+        ImageKey::new(info, self)
     }
 
     fn make_instance_kind(
@@ -340,6 +332,7 @@ impl InternablePrimitive for Image {
         PrimitiveInstanceKind::Image {
             data_handle,
             image_instance_index,
+            is_compositor_surface: false,
         }
     }
 }
@@ -382,16 +375,11 @@ pub type YuvImageKey = PrimKey<YuvImage>;
 
 impl YuvImageKey {
     pub fn new(
-        flags: PrimitiveFlags,
-        prim_size: LayoutSize,
+        info: &LayoutPrimitiveInfo,
         yuv_image: YuvImage,
     ) -> Self {
-
         YuvImageKey {
-            common: PrimKeyCommonData {
-                flags,
-                prim_size: prim_size.into(),
-            },
+            common: info.into(),
             kind: yuv_image,
         }
     }
@@ -489,7 +477,7 @@ pub type YuvImageDataHandle = InternHandle<YuvImage>;
 impl Internable for YuvImage {
     type Key = YuvImageKey;
     type StoreData = YuvImageTemplate;
-    type InternData = PrimitiveSceneData;
+    type InternData = ();
 }
 
 impl InternablePrimitive for YuvImage {
@@ -497,11 +485,7 @@ impl InternablePrimitive for YuvImage {
         self,
         info: &LayoutPrimitiveInfo,
     ) -> YuvImageKey {
-        YuvImageKey::new(
-            info.flags,
-            info.rect.size,
-            self,
-        )
+        YuvImageKey::new(info, self)
     }
 
     fn make_instance_kind(
@@ -512,7 +496,8 @@ impl InternablePrimitive for YuvImage {
     ) -> PrimitiveInstanceKind {
         PrimitiveInstanceKind::YuvImage {
             data_handle,
-            segment_instance_index: SegmentInstanceIndex::INVALID
+            segment_instance_index: SegmentInstanceIndex::INVALID,
+            is_compositor_surface: false,
         }
     }
 }
@@ -534,9 +519,9 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<Image>(), 52, "Image size changed");
-    assert_eq!(mem::size_of::<ImageTemplate>(), 104, "ImageTemplate size changed");
-    assert_eq!(mem::size_of::<ImageKey>(), 64, "ImageKey size changed");
+    assert_eq!(mem::size_of::<ImageTemplate>(), 112, "ImageTemplate size changed");
+    assert_eq!(mem::size_of::<ImageKey>(), 72, "ImageKey size changed");
     assert_eq!(mem::size_of::<YuvImage>(), 32, "YuvImage size changed");
-    assert_eq!(mem::size_of::<YuvImageTemplate>(), 52, "YuvImageTemplate size changed");
-    assert_eq!(mem::size_of::<YuvImageKey>(), 44, "YuvImageKey size changed");
+    assert_eq!(mem::size_of::<YuvImageTemplate>(), 60, "YuvImageTemplate size changed");
+    assert_eq!(mem::size_of::<YuvImageKey>(), 52, "YuvImageKey size changed");
 }

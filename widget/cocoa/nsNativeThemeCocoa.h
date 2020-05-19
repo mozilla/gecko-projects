@@ -226,7 +226,7 @@ class nsNativeThemeCocoa : private nsNativeTheme, public nsITheme {
   };
 
   enum Widget : uint8_t {
-    eColorFill,  // mozilla::gfx::Color
+    eColorFill,  // mozilla::gfx::sRGBColor
     eSheetBackground,
     eDialogBackground,
     eMenuBackground,  // MenuBackgroundParams
@@ -268,7 +268,7 @@ class nsNativeThemeCocoa : private nsNativeTheme, public nsITheme {
   };
 
   struct WidgetInfo {
-    static WidgetInfo ColorFill(const mozilla::gfx::Color& aParams) {
+    static WidgetInfo ColorFill(const mozilla::gfx::sRGBColor& aParams) {
       return WidgetInfo(Widget::eColorFill, aParams);
     }
     static WidgetInfo SheetBackground() { return WidgetInfo(Widget::eSheetBackground, false); }
@@ -374,7 +374,7 @@ class nsNativeThemeCocoa : private nsNativeTheme, public nsITheme {
     template <typename T>
     WidgetInfo(enum Widget aWidget, const T& aParams) : mVariant(aParams), mWidget(aWidget) {}
 
-    mozilla::Variant<mozilla::gfx::Color, MenuBackgroundParams, MenuIconParams, MenuItemParams,
+    mozilla::Variant<mozilla::gfx::sRGBColor, MenuBackgroundParams, MenuIconParams, MenuItemParams,
                      CheckboxOrRadioParams, ButtonParams, DropdownParams, SpinButtonParams,
                      SegmentParams, UnifiedToolbarParams, TextBoxParams, SearchFieldParams,
                      ProgressParams, MeterParams, TreeHeaderCellParams, ScaleParams,
@@ -398,8 +398,8 @@ class nsNativeThemeCocoa : private nsNativeTheme, public nsITheme {
                                         mozilla::layers::RenderRootStateManager* aManager,
                                         nsIFrame* aFrame, StyleAppearance aAppearance,
                                         const nsRect& aRect) override;
-  MOZ_MUST_USE LayoutDeviceIntMargin GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
-                                                     StyleAppearance aAppearance) override;
+  [[nodiscard]] LayoutDeviceIntMargin GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
+                                                      StyleAppearance aAppearance) override;
 
   bool GetWidgetPadding(nsDeviceContext* aContext, nsIFrame* aFrame, StyleAppearance aAppearance,
                         LayoutDeviceIntMargin* aResult) override;

@@ -276,8 +276,8 @@ void nsPageSequenceFrame::Reflow(nsPresContext* aPresContext,
       // The page isn't complete and it doesn't have a next-in-flow, so
       // create a continuing page.
       nsIFrame* continuingPage =
-          aPresContext->PresShell()->FrameConstructor()->CreateContinuingFrame(
-              aPresContext, kidFrame, this);
+          PresShell()->FrameConstructor()->CreateContinuingFrame(kidFrame,
+                                                                 this);
 
       // Add it to our child list
       mFrames.InsertFrame(nullptr, kidFrame, continuingPage);
@@ -405,12 +405,8 @@ static void GetPrintCanvasElementsInFrame(
   if (!aFrame) {
     return;
   }
-  for (nsIFrame::ChildListIterator childLists(aFrame); !childLists.IsDone();
-       childLists.Next()) {
-    nsFrameList children = childLists.CurrentList();
-    for (nsFrameList::Enumerator e(children); !e.AtEnd(); e.Next()) {
-      nsIFrame* child = e.get();
-
+  for (const auto& childList : aFrame->GetChildLists()) {
+    for (nsIFrame* child : childList.mList) {
       // Check if child is a nsHTMLCanvasFrame.
       nsHTMLCanvasFrame* canvasFrame = do_QueryFrame(child);
 
@@ -702,7 +698,7 @@ void nsPageSequenceFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   }
 
   content.AppendNewToTop<nsDisplayTransform>(aBuilder, this, &content,
-                                             content.GetBuildingRect(), 0,
+                                             content.GetBuildingRect(),
                                              ::ComputePageSequenceTransform);
 
   aLists.Content()->AppendToTop(&content);

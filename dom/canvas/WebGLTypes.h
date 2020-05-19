@@ -94,12 +94,9 @@ inline auto AutoAssertCast(const From val) {
   return detail::AutoAssertCastT<From>(val);
 }
 
-namespace ipc {
-template <typename T>
-struct PcqParamTraits;
-}
-
 namespace webgl {
+template <typename T>
+struct QueueParamTraits;
 class TexUnpackBytes;
 class TexUnpackImage;
 class TexUnpackSurface;
@@ -349,17 +346,13 @@ struct FloatOrInt final  // For TexParameter[fi] and friends.
   }
 };
 
-struct WebGLPixelStore {
+struct WebGLPixelStore final {
   uint32_t mUnpackImageHeight = 0;
   uint32_t mUnpackSkipImages = 0;
   uint32_t mUnpackRowLength = 0;
   uint32_t mUnpackSkipRows = 0;
   uint32_t mUnpackSkipPixels = 0;
   uint32_t mUnpackAlignment = 0;
-  uint32_t mPackRowLength = 0;
-  uint32_t mPackSkipRows = 0;
-  uint32_t mPackSkipPixels = 0;
-  uint32_t mPackAlignment = 0;
   GLenum mColorspaceConversion = 0;
   bool mFlipY = false;
   bool mPremultiplyAlpha = false;
@@ -464,6 +457,43 @@ typedef avec3<uint32_t> uvec3;
 // -
 
 namespace webgl {
+
+struct PackingInfo final {
+  GLenum format = 0;
+  GLenum type = 0;
+
+  bool operator<(const PackingInfo& x) const {
+    if (format != x.format) return format < x.format;
+
+    return type < x.type;
+  }
+
+  bool operator==(const PackingInfo& x) const {
+    return (format == x.format && type == x.type);
+  }
+};
+
+struct DriverUnpackInfo final {
+  GLenum internalFormat = 0;
+  GLenum unpackFormat = 0;
+  GLenum unpackType = 0;
+
+  PackingInfo ToPacking() const { return {unpackFormat, unpackType}; }
+};
+
+struct PixelPackState final {
+  uint32_t alignment = 4;
+  uint32_t rowLength = 0;
+  uint32_t skipRows = 0;
+  uint32_t skipPixels = 0;
+};
+
+struct ReadPixelsDesc final {
+  ivec2 srcOffset;
+  uvec2 size;
+  PackingInfo pi = {LOCAL_GL_RGBA, LOCAL_GL_UNSIGNED_BYTE};
+  PixelPackState packState;
+};
 
 class ExtensionBits final {
   uint64_t mBits = 0;
@@ -587,6 +617,18 @@ struct CompileResult final {
 
 // -
 
+struct OpaqueFramebufferOptions {
+  bool depthStencil = true;
+  bool antialias = true;
+  uint32_t width = 0;
+  uint32_t height = 0;
+
+  OpaqueFramebufferOptions() = default;
+  OpaqueFramebufferOptions(const OpaqueFramebufferOptions&) = default;
+};
+
+// -
+
 struct ActiveInfo {
   GLenum elemType = 0;     // `type`
   uint32_t elemCount = 0;  // `size`
@@ -595,6 +637,7 @@ struct ActiveInfo {
 
 struct ActiveAttribInfo final : public ActiveInfo {
   int32_t location = -1;
+  AttribBaseType baseType = AttribBaseType::Float;
 };
 
 struct ActiveUniformInfo final : public ActiveInfo {
@@ -645,6 +688,21 @@ struct GetUniformData final {
   GLenum type = 0;
 };
 
+struct VertAttribPointerDesc final {
+  bool intFunc = false;
+  uint8_t channels = 4;
+  bool normalized = false;
+  uint8_t byteStrideOrZero = 0;
+  GLenum type = LOCAL_GL_FLOAT;
+  uint64_t byteOffset = 0;
+};
+
+struct VertAttribPointerCalculated final {
+  uint8_t byteSize = 4 * 4;
+  uint8_t byteStride = 4 * 4;  // at-most 255
+  webgl::AttribBaseType baseType = webgl::AttribBaseType::Float;
+};
+
 }  // namespace webgl
 
 // return value for the InitializeCanvasRenderer message
@@ -659,9 +717,9 @@ struct ICRData {
  * inner data type must be trivially copyable by memcpy.  A RawBuffer
  * may be backed by local memory or shared memory.
  */
-template <typename T = uint8_t, typename nonCV = typename RemoveCV<T>::Type,
-          typename EnableIf<std::is_trivially_assignable<nonCV&, nonCV>::value,
-                            int>::Type = 0>
+template <typename T = uint8_t, typename nonCV = std::remove_cv_t<T>,
+          std::enable_if_t<std::is_trivially_assignable<nonCV&, nonCV>::value,
+                           int> = 0>
 class RawBuffer {
   // The SharedMemoryBasic that owns mData, if any.
   RefPtr<mozilla::ipc::SharedMemoryBasic> mSmem;
@@ -672,7 +730,7 @@ class RawBuffer {
   // true if we should delete[] the mData on destruction
   bool mOwnsData = false;
 
-  friend mozilla::ipc::PcqParamTraits<RawBuffer>;
+  friend struct mozilla::webgl::QueueParamTraits<RawBuffer<T>>;
 
  public:
   using ElementType = T;
@@ -822,6 +880,15 @@ inline typename C::mapped_type Find(
 
 // -
 
+template <typename T, typename U>
+inline Maybe<T> MaybeAs(const U val) {
+  const auto checked = CheckedInt<T>(val);
+  if (!checked.isValid()) return {};
+  return Some(checked.value());
+}
+
+// -
+
 inline GLenum ImageToTexTarget(const GLenum imageTarget) {
   switch (imageTarget) {
     case LOCAL_GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
@@ -913,11 +980,8 @@ Maybe<webgl::ErrorInfo> CheckFramebufferAttach(const GLenum bindImageTarget,
                                                const uint32_t zLayerCount,
                                                const webgl::Limits& limits);
 
-Maybe<webgl::ErrorInfo> CheckVertexAttribPointer(bool webgl2, bool isFuncInt,
-                                                 GLint size, GLenum type,
-                                                 bool normalized,
-                                                 uint32_t stride,
-                                                 uint64_t byteOffset);
+Result<webgl::VertAttribPointerCalculated, webgl::ErrorInfo>
+CheckVertexAttribPointer(bool isWebgl2, const webgl::VertAttribPointerDesc&);
 
 uint8_t ElemTypeComponents(GLenum elemType);
 

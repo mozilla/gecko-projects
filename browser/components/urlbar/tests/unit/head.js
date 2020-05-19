@@ -1,20 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-// Import common head.
-/* import-globals-from ../../../../../toolkit/components/places/tests/head_common.js */
-var commonFile = do_get_file(
-  "../../../../../toolkit/components/places/tests/head_common.js",
-  false
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
 );
-if (commonFile) {
-  let uri = Services.io.newFileURI(commonFile);
-  Services.scriptloader.loadSubScript(uri.spec, this);
-}
 
-// Put any other stuff relative to this test folder below.
 var {
   UrlbarMuxer,
   UrlbarProvider,
@@ -22,9 +12,16 @@ var {
   UrlbarUtils,
 } = ChromeUtils.import("resource:///modules/UrlbarUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AddonTestUtils: "resource://testing-common/AddonTestUtils.jsm",
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
   HttpServer: "resource://testing-common/httpd.js",
+  PlacesSearchAutocompleteProvider:
+    "resource://gre/modules/PlacesSearchAutocompleteProvider.jsm",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
+  Services: "resource://gre/modules/Services.jsm",
+  TestUtils: "resource://testing-common/TestUtils.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
   UrlbarInput: "resource:///modules/UrlbarInput.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
@@ -36,9 +33,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 });
 const { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
 
-const { AddonTestUtils } = ChromeUtils.import(
-  "resource://testing-common/AddonTestUtils.jsm"
-);
 AddonTestUtils.init(this, false);
 AddonTestUtils.createAppInfo(
   "xpcshell@tests.mozilla.org",
@@ -54,6 +48,7 @@ AddonTestUtils.createAppInfo(
  *          required options.
  */
 function createContext(searchString = "foo", properties = {}) {
+  info(`Creating new queryContext with searchString: ${searchString}`);
   return new UrlbarQueryContext(
     Object.assign(
       {
@@ -133,6 +128,10 @@ class TestProvider extends UrlbarTestUtils.TestProvider {
       this._onCancel();
     }
   }
+}
+
+function convertToUtf8(str) {
+  return String.fromCharCode(...new TextEncoder().encode(str));
 }
 
 /**
@@ -222,5 +221,260 @@ async function addTestSuggestionsEngine(suggestionsFn = null) {
     resp.setHeader("Content-Type", "application/json", false);
     resp.write(JSON.stringify(data));
   });
-  return addTestEngine("engine-suggestions.xml", server);
+  let engine = await addTestEngine("engine-suggestions.xml", server);
+  return engine;
+}
+
+/**
+ * Sets up a search engine that provides some tail suggestions by creating an
+ * array that mimics Google's tail suggestion responses.
+ *
+ * @param {function} suggestionsFn
+ *        A function that returns an array that mimics Google's tail suggestion
+ *        responses. See bug 1626897.
+ *        NOTE: Consumers specifying suggestionsFn must include searchStr as a
+ *              part of the array returned by suggestionsFn.
+ * @returns {nsISearchEngine} The new engine.
+ */
+async function addTestTailSuggestionsEngine(suggestionsFn = null) {
+  // This port number should match the number in engine-tail-suggestions.xml.
+  let server = makeTestServer(9001);
+  server.registerPathHandler("/suggest", (req, resp) => {
+    // URL query params are x-www-form-urlencoded, which converts spaces into
+    // plus signs, so un-convert any plus signs back to spaces.
+    let searchStr = decodeURIComponent(req.queryString.replace(/\+/g, " "));
+    let suggestions = suggestionsFn
+      ? suggestionsFn(searchStr)
+      : [
+          "what time is it in t",
+          ["what is the time today texas"].concat(
+            ["toronto", "tunisia"].map(s => searchStr + s.slice(1))
+          ),
+          [],
+          {
+            "google:irrelevantparameter": [],
+            "google:suggestdetail": [{}].concat(
+              ["toronto", "tunisia"].map(s => ({
+                mp: "… ",
+                t: s,
+              }))
+            ),
+          },
+        ];
+    let data = suggestions;
+    let jsonString = JSON.stringify(data);
+    // This script must be evaluated as UTF-8 for this to write out the bytes of
+    // the string in UTF-8.  If it's evaluated as Latin-1, the written bytes
+    // will be the result of UTF-8-encoding the result-string *twice*, which
+    // will break the "… " match prefixes.
+    let stringOfUtf8Bytes = convertToUtf8(jsonString);
+    resp.setHeader("Content-Type", "application/json", false);
+    resp.write(stringOfUtf8Bytes);
+  });
+  let engine = await addTestEngine("engine-tail-suggestions.xml", server);
+  return engine;
+}
+
+/**
+ * Creates a UrlbarResult for a search result.
+ * @param {UrlbarQueryContext} queryContext
+ *   The context that this result will be displayed in.
+ * @param {string} [options.suggestion]
+ *   The suggestion offered by the search engine.
+ * @param {string} [options.engineName]
+ *   The name of the engine providing the suggestion. Leave blank if there
+ *   is no suggestion.
+ * @param {string} [options.query]
+ *   The query that started the search. This overrides
+ *   `queryContext.searchString`. This is useful when the query that will show
+ *   up in the result object will be different from what was typed. For example,
+ *   if a leading restriction token will be used.
+ * @param {string} [options.alias]
+ *   The alias for the search engine, if the search is an alias search.
+ * @param {string} [options.engineIconUri]
+ *   A URI for the engine's icon.
+ * @param {boolean} [options.heuristic]
+ *   True if this is a heuristic result. Defaults to false.
+ * @param {number} [options.keywordOffer]
+ *   A value from UrlbarUtils.KEYWORD_OFFER.
+ * @returns {UrlbarResult}
+ */
+function makeSearchResult(
+  queryContext,
+  {
+    suggestion,
+    tail,
+    engineName,
+    alias,
+    query,
+    engineIconUri,
+    heuristic = false,
+    keywordOffer,
+  }
+) {
+  UrlbarTokenizer.tokenize(queryContext);
+
+  if (!keywordOffer) {
+    keywordOffer = UrlbarUtils.KEYWORD_OFFER.NONE;
+    if (alias && !query.trim() && alias.startsWith("@")) {
+      keywordOffer = heuristic
+        ? UrlbarUtils.KEYWORD_OFFER.HIDE
+        : UrlbarUtils.KEYWORD_OFFER.SHOW;
+    }
+  }
+
+  let result = new UrlbarResult(
+    UrlbarUtils.RESULT_TYPE.SEARCH,
+    UrlbarUtils.RESULT_SOURCE.SEARCH,
+    ...UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, {
+      engine: [engineName, UrlbarUtils.HIGHLIGHT.TYPED],
+      suggestion: [suggestion, UrlbarUtils.HIGHLIGHT.SUGGESTED],
+      tail: [tail, UrlbarUtils.HIGHLIGHT.SUGGESTED],
+      keyword: [alias, UrlbarUtils.HIGHLIGHT.TYPED],
+      // Check against undefined so consumers can pass in the empty string.
+      query: [
+        typeof query != "undefined" ? query : queryContext.searchString.trim(),
+        UrlbarUtils.HIGHLIGHT.TYPED,
+      ],
+      isSearchHistory: false,
+      icon: [engineIconUri ? engineIconUri : ""],
+      keywordOffer,
+    })
+  );
+
+  result.heuristic = heuristic;
+  return result;
+}
+
+/**
+ * Creates a UrlbarResult for a history result.
+ * @param {UrlbarQueryContext} queryContext
+ *   The context that this result will be displayed in.
+ * @param {string} options.title
+ *   The page title.
+ * @param {string} options.uri
+ *   The page URI.
+ * @param {array} [options.tags]
+ *   An array of string tags. Defaults to an empty array.
+ * @param {string} [options.iconUri]
+ *   A URI for the page's icon.
+ * @param {boolean} [options.heuristic]
+ *   True if this is a heuristic result. Defaults to false.
+ * @returns {UrlbarResult}
+ */
+function makeVisitResult(
+  queryContext,
+  { title, uri, iconUri, tags = [], heuristic = false }
+) {
+  UrlbarTokenizer.tokenize(queryContext);
+
+  let payload = {
+    url: [uri, UrlbarUtils.HIGHLIGHT.TYPED],
+    // Check against undefined so consumers can pass in the empty string.
+    icon: [typeof iconUri != "undefined" ? iconUri : `page-icon:${uri}`],
+    title: [title, UrlbarUtils.HIGHLIGHT.TYPED],
+  };
+
+  if (!heuristic) {
+    payload.tags = [tags, UrlbarUtils.HIGHLIGHT.TYPED];
+  }
+
+  let result = new UrlbarResult(
+    UrlbarUtils.RESULT_TYPE.URL,
+    UrlbarUtils.RESULT_SOURCE.OTHER_LOCAL,
+    ...UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, payload)
+  );
+
+  result.heuristic = heuristic;
+  return result;
+}
+
+/**
+ * Creates a UrlbarResult for a bookmark result.
+ * @param {UrlbarQueryContext} queryContext
+ *   The context that this result will be displayed in.
+ * @param {string} options.title
+ *   The page title.
+ * @param {string} options.uri
+ *   The page URI.
+ * @param {string} [options.iconUri]
+ *   A URI for the page's icon.
+ * @param {array} [options.tags]
+ *   An array of string tags. Defaults to an empty array.
+ * @param {boolean} [options.heuristic]
+ *   True if this is a heuristic result. Defaults to false.
+ * @returns {UrlbarResult}
+ */
+function makeBookmarkResult(
+  queryContext,
+  { title, uri, iconUri, tags = [], heuristic = false }
+) {
+  UrlbarTokenizer.tokenize(queryContext);
+
+  let result = new UrlbarResult(
+    UrlbarUtils.RESULT_TYPE.URL,
+    UrlbarUtils.RESULT_SOURCE.BOOKMARKS,
+    ...UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, {
+      url: [uri, UrlbarUtils.HIGHLIGHT.TYPED],
+      // Check against undefined so consumers can pass in the empty string.
+      icon: [typeof iconUri != "undefined" ? iconUri : `page-icon:${uri}`],
+      title: [title, UrlbarUtils.HIGHLIGHT.TYPED],
+      tags: [tags, UrlbarUtils.HIGHLIGHT.TYPED],
+    })
+  );
+
+  result.heuristic = heuristic;
+  return result;
+}
+
+/**
+ * Checks that the results returned by a UrlbarController match those in
+ * the param `matches`.
+ * @param {UrlbarQueryContext} context
+ *   The context for this query.
+ * @param {array} matches
+ *   An array of UrlbarResults.
+ * @param {boolean} [isPrivate]
+ *   Set this to `true` to simulate a search in a private window.
+ */
+async function check_results({ context, matches = [] } = {}) {
+  if (!context) {
+    return;
+  }
+
+  // At this point frecency could still be updating due to latest pages
+  // updates.
+  // This is not a problem in real life, but autocomplete tests should
+  // return reliable resultsets, thus we have to wait.
+  await PlacesTestUtils.promiseAsyncUpdates();
+
+  let controller = UrlbarTestUtils.newMockController({
+    input: {
+      isPrivate: context.isPrivate,
+      window: {
+        location: {
+          href: AppConstants.BROWSER_CHROME_URL,
+        },
+      },
+    },
+  });
+  await controller.startQuery(context);
+
+  Assert.equal(
+    context.results.length,
+    matches.length,
+    "Found the expected number of results."
+  );
+
+  Assert.deepEqual(
+    matches.map(m => m.payload),
+    context.results.map(m => m.payload),
+    "Payloads are the same."
+  );
+
+  Assert.deepEqual(
+    matches.map(m => m.heuristic),
+    context.results.map(m => m.heuristic),
+    "Heuristic results are correctly flagged."
+  );
 }

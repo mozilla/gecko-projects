@@ -111,10 +111,24 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         'NEED_PULSEAUDIO': 'true',
         'NEED_WINDOW_MANAGER': 'true',
-        'NEED_COMPIZ': 'true',
         'ENABLE_E10S': text_type(bool(test.get('e10s'))).lower(),
         'WORKING_DIR': '/builds/worker',
     })
+
+    # Legacy linux64 tests rely on compiz.
+    if test.get('docker-image', {}).get('in-tree') == 'desktop1604-test':
+        env.update({
+            'NEED_COMPIZ': 'true'
+        })
+
+    # Bug 1602701/1601828 - use compiz on ubuntu1804 due to GTK asynchiness
+    # when manipulating windows.
+    if test.get('docker-image', {}).get('in-tree') == 'ubuntu1804-test':
+        if ('wdspec' in job['run']['test']['suite'] or
+            ('marionette' in job['run']['test']['suite'] and 'headless' not in job['label'])):
+            env.update({
+                'NEED_COMPIZ': 'true'
+            })
 
     if mozharness.get('mochitest-flavor'):
         env['MOCHITEST_FLAVOR'] = mozharness['mochitest-flavor']
@@ -264,18 +278,11 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     # this list will get cleaned up / reduced / removed in bug 1354088
     if is_macosx:
         env.update({
-            'IDLEIZER_DISABLE_SHUTDOWN': 'true',
-            'LANG': 'en_US.UTF-8',
             'LC_ALL': 'en_US.UTF-8',
-            'MOZ_HIDE_RESULTS_TABLE': '1',
+            'LANG': 'en_US.UTF-8',
             'MOZ_NODE_PATH': '/usr/local/bin/node',
-            'MOZ_NO_REMOTE': '1',
-            'NO_FAIL_ON_TEST_ERRORS': '1',
             'PATH': '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
             'SHELL': '/bin/bash',
-            'XPCOM_DEBUG_BREAK': 'warn',
-            'XPC_FLAGS': '0x0',
-            'XPC_SERVICE_NAME': '0',
         })
     elif is_bitbar:
         env.update({
@@ -384,9 +391,6 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     }
     if is_bitbar:
         job['run']['run-as-root'] = True
-        # FIXME: The bitbar config incorrectly requests internal tooltool downloads
-        # so force it off here.
-        job['run']['tooltool-downloads'] = False
     configure_taskdesc_for_run(config, job, taskdesc, worker['implementation'])
 
 

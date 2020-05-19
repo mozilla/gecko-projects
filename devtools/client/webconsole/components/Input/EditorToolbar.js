@@ -5,9 +5,16 @@
 "use strict";
 
 // React & Redux
-const { Component } = require("devtools/client/shared/vendor/react");
+const {
+  Component,
+  createFactory,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+
+const EvaluationContextSelector = createFactory(
+  require("devtools/client/webconsole/components/Input/EvaluationContextSelector")
+);
 
 const actions = require("devtools/client/webconsole/actions/index");
 const { l10n } = require("devtools/client/webconsole/utils/messages");
@@ -28,6 +35,7 @@ class EditorToolbar extends Component {
       reverseSearchInputVisible: PropTypes.bool.isRequired,
       serviceContainer: PropTypes.object.isRequired,
       webConsoleUI: PropTypes.object.isRequired,
+      showEvaluationContextSelector: PropTypes.bool,
     };
   }
 
@@ -46,8 +54,22 @@ class EditorToolbar extends Component {
     dispatch(
       actions.reverseSearchInputToggle({
         initialValue: serviceContainer.getInputSelection(),
+        access: "editor-toolbar-icon",
       })
     );
+  }
+
+  renderEvaluationContextSelector() {
+    if (
+      !this.props.webConsoleUI.wrapper.toolbox ||
+      !this.props.showEvaluationContextSelector
+    ) {
+      return null;
+    }
+
+    return EvaluationContextSelector({
+      webConsoleUI: this.props.webConsoleUI,
+    });
   }
 
   render() {
@@ -80,6 +102,7 @@ class EditorToolbar extends Component {
         },
         l10n.getStr("webconsole.editor.toolbar.executeButton.label")
       ),
+      this.renderEvaluationContextSelector(),
       dom.button({
         className:
           "devtools-button webconsole-editor-toolbar-history-prevExpressionButton",

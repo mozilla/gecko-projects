@@ -52,9 +52,7 @@ class HTMLTextAreaElement final : public TextControlElement,
   virtual int32_t TabIndexDefault() override;
 
   // Element
-  virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override {
-    return true;
-  }
+  virtual bool IsInteractiveHTMLContent() const override { return true; }
 
   // nsIFormControl
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
@@ -99,7 +97,7 @@ class HTMLTextAreaElement final : public TextControlElement,
   virtual void EnablePreview() override;
   virtual bool IsPreviewEnabled() override;
   virtual void InitializeKeyboardEventListeners() override;
-  virtual void OnValueChanged(bool aNotify, ValueChangeKind) override;
+  virtual void OnValueChanged(ValueChangeKind) override;
   virtual void GetValueFromSetRangeText(nsAString& aValue) override;
   MOZ_CAN_RUN_SCRIPT virtual nsresult SetValueFromSetRangeText(
       const nsAString& aValue) override;
@@ -180,7 +178,8 @@ class HTMLTextAreaElement final : public TextControlElement,
   }
   // nsGenericHTMLFormElementWithState::GetForm is fine
   using nsGenericHTMLFormElementWithState::GetForm;
-  int32_t MaxLength() { return GetIntAttr(nsGkAtoms::maxlength, -1); }
+  int32_t MaxLength() const { return GetIntAttr(nsGkAtoms::maxlength, -1); }
+  int32_t UsedMaxLength() const final { return MaxLength(); }
   void SetMaxLength(int32_t aMaxLength, ErrorResult& aError) {
     int32_t minLength = MinLength();
     if (aMaxLength < 0 || (minLength >= 0 && aMaxLength < minLength)) {
@@ -189,7 +188,7 @@ class HTMLTextAreaElement final : public TextControlElement,
       SetHTMLIntAttr(nsGkAtoms::maxlength, aMaxLength, aError);
     }
   }
-  int32_t MinLength() { return GetIntAttr(nsGkAtoms::minlength, -1); }
+  int32_t MinLength() const { return GetIntAttr(nsGkAtoms::minlength, -1); }
   void SetMinLength(int32_t aMinLength, ErrorResult& aError) {
     int32_t maxLength = MaxLength();
     if (aMinLength < 0 || (maxLength >= 0 && aMinLength > maxLength)) {
@@ -272,10 +271,7 @@ class HTMLTextAreaElement final : public TextControlElement,
   // XPCOM adapter function widely used throughout code, leaving it as is.
   nsresult GetControllers(nsIControllers** aResult);
 
-  MOZ_CAN_RUN_SCRIPT nsIEditor* GetEditor() {
-    MOZ_ASSERT(mState);
-    return mState->GetTextEditor();
-  }
+  MOZ_CAN_RUN_SCRIPT nsIEditor* GetEditorForBindings();
   bool HasEditor() {
     MOZ_ASSERT(mState);
     return !!mState->GetTextEditorWithoutCreation();

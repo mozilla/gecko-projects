@@ -11,6 +11,16 @@
 var gGfxUtils = {
   _isRecording: false,
   _isTransactionLogging: false,
+
+  init() {
+    if (Services.prefs.getBoolPref("gfx.webrender.enable-capture")) {
+      document.getElementById("wrCaptureCmd").removeAttribute("disabled");
+      document
+        .getElementById("wrToggleCaptureSequenceCmd")
+        .removeAttribute("disabled");
+    }
+  },
+
   /**
    * Toggle composition recording for the current window.
    */
@@ -23,6 +33,13 @@ var gGfxUtils = {
    */
   webrenderCapture() {
     window.windowUtils.wrCapture();
+  },
+  /**
+   * Trigger a WebRender capture of the current state and future state
+   * into a local folder. If called again, it will stop capturing.
+   */
+  toggleWebrenderCaptureSequence() {
+    window.windowUtils.wrToggleCaptureSequence();
   },
 
   /**

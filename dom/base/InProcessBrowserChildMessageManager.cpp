@@ -20,7 +20,7 @@
 #include "mozilla/dom/SameProcessMessageQueue.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/WindowProxyHolder.h"
-#include "mozilla/dom/JSWindowActorService.h"
+#include "mozilla/dom/JSActorService.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -37,7 +37,7 @@ InProcessBrowserChildMessageManager::Create(nsDocShell* aShell,
   NS_ENSURE_TRUE(mm->Init(), nullptr);
 
   if (XRE_IsParentProcess()) {
-    RefPtr<JSWindowActorService> wasvc = JSWindowActorService::GetSingleton();
+    RefPtr<JSActorService> wasvc = JSActorService::GetSingleton();
     wasvc->RegisterChromeEventTarget(mm);
   }
 
@@ -45,18 +45,16 @@ InProcessBrowserChildMessageManager::Create(nsDocShell* aShell,
 }
 
 bool InProcessBrowserChildMessageManager::DoSendBlockingMessage(
-    JSContext* aCx, const nsAString& aMessage, StructuredCloneData& aData,
-    JS::Handle<JSObject*> aCpows, nsIPrincipal* aPrincipal,
-    nsTArray<StructuredCloneData>* aRetVal, bool aIsSync) {
+    const nsAString& aMessage, StructuredCloneData& aData,
+    nsTArray<StructuredCloneData>* aRetVal) {
   SameProcessMessageQueue* queue = SameProcessMessageQueue::Get();
   queue->Flush();
 
   if (mChromeMessageManager) {
-    SameProcessCpowHolder cpows(JS::RootingContext::get(aCx), aCpows);
     RefPtr<nsFrameMessageManager> mm = mChromeMessageManager;
     RefPtr<nsFrameLoader> fl = GetFrameLoader();
-    mm->ReceiveMessage(mOwner, fl, aMessage, true, &aData, &cpows, aPrincipal,
-                       aRetVal, IgnoreErrors());
+    mm->ReceiveMessage(mOwner, fl, aMessage, true, &aData, aRetVal,
+                       IgnoreErrors());
   }
   return true;
 }
@@ -64,11 +62,9 @@ bool InProcessBrowserChildMessageManager::DoSendBlockingMessage(
 class nsAsyncMessageToParent : public nsSameProcessAsyncMessageBase,
                                public SameProcessMessageQueue::Runnable {
  public:
-  nsAsyncMessageToParent(JS::RootingContext* aRootingCx,
-                         JS::Handle<JSObject*> aCpows,
-                         InProcessBrowserChildMessageManager* aBrowserChild)
-      : nsSameProcessAsyncMessageBase(aRootingCx, aCpows),
-        mBrowserChild(aBrowserChild) {}
+  explicit nsAsyncMessageToParent(
+      InProcessBrowserChildMessageManager* aBrowserChild)
+      : nsSameProcessAsyncMessageBase(), mBrowserChild(aBrowserChild) {}
 
   virtual nsresult HandleMessage() override {
     RefPtr<nsFrameLoader> fl = mBrowserChild->GetFrameLoader();
@@ -80,14 +76,11 @@ class nsAsyncMessageToParent : public nsSameProcessAsyncMessageBase,
 };
 
 nsresult InProcessBrowserChildMessageManager::DoSendAsyncMessage(
-    JSContext* aCx, const nsAString& aMessage, StructuredCloneData& aData,
-    JS::Handle<JSObject*> aCpows, nsIPrincipal* aPrincipal) {
+    const nsAString& aMessage, StructuredCloneData& aData) {
   SameProcessMessageQueue* queue = SameProcessMessageQueue::Get();
-  JS::RootingContext* rcx = JS::RootingContext::get(aCx);
-  RefPtr<nsAsyncMessageToParent> ev =
-      new nsAsyncMessageToParent(rcx, aCpows, this);
+  RefPtr<nsAsyncMessageToParent> ev = new nsAsyncMessageToParent(this);
 
-  nsresult rv = ev->Init(aMessage, aData, aPrincipal);
+  nsresult rv = ev->Init(aMessage, aData);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -118,7 +111,7 @@ InProcessBrowserChildMessageManager::InProcessBrowserChildMessageManager(
 
 InProcessBrowserChildMessageManager::~InProcessBrowserChildMessageManager() {
   if (XRE_IsParentProcess()) {
-    JSWindowActorService::UnregisterChromeEventTarget(this);
+    JSActorService::UnregisterChromeEventTarget(this);
   }
 
   mAnonymousGlobalScopes.Clear();
@@ -150,6 +143,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocShell)
   tmp->nsMessageManagerScriptExecutor::Unlink();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(InProcessBrowserChildMessageManager)
@@ -250,19 +244,6 @@ void InProcessBrowserChildMessageManager::GetEventTargetParent(
     EventChainPreVisitor& aVisitor) {
   aVisitor.mForceContentDispatch = true;
   aVisitor.mCanHandle = true;
-
-#ifdef DEBUG
-  if (mOwner) {
-    RefPtr<nsFrameLoaderOwner> owner = do_QueryObject(mOwner);
-    RefPtr<nsFrameLoader> fl = owner->GetFrameLoader();
-    if (fl) {
-      NS_ASSERTION(this == fl->GetBrowserChildMessageManager(),
-                   "Wrong event target!");
-      NS_ASSERTION(fl->mMessageManager == mChromeMessageManager,
-                   "Wrong message manager!");
-    }
-  }
-#endif
 
   if (mPreventEventsEscaping) {
     aVisitor.SetParentTarget(nullptr, false);

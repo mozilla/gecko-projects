@@ -6,6 +6,7 @@
 
 #include "WebRenderUserData.h"
 
+#include "mozilla/layers/AnimationHelper.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/ImageClient.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
@@ -13,6 +14,7 @@
 #include "mozilla/layers/WebRenderMessages.h"
 #include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "mozilla/layers/SharedSurfacesChild.h"
+#include "mozilla/webgpu/WebGPUChild.h"
 #include "nsDisplayListInvalidation.h"
 #include "nsIFrame.h"
 #include "WebRenderCanvasRenderer.h"
@@ -83,7 +85,7 @@ WebRenderUserData::WebRenderUserData(RenderRootStateManager* aManager,
       mTable(aManager->GetWebRenderUserDataTable()),
       mUsed(false) {}
 
-WebRenderUserData::~WebRenderUserData() {}
+WebRenderUserData::~WebRenderUserData() = default;
 
 void WebRenderUserData::RemoveFromTable() { mTable->RemoveEntry(this); }
 
@@ -130,8 +132,7 @@ void WebRenderImageData::ClearImageKey() {
     if (mOwnsKey) {
       mManager->AddImageKeyForDiscard(mKey.value());
       if (mTextureOfImage) {
-        WrBridge()->ReleaseTextureOfImage(mKey.value(),
-                                          mManager->GetRenderRoot());
+        WrBridge()->ReleaseTextureOfImage(mKey.value());
         mTextureOfImage = nullptr;
       }
     }
@@ -180,8 +181,7 @@ Maybe<wr::ImageKey> WebRenderImageData::UpdateImageKey(
   ImageClientSingle* imageClient = mImageClient->AsImageClientSingle();
   uint32_t oldCounter = imageClient->GetLastUpdateGenerationCounter();
 
-  bool ret = imageClient->UpdateImage(aContainer, /* unused */ 0,
-                                      Some(mManager->GetRenderRoot()));
+  bool ret = imageClient->UpdateImage(aContainer, /* unused */ 0);
   RefPtr<TextureClient> currentTexture = imageClient->GetForwardedTexture();
   if (!ret || !currentTexture) {
     // Delete old key
@@ -239,8 +239,7 @@ void WebRenderImageData::CreateAsyncImageWebRenderCommands(
   if (mPipelineId.isSome() && mContainer != aContainer) {
     // In this case, we need to remove the existed pipeline and create new one
     // because the ImageContainer is changed.
-    WrBridge()->RemovePipelineIdForCompositable(mPipelineId.ref(),
-                                                mManager->GetRenderRoot());
+    WrBridge()->RemovePipelineIdForCompositable(mPipelineId.ref());
     mPipelineId.reset();
   }
 
@@ -249,8 +248,7 @@ void WebRenderImageData::CreateAsyncImageWebRenderCommands(
     mPipelineId =
         Some(WrBridge()->GetCompositorBridgeChild()->GetNextPipelineId());
     WrBridge()->AddPipelineIdForAsyncCompositable(
-        mPipelineId.ref(), aContainer->GetAsyncContainerHandle(),
-        mManager->GetRenderRoot());
+        mPipelineId.ref(), aContainer->GetAsyncContainerHandle());
     mContainer = aContainer;
   }
   MOZ_ASSERT(!mImageClient);
@@ -269,8 +267,7 @@ void WebRenderImageData::CreateAsyncImageWebRenderCommands(
 
   WrBridge()->AddWebRenderParentCommand(
       OpUpdateAsyncImagePipeline(mPipelineId.value(), aSCBounds, aSCTransform,
-                                 aScaleToSize, aFilter, aMixBlendMode),
-      mManager->GetRenderRoot());
+                                 aScaleToSize, aFilter, aMixBlendMode));
 }
 
 void WebRenderImageData::CreateImageClientIfNeeded() {
@@ -336,6 +333,11 @@ WebRenderImageData* WebRenderFallbackData::PaintIntoImage() {
   return mImageData.get();
 }
 
+WebRenderAPZAnimationData::WebRenderAPZAnimationData(
+    RenderRootStateManager* aManager, nsDisplayItem* aItem)
+    : WebRenderUserData(aManager, aItem),
+      mAnimationId(AnimationHelper::GetNextCompositorAnimationsId()) {}
+
 WebRenderAnimationData::WebRenderAnimationData(RenderRootStateManager* aManager,
                                                nsDisplayItem* aItem)
     : WebRenderUserData(aManager, aItem) {}
@@ -385,6 +387,30 @@ ImageContainer* WebRenderCanvasData::GetImageContainer() {
 
 void WebRenderCanvasData::ClearImageContainer() { mContainer = nullptr; }
 
+WebRenderLocalCanvasData::WebRenderLocalCanvasData(
+    RenderRootStateManager* aManager, nsDisplayItem* aItem)
+    : WebRenderUserData(aManager, aItem) {}
+
+WebRenderLocalCanvasData::~WebRenderLocalCanvasData() = default;
+
+void WebRenderLocalCanvasData::RequestFrameReadback() {
+  if (mGpuBridge) {
+    mGpuBridge->SwapChainPresent(mExternalImageId, mGpuTextureId);
+  }
+}
+
+void WebRenderLocalCanvasData::RefreshExternalImage() {
+  if (!mDirty) {
+    return;
+  }
+
+  const ImageIntRect dirtyRect(0, 0, mDescriptor.width, mDescriptor.height);
+  // Update the WR external image, forcing the composition of a new frame.
+  mManager->AsyncResourceUpdates().UpdatePrivateExternalImage(
+      mExternalImageId, mImageKey, mDescriptor, dirtyRect);
+  mDirty = false;
+}
+
 WebRenderRemoteData::WebRenderRemoteData(RenderRootStateManager* aManager,
                                          nsDisplayItem* aItem)
     : WebRenderUserData(aManager, aItem) {}
@@ -394,22 +420,6 @@ WebRenderRemoteData::~WebRenderRemoteData() {
     mRemoteBrowser->UpdateEffects(mozilla::dom::EffectsInfo::FullyHidden());
   }
 }
-
-WebRenderRenderRootData::WebRenderRenderRootData(
-    RenderRootStateManager* aManager, nsDisplayItem* aItem)
-    : WebRenderUserData(aManager, aItem) {}
-
-RenderRootBoundary& WebRenderRenderRootData::EnsureHasBoundary(
-    wr::RenderRoot aChildType) {
-  if (mBoundary) {
-    MOZ_ASSERT(mBoundary->GetChildType() == aChildType);
-  } else {
-    mBoundary.emplace(aChildType);
-  }
-  return mBoundary.ref();
-}
-
-WebRenderRenderRootData::~WebRenderRenderRootData() {}
 
 void DestroyWebRenderUserDataTable(WebRenderUserDataTable* aTable) {
   for (auto iter = aTable->Iter(); !iter.Done(); iter.Next()) {

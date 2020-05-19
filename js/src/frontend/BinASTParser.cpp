@@ -17,16 +17,25 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/Vector.h"
 
+#include <type_traits>
 #include <utility>
 
 #include "frontend/BinAST-macros.h"
 #include "frontend/BinASTTokenReaderContext.h"
 #include "frontend/BinASTTokenReaderMultipart.h"
 #include "frontend/FullParseHandler.h"
+#include "frontend/FunctionSyntaxKind.h"  // FunctionSyntaxKind
 #include "frontend/ParseNode.h"
 #include "frontend/Parser.h"
 #include "frontend/SharedContext.h"
+#ifndef ENABLE_NEW_REGEXP
+#  include "irregexp/RegExpParser.h"
+#endif
 #include "js/RegExpFlags.h"  //  JS::RegExpFlag, JS::RegExpFlags
+#ifdef ENABLE_NEW_REGEXP
+#  include "new-regexp/RegExpAPI.h"
+#endif
+#include "vm/GeneratorAndAsyncKind.h"  // js::GeneratorKind, js::FunctionAsyncKind
 #include "vm/RegExpObject.h"
 
 #include "frontend/ParseContext-inl.h"
@@ -1478,7 +1487,7 @@ JS::Result<Ok> BinASTParser<Tok>::parseInterfaceAssertedBlockScope(
   if (hasDirectEval && pc_->isFunctionBox() && !pc_->sc()->strict()) {
     // In non-strict mode code, direct calls to eval can
     // add variables to the call object.
-    pc_->functionBox()->setHasExtensibleScope();
+    pc_->functionBox()->setFunHasExtensibleScope();
   }
   auto result = Ok();
   return result;
@@ -1573,7 +1582,7 @@ JS::Result<Ok> BinASTParser<Tok>::parseInterfaceAssertedBoundNamesScope(
   if (hasDirectEval && pc_->isFunctionBox() && !pc_->sc()->strict()) {
     // In non-strict mode code, direct calls to eval can
     // add variables to the call object.
-    pc_->functionBox()->setHasExtensibleScope();
+    pc_->functionBox()->setFunHasExtensibleScope();
   }
   auto result = Ok();
   return result;
@@ -1687,7 +1696,7 @@ JS::Result<Ok> BinASTParser<Tok>::parseInterfaceAssertedParameterScope(
   if (hasDirectEval && pc_->isFunctionBox() && !pc_->sc()->strict()) {
     // In non-strict mode code, direct calls to eval can
     // add variables to the call object.
-    pc_->functionBox()->setHasExtensibleScope();
+    pc_->functionBox()->setFunHasExtensibleScope();
   }
   auto result = Ok();
   return result;
@@ -1790,7 +1799,7 @@ JS::Result<Ok> BinASTParser<Tok>::parseInterfaceAssertedScriptGlobalScope(
   if (hasDirectEval && pc_->isFunctionBox() && !pc_->sc()->strict()) {
     // In non-strict mode code, direct calls to eval can
     // add variables to the call object.
-    pc_->functionBox()->setHasExtensibleScope();
+    pc_->functionBox()->setFunHasExtensibleScope();
   }
   auto result = Ok();
   return result;
@@ -1838,7 +1847,7 @@ JS::Result<Ok> BinASTParser<Tok>::parseInterfaceAssertedVarScope(
   if (hasDirectEval && pc_->isFunctionBox() && !pc_->sc()->strict()) {
     // In non-strict mode code, direct calls to eval can
     // add variables to the call object.
-    pc_->functionBox()->setHasExtensibleScope();
+    pc_->functionBox()->setFunHasExtensibleScope();
   }
   auto result = Ok();
   return result;
@@ -3543,7 +3552,7 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceLiteralRegExpExpression(
   RegExpFlags reflags = JS::RegExpFlag::NoFlags;
   auto flagsContext =
       FieldContext(BinASTInterfaceAndField::LiteralRegExpExpression__Flags);
-  if (mozilla::IsSame<Tok, BinASTTokenReaderContext>::value) {
+  if constexpr (std::is_same_v<Tok, BinASTTokenReaderContext>) {
     // Hack: optimized `readChars` is not implemented for
     // `BinASTTokenReaderContext`.
     RootedAtom flags(cx_);
@@ -3559,13 +3568,27 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceLiteralRegExpExpression(
     }
   }
 
-  Rooted<RegExpObject*> reobj(cx_);
-  BINJS_TRY_VAR(reobj,
-                RegExpObject::create(cx_, pattern, reflags, TenuredObject));
+  // Validate the RegExp pattern is valid.
+  {
+    JS::CompileOptions dummyOptions(cx_);
+    DummyTokenStream dummyTokenStream(cx_, dummyOptions);
 
-  BINJS_TRY_DECL(result,
-                 handler_.newRegExp(reobj, tokenizer_->pos(start), *this));
-  return result;
+    LifoAllocScope allocScope(&cx_->tempLifoAlloc());
+#ifdef ENABLE_NEW_REGEXP
+    BINJS_TRY(
+        irregexp::CheckPatternSyntax(cx_, dummyTokenStream, pattern, reflags));
+#else
+    BINJS_TRY(irregexp::ParsePatternSyntax(dummyTokenStream, allocScope.alloc(),
+                                           pattern, reflags.unicode()));
+#endif
+  }
+
+  RegExpIndex index(this->getCompilationInfo().regExpData.length());
+  BINJS_TRY(this->getCompilationInfo().regExpData.emplaceBack());
+  BINJS_TRY(
+      this->getCompilationInfo().regExpData[index].init(cx_, pattern, reflags));
+
+  return handler_.newRegExp(index, tokenizer_->pos(start));
 }
 
 template <typename Tok>
@@ -3986,7 +4009,7 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceThisExpression(
 
   TokenPos pos = tokenizer_->pos(start);
   ParseNode* thisName(nullptr);
-  if (pc_->sc()->thisBinding() == ThisBinding::Function) {
+  if (pc_->sc()->hasFunctionThisBinding()) {
     HandlePropertyName dotThis = cx_->names().dotThis;
     BINJS_TRY(usedNames_.noteUse(cx_, dotThis, pc_->scriptId(),
                                  pc_->innermostScope()->id()));

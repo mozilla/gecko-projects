@@ -52,9 +52,7 @@ EXPORTS += [
     '!ErrorList.h',
     '!ErrorNamesInternal.h',
     'CodeAddressService.h',
-    'nsAgg.h',
     'nsAlgorithm.h',
-    'nsAutoPtr.h',
     'nsAutoRef.h',
     'nsCom.h',
     'nsCOMPtr.h',
@@ -202,12 +200,10 @@ if CONFIG['OS_TARGET'] == 'WINNT':
         'MemoryInfo.cpp',
     ]
 
-GeneratedFile("ErrorList.h", script="ErrorList.py", entry_point="error_list_h", py2=True)
+GeneratedFile("ErrorList.h", script="ErrorList.py", entry_point="error_list_h")
 GeneratedFile("ErrorNamesInternal.h", script="ErrorList.py",
-              py2=True,
               entry_point="error_names_internal_h")
 GeneratedFile("error_list.rs", script="ErrorList.py",
-              py2=True,
               entry_point="error_list_rs")
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
@@ -225,8 +221,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
     ]
 
     GeneratedFile('gk_rust_utils_ffi_generated.h',
-                  script='/layout/style/RunCbindgen.py',
-                  py2=True,
+                  script='/build/RunCbindgen.py',
                   entry_point='generate', inputs=['/xpcom/rust/gkrust_utils'])
 
 include('/ipc/chromium/chromium-config.mozbuild')

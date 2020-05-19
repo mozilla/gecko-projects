@@ -539,12 +539,19 @@ static bool AddInnerLazyFunctionsFromScript(
     if (!gcThing.is<JSObject>()) {
       continue;
     }
-
     JSObject* obj = &gcThing.as<JSObject>();
-    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpretedLazy()) {
-      if (!lazyFunctions.append(obj)) {
-        return false;
-      }
+
+    if (!obj->is<JSFunction>()) {
+      continue;
+    }
+    JSFunction* fun = &obj->as<JSFunction>();
+
+    if (!fun->hasBaseScript() || fun->hasBytecode()) {
+      continue;
+    }
+
+    if (!lazyFunctions.append(obj)) {
+      return false;
     }
   }
   return true;
@@ -558,24 +565,29 @@ static bool AddLazyFunctionsForRealm(JSContext* cx,
   // script. The last condition is so that we don't compile lazy scripts
   // whose enclosing scripts failed to compile, indicating that the lazy
   // script did not escape the script.
-  //
-  // Some LazyScripts have a non-null |JSScript* script| pointer. We still
-  // want to delazify in that case: this pointer is weak so the JSScript
-  // could be destroyed at the next GC.
 
   for (auto i = cx->zone()->cellIter<JSObject>(kind); !i.done(); i.next()) {
     JSFunction* fun = &i->as<JSFunction>();
+
+    // When iterating over the GC-heap, we may encounter function objects that
+    // are incomplete (missing a BaseScript when we expect one). We must check
+    // for this case before we can call JSFunction::hasBytecode().
+    if (fun->isIncomplete()) {
+      continue;
+    }
 
     if (fun->realm() != cx->realm()) {
       continue;
     }
 
-    if (fun->hasLazyScript()) {
-      LazyScript* lazy = fun->lazyScript();
-      if (lazy->enclosingScriptHasEverBeenCompiled()) {
-        if (!lazyFunctions.append(fun)) {
-          return false;
-        }
+    if (!fun->hasBaseScript() || fun->hasBytecode()) {
+      continue;
+    }
+
+    BaseScript* lazy = fun->baseScript();
+    if (lazy->isReadyForDelazification()) {
+      if (!lazyFunctions.append(fun)) {
+        return false;
       }
     }
   }
@@ -606,18 +618,15 @@ static bool CreateLazyScriptsForRealm(JSContext* cx) {
 
     // lazyFunctions may have been populated with multiple functions for
     // a lazy script.
-    if (!fun->isInterpretedLazy()) {
+    if (!fun->isInterpreted() || fun->hasBytecode()) {
       continue;
     }
-
-    bool lazyScriptHadNoScript = !fun->lazyScript()->maybeScript();
 
     JSScript* script = JSFunction::getOrCreateScript(cx, fun);
     if (!script) {
       return false;
     }
-    if (lazyScriptHadNoScript &&
-        !AddInnerLazyFunctionsFromScript(script, &lazyFunctions)) {
+    if (!AddInnerLazyFunctionsFromScript(script, &lazyFunctions)) {
       return false;
     }
   }

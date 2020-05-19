@@ -30,6 +30,7 @@ interface Bluetooth : EventTarget {
   attribute EventHandler onavailabilitychanged;
   [SameObject]
   readonly attribute BluetoothDevice? referringDevice;
+  Promise<sequence<BluetoothDevice>> getDevices();
   Promise<BluetoothDevice> requestDevice(optional RequestDeviceOptions options = {});
 };
 
@@ -51,7 +52,7 @@ dictionary AllowedBluetoothDevice {
   // An allowedServices of "all" means all services are allowed.
   required (DOMString or sequence<UUID>) allowedServices;
 };
-dictionary BluetoothPermissionData {
+dictionary BluetoothPermissionStorage {
   required sequence<AllowedBluetoothDevice> allowedDevices;
 };
 
@@ -79,13 +80,17 @@ interface BluetoothDevice : EventTarget {
   readonly attribute DOMString? name;
   readonly attribute BluetoothRemoteGATTServer? gatt;
 
-  Promise<void> watchAdvertisements();
-  void unwatchAdvertisements();
+  Promise<void> watchAdvertisements(
+      optional WatchAdvertisementsOptions options = {});
   readonly attribute boolean watchingAdvertisements;
 };
 BluetoothDevice includes BluetoothDeviceEventHandlers;
 BluetoothDevice includes CharacteristicEventHandlers;
 BluetoothDevice includes ServiceEventHandlers;
+
+dictionary WatchAdvertisementsOptions {
+  AbortSignal signal;
+};
 
 [Exposed=Window, SecureContext]
 interface BluetoothManufacturerDataMap {

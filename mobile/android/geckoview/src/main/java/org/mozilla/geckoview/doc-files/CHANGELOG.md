@@ -11,17 +11,125 @@ exclude: true
 
 # GeckoView API Changelog.
 
-⚠️  breaking change
+⚠️  breaking change and deprecation notices
+
+## v78
+- Added [`WebExtensionController.installBuiltIn`][78.1] that allows installing an
+  extension that is bundled with the APK. This method is meant as a replacement
+  for [`GeckoRuntime.registerWebExtension`][67.15], ⚠️ which is now deprecated
+  and will be removed in GeckoView 81.
+- Added [`CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS`][78.2] to allow
+  enabling dynamic first party isolation; this will block tracking cookies and
+  isolate all other third party cookies by keying them based on the first party
+  from which they are accessed.
+- Added `cookieStoreId` field to [`WebExtension.CreateTabDetails`][78.3]. This adds the optional
+  ability to create a tab with a given cookie store ID for its [`contextual identity`][78.4].
+  ([bug 1622500]({{bugzilla}}1622500))
+
+[78.1]: {{javadoc_uri}}/WebExtensionController.html#installBuiltIn-java.lang.String-
+[78.2]: {{javadoc_uri}}/ContentBlocking.CookieBehavior.html#ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS
+[78.3]: {{javadoc_uri}}/WebExtension.CreateTabDetails.html
+[78.4]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/contextualIdentities
+
+## v77
+- Added [`GeckoRuntime.appendAppNotesToCrashReport`][77.1] For adding app notes to the crash report.
+  ([bug 1626979]({{bugzilla}}1626979))
+- ⚠️ Remove the `DynamicToolbarAnimator` API along with accesors on `GeckoView` and `GeckoSession`.
+  ([bug 1627716]({{bugzilla}}1627716))
+
+[77.1]: {{javadoc_uri}}/GeckoRuntime.html#appendAppNotesToCrashReport-java.lang.String-
+
+## v76
+- Added [`GeckoSession.PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS`][76.1] to control EME media key access.
+- [`RuntimeTelemetry#getSnapshots`][68.10] is deprecated and will be removed
+  in 79. Use Glean to handle Gecko telemetry.
+  ([bug 1620395]({{bugzilla}}1620395))
+- Added [`LoadRequest.isDirectNavigation`] to know when calls to
+  [`onLoadRequest`][76.3] originate from a direct navigation made by the app
+  itself.
+  ([bug 1624675]({{bugzilla}}1624675))
+
+[76.1]: {{javadoc_uri}}/GeckoSession.PermissionDelegate.html#PERMISSION_MEDIA_KEY_SYSTEM_ACCESS
+[76.2]: {{javadoc_uri}}/GeckoSession.NavigationDelegate.LoadRequest.html#isDirectNavigation
+[76.3]: {{javadoc_uri}}/GeckoSession.NavigationDelegate.html#onLoadRequest-org.mozilla.geckoview.GeckoSession-org.mozilla.geckoview.GeckoSession.NavigationDelegate.LoadRequest-
 
 ## v75
-- ⚠️ Remove [`GeckoRuntimeSettings.Builder#useContentProcessHint`]. The content
+- ⚠️ Remove `GeckoRuntimeSettings.Builder#useContentProcessHint`. The content
   process is now preloaded by default if
   [`GeckoRuntimeSettings.Builder#useMultiprocess`][75.1] is enabled.
-- ⚠️ Move [`GeckoSessionSettings.Builder#useMultiprocess`] to
+- ⚠️ Move `GeckoSessionSettings.Builder#useMultiprocess` to
   [`GeckoRuntimeSettings.Builder#useMultiprocess`][75.1]. Multiprocess state is
   no longer determined per session.
+- Added [`DebuggerDelegate#onExtensionListUpdated`][75.2] to notify that a temporary
+  extension has been installed by the debugger.
+  ([bug 1614295]({{bugzilla}}1614295))
+- ⚠️ Removed [`GeckoRuntimeSettings.setAutoplayDefault`][75.3], use
+  [`GeckoSession.PermissionDelegate#PERMISSION_AUTOPLAY_AUDIBLE`][73.12] and
+  [`GeckoSession.PermissionDelegate#PERMISSION_AUTOPLAY_INAUDIBLE`][73.13] to
+  control autoplay.
+  ([bug 1614894]({{bugzilla}}1614894))
+- Added [`GeckoSession.reload(int flags)`][75.4] That takes a [load flag][75.5] parameter.
+- ⚠️ Moved [`ActionDelegate`][75.6] and [`MessageDelegate`][75.7] to
+  [`SessionController`][75.8].
+  ([bug 1616625]({{bugzilla}}1616625))
+- Added [`SessionTabDelegate`][75.9] to [`SessionController`][75.8] and
+  [`TabDelegate`][75.10] to [`WebExtension`][69.5] which receive respectively
+  calls for the session and the runtime. `TabDelegate` is also now
+  per-`WebExtension` object instead of being global.  The existing global
+  [`TabDelegate`][75.11] is now deprecated and will be removed in GeckoView 77.
+  ([bug 1616625]({{bugzilla}}1616625))
+- Added [`SessionTabDelegate#onUpdateTab`][75.12] which is called whenever an
+  extension calls `tabs.update` on the corresponding `GeckoSession`.
+  [`TabDelegate#onCreateTab`][75.13] now takes a [`CreateTabDetails`][75.14]
+  object which contains additional information about the newly created tab
+  (including the `url` which used to be passed in directly).
+  ([bug 1616625]({{bugzilla}}1616625))
+- Added [`GeckoRuntimeSettings.setWebManifestEnabled`][75.15],
+  [`GeckoRuntimeSettings.webManifest`][75.16], and
+  [`GeckoRuntimeSettings.getWebManifestEnabled`][75.17]
+  ([bug 1614894]({{bugzilla}}1603673)), to enable or check Web Manifest support.
+- Added [`GeckoDisplay.safeAreaInsetsChanged`][75.18] to notify the content of [safe area insets][75.19].
+  ([bug 1503656]({{bugzilla}}1503656))
+- Added [`GeckoResult#cancel()`][75.22], [`GeckoResult#setCancellationDelegate()`][75.22],
+  and [`GeckoResult.CancellationDelegate`][75.23]. This adds the optional ability to cancel
+  an operation behind a pending `GeckoResult`.
+- Added [`baseUrl`][75.24] to [`WebExtension.MetaData`][75.25] to expose the
+  base URL for all WebExtension pages for a given extension.
+  ([bug 1560048]({{bugzilla}}1560048))
+- Added [`allowedInPrivateBrowsing`][75.26] and
+  [`setAllowedInPrivateBrowsing`][75.27] to control whether an extension can
+  run in private browsing or not.  Extensions installed with
+  [`registerWebExtension`][67.15] will always be allowed to run in private
+  browsing.
+  ([bug 1599139]({{bugzilla}}1599139))
 
 [75.1]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#useMultiprocess-boolean-
+[75.2]: {{javadoc_uri}}/WebExtensionController.DebuggerDelegate.html#onExtensionListUpdated--
+[75.3]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#autoplayDefault-boolean-
+[75.4]: {{javadoc_uri}}/GeckoSession.html#reload-int-
+[75.5]: {{javadoc_uri}}/GeckoSession.html#LOAD_FLAGS_NONE
+[75.6]: {{javadoc_uri}}/WebExtension.ActionDelegate.html
+[75.7]: {{javadoc_uri}}/WebExtension.MessageDelegate.html
+[75.8]: {{javadoc_uri}}/WebExtension.SessionController.html
+[75.9]: {{javadoc_uri}}/WebExtension.SessionTabDelegate.html
+[75.10]: {{javadoc_uri}}/WebExtension.TabDelegate.html
+[75.11]: {{javadoc_uri}}/WebExtensionRuntime.TabDelegate.html
+[75.12]: {{javadoc_uri}}/WebExtension.SessionTabDelegate.html#onUpdateTab-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.GeckoSession-org.mozilla.geckoview.WebExtension.UpdateTabDetails-
+[75.13]: {{javadoc_uri}}/WebExtension.TabDelegate.html#onNewTab-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.WebExtension.CreateTabDetails-
+[75.14]: {{javadoc_uri}}/WebExtension.CreateTabDetails.html
+[75.15]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#setWebManifestEnabled-boolean-
+[75.16]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#webManifest-boolean-
+[75.17]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#getWebManifestEnabled--
+[75.18]: {{javadoc_uri}}/GeckoDisplay.html#safeAreaInsetsChanged-int-int-int-int-
+[75.19]: https://developer.mozilla.org/en-US/docs/Web/CSS/env
+[75.20]: {{javadoc_uri}}/WebExtension.InstallException.ErrorCodes.html#ERROR_POSTPONED-
+[75.21]: {{javadoc_uri}}/GeckoResult.html#cancel--
+[75.22]: {{javadoc_uri}}/GeckoResult.html#setCancellationDelegate-CancellationDelegate-
+[75.23]: {{javadoc_uri}}/GeckoResult.CancellationDelegate.html
+[75.24]: {{javadoc_uri}}/WebExtension.MetaData.html#baseUrl
+[75.25]: {{javadoc_uri}}/WebExtension.MetaData.html
+[75.26]: {{javadoc_uri}}/WebExtension.MetaData.html#allowedInPrivateBrowsing
+[75.27]: {{javadoc_uri}}/WebExtensionController.html#setAllowedInPrivateBrowsing-org.mozilla.geckoview.WebExtension-boolean-
 
 ## v74
 - Added [`WebExtensionController.enable`][74.1] and [`disable`][74.2] to
@@ -585,4 +693,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: e79b2ea5f93700f9e920b962286ec7b203c493b9
+[api-version]: 5460cbfe03322d19964ce94082ac2ae99af6d791

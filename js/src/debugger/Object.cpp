@@ -55,6 +55,7 @@
 #include "vm/NativeObject.h"              // for NativeObject, JSObject::is
 #include "vm/ObjectGroup.h"               // for GenericObject, NewObjectKind
 #include "vm/ObjectOperations.h"          // for DefineProperty
+#include "vm/PlainObject.h"               // for js::PlainObject
 #include "vm/PromiseObject.h"             // for js::PromiseObject
 #include "vm/Realm.h"                     // for AutoRealm, ErrorCopier, Realm
 #include "vm/Runtime.h"                   // for JSAtomState
@@ -66,9 +67,9 @@
 #include "vm/StringType.h"                // for JSAtom, PropertyName
 #include "vm/WrapperObject.h"             // for JSObject::is, WrapperObject
 
-#include "vm/Compartment-inl.h"       // for Compartment::wrap
-#include "vm/JSAtom-inl.h"            // for ValueToId
-#include "vm/JSObject-inl.h"          // for GetObjectClassName, InitClass
+#include "vm/Compartment-inl.h"  // for Compartment::wrap
+#include "vm/JSAtom-inl.h"       // for ValueToId
+#include "vm/JSObject-inl.h"  // for GetObjectClassName, InitClass, NewObjectWithGivenProtoAndKind
 #include "vm/NativeObject-inl.h"      // for NativeObject::global
 #include "vm/ObjectOperations-inl.h"  // for DeleteProperty, GetProperty
 #include "vm/Realm-inl.h"             // for AutoRealm::AutoRealm
@@ -1618,10 +1619,10 @@ NativeObject* DebuggerObject::initClass(JSContext* cx,
 DebuggerObject* DebuggerObject::create(JSContext* cx, HandleObject proto,
                                        HandleObject referent,
                                        HandleNativeObject debugger) {
-  NewObjectKind newKind =
-      IsInsideNursery(referent) ? GenericObject : TenuredObject;
   DebuggerObject* obj =
-      NewObjectWithGivenProto<DebuggerObject>(cx, proto, newKind);
+      IsInsideNursery(referent)
+          ? NewObjectWithGivenProto<DebuggerObject>(cx, proto)
+          : NewTenuredObjectWithGivenProto<DebuggerObject>(cx, proto);
   if (!obj) {
     return nullptr;
   }
@@ -1889,19 +1890,12 @@ bool DebuggerObject::getErrorMessageName(JSContext* cx,
     return false;
   }
 
-  if (!report) {
+  if (!report || !report->errorMessageName) {
     result.set(nullptr);
     return true;
   }
 
-  const JSErrorFormatString* efs =
-      GetErrorMessage(nullptr, report->errorNumber);
-  if (!efs) {
-    result.set(nullptr);
-    return true;
-  }
-
-  RootedString str(cx, JS_NewStringCopyZ(cx, efs->name));
+  RootedString str(cx, JS_NewStringCopyZ(cx, report->errorMessageName));
   if (!str) {
     return false;
   }

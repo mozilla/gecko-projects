@@ -141,8 +141,8 @@ DrawMode SVGContextPaintImpl::Init(const DrawTarget* aDrawTarget,
   if (style->mFill.kind.IsNone()) {
     SetFillOpacity(0.0f);
   } else {
-    float opacity = nsSVGUtils::GetOpacity(
-        style->FillOpacitySource(), style->mFillOpacity, aOuterContextPaint);
+    float opacity =
+        nsSVGUtils::GetOpacity(style->mFillOpacity, aOuterContextPaint);
 
     SetupInheritablePaint(aDrawTarget, aContextMatrix, aFrame, opacity,
                           aOuterContextPaint, mFillPaint, &nsStyleSVG::mFill,
@@ -158,8 +158,7 @@ DrawMode SVGContextPaintImpl::Init(const DrawTarget* aDrawTarget,
     SetStrokeOpacity(0.0f);
   } else {
     float opacity =
-        nsSVGUtils::GetOpacity(style->StrokeOpacitySource(),
-                               style->mStrokeOpacity, aOuterContextPaint);
+        nsSVGUtils::GetOpacity(style->mStrokeOpacity, aOuterContextPaint);
 
     SetupInheritablePaint(aDrawTarget, aContextMatrix, aFrame, opacity,
                           aOuterContextPaint, mStrokePaint,
@@ -235,11 +234,11 @@ already_AddRefed<gfxPattern> SVGContextPaintImpl::Paint::GetPattern(
 
   switch (mPaintType) {
     case Tag::None:
-      pattern = new gfxPattern(Color());
+      pattern = new gfxPattern(DeviceColor());
       mPatternMatrix = gfxMatrix();
       break;
     case Tag::Color: {
-      Color color = Color::FromABGR(mPaintDefinition.mColor);
+      DeviceColor color = ToDeviceColor(mPaintDefinition.mColor);
       color.a *= aOpacity;
       pattern = new gfxPattern(color);
       mPatternMatrix = gfxMatrix();
@@ -279,7 +278,7 @@ already_AddRefed<gfxPattern> SVGContextPaintImpl::Paint::GetPattern(
       return nullptr;
   }
 
-  mPatternCache.Put(aOpacity, pattern);
+  mPatternCache.Put(aOpacity, RefPtr{pattern});
   return pattern.forget();
 }
 
@@ -308,7 +307,7 @@ already_AddRefed<gfxPattern> SVGEmbeddingContextPaint::GetFillPattern(
   // The gfxPattern that we create below depends on aFillOpacity, and since
   // different elements in the SVG image may pass in different values for
   // fill opacities we don't try to cache the gfxPattern that we create.
-  Color fill = *mFill;
+  DeviceColor fill = *mFill;
   fill.a *= aFillOpacity;
   return do_AddRef(new gfxPattern(fill));
 }
@@ -319,7 +318,7 @@ already_AddRefed<gfxPattern> SVGEmbeddingContextPaint::GetStrokePattern(
   if (!mStroke) {
     return nullptr;
   }
-  Color stroke = *mStroke;
+  DeviceColor stroke = *mStroke;
   stroke.a *= aStrokeOpacity;
   return do_AddRef(new gfxPattern(stroke));
 }

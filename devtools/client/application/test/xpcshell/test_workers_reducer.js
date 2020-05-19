@@ -3,6 +3,8 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
+const { Ci } = require("chrome");
+
 const {
   updateCanDebugWorkers,
   updateWorkers,
@@ -33,13 +35,62 @@ add_task(async function() {
 
 add_task(async function() {
   info("Test workers reducer: UPDATE_WORKERS action");
-
   const state = WorkersState();
-  const action = updateWorkers([{ foo: "bar" }, { lorem: "ipsum" }]);
+
+  const rawData = [
+    {
+      registration: {
+        scope: "lorem-ipsum",
+        lastUpdateTime: 42,
+        id: "r1",
+      },
+      workers: [
+        {
+          id: "w1",
+          state: Ci.nsIServiceWorkerInfo.STATE_ACTIVATED,
+          url: "https://example.com/w1.js",
+          workerTargetFront: { foo: "bar" },
+          stateText: "activated",
+        },
+        {
+          id: "w2",
+          state: Ci.nsIServiceWorkerInfo.STATE_INSTALLED,
+          url: "https://example.com/w2.js",
+          workerTargetFront: undefined,
+          stateText: "installed",
+        },
+      ],
+    },
+  ];
+
+  const expectedData = [
+    {
+      id: "r1",
+      lastUpdateTime: 42,
+      registrationFront: rawData[0].registration,
+      scope: "lorem-ipsum",
+      workers: [
+        {
+          id: "w1",
+          url: "https://example.com/w1.js",
+          workerTargetFront: rawData[0].workers[0].workerTargetFront,
+          registrationFront: rawData[0].registration,
+          state: Ci.nsIServiceWorkerInfo.STATE_ACTIVATED,
+          stateText: "activated",
+        },
+        {
+          id: "w2",
+          url: "https://example.com/w2.js",
+          workerTargetFront: undefined,
+          registrationFront: rawData[0].registration,
+          state: Ci.nsIServiceWorkerInfo.STATE_INSTALLED,
+          stateText: "installed",
+        },
+      ],
+    },
+  ];
+
+  const action = updateWorkers(rawData);
   const newState = workersReducer(state, action);
-  deepEqual(
-    newState.list,
-    [{ foo: "bar" }, { lorem: "ipsum" }],
-    "workers contains the expected list"
-  );
+  deepEqual(newState.list, expectedData, "workers contains the expected list");
 });

@@ -2,12 +2,8 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("extensions.webapi.testing");
-});
-
 function check_frame_availability(browser) {
-  return check_availability(browser.browsingContext.getChildren()[0]);
+  return check_availability(browser.browsingContext.children[0]);
 }
 
 function check_availability(browser) {
@@ -29,7 +25,9 @@ add_task(async function test_not_available() {
 
 // Test that with testing on the API is available in the test domain
 add_task(async function test_available() {
-  Services.prefs.setBoolPref("extensions.webapi.testing", true);
+  await SpecialPowers.pushPrefEnv({
+    set: [["extensions.webapi.testing", true]],
+  });
 
   await BrowserTestUtils.withNewTab(
     `${SECURE_TESTROOT}webapi_checkavailable.html`,

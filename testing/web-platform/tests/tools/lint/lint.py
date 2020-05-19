@@ -20,7 +20,7 @@ from ..gitignore.gitignore import PathFilter
 from ..wpt import testfiles
 from ..manifest.vcs import walk
 
-from ..manifest.sourcefile import SourceFile, js_meta_re, python_meta_re, space_chars, get_any_variants, get_default_any_variants
+from ..manifest.sourcefile import SourceFile, js_meta_re, python_meta_re, space_chars, get_any_variants
 from six import binary_type, iteritems, itervalues, with_metaclass
 from six.moves import range
 from six.moves.urllib.parse import urlsplit, urljoin
@@ -392,7 +392,8 @@ regexps = [item() for item in  # type: ignore
             rules.MissingDepsRegexp,
             rules.SpecialPowersRegexp,
             rules.AssertThrowsRegexp,
-            rules.PromiseRejectsRegexp]]
+            rules.PromiseRejectsRegexp,
+            rules.AssertPreconditionRegexp]]
 
 
 def check_regexp_line(repo_root, path, f):
@@ -586,7 +587,8 @@ ast_checkers = [item() for item in [OpenModeCheck]]
 
 def check_python_ast(repo_root, path, f):
     # type: (str, str, IO[bytes]) -> List[rules.Error]
-    if not path.endswith(".py"):
+    # *.quic.py are Python 3 only and cannot be parsed by Python 2.
+    if not path.endswith(".py") or path.endswith(".quic.py"):
         return []
 
     try:
@@ -609,28 +611,10 @@ def check_global_metadata(value):
     # type: (str) -> Iterable[Tuple[Type[rules.Rule], Tuple[Any, ...]]]
     global_values = {item.strip() for item in value.split(b",") if item.strip()}
 
-    included_variants = set.union(get_default_any_variants(),
-                                  *(get_any_variants(v) for v in global_values if not v.startswith(b"!")))
-
+    # TODO: this could check for duplicates and such
     for global_value in global_values:
-        if global_value.startswith(b"!"):
-            excluded_value = global_value[1:]
-            if not get_any_variants(excluded_value):
-                yield (rules.UnknownGlobalMetadata, ())
-
-            elif excluded_value in global_values:
-                yield (rules.BrokenGlobalMetadata,
-                       (("Cannot specify both %s and %s" % (global_value, excluded_value)),))
-
-            else:
-                excluded_variants = get_any_variants(excluded_value)
-                if not (excluded_variants & included_variants):
-                    yield (rules.BrokenGlobalMetadata,
-                           (("Cannot exclude %s if it is not included" % (excluded_value,)),))
-
-        else:
-            if not get_any_variants(global_value):
-                yield (rules.UnknownGlobalMetadata, ())
+        if not get_any_variants(global_value):
+            yield (rules.UnknownGlobalMetadata, ())
 
 
 def check_script_metadata(repo_root, path, f):
@@ -659,13 +643,7 @@ def check_script_metadata(repo_root, path, f):
                 if value != b"long":
                     errors.append(rules.UnknownTimeoutMetadata.error(path,
                                                                      line_no=idx + 1))
-            elif key == b"title":
-                pass
-            elif key == b"script":
-                pass
-            elif key == b"variant":
-                pass
-            else:
+            elif key not in (b"title", b"script", b"variant", b"quic"):
                 errors.append(rules.UnknownMetadata.error(path,
                                                           line_no=idx + 1))
         else:

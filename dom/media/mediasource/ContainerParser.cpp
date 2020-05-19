@@ -23,7 +23,6 @@
 #  include "MP4Interval.h"
 #  include "ByteStream.h"
 #endif
-#include "nsAutoPtr.h"
 #include "SourceBufferResource.h"
 #include <algorithm>
 
@@ -194,7 +193,8 @@ class WebMContainerParser
     // We should be more precise.
     if (initSegment || !HasCompleteInitData()) {
       if (mParser.mInitEndOffset > 0) {
-        MOZ_ASSERT(mParser.mInitEndOffset <= mResource->GetLength());
+        MOZ_DIAGNOSTIC_ASSERT(mInitData && mResource &&
+                              mParser.mInitEndOffset <= mResource->GetLength());
         if (!mInitData->SetLength(mParser.mInitEndOffset, fallible)) {
           // Super unlikely OOM
           return NS_ERROR_OUT_OF_MEMORY;
@@ -527,8 +527,8 @@ class MP4ContainerParser : public ContainerParser,
       // consumers of ParseStartAndEndTimestamps to add their timestamp offset
       // manually. This allows the ContainerParser to be shared across different
       // timestampOffsets.
-      mParser = new MoofParser(mStream, AsVariant(ParseAllTracks{}),
-                               /* aIsAudio = */ false);
+      mParser = MakeUnique<MoofParser>(mStream, AsVariant(ParseAllTracks{}),
+                                       /* aIsAudio = */ false);
       DDLINKCHILD("parser", mParser.get());
       mInitData = new MediaByteBuffer();
       mCompleteInitSegmentRange = MediaByteRange();
@@ -539,6 +539,9 @@ class MP4ContainerParser : public ContainerParser,
       mTotalParsed += aData.Length();
       return NS_ERROR_NOT_AVAILABLE;
     }
+
+    MOZ_DIAGNOSTIC_ASSERT(mResource && mParser && mInitData,
+                          "Should have received an init segment first");
 
     mResource->AppendData(aData);
     MediaByteRangeSet byteRanges;
@@ -591,7 +594,7 @@ class MP4ContainerParser : public ContainerParser,
 
  private:
   RefPtr<MP4Stream> mStream;
-  nsAutoPtr<MoofParser> mParser;
+  UniquePtr<MoofParser> mParser;
 };
 #endif  // MOZ_FMP4
 
@@ -737,24 +740,24 @@ class ADTSContainerParser
 #endif  // MOZ_FMP4
 
 /*static*/
-ContainerParser* ContainerParser::CreateForMIMEType(
+UniquePtr<ContainerParser> ContainerParser::CreateForMIMEType(
     const MediaContainerType& aType) {
   if (aType.Type() == MEDIAMIMETYPE(VIDEO_WEBM) ||
       aType.Type() == MEDIAMIMETYPE(AUDIO_WEBM)) {
-    return new WebMContainerParser(aType);
+    return MakeUnique<WebMContainerParser>(aType);
   }
 
 #ifdef MOZ_FMP4
   if (aType.Type() == MEDIAMIMETYPE(VIDEO_MP4) ||
       aType.Type() == MEDIAMIMETYPE(AUDIO_MP4)) {
-    return new MP4ContainerParser(aType);
+    return MakeUnique<MP4ContainerParser>(aType);
   }
   if (aType.Type() == MEDIAMIMETYPE("audio/aac")) {
-    return new ADTSContainerParser(aType);
+    return MakeUnique<ADTSContainerParser>(aType);
   }
 #endif
 
-  return new ContainerParser(aType);
+  return MakeUnique<ContainerParser>(aType);
 }
 
 #undef MSE_DEBUG

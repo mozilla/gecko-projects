@@ -134,6 +134,13 @@ the fully qualified namespace. That is, to use ``Foo::Bar`` do not
 write ``using namespace Foo; using namespace Bar;``, write
 ``using namespace Foo::Bar;``
 
+Use nested namespaces (ex: ``namespace mozilla::widget {``
+
+.. note::
+
+   clang-tidy provides the ``modernize-concat-nested-namespaces``
+   check with autofixes.
+
 
 Anonymous namespaces
 ~~~~~~~~~~~~~~~~~~~~
@@ -159,7 +166,7 @@ C++ classes
    };
 
    class MyClass
-     : public X 
+     : public X
      , public Y
    {
    public:
@@ -365,8 +372,12 @@ C/C++ practices
 -  Include guards are named per the Google coding style and should not
    include a leading ``MOZ_`` or ``MOZILLA_``. For example
    ``dom/media/foo.h`` would use the guard ``DOM_MEDIA_FOO_H_``.
+-  Avoid the usage of ``typedef``, instead, please use ``using`` instead.
 
+.. note::
 
+   For parts of this rule, clang-tidy provides the ``modernize-use-using``
+   check with autofixes.
 
 
 COM and pointers
@@ -485,7 +496,7 @@ explicitly mark the return value should always be checked. For example:
    create();
 
    // for C++, add this in *declaration*, do not add it again in implementation.
-   MOZ_MUST_USE nsresult
+   [[nodiscard]] nsresult
    DoSomething();
 
 There are some exceptions:
@@ -500,7 +511,7 @@ There are some exceptions:
    SomeMap::GetValue(const nsString& key, nsString& value);
 
 If most callers need to check the output value first, then adding
-``MOZ_MUST_USE`` might be too verbose. In this case, change the return value
+``[[nodiscard]]`` might be too verbose. In this case, change the return value
 to void might be a reasonable choice.
 
 There is also a static analysis attribute ``MOZ_MUST_USE_TYPE``, which can

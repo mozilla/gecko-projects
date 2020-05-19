@@ -20,7 +20,7 @@
 #include "gc/ZoneAllocator.h"
 #include "js/GCHashTable.h"
 #include "vm/AtomsTable.h"
-#include "vm/JSScript.h"
+#include "vm/JSFunction.h"
 #include "vm/TypeInference.h"
 
 namespace js {
@@ -180,8 +180,7 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   js::WriteOnceData<bool> isSystemZone_;
 
   enum class HelperThreadUse : uint32_t { None, Pending, Active };
-  mozilla::Atomic<HelperThreadUse, mozilla::SequentiallyConsistent,
-                  mozilla::recordreplay::Behavior::DontPreserve>
+  mozilla::Atomic<HelperThreadUse, mozilla::SequentiallyConsistent>
       helperThreadUse_;
 
   // The helper thread context with exclusive access to this zone, if
@@ -231,9 +230,7 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   js::ZoneOrGCTaskData<js::gc::UniqueIdMap> uniqueIds_;
 
   // Number of allocations since the most recent minor GC for this thread.
-  mozilla::Atomic<uint32_t, mozilla::Relaxed,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      tenuredAllocsSinceMinorGC_;
+  mozilla::Atomic<uint32_t, mozilla::Relaxed> tenuredAllocsSinceMinorGC_;
 
   // Live weakmaps in this zone.
   js::ZoneOrGCTaskData<mozilla::LinkedList<js::WeakMapBase>> gcWeakMapList_;
@@ -322,9 +319,15 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
       js::Vector<js::AccessorShape*, 0, js::SystemAllocPolicy>;
   js::ZoneData<NurseryShapeVector> nurseryShapes_;
 
-  // A map from finalization group targets to a list of finalization records
-  // representing groups that the target is registered with and their associated
-  // held values.
+  // The set of all finalization registries in this zone.
+  using FinalizationRegistrySet =
+      GCHashSet<js::HeapPtrObject, js::MovableCellHasher<js::HeapPtrObject>,
+                js::ZoneAllocPolicy>;
+  js::ZoneOrGCTaskData<FinalizationRegistrySet> finalizationRegistries_;
+
+  // A map from finalization registry targets to a list of finalization records
+  // representing registries that the target is registered with and their
+  // associated held values.
   using FinalizationRecordMap =
       GCHashMap<js::HeapPtrObject, js::gc::FinalizationRecordVector,
                 js::MovableCellHasher<js::HeapPtrObject>, js::ZoneAllocPolicy>;
@@ -547,12 +550,24 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
     weakCaches().insertBack(cachep);
   }
 
+  void delegatePreWriteBarrier(JSObject* obj, JSObject* delegate) {
+    if (needsIncrementalBarrier()) {
+      delegatePreWriteBarrierInternal(obj, delegate);
+    }
+  }
+
+  void delegatePreWriteBarrierInternal(JSObject* obj, JSObject* delegate);
   js::gc::WeakKeyTable& gcWeakKeys() { return gcWeakKeys_.ref(); }
   js::gc::WeakKeyTable& gcNurseryWeakKeys() { return gcNurseryWeakKeys_.ref(); }
 
+  js::gc::WeakKeyTable& gcWeakKeys(const js::gc::Cell* cell) {
+    return cell->isTenured() ? gcWeakKeys() : gcNurseryWeakKeys();
+  }
+
   // Perform all pending weakmap entry marking for this zone after
   // transitioning to weak marking mode.
-  void enterWeakMarkingMode(js::GCMarker* marker);
+  js::gc::IncrementalProgress enterWeakMarkingMode(js::GCMarker* marker,
+                                                   js::SliceBudget& budget);
   void checkWeakMarkingMode();
 
   // A set of edges from this zone to other zones used during GC to calculate
@@ -687,6 +702,10 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   bool isQueuedForBackgroundSweep() { return isOnList(); }
 
   void sweepWeakKeysAfterMinorGC();
+
+  FinalizationRegistrySet& finalizationRegistries() {
+    return finalizationRegistries_.ref();
+  }
 
   FinalizationRecordMap& finalizationRecordMap() {
     return finalizationRecordMap_.ref();

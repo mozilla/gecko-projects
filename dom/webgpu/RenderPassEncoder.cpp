@@ -12,7 +12,8 @@
 namespace mozilla {
 namespace webgpu {
 
-GPU_IMPL_CYCLE_COLLECTION(RenderPassEncoder, mParent)
+GPU_IMPL_CYCLE_COLLECTION(RenderPassEncoder, mParent, mUsedBindGroups,
+                          mUsedBuffers, mUsedPipelines, mUsedTextureViews)
 GPU_IMPL_JS_WRAP(RenderPassEncoder)
 
 ffi::WGPULoadOp ConvertLoadOp(const dom::GPULoadOp& aOp) {
@@ -76,6 +77,8 @@ ffi::WGPURawPass BeginRenderPass(RawId aEncoderId,
              WGPUMAX_COLOR_TARGETS>
       colorDescs = {};
   desc.color_attachments = colorDescs.data();
+  desc.color_attachments_length = aDesc.mColorAttachments.Length();
+
   for (size_t i = 0; i < aDesc.mColorAttachments.Length(); ++i) {
     const auto& ca = aDesc.mColorAttachments[i];
     ffi::WGPURenderPassColorAttachmentDescriptor& cd = colorDescs[i];
@@ -83,7 +86,7 @@ ffi::WGPURawPass BeginRenderPass(RawId aEncoderId,
     cd.store_op = ConvertStoreOp(ca.mStoreOp);
 
     if (ca.mResolveTarget.WasPassed()) {
-      cd.resolve_target = &ca.mResolveTarget.Value().mId;
+      cd.resolve_target = ca.mResolveTarget.Value().mId;
     }
     if (ca.mLoadValue.IsGPULoadOp()) {
       cd.load_op = ConvertLoadOp(ca.mLoadValue.GetAsGPULoadOp());
@@ -105,8 +108,7 @@ ffi::WGPURawPass BeginRenderPass(RawId aEncoderId,
         }
       }
       if (ca.mLoadValue.IsGPUColorDict()) {
-        cd.clear_color =
-            ConvertColor(ca.mLoadValue.GetAsGPUColorDict());
+        cd.clear_color = ConvertColor(ca.mLoadValue.GetAsGPUColorDict());
       }
     }
   }
@@ -116,7 +118,15 @@ ffi::WGPURawPass BeginRenderPass(RawId aEncoderId,
 
 RenderPassEncoder::RenderPassEncoder(CommandEncoder* const aParent,
                                      const dom::GPURenderPassDescriptor& aDesc)
-    : ChildOf(aParent), mRaw(BeginRenderPass(aParent->mId, aDesc)) {}
+    : ChildOf(aParent), mRaw(BeginRenderPass(aParent->mId, aDesc)) {
+  for (const auto& at : aDesc.mColorAttachments) {
+    mUsedTextureViews.AppendElement(at.mAttachment);
+  }
+  if (aDesc.mDepthStencilAttachment.WasPassed()) {
+    mUsedTextureViews.AppendElement(
+        aDesc.mDepthStencilAttachment.Value().mAttachment);
+  }
+}
 
 RenderPassEncoder::~RenderPassEncoder() {
   if (mValid) {
@@ -129,6 +139,7 @@ void RenderPassEncoder::SetBindGroup(
     uint32_t aSlot, const BindGroup& aBindGroup,
     const dom::Sequence<uint32_t>& aDynamicOffsets) {
   if (mValid) {
+    mUsedBindGroups.AppendElement(&aBindGroup);
     ffi::wgpu_render_pass_set_bind_group(&mRaw, aSlot, aBindGroup.mId,
                                          aDynamicOffsets.Elements(),
                                          aDynamicOffsets.Length());
@@ -137,23 +148,25 @@ void RenderPassEncoder::SetBindGroup(
 
 void RenderPassEncoder::SetPipeline(const RenderPipeline& aPipeline) {
   if (mValid) {
+    mUsedPipelines.AppendElement(&aPipeline);
     ffi::wgpu_render_pass_set_pipeline(&mRaw, aPipeline.mId);
   }
 }
 
-void RenderPassEncoder::SetIndexBuffer(const Buffer& aBuffer,
-                                       uint64_t aOffset) {
+void RenderPassEncoder::SetIndexBuffer(const Buffer& aBuffer, uint64_t aOffset,
+                                       uint64_t aSize) {
   if (mValid) {
-    ffi::wgpu_render_pass_set_index_buffer(&mRaw, aBuffer.mId, aOffset);
+    mUsedBuffers.AppendElement(&aBuffer);
+    ffi::wgpu_render_pass_set_index_buffer(&mRaw, aBuffer.mId, aOffset, aSize);
   }
 }
 
 void RenderPassEncoder::SetVertexBuffer(uint32_t aSlot, const Buffer& aBuffer,
-                                        uint64_t aOffset) {
+                                        uint64_t aOffset, uint64_t aSize) {
   if (mValid) {
-    // TODO: change the Rust API to use a single vertex buffer?
-    ffi::wgpu_render_pass_set_vertex_buffers(&mRaw, aSlot, &aBuffer.mId,
-                                             &aOffset, 1);
+    mUsedBuffers.AppendElement(&aBuffer);
+    ffi::wgpu_render_pass_set_vertex_buffer(&mRaw, aSlot, aBuffer.mId, aOffset,
+                                            aSize);
   }
 }
 

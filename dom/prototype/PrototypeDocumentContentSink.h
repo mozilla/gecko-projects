@@ -72,7 +72,7 @@ class PrototypeDocumentContentSink final : public nsIStreamLoaderObserver,
   NS_IMETHOD WillInterrupt(void) override { return NS_OK; };
   NS_IMETHOD WillResume(void) override { return NS_OK; };
   NS_IMETHOD SetParser(nsParserBase* aParser) override;
-  virtual void InitialDocumentTranslationCompleted() override;
+  virtual void InitialTranslationCompleted() override;
   virtual void FlushPendingNotifications(FlushType aType) override{};
   virtual void SetDocumentCharset(NotNull<const Encoding*> aEncoding) override;
   virtual nsISupports* GetTarget() override;
@@ -105,7 +105,6 @@ class PrototypeDocumentContentSink final : public nsIStreamLoaderObserver,
   RefPtr<nsParserBase> mParser;
   nsCOMPtr<nsIURI> mDocumentURI;
   RefPtr<Document> mDocument;
-  RefPtr<nsNodeInfoManager> mNodeInfoManager;
   RefPtr<ScriptLoader> mScriptLoader;
 
   PrototypeDocumentContentSink* mNextSrcLoadWaiter;  // [OWNER] but not COMPtr
@@ -215,7 +214,7 @@ class PrototypeDocumentContentSink final : public nsIStreamLoaderObserver,
    * Note that the resulting content node is not bound to any tree
    */
   nsresult CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
-                                      Element** aResult, bool aIsRoot);
+                                      Element** aResult, nsIContent* aParent);
   /**
    * Prepare to walk the current prototype.
    */

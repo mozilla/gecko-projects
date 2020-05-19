@@ -24,8 +24,8 @@
 #include "mozilla/dom/PBackgroundFileHandleChild.h"
 #include "mozilla/dom/PBackgroundFileRequestChild.h"
 #include "mozilla/dom/PBackgroundMutableFileChild.h"
+#include "mozilla/InitializedOnce.h"
 #include "mozilla/UniquePtr.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 
@@ -63,18 +63,18 @@ struct CloneInfo;
 }  // namespace dom
 }  // namespace mozilla
 
-DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::indexedDB::CloneInfo)
+MOZ_DECLARE_RELOCATE_USING_MOVE_CONSTRUCTOR(mozilla::dom::indexedDB::CloneInfo)
 
 namespace mozilla {
 namespace dom {
 namespace indexedDB {
 
 class ThreadLocal {
-  friend class nsAutoPtr<ThreadLocal>;
+  friend class DefaultDelete<ThreadLocal>;
   friend IDBFactory;
 
   LoggingInfo mLoggingInfo;
-  IDBTransaction* mCurrentTransaction;
+  Maybe<IDBTransaction&> mCurrentTransaction;
   nsCString mLoggingIdString;
 
   NS_DECL_OWNINGTHREAD
@@ -123,13 +123,13 @@ class ThreadLocal {
     return mLoggingInfo.nextRequestSerialNumber()++;
   }
 
-  void SetCurrentTransaction(IDBTransaction* aCurrentTransaction) {
+  void SetCurrentTransaction(Maybe<IDBTransaction&> aCurrentTransaction) {
     AssertIsOnOwningThread();
 
     mCurrentTransaction = aCurrentTransaction;
   }
 
-  IDBTransaction* GetCurrentTransaction() const {
+  Maybe<IDBTransaction&> MaybeCurrentTransactionRef() const {
     AssertIsOnOwningThread();
 
     return mCurrentTransaction;
@@ -144,25 +144,30 @@ class BackgroundFactoryChild final : public PBackgroundIDBFactoryChild {
   friend class mozilla::ipc::BackgroundChildImpl;
   friend IDBFactory;
 
+  // TODO: This long-lived raw pointer is very suspicious, in particular as it
+  // is used in BackgroundDatabaseChild::EnsureDOMObject to reacquire a strong
+  // reference. What ensures it is kept alive, and why can't we store a strong
+  // reference here?
   IDBFactory* mFactory;
 
-  NS_DECL_OWNINGTHREAD
-
  public:
+  NS_INLINE_DECL_REFCOUNTING(BackgroundFactoryChild, override)
+
   void AssertIsOnOwningThread() const {
     NS_ASSERT_OWNINGTHREAD(BackgroundFactoryChild);
   }
 
-  IDBFactory* GetDOMObject() const {
+  IDBFactory& GetDOMObject() const {
     AssertIsOnOwningThread();
-    return mFactory;
+    MOZ_ASSERT(mFactory);
+    return *mFactory;
   }
 
   bool SendDeleteMe() = delete;
 
  private:
   // Only created by IDBFactory.
-  explicit BackgroundFactoryChild(IDBFactory* aFactory);
+  explicit BackgroundFactoryChild(IDBFactory& aFactory);
 
   // Only destroyed by mozilla::ipc::BackgroundChildImpl.
   ~BackgroundFactoryChild();
@@ -221,7 +226,7 @@ class BackgroundFactoryRequestChild final
   friend class PermissionRequestChild;
   friend class PermissionRequestParent;
 
-  const RefPtr<IDBFactory> mFactory;
+  const SafeRefPtr<IDBFactory> mFactory;
 
   // Normally when opening of a database is successful, we receive a database
   // actor in request response, so we can use it to call ReleaseDOMObject()
@@ -244,7 +249,7 @@ class BackgroundFactoryRequestChild final
 
  private:
   // Only created by IDBFactory.
-  BackgroundFactoryRequestChild(IDBFactory* aFactory,
+  BackgroundFactoryRequestChild(SafeRefPtr<IDBFactory> aFactory,
                                 IDBOpenDBRequest* aOpenRequest,
                                 bool aIsDeleteOp, uint64_t aRequestedVersion);
 
@@ -267,9 +272,9 @@ class BackgroundFactoryRequestChild final
       const FactoryRequestResponse& aResponse);
 
   mozilla::ipc::IPCResult RecvPermissionChallenge(
-      const PrincipalInfo& aPrincipalInfo);
+      PrincipalInfo&& aPrincipalInfo);
 
-  mozilla::ipc::IPCResult RecvBlocked(const uint64_t& aCurrentVersion);
+  mozilla::ipc::IPCResult RecvBlocked(uint64_t aCurrentVersion);
 };
 
 class BackgroundDatabaseChild final : public PBackgroundIDBDatabaseChild {
@@ -333,32 +338,24 @@ class BackgroundDatabaseChild final : public PBackgroundIDBDatabaseChild {
   bool DeallocPBackgroundIDBDatabaseRequestChild(
       PBackgroundIDBDatabaseRequestChild* aActor);
 
-  PBackgroundIDBTransactionChild* AllocPBackgroundIDBTransactionChild(
-      const nsTArray<nsString>& aObjectStoreNames, const Mode& aMode);
-
-  bool DeallocPBackgroundIDBTransactionChild(
-      PBackgroundIDBTransactionChild* aActor);
-
-  PBackgroundIDBVersionChangeTransactionChild*
-  AllocPBackgroundIDBVersionChangeTransactionChild(
-      const uint64_t& aCurrentVersion, const uint64_t& aRequestedVersion,
-      const int64_t& aNextObjectStoreId, const int64_t& aNextIndexId);
+  already_AddRefed<PBackgroundIDBVersionChangeTransactionChild>
+  AllocPBackgroundIDBVersionChangeTransactionChild(uint64_t aCurrentVersion,
+                                                   uint64_t aRequestedVersion,
+                                                   int64_t aNextObjectStoreId,
+                                                   int64_t aNextIndexId);
 
   mozilla::ipc::IPCResult RecvPBackgroundIDBVersionChangeTransactionConstructor(
       PBackgroundIDBVersionChangeTransactionChild* aActor,
       const uint64_t& aCurrentVersion, const uint64_t& aRequestedVersion,
       const int64_t& aNextObjectStoreId, const int64_t& aNextIndexId) override;
 
-  bool DeallocPBackgroundIDBVersionChangeTransactionChild(
-      PBackgroundIDBVersionChangeTransactionChild* aActor);
-
   PBackgroundMutableFileChild* AllocPBackgroundMutableFileChild(
       const nsString& aName, const nsString& aType);
 
   bool DeallocPBackgroundMutableFileChild(PBackgroundMutableFileChild* aActor);
 
-  mozilla::ipc::IPCResult RecvVersionChange(const uint64_t& aOldVersion,
-                                            const Maybe<uint64_t>& aNewVersion);
+  mozilla::ipc::IPCResult RecvVersionChange(uint64_t aOldVersion,
+                                            Maybe<uint64_t> aNewVersion);
 
   mozilla::ipc::IPCResult RecvInvalidate();
 
@@ -398,12 +395,12 @@ class BackgroundTransactionBase {
   // mTemporaryStrongTransaction is strong and is only valid until the end of
   // NoteComplete() member function or until the NoteActorDestroyed() member
   // function is called.
-  RefPtr<IDBTransaction> mTemporaryStrongTransaction;
+  SafeRefPtr<IDBTransaction> mTemporaryStrongTransaction;
 
  protected:
   // mTransaction is weak and is valid until the NoteActorDestroyed() member
   // function is called.
-  IDBTransaction* mTransaction;
+  IDBTransaction* mTransaction = nullptr;
 
  public:
 #ifdef DEBUG
@@ -418,10 +415,11 @@ class BackgroundTransactionBase {
   }
 
  protected:
-  BackgroundTransactionBase();
-  explicit BackgroundTransactionBase(IDBTransaction* aTransaction);
+  MOZ_COUNTED_DEFAULT_CTOR(BackgroundTransactionBase);
 
-  virtual ~BackgroundTransactionBase();
+  explicit BackgroundTransactionBase(SafeRefPtr<IDBTransaction> aTransaction);
+
+  MOZ_COUNTED_DTOR_VIRTUAL(BackgroundTransactionBase);
 
   void NoteActorDestroyed();
 
@@ -429,7 +427,7 @@ class BackgroundTransactionBase {
 
  private:
   // Only called by BackgroundVersionChangeTransactionChild.
-  void SetDOMTransaction(IDBTransaction* aTransaction);
+  void SetDOMTransaction(SafeRefPtr<IDBTransaction> aTransaction);
 };
 
 class BackgroundTransactionChild final : public BackgroundTransactionBase,
@@ -438,6 +436,8 @@ class BackgroundTransactionChild final : public BackgroundTransactionBase,
   friend IDBDatabase;
 
  public:
+  NS_INLINE_DECL_REFCOUNTING(BackgroundTransactionChild, override)
+
 #ifdef DEBUG
   void AssertIsOnOwningThread() const override;
 #endif
@@ -448,7 +448,7 @@ class BackgroundTransactionChild final : public BackgroundTransactionBase,
 
  private:
   // Only created by IDBDatabase.
-  explicit BackgroundTransactionChild(IDBTransaction* aTransaction);
+  explicit BackgroundTransactionChild(SafeRefPtr<IDBTransaction> aTransaction);
 
   // Only destroyed by BackgroundDatabaseChild.
   ~BackgroundTransactionChild();
@@ -457,7 +457,7 @@ class BackgroundTransactionChild final : public BackgroundTransactionBase,
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult RecvComplete(const nsresult& aResult);
+  mozilla::ipc::IPCResult RecvComplete(nsresult aResult);
 
   PBackgroundIDBRequestChild* AllocPBackgroundIDBRequestChild(
       const RequestParams& aParams);
@@ -478,6 +478,8 @@ class BackgroundVersionChangeTransactionChild final
   IDBOpenDBRequest* mOpenDBRequest;
 
  public:
+  NS_INLINE_DECL_REFCOUNTING(BackgroundVersionChangeTransactionChild, override)
+
 #ifdef DEBUG
   void AssertIsOnOwningThread() const override;
 #endif
@@ -495,15 +497,13 @@ class BackgroundVersionChangeTransactionChild final
   ~BackgroundVersionChangeTransactionChild();
 
   // Only called by BackgroundDatabaseChild.
-  void SetDOMTransaction(IDBTransaction* aDOMObject) {
-    BackgroundTransactionBase::SetDOMTransaction(aDOMObject);
-  }
+  using BackgroundTransactionBase::SetDOMTransaction;
 
  public:
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult RecvComplete(const nsresult& aResult);
+  mozilla::ipc::IPCResult RecvComplete(nsresult aResult);
 
   PBackgroundIDBRequestChild* AllocPBackgroundIDBRequestChild(
       const RequestParams& aParams);
@@ -573,7 +573,7 @@ class BackgroundRequestChild final : public BackgroundRequestChildBase,
 
   class PreprocessHelper;
 
-  RefPtr<IDBTransaction> mTransaction;
+  SafeRefPtr<IDBTransaction> mTransaction;
   nsTArray<CloneInfo> mCloneInfos;
   uint32_t mRunningPreprocessHelpers;
   uint32_t mCurrentCloneDataIndex;
@@ -603,10 +603,9 @@ class BackgroundRequestChild final : public BackgroundRequestChildBase,
 
   void HandleResponse(const nsTArray<Key>& aResponse);
 
-  void HandleResponse(const SerializedStructuredCloneReadInfo& aResponse);
+  void HandleResponse(SerializedStructuredCloneReadInfo&& aResponse);
 
-  void HandleResponse(
-      const nsTArray<SerializedStructuredCloneReadInfo>& aResponse);
+  void HandleResponse(nsTArray<SerializedStructuredCloneReadInfo>&& aResponse);
 
   void HandleResponse(JS::Handle<JS::Value> aResponse);
 
@@ -619,11 +618,15 @@ class BackgroundRequestChild final : public BackgroundRequestChildBase,
   nsresult HandlePreprocessInternal(
       const nsTArray<PreprocessInfo>& aPreprocessInfos);
 
+  SafeRefPtr<IDBTransaction> AcquireTransaction() const {
+    return mTransaction.clonePtr();
+  }
+
  public:
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult Recv__delete__(const RequestResponse& aResponse);
+  mozilla::ipc::IPCResult Recv__delete__(RequestResponse&& aResponse);
 
   mozilla::ipc::IPCResult RecvPreprocess(const PreprocessParams& aParams);
 };
@@ -637,8 +640,8 @@ class BackgroundCursorChildBase : public PBackgroundIDBCursorChild {
  private:
   NS_DECL_OWNINGTHREAD
  protected:
-  InitializedOnceMustBeTrue<IDBRequest* const> mRequest;
-  IDBTransaction* mTransaction;
+  InitializedOnce<const NotNull<IDBRequest*>> mRequest;
+  Maybe<IDBTransaction&> mTransaction;
 
   // These are only set while a request is in progress.
   RefPtr<IDBRequest> mStrongRequest;
@@ -669,20 +672,20 @@ class BackgroundCursorChildBase : public PBackgroundIDBCursorChild {
 
   virtual void SendDeleteMeInternal() = 0;
 
-  virtual mozilla::ipc::IPCResult RecvResponse(
-      const CursorResponse& aResponse) = 0;
+  virtual mozilla::ipc::IPCResult RecvResponse(CursorResponse&& aResponse) = 0;
 };
 
 template <IDBCursorType CursorType>
 class BackgroundCursorChild final : public BackgroundCursorChildBase {
  public:
   using SourceType = CursorSourceType<CursorType>;
+  using ResponseType = typename CursorTypeTraits<CursorType>::ResponseType;
 
  private:
   friend class BackgroundTransactionChild;
   friend class BackgroundVersionChangeTransactionChild;
 
-  InitializedOnceMustBeTrue<SourceType* const> mSource;
+  InitializedOnce<const NotNull<SourceType*>> mSource;
   IDBCursorImpl<CursorType>* mCursor;
 
   std::deque<CursorData<CursorType>> mCachedResponses, mDelayedResponses;
@@ -719,28 +722,21 @@ class BackgroundCursorChild final : public BackgroundCursorChildBase {
 
   void HandleResponse(const void_t& aResponse);
 
-  void HandleResponse(const nsTArray<ObjectStoreCursorResponse>& aResponses);
+  void HandleResponse(nsTArray<ResponseType>&& aResponses);
 
-  void HandleResponse(const nsTArray<ObjectStoreKeyCursorResponse>& aResponses);
-
-  void HandleResponse(const nsTArray<IndexCursorResponse>& aResponses);
-
-  template <typename T, typename Func>
-  void HandleMultipleCursorResponses(const nsTArray<T>& aResponses,
+  template <typename Func>
+  void HandleMultipleCursorResponses(nsTArray<ResponseType>&& aResponses,
                                      const Func& aHandleRecord);
 
-  void HandleResponse(const nsTArray<IndexKeyCursorResponse>& aResponses);
-
   template <typename... Args>
-  MOZ_MUST_USE RefPtr<IDBCursor> HandleIndividualCursorResponse(
+  [[nodiscard]] RefPtr<IDBCursor> HandleIndividualCursorResponse(
       bool aUseAsCurrentResult, Args&&... aArgs);
 
  public:
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult RecvResponse(
-      const CursorResponse& aResponse) override;
+  mozilla::ipc::IPCResult RecvResponse(CursorResponse&& aResponse) override;
 
   // Force callers to use SendContinueInternal.
   bool SendContinue(const CursorRequestParams& aParams, const Key& aCurrentKey,
@@ -789,7 +785,7 @@ class BackgroundFileHandleChild : public PBackgroundFileHandleChild {
   // IPDL methods are only called by IPDL.
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  mozilla::ipc::IPCResult RecvComplete(const bool& aAborted);
+  mozilla::ipc::IPCResult RecvComplete(bool aAborted);
 
   PBackgroundFileRequestChild* AllocPBackgroundFileRequestChild(
       const FileRequestParams& aParams);
@@ -835,8 +831,8 @@ class BackgroundFileRequestChild final : public PBackgroundFileRequestChild {
 
   mozilla::ipc::IPCResult Recv__delete__(const FileRequestResponse& aResponse);
 
-  mozilla::ipc::IPCResult RecvProgress(const uint64_t& aProgress,
-                                       const uint64_t& aProgressMax);
+  mozilla::ipc::IPCResult RecvProgress(uint64_t aProgress,
+                                       uint64_t aProgressMax);
 };
 
 class BackgroundUtilsChild final : public PBackgroundIndexedDBUtilsChild {

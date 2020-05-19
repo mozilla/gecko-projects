@@ -37,7 +37,6 @@ const whitelist = {
 
     // Session store
     "resource:///modules/sessionstore/ContentSessionStore.jsm",
-    "resource://gre/modules/sessionstore/SessionHistory.jsm",
 
     // Browser front-end
     "resource:///actors/AboutReaderChild.jsm",
@@ -45,7 +44,6 @@ const whitelist = {
     "resource:///actors/LinkHandlerChild.jsm",
     "resource:///actors/SearchTelemetryChild.jsm",
     "resource://gre/actors/AutoCompleteChild.jsm",
-    "resource://gre/modules/ActorChild.jsm",
     "resource://gre/modules/ActorManagerChild.jsm",
     "resource://gre/modules/E10SUtils.jsm",
     "resource://gre/modules/Readerable.jsm",
@@ -74,7 +72,6 @@ const whitelist = {
     "resource:///modules/ContentObservers.js",
     "resource://gre/modules/extensionProcessScriptLoader.js",
     "resource://devtools/client/jsonview/converter-observer.js",
-    "resource://gre/modules/WebRequestContent.js",
   ]),
 };
 
@@ -85,6 +82,9 @@ const intermittently_loaded_whitelist = {
   modules: new Set([
     "resource://gre/modules/nsAsyncShutdown.jsm",
     "resource://gre/modules/sessionstore/Utils.jsm",
+
+    // Session store.
+    "resource://gre/modules/sessionstore/SessionHistory.jsm",
 
     "resource://specialpowers/SpecialPowersChild.jsm",
     "resource://specialpowers/WrapPrivileged.jsm",

@@ -4,7 +4,8 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = ["AboutLoginsParent"];
+// _AboutLogins is only exported for testing
+var EXPORTED_SYMBOLS = ["AboutLoginsParent", "_AboutLogins"];
 
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
@@ -16,6 +17,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   LoginBreaches: "resource:///modules/LoginBreaches.jsm",
   LoginHelper: "resource://gre/modules/LoginHelper.jsm",
   MigrationUtils: "resource:///modules/MigrationUtils.jsm",
+  OSKeyStore: "resource://gre/modules/OSKeyStore.jsm",
   Services: "resource://gre/modules/Services.jsm",
   UIState: "resource://services-sync/UIState.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
@@ -36,6 +38,21 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "identity.fxaccounts.enabled",
   false
 );
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "OS_AUTH_ENABLED",
+  "signon.management.page.os-auth.enabled",
+  true
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "VULNERABLE_PASSWORDS_ENABLED",
+  "signon.management.page.vulnerable-passwords.enabled",
+  false
+);
+XPCOMUtils.defineLazyGetter(this, "AboutLoginsL10n", () => {
+  return new Localization(["branding/brand.ftl", "browser/aboutLogins.ftl"]);
+});
 
 const ABOUT_LOGINS_ORIGIN = "about:logins";
 const MASTER_PASSWORD_NOTIFICATION_ID = "master-password-login-required";
@@ -197,11 +214,7 @@ class AboutLoginsParent extends JSWindowActorParent {
       EXPECTED_ABOUTLOGINS_REMOTE_TYPE
     ) {
       throw new Error(
-        `AboutLoginsParent: Received ${
-          message.name
-        } message the remote type didn't match expectations: ${
-          this.browsingContext.embedderElement.remoteType
-        } == ${EXPECTED_ABOUTLOGINS_REMOTE_TYPE}`
+        `AboutLoginsParent: Received ${message.name} message the remote type didn't match expectations: ${this.browsingContext.embedderElement.remoteType} == ${EXPECTED_ABOUTLOGINS_REMOTE_TYPE}`
       );
     }
 
@@ -236,17 +249,6 @@ class AboutLoginsParent extends JSWindowActorParent {
       case "AboutLogins:DeleteLogin": {
         let login = LoginHelper.vanillaObjectToLogin(message.data.login);
         Services.logins.removeLogin(login);
-        break;
-      }
-      case "AboutLogins:DismissBreachAlert": {
-        const login = message.data.login;
-
-        await LoginBreaches.recordDismissal(login.guid);
-        const logins = await AboutLogins.getAllLogins();
-        const breachesByLoginGUID = await LoginBreaches.getPotentialBreachesByLoginGUID(
-          logins
-        );
-        this.sendAsyncMessage("AboutLogins:SetBreaches", breachesByLoginGUID);
         break;
       }
       case "AboutLogins:HideFooter": {
@@ -313,60 +315,117 @@ class AboutLoginsParent extends JSWindowActorParent {
         ownerGlobal.openPreferences("privacy-logins");
         break;
       }
-      case "AboutLogins:OpenSite": {
-        let guid = message.data.login.guid;
-        let logins = LoginHelper.searchLoginsWithObject({ guid });
-        if (logins.length != 1) {
-          log.warn(
-            `AboutLogins:OpenSite: expected to find a login for guid: ${guid} but found ${
-              logins.length
-            }`
-          );
-          return;
-        }
-
-        ownerGlobal.openWebLinkIn(logins[0].origin, "tab", {
-          relatedToCurrent: true,
-        });
-        break;
-      }
       case "AboutLogins:MasterPasswordRequest": {
-        // This does no harm if master password isn't set.
-        let tokendb = Cc["@mozilla.org/security/pk11tokendb;1"].createInstance(
-          Ci.nsIPK11TokenDB
-        );
-        let token = tokendb.getInternalKeyToken();
-
-        // If there is no master password, return as-if authentication succeeded.
-        if (token.checkPassword("")) {
-          this.sendAsyncMessage("AboutLogins:MasterPasswordResponse", true);
-          return;
+        let messageId = message.data;
+        if (!messageId) {
+          throw new Error(
+            "AboutLogins:MasterPasswordRequest: Message ID required for MasterPasswordRequest."
+          );
         }
 
-        // If a master password prompt is already open, just exit early and return false.
-        // The user can re-trigger it after responding to the already open dialog.
-        if (Services.logins.uiBusy) {
-          this.sendAsyncMessage("AboutLogins:MasterPasswordResponse", false);
-          return;
-        }
+        let loggedIn = false;
+        let telemetryEvent;
 
-        // So there's a master password. But since checkPassword didn't succeed, we're logged out (per nsIPK11Token.idl).
         try {
-          // Relogin and ask for the master password.
-          token.login(true); // 'true' means always prompt for token password. User will be prompted until
-          // clicking 'Cancel' or entering the correct password.
-        } catch (e) {
-          // An exception will be thrown if the user cancels the login prompt dialog.
-          // User is also logged out of Software Security Device.
-        }
+          // This does no harm if master password isn't set.
+          let tokendb = Cc[
+            "@mozilla.org/security/pk11tokendb;1"
+          ].createInstance(Ci.nsIPK11TokenDB);
+          let token = tokendb.getInternalKeyToken();
 
-        this.sendAsyncMessage(
-          "AboutLogins:MasterPasswordResponse",
-          token.isLoggedIn()
-        );
+          if (Date.now() < AboutLogins._authExpirationTime) {
+            loggedIn = true;
+            telemetryEvent = {
+              object: token.hasPassword ? "master_password" : "os_auth",
+              method: "reauthenticate",
+              value: "success_no_prompt",
+            };
+            return;
+          }
+
+          // Use the OS auth dialog if there is no master password
+          if (!token.hasPassword && !OS_AUTH_ENABLED) {
+            loggedIn = true;
+            telemetryEvent = {
+              object: "os_auth",
+              method: "reauthenticate",
+              value: "success_disabled",
+            };
+            return;
+          }
+          if (!token.hasPassword && OS_AUTH_ENABLED) {
+            let messageText = { value: "NOT SUPPORTED" };
+            let captionText = { value: "" };
+            // This feature is only supported on Windows and macOS
+            // but we still call in to OSKeyStore on Linux to get
+            // the proper auth_details for Telemetry.
+            // See bug 1614874 for Linux support.
+            if (OSKeyStore.canReauth()) {
+              messageId += "-" + AppConstants.platform;
+              [messageText, captionText] = await AboutLoginsL10n.formatMessages(
+                [
+                  {
+                    id: messageId,
+                  },
+                  {
+                    id: "about-logins-os-auth-dialog-caption",
+                  },
+                ]
+              );
+            }
+            let result = await OSKeyStore.ensureLoggedIn(
+              messageText.value,
+              captionText.value,
+              ownerGlobal,
+              false
+            );
+            loggedIn = result.authenticated;
+            telemetryEvent = {
+              object: "os_auth",
+              method: "reauthenticate",
+              value: result.auth_details,
+            };
+            return;
+          }
+          // Force a log-out of the Master Password.
+          token.checkPassword("");
+
+          // If a master password prompt is already open, just exit early and return false.
+          // The user can re-trigger it after responding to the already open dialog.
+          if (Services.logins.uiBusy) {
+            loggedIn = false;
+            return;
+          }
+
+          // So there's a master password. But since checkPassword didn't succeed, we're logged out (per nsIPK11Token.idl).
+          try {
+            // Relogin and ask for the master password.
+            token.login(true); // 'true' means always prompt for token password. User will be prompted until
+            // clicking 'Cancel' or entering the correct password.
+          } catch (e) {
+            // An exception will be thrown if the user cancels the login prompt dialog.
+            // User is also logged out of Software Security Device.
+          }
+          loggedIn = token.isLoggedIn();
+          telemetryEvent = {
+            object: "master_password",
+            method: "reauthenticate",
+            value: loggedIn ? "success" : "fail",
+          };
+        } finally {
+          if (loggedIn) {
+            const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+            AboutLogins._authExpirationTime = Date.now() + AUTH_TIMEOUT_MS;
+          }
+          this.sendAsyncMessage("AboutLogins:MasterPasswordResponse", {
+            result: loggedIn,
+            telemetryEvent,
+          });
+        }
         break;
       }
       case "AboutLogins:Subscribe": {
+        AboutLogins._authExpirationTime = Number.NEGATIVE_INFINITY;
         if (!AboutLogins._observersAdded) {
           Services.obs.addObserver(AboutLogins, "passwordmgr-crypto-login");
           Services.obs.addObserver(
@@ -404,12 +463,18 @@ class AboutLoginsParent extends JSWindowActorParent {
             playStoreBadgeLanguage,
           };
 
+          let selectedSort = Services.prefs.getCharPref(
+            "signon.management.page.sort",
+            "name"
+          );
+          if (selectedSort == "breached") {
+            // The "breached" value was used since Firefox 70 and
+            // replaced with "alerts" in Firefox 76.
+            selectedSort = "alerts";
+          }
           this.sendAsyncMessage("AboutLogins:Setup", {
             logins,
-            selectedSort: Services.prefs.getCharPref(
-              "signon.management.page.sort",
-              "name"
-            ),
+            selectedSort,
             syncState,
             selectedBadgeLanguages,
             masterPasswordEnabled: LoginHelper.isMasterPasswordSet(),
@@ -445,9 +510,7 @@ class AboutLoginsParent extends JSWindowActorParent {
         });
         if (logins.length != 1) {
           log.warn(
-            `AboutLogins:UpdateLogin: expected to find a login for guid: ${
-              loginUpdates.guid
-            } but found ${logins.length}`
+            `AboutLogins:UpdateLogin: expected to find a login for guid: ${loginUpdates.guid} but found ${logins.length}`
           );
           return;
         }
@@ -488,6 +551,7 @@ class AboutLoginsParent extends JSWindowActorParent {
 var AboutLogins = {
   _subscribers: new WeakSet(),
   _observersAdded: false,
+  _authExpirationTime: Number.NEGATIVE_INFINITY,
 
   async observe(subject, topic, type) {
     if (!ChromeUtils.nondeterministicGetWeakSetKeys(this._subscribers).length) {
@@ -523,14 +587,23 @@ var AboutLogins = {
         if (!login) {
           return;
         }
-        this.messageSubscribers("AboutLogins:LoginAdded", login);
 
         if (BREACH_ALERTS_ENABLED) {
           this.messageSubscribers(
             "AboutLogins:UpdateBreaches",
             await LoginBreaches.getPotentialBreachesByLoginGUID([login])
           );
+          if (VULNERABLE_PASSWORDS_ENABLED) {
+            this.messageSubscribers(
+              "AboutLogins:UpdateVulnerableLogins",
+              await LoginBreaches.getPotentiallyVulnerablePasswordsByLoginGUID([
+                login,
+              ])
+            );
+          }
         }
+
+        this.messageSubscribers("AboutLogins:LoginAdded", login);
         break;
       }
       case "modifyLogin": {
@@ -539,6 +612,30 @@ var AboutLogins = {
         if (!login) {
           return;
         }
+
+        if (BREACH_ALERTS_ENABLED) {
+          let breachesForThisLogin = await LoginBreaches.getPotentialBreachesByLoginGUID(
+            [login]
+          );
+          let breachData = breachesForThisLogin.size
+            ? breachesForThisLogin.get(login.guid)
+            : false;
+          this.messageSubscribers(
+            "AboutLogins:UpdateBreaches",
+            new Map([[login.guid, breachData]])
+          );
+          if (VULNERABLE_PASSWORDS_ENABLED) {
+            let vulnerablePasswordsForThisLogin = await LoginBreaches.getPotentiallyVulnerablePasswordsByLoginGUID(
+              [login]
+            );
+            let isLoginVulnerable = !!vulnerablePasswordsForThisLogin.size;
+            this.messageSubscribers(
+              "AboutLogins:UpdateVulnerableLogins",
+              new Map([[login.guid, isLoginVulnerable]])
+            );
+          }
+        }
+
         this.messageSubscribers("AboutLogins:LoginModified", login);
         break;
       }
@@ -774,6 +871,14 @@ var AboutLogins = {
         "AboutLogins:SetBreaches",
         await LoginBreaches.getPotentialBreachesByLoginGUID(logins)
       );
+      if (VULNERABLE_PASSWORDS_ENABLED) {
+        sendMessageFn(
+          "AboutLogins:SetVulnerableLogins",
+          await LoginBreaches.getPotentiallyVulnerablePasswordsByLoginGUID(
+            logins
+          )
+        );
+      }
     }
 
     sendMessageFn(
@@ -821,6 +926,7 @@ var AboutLogins = {
     this.updatePasswordSyncNotificationState(this.getSyncState(), latest);
   },
 };
+var _AboutLogins = AboutLogins;
 
 XPCOMUtils.defineLazyPreferenceGetter(
   this,

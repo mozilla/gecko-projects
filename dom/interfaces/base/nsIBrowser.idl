@@ -9,6 +9,7 @@ interface nsITransportSecurityInfo;
 interface nsIURI;
 interface nsIWebProgress;
 interface nsIReferrerInfo;
+interface nsIOpenWindowInfo;
 
 webidl FrameLoader;
 
@@ -23,6 +24,12 @@ interface nsIBrowser : nsISupports
    * they are loaded in the same process as the content.
    */
   readonly attribute FrameLoader sameProcessAsFrameLoader;
+
+  /**
+   * Gets the optional open window information provided by the window creation
+   * code and used to initialize a new browser.
+   */
+  attribute nsIOpenWindowInfo openWindowInfo;
 
   /*
    * Called by the child to inform the parent that links are dropped into
@@ -68,18 +75,6 @@ interface nsIBrowser : nsISupports
    * Will always be non-null when isRemoteBrowser is true.
    */
   readonly attribute nsIWebProgress remoteWebProgressManager;
-
-  /**
-   * Called by the child to inform the parent that a command update has occurred
-   * and the supplied set of commands are now enabled and disabled.
-   *
-   * @param action command updater action
-   * @param enabledCommands commands to enable
-   * @param disabledCommand commands to disable
-   */
-  void enableDisableCommandsRemoteOnly(in AString action,
-                                       in Array<ACString> enabledCommands,
-                                       in Array<ACString> disabledCommands);
 
   readonly attribute nsIPrincipal contentPrincipal;
   readonly attribute nsIPrincipal contentStoragePrincipal;
@@ -157,7 +152,6 @@ interface nsIBrowser : nsISupports
                                in AString aTitle,
                                in nsIPrincipal aContentPrincipal,
                                in nsIPrincipal aContentStoragePrincipal,
-                               in nsIPrincipal aContentBlockingAllowListPrincipal,
                                in nsIContentSecurityPolicy aCSP,
                                in nsIReferrerInfo aReferrerInfo,
                                in boolean aIsSynthetic,
@@ -179,4 +173,25 @@ interface nsIBrowser : nsISupports
   void updateSecurityUIForSecurityChange(in nsITransportSecurityInfo aSecurityInfo,
                                          in uint32_t aState,
                                          in boolean aIsSecureContext);
+
+  /**
+   * Called by Gecko when it wants to change the process which is currently
+   * being used to render content in this tab.
+   *
+   * Returns a promise which will be resolved with the ChildID of the new
+   * process.
+   *
+   * @param aRemoteType the new remote type to switch this browser into
+   * @param aPendingSwitchId unique identifier for the ongoing
+   *                         process-switching load
+   * @param aReplaceBrowsingContext if true, do not preserve the
+   *                                BrowsingContext loaded inside this
+   *                                browser after changing processes.
+   */
+  Promise performProcessSwitch(in AString aRemoteType,
+                               in uint64_t aPendingSwitchId,
+                               in boolean aReplaceBrowsingContext);
+
+  /** If `true`, this browser supports the `performProcessSwitch` method */
+  readonly attribute bool canPerformProcessSwitch;
 };

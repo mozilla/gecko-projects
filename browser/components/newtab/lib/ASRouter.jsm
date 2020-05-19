@@ -20,6 +20,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PanelTestProvider: "resource://activity-stream/lib/PanelTestProvider.jsm",
   ToolbarBadgeHub: "resource://activity-stream/lib/ToolbarBadgeHub.jsm",
   ToolbarPanelHub: "resource://activity-stream/lib/ToolbarPanelHub.jsm",
+  MomentsPageHub: "resource://activity-stream/lib/MomentsPageHub.jsm",
   ASRouterTargeting: "resource://activity-stream/lib/ASRouterTargeting.jsm",
   QueryCache: "resource://activity-stream/lib/ASRouterTargeting.jsm",
   ASRouterPreferences: "resource://activity-stream/lib/ASRouterPreferences.jsm",
@@ -34,6 +35,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Downloader: "resource://services-settings/Attachments.jsm",
   RemoteL10n: "resource://activity-stream/lib/RemoteL10n.jsm",
   MigrationUtils: "resource:///modules/MigrationUtils.jsm",
+  ExperimentAPI: "resource://messaging-system/experiments/ExperimentAPI.jsm",
 });
 XPCOMUtils.defineLazyServiceGetters(this, {
   BrowserHandler: ["@mozilla.org/browser/clh;1", "nsIBrowserHandler"],
@@ -137,9 +139,11 @@ const MessageLoaderUtils = {
   async _localJsonLoader(provider) {
     let payload;
     try {
-      payload = await (await fetch(provider.location, {
-        credentials: "omit",
-      })).json();
+      payload = await (
+        await fetch(provider.location, {
+          credentials: "omit",
+        })
+      ).json();
     } catch (e) {
       return [];
     }
@@ -211,7 +215,8 @@ const MessageLoaderUtils = {
       if (
         response &&
         response.ok &&
-        (response.status >= 200 && response.status < 400)
+        response.status >= 200 &&
+        response.status < 400
       ) {
         let jsonResponse;
         try {
@@ -332,6 +337,31 @@ const MessageLoaderUtils = {
     return RemoteSettings(bucket).get();
   },
 
+  async _experimentsAPILoader(provider, options) {
+    try {
+      await ExperimentAPI.ready();
+    } catch (e) {
+      MessageLoaderUtils.reportError(e);
+      return [];
+    }
+    return provider.messageGroups
+      .map(group => {
+        let experimentData;
+        try {
+          experimentData = ExperimentAPI.getExperiment({ group });
+        } catch (e) {
+          MessageLoaderUtils.reportError(e);
+          return [];
+        }
+        if (experimentData && experimentData.branch) {
+          return experimentData.branch.value;
+        }
+
+        return [];
+      })
+      .flat();
+  },
+
   _handleRemoteSettingsUndesiredEvent(event, providerId, dispatchToAS) {
     if (dispatchToAS) {
       dispatchToAS(
@@ -359,6 +389,8 @@ const MessageLoaderUtils = {
         return this._remoteSettingsLoader;
       case "json":
         return this._localJsonLoader;
+      case "remote-experiments":
+        return this._experimentsAPILoader;
       case "local":
       default:
         return this._localLoader;
@@ -389,9 +421,7 @@ const MessageLoaderUtils = {
       messages = [];
       MessageLoaderUtils.reportError(
         new Error(
-          `Tried to load messages for ${
-            provider.id
-          } but the result was not an Array.`
+          `Tried to load messages for ${provider.id} but the result was not an Array.`
         )
       );
     }
@@ -608,13 +638,13 @@ class _ASRouter {
       ...ASRouterPreferences.providers.filter(
         p =>
           p.enabled &&
-          (ASRouterPreferences.getUserPreference(p.id) !== false &&
-            // Provider is enabled or if provider has multiple categories
-            // check that at least one category is enabled
-            (!p.categories ||
-              p.categories.some(
-                c => ASRouterPreferences.getUserPreference(c) !== false
-              )))
+          ASRouterPreferences.getUserPreference(p.id) !== false &&
+          // Provider is enabled or if provider has multiple categories
+          // check that at least one category is enabled
+          (!p.categories ||
+            p.categories.some(
+              c => ASRouterPreferences.getUserPreference(c) !== false
+            ))
       ),
     ].map(_provider => {
       // make a copy so we don't modify the source of the pref
@@ -740,13 +770,19 @@ class _ASRouter {
       p =>
         p.id === "message-groups" && MessageLoaderUtils.shouldProviderUpdate(p)
     );
-    if (!provider) {
-      return;
+    let remoteMessages = [];
+    if (provider) {
+      const { messages } = await MessageLoaderUtils._loadDataForProvider(
+        provider,
+        {
+          storage: this._storage,
+          dispatchToAS: this.dispatchToAS,
+        }
+      );
+      if (messages && messages.length) {
+        remoteMessages = messages;
+      }
     }
-    let { messages } = await MessageLoaderUtils._loadDataForProvider(provider, {
-      storage: this._storage,
-      dispatchToAS: this.dispatchToAS,
-    });
     const providerGroups = this.state.providers.map(
       ({ id, frequency = null, enabled }) => {
         const defaultGroup = { id, enabled, type: "default" };
@@ -755,11 +791,11 @@ class _ASRouter {
         }
         const localGroup =
           LOCAL_GROUP_CONFIGURATIONS.find(g => g.id === id) || {};
-        const remoteGroup = messages.find(g => g.id === id) || {};
+        const remoteGroup = remoteMessages.find(g => g.id === id) || {};
         return { ...defaultGroup, ...localGroup, ...remoteGroup };
       }
     );
-    const messageGroups = messages
+    const messageGroups = remoteMessages
       .filter(m => !providerGroups.find(g => g.id === m.id))
       .map(remoteGroup => {
         const localGroup =
@@ -928,6 +964,12 @@ class _ASRouter {
       dispatch: this.dispatch,
       handleUserAction: this.handleUserAction,
     });
+    MomentsPageHub.init(this.waitForInitialized, {
+      handleMessageRequest: this.handleMessageRequest,
+      addImpression: this.addImpression,
+      blockMessageById: this.blockMessageById,
+      dispatch: this.dispatch,
+    });
 
     this._loadLocalProviders();
 
@@ -1001,6 +1043,7 @@ class _ASRouter {
     BookmarkPanelHub.uninit();
     ToolbarPanelHub.uninit();
     ToolbarBadgeHub.uninit();
+    MomentsPageHub.uninit();
 
     // Uninitialise all trigger listeners
     for (const listener of ASRouterTriggerListeners.values()) {
@@ -1335,14 +1378,28 @@ class _ASRouter {
           );
         }
         break;
+      case "cfr_urlbar_chiclet":
+        if (force) {
+          CFRPageActions.forceRecommendation(target, message, this.dispatch);
+        } else {
+          CFRPageActions.addRecommendation(
+            target,
+            null,
+            message,
+            this.dispatch
+          );
+        }
+        break;
       case "fxa_bookmark_panel":
         if (force) {
           BookmarkPanelHub._forceShowMessage(target, message);
         }
         break;
       case "toolbar_badge":
-      case "update_action":
         ToolbarBadgeHub.registerBadgeNotificationListener(message, { force });
+        break;
+      case "update_action":
+        MomentsPageHub.executeAction(message);
         break;
       case "milestone_message":
         CFRPageActions.showMilestone(target, message, this.dispatch, { force });
@@ -1595,6 +1652,10 @@ class _ASRouter {
     });
   }
 
+  async modifyMessageJson(content, target, force = true, action = {}) {
+    await this._sendMessageToTarget(content, target, action.data, force);
+  }
+
   async setMessageById(id, target, force = true, action = {}) {
     const newMessage = this.getMessageById(id);
 
@@ -1796,6 +1857,7 @@ class _ASRouter {
       providers.push({
         id: "preview",
         type: "remote",
+        enabled: true,
         url,
         updateCycleInMs: 0,
       });
@@ -1876,7 +1938,7 @@ class _ASRouter {
         break;
       case ra.OPEN_URL:
         target.browser.ownerGlobal.openLinkIn(
-          action.data.args,
+          Services.urlFormatter.formatURL(action.data.args),
           action.data.where || "current",
           {
             private: false,
@@ -1888,13 +1950,22 @@ class _ASRouter {
         );
         break;
       case ra.OPEN_ABOUT_PAGE:
+        let aboutPageURL = new URL(`about:${action.data.args}`);
+        if (action.data.entrypoint) {
+          aboutPageURL.search = action.data.entrypoint;
+        }
         target.browser.ownerGlobal.openTrustedLinkIn(
-          `about:${action.data.args}`,
+          aboutPageURL.toString(),
           "tab"
         );
         break;
       case ra.OPEN_PREFERENCES_PAGE:
-        target.browser.ownerGlobal.openPreferences(action.data.category);
+        target.browser.ownerGlobal.openPreferences(
+          action.data.category || action.data.args,
+          action.data.entrypoint && {
+            urlParams: { entrypoint: action.data.entrypoint },
+          }
+        );
         break;
       case ra.OPEN_APPLICATIONS_MENU:
         UITour.showMenu(target.browser.ownerGlobal, action.data.args);
@@ -2122,6 +2193,9 @@ class _ASRouter {
           );
         }
         break;
+      case "MODIFY_MESSAGE_JSON":
+        await this.modifyMessageJson(action.data.content, target, true, action);
+        break;
       case "DISMISS_MESSAGE_BY_ID":
         this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {
           type: "CLEAR_MESSAGE",
@@ -2182,6 +2256,7 @@ class _ASRouter {
       case "DOORHANGER_TELEMETRY":
       case "TOOLBAR_BADGE_TELEMETRY":
       case "TOOLBAR_PANEL_TELEMETRY":
+      case "MOMENTS_PAGE_TELEMETRY":
         if (this.dispatchToAS) {
           this.dispatchToAS(ac.ASRouterUserEvent(action.data));
         }

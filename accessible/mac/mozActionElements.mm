@@ -43,6 +43,8 @@ enum CheckboxValue {
                         NSAccessibilityFocusedAttribute,  // required
                         NSAccessibilityTitleAttribute,    // required
                         NSAccessibilityChildrenAttribute, NSAccessibilityDescriptionAttribute,
+                        NSAccessibilityRequiredAttribute, NSAccessibilityHasPopupAttribute,
+                        NSAccessibilityPopupValueAttribute,
 #if DEBUG
                         @"AXMozDescription",
 #endif
@@ -56,15 +58,16 @@ enum CheckboxValue {
 - (id)accessibilityAttributeValue:(NSString*)attribute {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
-  if ([attribute isEqualToString:NSAccessibilityChildrenAttribute]) {
-    if ([self hasPopup]) return [self children];
-    return nil;
+  if ([attribute isEqualToString:NSAccessibilityHasPopupAttribute]) {
+    return [NSNumber numberWithBool:[self hasPopup]];
   }
 
-  if ([attribute isEqualToString:NSAccessibilityRoleDescriptionAttribute]) {
-    if ([self isTab]) return utils::LocalizedString(NS_LITERAL_STRING("tab"));
-
-    return NSAccessibilityRoleDescription([self role], nil);
+  if ([attribute isEqualToString:NSAccessibilityPopupValueAttribute]) {
+    if ([self hasPopup]) {
+      return utils::GetAccAttr(self, "haspopup");
+    } else {
+      return nil;
+    }
   }
 
   return [super accessibilityAttributeValue:attribute];
@@ -72,80 +75,82 @@ enum CheckboxValue {
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }
 
-- (BOOL)accessibilityIsIgnored {
-  return ![self getGeckoAccessible] && ![self getProxyAccessible];
-}
-
-- (NSArray*)accessibilityActionNames {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-
-  if ([self isEnabled]) {
-    if ([self hasPopup])
-      return
-          [NSArray arrayWithObjects:NSAccessibilityPressAction, NSAccessibilityShowMenuAction, nil];
-    return [NSArray arrayWithObject:NSAccessibilityPressAction];
-  }
-  return nil;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
-}
-
-- (NSString*)accessibilityActionDescription:(NSString*)action {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-
-  if ([action isEqualToString:NSAccessibilityPressAction]) {
-    if ([self isTab]) return utils::LocalizedString(NS_LITERAL_STRING("switch"));
-
-    return @"press button";  // XXX: localize this later?
-  }
-
-  if ([self hasPopup]) {
-    if ([action isEqualToString:NSAccessibilityShowMenuAction]) return @"show menu";
-  }
-
-  return nil;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
-}
-
-- (void)accessibilityPerformAction:(NSString*)action {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
-
-  if ([self isEnabled] && [action isEqualToString:NSAccessibilityPressAction]) {
-    // TODO: this should bring up the menu, but currently doesn't.
-    //       once msaa and atk have merged better, they will implement
-    //       the action needed to show the menu.
-    [self click];
-  }
-
-  NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
-- (void)click {
-  // both buttons and checkboxes have only one action. we should really stop using arbitrary
-  // arrays with actions, and define constants for these actions.
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible])
-    accWrap->DoAction(0);
-  else if (ProxyAccessible* proxy = [self getProxyAccessible])
-    proxy->DoAction(0);
-}
-
-- (BOOL)isTab {
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) return accWrap->Role() == roles::PAGETAB;
-
-  if (ProxyAccessible* proxy = [self getProxyAccessible]) return proxy->Role() == roles::PAGETAB;
-
-  return false;
-}
-
 - (BOOL)hasPopup {
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible])
-    return accWrap->NativeState() & states::HASPOPUP;
+  return ([self stateWithMask:states::HASPOPUP] != 0);
+}
 
-  if (ProxyAccessible* proxy = [self getProxyAccessible])
-    return proxy->NativeState() & states::HASPOPUP;
+@end
 
-  return false;
+@implementation mozPopupButtonAccessible
+- (NSString*)title {
+  // Popup buttons don't have titles.
+  return @"";
+}
+
+- (NSArray*)accessibilityAttributeNames {
+  static NSMutableArray* supportedAttributes = nil;
+  if (!supportedAttributes) {
+    supportedAttributes = [[super accessibilityAttributeNames] mutableCopy];
+    // We need to remove AXHasPopup from a AXPopupButton for it to be reported
+    // as a popup button. Otherwise VO reports it as a button that has a popup
+    // which is not consistent with Safari.
+    [supportedAttributes removeObject:NSAccessibilityHasPopupAttribute];
+    [supportedAttributes addObject:NSAccessibilityValueAttribute];
+  }
+
+  return supportedAttributes;
+}
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
+
+  if ([attribute isEqualToString:NSAccessibilityHasPopupAttribute]) {
+    // We need to null on AXHasPopup for it to be reported as a popup button.
+    // Otherwise VO reports it as a button that has a popup which is not
+    // consistent with Safari.
+    return nil;
+  }
+
+  return [super accessibilityAttributeValue:attribute];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+}
+
+- (NSArray*)children {
+  if ([self stateWithMask:states::EXPANDED] == 0) {
+    // If the popup button is collapsed don't return its children.
+    return @[];
+  }
+
+  return [super children];
+}
+
+- (void)stateChanged:(uint64_t)state isEnabled:(BOOL)enabled {
+
+  [super stateChanged:state isEnabled:enabled];
+
+  if (state == states::EXPANDED) {
+    // If the EXPANDED state is updated, fire AXMenu events on the
+    // popups child which is the actual menu.
+    if (mozAccessible* popup = (mozAccessible*)[self childAt:0]) {
+      [popup postNotification:(enabled ? @"AXMenuOpened" : @"AXMenuClosed")];
+    }
+  }
+}
+
+- (BOOL)ignoreWithParent:(mozAccessible*)parent {
+  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
+    if (accWrap->IsContent() && accWrap->GetContent()->IsXULElement(nsGkAtoms::menulist)) {
+      // The way select elements work is that content has a COMBOBOX accessible, when it is clicked
+      // it expands a COMBOBOX in our top-level main XUL window. The latter COMBOBOX is a stand-in
+      // for the content one while it is expanded.
+      // XXX: VO focus behaves weirdly if we expose the dummy XUL COMBOBOX in the tree.
+      // We are only interested in its menu child.
+      return YES;
+    }
+  }
+
+  return [super ignoreWithParent:parent];
 }
 
 @end
@@ -167,15 +172,14 @@ enum CheckboxValue {
 }
 
 - (int)isChecked {
-  uint64_t state = 0;
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible])
-    state = accWrap->NativeState();
-  else if (ProxyAccessible* proxy = [self getProxyAccessible])
-    state = proxy->NativeState();
-
   // check if we're checked or in a mixed state
-  if (state & states::CHECKED) {
-    return (state & states::MIXED) ? kMixed : kChecked;
+  uint64_t state = [self stateWithMask:(states::CHECKED | states::PRESSED | states::MIXED)];
+  if (state & (states::CHECKED | states::PRESSED)) {
+    return kChecked;
+  }
+
+  if (state & states::MIXED) {
+    return kMixed;
   }
 
   return kUnchecked;
@@ -187,78 +191,6 @@ enum CheckboxValue {
   return [NSNumber numberWithInt:[self isChecked]];
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
-}
-
-@end
-
-@implementation mozTabsAccessible
-
-- (void)dealloc {
-  [mTabs release];
-
-  [super dealloc];
-}
-
-- (NSArray*)accessibilityAttributeNames {
-  // standard attributes that are shared and supported by root accessible (AXMain) elements.
-  static NSMutableArray* attributes = nil;
-
-  if (!attributes) {
-    attributes = [[super accessibilityAttributeNames] mutableCopy];
-    [attributes addObject:NSAccessibilityContentsAttribute];
-    [attributes addObject:NSAccessibilityTabsAttribute];
-  }
-
-  return attributes;
-}
-
-- (id)accessibilityAttributeValue:(NSString*)attribute {
-  if ([attribute isEqualToString:NSAccessibilityContentsAttribute]) return [super children];
-  if ([attribute isEqualToString:NSAccessibilityTabsAttribute]) return [self tabs];
-
-  return [super accessibilityAttributeValue:attribute];
-}
-
-/**
- * Returns the selected tab (the mozAccessible)
- */
-- (id)value {
-  mozAccessible* nativeAcc = nil;
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
-    if (Accessible* accTab = accWrap->GetSelectedItem(0)) {
-      accTab->GetNativeInterface((void**)&nativeAcc);
-    }
-  } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
-    if (ProxyAccessible* proxyTab = proxy->GetSelectedItem(0)) {
-      nativeAcc = GetNativeFromProxy(proxyTab);
-    }
-  }
-
-  return nativeAcc;
-}
-
-/**
- * Return the mozAccessibles that are the tabs.
- */
-- (id)tabs {
-  if (mTabs) return mTabs;
-
-  NSArray* children = [self children];
-  NSEnumerator* enumerator = [children objectEnumerator];
-  mTabs = [[NSMutableArray alloc] init];
-
-  id obj;
-  while ((obj = [enumerator nextObject]))
-    if ([obj isTab]) [mTabs addObject:obj];
-
-  return mTabs;
-}
-
-- (void)invalidateChildren {
-  [super invalidateChildren];
-
-  [mTabs release];
-  mTabs = nil;
 }
 
 @end
@@ -299,6 +231,86 @@ enum CheckboxValue {
   }
 
   return nil;
+}
+
+@end
+
+@implementation mozIncrementableAccessible
+
+- (NSArray*)accessibilityActionNames {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
+  NSArray* actions = [super accessibilityActionNames];
+
+  static NSArray* sliderAttrs = nil;
+  if (!sliderAttrs) {
+    NSMutableArray* tempArray = [NSMutableArray new];
+    [tempArray addObject:NSAccessibilityIncrementAction];
+    [tempArray addObject:NSAccessibilityDecrementAction];
+    sliderAttrs = [[NSArray alloc] initWithArray:tempArray];
+    [tempArray release];
+  }
+
+  return [actions arrayByAddingObjectsFromArray:sliderAttrs];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+}
+
+- (void)accessibilityPerformAction:(NSString*)action {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  if ([action isEqualToString:NSAccessibilityIncrementAction]) {
+    [self changeValueBySteps:1];
+  } else if ([action isEqualToString:NSAccessibilityDecrementAction]) {
+    [self changeValueBySteps:-1];
+  } else {
+    [super accessibilityPerformAction:action];
+  }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+/*
+ * Updates the accessible's current value by (factor * step).
+ * If incrementing factor should be positive, if decrementing
+ * factor should be negative.
+ */
+
+- (void)changeValueBySteps:(int)factor {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
+    double newVal = accWrap->CurValue() + (accWrap->Step() * factor);
+    double min = accWrap->MinValue();
+    double max = accWrap->MaxValue();
+    if ((IsNaN(min) || newVal >= min) && (IsNaN(max) || newVal <= max)) {
+      accWrap->SetCurValue(newVal);
+    }
+  } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
+    double newVal = proxy->CurValue() + (proxy->Step() * factor);
+    double min = proxy->MinValue();
+    double max = proxy->MaxValue();
+    // Because min and max are not required attributes, we first check
+    // if the value is undefined. If this check fails,
+    // the value is defined, and we we verify our new value falls
+    // within the bound (inclusive).
+    if ((IsNaN(min) || newVal >= min) && (IsNaN(max) || newVal <= max)) {
+      proxy->SetCurValue(newVal);
+    }
+  }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+- (void)handleAccessibleEvent:(uint32_t)eventType {
+  switch (eventType) {
+    case nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE:
+    case nsIAccessibleEvent::EVENT_VALUE_CHANGE:
+      [self postNotification:NSAccessibilityValueChangedNotification];
+      break;
+    default:
+      [super handleAccessibleEvent:eventType];
+      break;
+  }
 }
 
 @end

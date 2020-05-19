@@ -28,6 +28,7 @@
 #include "vm/JSAtom-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
+#include "vm/ObjectGroup-inl.h"  // JSObject::setSingleton
 #include "vm/Stack-inl.h"
 #include "vm/TypeInference-inl.h"
 
@@ -38,8 +39,8 @@
 
 using namespace js;
 
-typedef Rooted<ArgumentsObject*> RootedArgumentsObject;
-typedef MutableHandle<ArgumentsObject*> MutableHandleArgumentsObject;
+using RootedArgumentsObject = Rooted<ArgumentsObject*>;
+using MutableHandleArgumentsObject = MutableHandle<ArgumentsObject*>;
 
 /*****************************************************************************/
 
@@ -85,7 +86,7 @@ template <typename T>
 static T* CreateEnvironmentObject(JSContext* cx, HandleShape shape,
                                   HandleObjectGroup group, gc::InitialHeap heap,
                                   IsSingletonEnv isSingleton) {
-  static_assert(std::is_base_of<EnvironmentObject, T>::value,
+  static_assert(std::is_base_of_v<EnvironmentObject, T>,
                 "T must be an EnvironmentObject");
 
   // All environment objects can be background-finalized.
@@ -296,7 +297,6 @@ VarEnvironmentObject* VarEnvironmentObject::create(JSContext* cx,
   }
 
   MOZ_ASSERT(!env->inDictionaryMode());
-  MOZ_ASSERT(env->isDelegate());
 
   env->initEnclosingEnvironment(enclosing);
 
@@ -663,7 +663,7 @@ WithEnvironmentObject* WithEnvironmentObject::create(JSContext* cx,
                                                      HandleObject enclosing,
                                                      Handle<WithScope*> scope) {
   RootedShape shape(cx, EmptyEnvironmentShape(cx, &class_, JSSLOT_FREE(&class_),
-                                              BaseShape::DELEGATE));
+                                              /* baseShapeFlags = */ 0));
   if (!shape) {
     return nullptr;
   }
@@ -693,9 +693,19 @@ WithEnvironmentObject* WithEnvironmentObject::createNonSyntactic(
 }
 
 static inline bool IsUnscopableDotName(JSContext* cx, HandleId id) {
-  return JSID_IS_ATOM(id, cx->names().dotThis) ||
-         JSID_IS_ATOM(id, cx->names().dotGenerator);
+  return JSID_IS_ATOM(id, cx->names().dotThis);
 }
+
+#ifdef DEBUG
+static bool IsInternalDotName(JSContext* cx, HandleId id) {
+  return JSID_IS_ATOM(id, cx->names().dotThis) ||
+         JSID_IS_ATOM(id, cx->names().dotGenerator) ||
+         JSID_IS_ATOM(id, cx->names().dotInitializers) ||
+         JSID_IS_ATOM(id, cx->names().dotFieldKeys) ||
+         JSID_IS_ATOM(id, cx->names().dotStaticInitializers) ||
+         JSID_IS_ATOM(id, cx->names().dotStaticFieldKeys);
+}
+#endif
 
 /* Implements ES6 8.1.1.2.1 HasBinding steps 7-9. */
 static bool CheckUnscopables(JSContext* cx, HandleObject obj, HandleId id,
@@ -722,13 +732,15 @@ static bool CheckUnscopables(JSContext* cx, HandleObject obj, HandleId id,
 static bool with_LookupProperty(JSContext* cx, HandleObject obj, HandleId id,
                                 MutableHandleObject objp,
                                 MutableHandle<PropertyResult> propp) {
-  // SpiderMonkey-specific: consider internal '.generator' and '.this' names
-  // to be unscopable.
+  // SpiderMonkey-specific: consider the internal '.this' name to be unscopable.
   if (IsUnscopableDotName(cx, id)) {
     objp.set(nullptr);
     propp.setNotFound();
     return true;
   }
+
+  // Other internal dot-names shouldn't even end up in with-environments.
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
 
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
   if (!LookupProperty(cx, actual, id, objp, propp)) {
@@ -751,14 +763,14 @@ static bool with_LookupProperty(JSContext* cx, HandleObject obj, HandleId id,
 static bool with_DefineProperty(JSContext* cx, HandleObject obj, HandleId id,
                                 Handle<PropertyDescriptor> desc,
                                 ObjectOpResult& result) {
-  MOZ_ASSERT(!IsUnscopableDotName(cx, id));
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
   return DefineProperty(cx, actual, id, desc, result);
 }
 
 static bool with_HasProperty(JSContext* cx, HandleObject obj, HandleId id,
                              bool* foundp) {
-  MOZ_ASSERT(!IsUnscopableDotName(cx, id));
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
 
   // ES 8.1.1.2.1 step 3-5.
@@ -776,7 +788,7 @@ static bool with_HasProperty(JSContext* cx, HandleObject obj, HandleId id,
 static bool with_GetProperty(JSContext* cx, HandleObject obj,
                              HandleValue receiver, HandleId id,
                              MutableHandleValue vp) {
-  MOZ_ASSERT(!IsUnscopableDotName(cx, id));
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
   RootedValue actualReceiver(cx, receiver);
   if (receiver.isObject() && &receiver.toObject() == obj) {
@@ -788,7 +800,7 @@ static bool with_GetProperty(JSContext* cx, HandleObject obj,
 static bool with_SetProperty(JSContext* cx, HandleObject obj, HandleId id,
                              HandleValue v, HandleValue receiver,
                              ObjectOpResult& result) {
-  MOZ_ASSERT(!IsUnscopableDotName(cx, id));
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
   RootedValue actualReceiver(cx, receiver);
   if (receiver.isObject() && &receiver.toObject() == obj) {
@@ -800,14 +812,14 @@ static bool with_SetProperty(JSContext* cx, HandleObject obj, HandleId id,
 static bool with_GetOwnPropertyDescriptor(
     JSContext* cx, HandleObject obj, HandleId id,
     MutableHandle<PropertyDescriptor> desc) {
-  MOZ_ASSERT(!IsUnscopableDotName(cx, id));
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
   return GetOwnPropertyDescriptor(cx, actual, id, desc);
 }
 
 static bool with_DeleteProperty(JSContext* cx, HandleObject obj, HandleId id,
                                 ObjectOpResult& result) {
-  MOZ_ASSERT(!IsUnscopableDotName(cx, id));
+  MOZ_ASSERT(!IsInternalDotName(cx, id));
   RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
   return DeleteProperty(cx, actual, id, result);
 }
@@ -836,7 +848,7 @@ const JSClass WithEnvironmentObject::class_ = {
 NonSyntacticVariablesObject* NonSyntacticVariablesObject::create(
     JSContext* cx) {
   RootedShape shape(cx, EmptyEnvironmentShape(cx, &class_, JSSLOT_FREE(&class_),
-                                              BaseShape::DELEGATE));
+                                              /* baseShapeFlags = */ 0));
   if (!shape) {
     return nullptr;
   }
@@ -925,7 +937,6 @@ LexicalEnvironmentObject* LexicalEnvironmentObject::createTemplateObject(
   }
 
   MOZ_ASSERT(!env->inDictionaryMode());
-  MOZ_ASSERT(env->isDelegate());
 
   if (enclosing) {
     env->initEnclosingEnvironment(enclosing);
@@ -1091,6 +1102,10 @@ Value LexicalEnvironmentObject::thisValue() const {
   // have set this to the WindowProxy.
   MOZ_ASSERT_IF(v.isObject(), !IsWindow(&v.toObject()));
 
+  // WarpBuilder relies on the return value not being nursery-allocated for the
+  // global lexical environment.
+  MOZ_ASSERT_IF(isGlobal() && v.isGCThing(), v.toGCThing()->isTenured());
+
   return v;
 }
 
@@ -1161,7 +1176,7 @@ size_t NamedLambdaObject::lambdaSlot() {
 RuntimeLexicalErrorObject* RuntimeLexicalErrorObject::create(
     JSContext* cx, HandleObject enclosing, unsigned errorNumber) {
   RootedShape shape(cx, EmptyEnvironmentShape(cx, &class_, JSSLOT_FREE(&class_),
-                                              BaseShape::DELEGATE));
+                                              /* baseShapeFlags = */ 0));
   if (!shape) {
     return nullptr;
   }
@@ -2737,7 +2752,7 @@ void DebugEnvironments::takeFrameSnapshot(
      * Copy in formals that are not aliased via the scope chain
      * but are aliased via the arguments object.
      */
-    if (script->analyzedArgsUsage() && script->needsArgsObj() &&
+    if (!script->needsArgsAnalysis() && script->needsArgsObj() &&
         frame.hasArgsObj()) {
       for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
         if (script->formalLivesInArgumentsObject(i)) {
@@ -2897,19 +2912,6 @@ void DebugEnvironments::onPopGeneric(JSContext* cx, const EnvironmentIter& ei) {
 
 void DebugEnvironments::onPopLexical(JSContext* cx, const EnvironmentIter& ei) {
   onPopGeneric<LexicalEnvironmentObject, LexicalScope>(cx, ei);
-}
-
-void DebugEnvironments::onPopVar(JSContext* cx, AbstractFramePtr frame,
-                                 jsbytecode* pc) {
-  cx->check(frame);
-
-  DebugEnvironments* envs = cx->realm()->debugEnvs();
-  if (!envs) {
-    return;
-  }
-
-  EnvironmentIter ei(cx, frame, pc);
-  onPopVar(cx, ei);
 }
 
 void DebugEnvironments::onPopVar(JSContext* cx, const EnvironmentIter& ei) {
@@ -3692,9 +3694,14 @@ static bool CheckArgumentsRedeclaration(JSContext* cx, HandleScript script) {
 static bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
                                           HandleObject scopeChain,
                                           HandleObject varObj) {
-  if (!script->bodyScope()->as<EvalScope>().hasBindings()) {
-    return true;
-  }
+  // Strict eval has its own call objects and we shouldn't end up here.
+  //
+  // Non-strict eval may introduce 'var' bindings that conflict with lexical
+  // bindings in an enclosing lexical scope.
+  MOZ_ASSERT(!script->bodyScope()->hasEnvironment());
+  MOZ_ASSERT(!script->strict());
+
+  MOZ_ASSERT(script->bodyScope()->as<EvalScope>().hasBindings());
 
   RootedObject obj(cx, scopeChain);
 
@@ -3761,15 +3768,8 @@ bool js::CheckGlobalOrEvalDeclarationConflicts(JSContext* cx,
   RootedObject varObj(cx, &GetVariablesObject(envChain));
 
   if (script->isForEval()) {
-    // Strict eval has its own call objects.
-    //
-    // Non-strict eval may introduce 'var' bindings that conflict with
-    // lexical bindings in an enclosing lexical scope.
-    if (!script->bodyScope()->hasEnvironment()) {
-      MOZ_ASSERT(!script->strict());
-      if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj)) {
-        return false;
-      }
+    if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj)) {
+      return false;
     }
   } else {
     Rooted<LexicalEnvironmentObject*> lexicalEnv(
@@ -3910,18 +3910,24 @@ static bool RemoveReferencedNames(JSContext* cx, HandleScript script,
     if (!gcThing.is<JSObject>()) {
       continue;
     }
-
     JSObject* obj = &gcThing.as<JSObject>();
-    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
-      fun = &obj->as<JSFunction>();
-      innerScript = JSFunction::getOrCreateScript(cx, fun);
-      if (!innerScript) {
-        return false;
-      }
 
-      if (!RemoveReferencedNames(cx, innerScript, remainingNames)) {
-        return false;
-      }
+    if (!obj->is<JSFunction>()) {
+      continue;
+    }
+    fun = &obj->as<JSFunction>();
+
+    if (!fun->isInterpreted()) {
+      continue;
+    }
+
+    innerScript = JSFunction::getOrCreateScript(cx, fun);
+    if (!innerScript) {
+      return false;
+    }
+
+    if (!RemoveReferencedNames(cx, innerScript, remainingNames)) {
+      return false;
     }
   }
 
@@ -3985,15 +3991,24 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
     if (!gcThing.is<JSObject>()) {
       continue;
     }
-
     JSObject* obj = &gcThing.as<JSObject>();
-    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
-      fun = &obj->as<JSFunction>();
-      innerInnerScript = JSFunction::getOrCreateScript(cx, fun);
-      if (!innerInnerScript ||
-          !AnalyzeEntrainedVariablesInScript(cx, script, innerInnerScript)) {
-        return false;
-      }
+
+    if (!obj->is<JSFunction>()) {
+      continue;
+    }
+    fun = &obj->as<JSFunction>();
+
+    if (!fun->isInterpreted()) {
+      continue;
+    }
+
+    innerInnerScript = JSFunction::getOrCreateScript(cx, fun);
+    if (!innerInnerScript) {
+      return false;
+    }
+
+    if (!AnalyzeEntrainedVariablesInScript(cx, script, innerInnerScript)) {
+      return false;
     }
   }
 
@@ -4018,13 +4033,13 @@ bool js::AnalyzeEntrainedVariables(JSContext* cx, HandleScript script) {
     if (!gcThing.is<JSObject>()) {
       continue;
     }
-
     JSObject* obj = &gcThing.as<JSObject>();
+
     if (!obj->is<JSFunction>()) {
       continue;
     }
-
     fun = &obj->as<JSFunction>();
+
     if (!fun->isInterpreted()) {
       continue;
     }

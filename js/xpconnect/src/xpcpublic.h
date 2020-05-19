@@ -43,7 +43,7 @@ class Exception;
 }  // namespace dom
 }  // namespace mozilla
 
-typedef void (*xpcGCCallback)(JSGCStatus status);
+using xpcGCCallback = void (*)(JSGCStatus);
 
 namespace xpc {
 
@@ -415,7 +415,7 @@ void SetLocationForGlobal(JSObject* global, nsIURI* locationURI);
 // of JS::ZoneStats.
 class ZoneStatsExtras {
  public:
-  ZoneStatsExtras() {}
+  ZoneStatsExtras() = default;
 
   nsCString pathPrefix;
 
@@ -428,7 +428,7 @@ class ZoneStatsExtras {
 // of JS::RealmStats.
 class RealmStatsExtras {
  public:
-  RealmStatsExtras() {}
+  RealmStatsExtras() = default;
 
   nsCString jsPathPrefix;
   nsCString domPathPrefix;
@@ -543,8 +543,6 @@ bool ShouldDiscardSystemSource();
 
 void SetPrefableRealmOptions(JS::RealmOptions& options);
 
-bool ExtraWarningsForSystemJS();
-
 class ErrorBase {
  public:
   nsString mErrorMsg;
@@ -584,10 +582,15 @@ class ErrorReport : public ErrorBase {
   nsString mSourceLine;
   nsString mErrorMsgName;
   uint64_t mWindowID;
-  uint32_t mFlags;
+  bool mIsWarning;
   bool mIsMuted;
+  bool mIsPromiseRejection;
 
-  ErrorReport() : mWindowID(0), mFlags(0), mIsMuted(false) {}
+  ErrorReport()
+      : mWindowID(0),
+        mIsWarning(false),
+        mIsMuted(false),
+        mIsPromiseRejection(false) {}
 
   void Init(JSErrorReport* aReport, const char* aToStringResult, bool aIsChrome,
             uint64_t aWindowID);
@@ -601,11 +604,11 @@ class ErrorReport : public ErrorBase {
   // the sort that JS::CaptureCurrentStack produces).  aStack is allowed to be
   // null. If aStack is non-null, aStackGlobal must be a non-null global
   // object that's same-compartment with aStack. Note that aStack might be a
-  // CCW. When recording/replaying, aTimeWarpTarget optionally indicates
-  // where the error occurred in the process' execution.
-  void LogToConsoleWithStack(JS::HandleObject aStack,
-                             JS::HandleObject aStackGlobal,
-                             uint64_t aTimeWarpTarget = 0);
+  // CCW.
+  void LogToConsoleWithStack(nsGlobalWindowInner* aWin,
+                             JS::Handle<mozilla::Maybe<JS::Value>> aException,
+                             JS::HandleObject aStack,
+                             JS::HandleObject aStackGlobal);
 
   // Produce an error event message string from the given JSErrorReport.  Note
   // that this may produce an empty string if aReport doesn't have a
@@ -616,8 +619,10 @@ class ErrorReport : public ErrorBase {
   // Log the error report to the stderr.
   void LogToStderr();
 
+  bool IsWarning() const { return mIsWarning; };
+
  private:
-  ~ErrorReport() {}
+  ~ErrorReport() = default;
 };
 
 void DispatchScriptErrorEvent(nsPIDOMWindowInner* win,

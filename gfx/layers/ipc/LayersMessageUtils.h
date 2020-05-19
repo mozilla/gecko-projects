@@ -23,12 +23,11 @@
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ipc/ByteBufUtils.h"
 #include "mozilla/layers/APZInputBridge.h"
-#include "mozilla/layers/APZTypes.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/FocusTarget.h"
-#include "mozilla/layers/GeckoContentController.h"
+#include "mozilla/layers/GeckoContentControllerTypes.h"
 #include "mozilla/layers/KeyboardMap.h"
 #include "mozilla/layers/LayerAttributes.h"
 #include "mozilla/layers/LayersTypes.h"
@@ -72,8 +71,22 @@ struct ParamTraits<mozilla::VsyncEvent> {
 };
 
 template <>
-struct ParamTraits<mozilla::layers::MatrixMessage>
-    : public PlainOldDataSerializer<mozilla::layers::MatrixMessage> {};
+struct ParamTraits<mozilla::layers::MatrixMessage> {
+  typedef mozilla::layers::MatrixMessage paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam) {
+    WriteParam(aMsg, aParam.mMatrix);
+    WriteParam(aMsg, aParam.mTopLevelViewportVisibleRectInBrowserCoords);
+    WriteParam(aMsg, aParam.mLayersId);
+  }
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   paramType* aResult) {
+    return ReadParam(aMsg, aIter, &aResult->mMatrix) &&
+           ReadParam(aMsg, aIter,
+                     &aResult->mTopLevelViewportVisibleRectInBrowserCoords) &&
+           ReadParam(aMsg, aIter, &aResult->mLayersId);
+  }
+};
 
 template <>
 struct ParamTraits<mozilla::layers::LayersObserverEpoch>
@@ -532,6 +545,7 @@ struct ParamTraits<mozilla::layers::APZEventResult> {
     WriteParam(aMsg, aParam.mTargetGuid);
     WriteParam(aMsg, aParam.mInputBlockId);
     WriteParam(aMsg, aParam.mHitRegionWithApzAwareListeners);
+    WriteParam(aMsg, aParam.mTargetIsRoot);
   }
 
   static bool Read(const Message* aMsg, PickleIterator* aIter,
@@ -539,23 +553,8 @@ struct ParamTraits<mozilla::layers::APZEventResult> {
     return (ReadParam(aMsg, aIter, &aResult->mStatus) &&
             ReadParam(aMsg, aIter, &aResult->mTargetGuid) &&
             ReadParam(aMsg, aIter, &aResult->mInputBlockId) &&
-            ReadParam(aMsg, aIter, &aResult->mHitRegionWithApzAwareListeners));
-  }
-};
-
-template <>
-struct ParamTraits<mozilla::layers::SLGuidAndRenderRoot> {
-  typedef mozilla::layers::SLGuidAndRenderRoot paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam) {
-    WriteParam(aMsg, aParam.mScrollableLayerGuid);
-    WriteParam(aMsg, aParam.mRenderRoot);
-  }
-
-  static bool Read(const Message* aMsg, PickleIterator* aIter,
-                   paramType* aResult) {
-    return (ReadParam(aMsg, aIter, &aResult->mScrollableLayerGuid) &&
-            ReadParam(aMsg, aIter, &aResult->mRenderRoot));
+            ReadParam(aMsg, aIter, &aResult->mHitRegionWithApzAwareListeners) &&
+            ReadParam(aMsg, aIter, &aResult->mTargetIsRoot));
   }
 };
 
@@ -609,17 +608,13 @@ struct ParamTraits<mozilla::layers::FocusTarget::ScrollTargets> {
 
   static void Write(Message* aMsg, const paramType& aParam) {
     WriteParam(aMsg, aParam.mHorizontal);
-    WriteParam(aMsg, aParam.mHorizontalRenderRoot);
     WriteParam(aMsg, aParam.mVertical);
-    WriteParam(aMsg, aParam.mVerticalRenderRoot);
   }
 
   static bool Read(const Message* aMsg, PickleIterator* aIter,
                    paramType* aResult) {
     return ReadParam(aMsg, aIter, &aResult->mHorizontal) &&
-           ReadParam(aMsg, aIter, &aResult->mHorizontalRenderRoot) &&
-           ReadParam(aMsg, aIter, &aResult->mVertical) &&
-           ReadParam(aMsg, aIter, &aResult->mVerticalRenderRoot);
+           ReadParam(aMsg, aIter, &aResult->mVertical);
   }
 };
 
@@ -720,21 +715,20 @@ struct ParamTraits<mozilla::layers::KeyboardMap> {
   }
 };
 
-typedef mozilla::layers::GeckoContentController GeckoContentController;
-typedef GeckoContentController::TapType TapType;
-
 template <>
-struct ParamTraits<TapType> : public ContiguousEnumSerializerInclusive<
-                                  TapType, TapType::eSingleTap,
-                                  GeckoContentController::sHighestTapType> {};
-
-typedef GeckoContentController::APZStateChange APZStateChange;
-
-template <>
-struct ParamTraits<APZStateChange>
+struct ParamTraits<mozilla::layers::GeckoContentController_TapType>
     : public ContiguousEnumSerializerInclusive<
-          APZStateChange, APZStateChange::eTransformBegin,
-          GeckoContentController::sHighestAPZStateChange> {};
+          mozilla::layers::GeckoContentController_TapType,
+          mozilla::layers::GeckoContentController_TapType::eSingleTap,
+          mozilla::layers::kHighestGeckoContentController_TapType> {};
+
+template <>
+struct ParamTraits<mozilla::layers::GeckoContentController_APZStateChange>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::layers::GeckoContentController_APZStateChange,
+          mozilla::layers::GeckoContentController_APZStateChange::
+              eTransformBegin,
+          mozilla::layers::kHighestGeckoContentController_APZStateChange> {};
 
 template <>
 struct ParamTraits<mozilla::layers::EventRegionsOverride>
@@ -785,8 +779,91 @@ struct ParamTraits<mozilla::layers::CompositorOptions> {
 };
 
 template <>
-struct ParamTraits<mozilla::layers::SimpleLayerAttributes>
-    : public PlainOldDataSerializer<mozilla::layers::SimpleLayerAttributes> {};
+struct ParamTraits<mozilla::layers::ScrollbarLayerType>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::layers::ScrollbarLayerType,
+          mozilla::layers::ScrollbarLayerType::None,
+          mozilla::layers::kHighestScrollbarLayerType> {};
+
+template <>
+struct ParamTraits<mozilla::layers::ScrollbarData> {
+  typedef mozilla::layers::ScrollbarData paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam) {
+    WriteParam(aMsg, aParam.mDirection);
+    WriteParam(aMsg, aParam.mScrollbarLayerType);
+    WriteParam(aMsg, aParam.mThumbRatio);
+    WriteParam(aMsg, aParam.mThumbStart);
+    WriteParam(aMsg, aParam.mThumbLength);
+    WriteParam(aMsg, aParam.mThumbIsAsyncDraggable);
+    WriteParam(aMsg, aParam.mScrollTrackStart);
+    WriteParam(aMsg, aParam.mScrollTrackLength);
+    WriteParam(aMsg, aParam.mTargetViewId);
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   paramType* aResult) {
+    return ReadParam(aMsg, aIter, &aResult->mDirection) &&
+           ReadParam(aMsg, aIter, &aResult->mScrollbarLayerType) &&
+           ReadParam(aMsg, aIter, &aResult->mThumbRatio) &&
+           ReadParam(aMsg, aIter, &aResult->mThumbStart) &&
+           ReadParam(aMsg, aIter, &aResult->mThumbLength) &&
+           ReadParam(aMsg, aIter, &aResult->mThumbIsAsyncDraggable) &&
+           ReadParam(aMsg, aIter, &aResult->mScrollTrackStart) &&
+           ReadParam(aMsg, aIter, &aResult->mScrollTrackLength) &&
+           ReadParam(aMsg, aIter, &aResult->mTargetViewId);
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::layers::SimpleLayerAttributes::FixedPositionData>
+    : public PlainOldDataSerializer<
+          mozilla::layers::SimpleLayerAttributes::FixedPositionData> {};
+
+template <>
+struct ParamTraits<mozilla::layers::SimpleLayerAttributes::StickyPositionData>
+    : public PlainOldDataSerializer<
+          mozilla::layers::SimpleLayerAttributes::StickyPositionData> {};
+
+template <>
+struct ParamTraits<mozilla::layers::SimpleLayerAttributes> {
+  typedef mozilla::layers::SimpleLayerAttributes paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam) {
+    WriteParam(aMsg, aParam.mTransform);
+    WriteParam(aMsg, aParam.mTransformIsPerspective);
+    WriteParam(aMsg, aParam.mScrolledClip);
+    WriteParam(aMsg, aParam.mPostXScale);
+    WriteParam(aMsg, aParam.mPostYScale);
+    WriteParam(aMsg, aParam.mContentFlags);
+    WriteParam(aMsg, aParam.mOpacity);
+    WriteParam(aMsg, aParam.mIsFixedPosition);
+    WriteParam(aMsg, aParam.mIsAsyncZoomContainerForViewId);
+    WriteParam(aMsg, aParam.mScrollbarData);
+    WriteParam(aMsg, aParam.mMixBlendMode);
+    WriteParam(aMsg, aParam.mForceIsolatedGroup);
+    WriteParam(aMsg, aParam.mFixedPositionData);
+    WriteParam(aMsg, aParam.mStickyPositionData);
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   paramType* aResult) {
+    return ReadParam(aMsg, aIter, &aResult->mTransform) &&
+           ReadParam(aMsg, aIter, &aResult->mTransformIsPerspective) &&
+           ReadParam(aMsg, aIter, &aResult->mScrolledClip) &&
+           ReadParam(aMsg, aIter, &aResult->mPostXScale) &&
+           ReadParam(aMsg, aIter, &aResult->mPostYScale) &&
+           ReadParam(aMsg, aIter, &aResult->mContentFlags) &&
+           ReadParam(aMsg, aIter, &aResult->mOpacity) &&
+           ReadParam(aMsg, aIter, &aResult->mIsFixedPosition) &&
+           ReadParam(aMsg, aIter, &aResult->mIsAsyncZoomContainerForViewId) &&
+           ReadParam(aMsg, aIter, &aResult->mScrollbarData) &&
+           ReadParam(aMsg, aIter, &aResult->mMixBlendMode) &&
+           ReadParam(aMsg, aIter, &aResult->mForceIsolatedGroup) &&
+           ReadParam(aMsg, aIter, &aResult->mFixedPositionData) &&
+           ReadParam(aMsg, aIter, &aResult->mStickyPositionData);
+  }
+};
 
 template <>
 struct ParamTraits<mozilla::layers::ScrollUpdateInfo>

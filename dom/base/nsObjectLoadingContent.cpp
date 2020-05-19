@@ -71,6 +71,7 @@
 #include "nsContentCID.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/Components.h"
+#include "mozilla/LoadInfo.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
@@ -86,9 +87,11 @@
 #include "mozilla/dom/HTMLEmbedElement.h"
 #include "mozilla/dom/HTMLObjectElement.h"
 #include "mozilla/dom/UserActivation.h"
+#include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs_security.h"
 #include "nsChannelClassifier.h"
 #include "nsFocusManager.h"
 #include "ReferrerInfo.h"
@@ -518,8 +521,7 @@ void nsObjectLoadingContent::SetupFrameLoader(int32_t aJSPluginId) {
   NS_ASSERTION(thisContent, "must be a content");
 
   mFrameLoader =
-      nsFrameLoader::Create(thisContent->AsElement(),
-                            /* aOpener = */ nullptr, mNetworkCreated);
+      nsFrameLoader::Create(thisContent->AsElement(), mNetworkCreated);
   MOZ_ASSERT(mFrameLoader, "nsFrameLoader::Create failed");
 }
 
@@ -794,12 +796,12 @@ nsresult nsObjectLoadingContent::InstantiatePluginInstance(bool aIsLoading) {
 
 void nsObjectLoadingContent::GetPluginAttributes(
     nsTArray<MozPluginParameter>& aAttributes) {
-  aAttributes = mCachedAttributes;
+  aAttributes = mCachedAttributes.Clone();
 }
 
 void nsObjectLoadingContent::GetPluginParameters(
     nsTArray<MozPluginParameter>& aParameters) {
-  aParameters = mCachedParameters;
+  aParameters = mCachedParameters.Clone();
 }
 
 void nsObjectLoadingContent::GetNestedParams(
@@ -2276,7 +2278,8 @@ nsresult nsObjectLoadingContent::OpenChannel() {
       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
 
   bool isURIUniqueOrigin =
-      nsIOService::IsDataURIUniqueOpaqueOrigin() && mURI->SchemeIs("data");
+      StaticPrefs::security_data_uri_unique_opaque_origin() &&
+      mURI->SchemeIs("data");
 
   if (inherit && !isURIUniqueOrigin) {
     securityFlags |= nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL;
@@ -2300,11 +2303,25 @@ nsresult nsObjectLoadingContent::OpenChannel() {
     loadinfo->SetPrincipalToInherit(thisContent->NodePrincipal());
   }
 
+  // For object loads we store the CSP that potentially needs to
+  // be inherited, e.g. in case we are loading an opaque origin
+  // like a data: URI. The actual inheritance check happens within
+  // Document::InitCSP(). Please create an actual copy of the CSP
+  // (do not share the same reference) otherwise a Meta CSP of an
+  // opaque origin will incorrectly be propagated to the embedding
+  // document.
+  nsCOMPtr<nsIContentSecurityPolicy> csp = doc->GetCsp();
+  if (csp) {
+    RefPtr<nsCSPContext> cspToInherit = new nsCSPContext();
+    cspToInherit->InitFromOther(static_cast<nsCSPContext*>(csp.get()));
+    nsCOMPtr<nsILoadInfo> loadinfo = chan->LoadInfo();
+    static_cast<LoadInfo*>(loadinfo.get())->SetCSPToInherit(cspToInherit);
+  }
+
   // Referrer
   nsCOMPtr<nsIHttpChannel> httpChan(do_QueryInterface(chan));
   if (httpChan) {
-    nsCOMPtr<nsIReferrerInfo> referrerInfo = new ReferrerInfo();
-    referrerInfo->InitWithDocument(doc);
+    auto referrerInfo = MakeRefPtr<ReferrerInfo>(*doc);
 
     rv = httpChan->SetReferrerInfoWithoutClone(referrerInfo);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -2519,18 +2536,15 @@ void nsObjectLoadingContent::CreateStaticClone(
   if (thisObj->mPrintFrame.IsAlive()) {
     aDest->mPrintFrame = thisObj->mPrintFrame;
   } else {
-    aDest->mPrintFrame =
-        const_cast<nsObjectLoadingContent*>(this)->GetExistingFrame();
+    aDest->mPrintFrame = thisObj->GetExistingFrame();
   }
 
   if (mFrameLoader) {
     nsCOMPtr<nsIContent> content =
         do_QueryInterface(static_cast<nsIImageLoadingContent*>(aDest));
-    RefPtr<nsFrameLoader> fl =
-        nsFrameLoader::Create(content->AsElement(), nullptr, false);
-    if (fl) {
-      aDest->mFrameLoader = fl;
-      mFrameLoader->CreateStaticClone(fl);
+    Document* doc = content->OwnerDoc();
+    if (doc->IsStaticDocument()) {
+      doc->AddPendingFrameStaticClone(aDest, mFrameLoader);
     }
   }
 }

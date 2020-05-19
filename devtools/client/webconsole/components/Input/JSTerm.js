@@ -64,8 +64,8 @@ const {
 } = require("devtools/client/webconsole/selectors/autocomplete");
 const actions = require("devtools/client/webconsole/actions/index");
 
-const EvaluationSelector = createFactory(
-  require("devtools/client/webconsole/components/Input/EvaluationSelector")
+const EvaluationContextSelector = createFactory(
+  require("devtools/client/webconsole/components/Input/EvaluationContextSelector")
 );
 
 // Constants used for defining the direction of JSTerm input history navigation.
@@ -115,7 +115,9 @@ class JSTerm extends Component {
       editorWidth: PropTypes.number,
       showEditorOnboarding: PropTypes.bool,
       autocomplete: PropTypes.bool,
-      showEvaluationSelector: PropTypes.bool,
+      showEvaluationContextSelector: PropTypes.bool,
+      autocompletePopupPosition: PropTypes.string,
+      inputEnabled: PropTypes.bool,
     };
   }
 
@@ -173,12 +175,13 @@ class JSTerm extends Component {
       onSelect: this.onAutocompleteSelect.bind(this),
       onClick: this.acceptProposedCompletion.bind(this),
       listId: "webConsole_autocompletePopupListBox",
-      position: "bottom",
+      position: this.props.autocompletePopupPosition,
       autoSelect: true,
+      useXulWrapper: true,
     };
 
     const doc = this.webConsoleUI.document;
-    const toolbox = this.webConsoleUI.wrapper.toolbox;
+    const { toolbox } = this.webConsoleUI.wrapper;
     const tooltipDoc = toolbox ? toolbox.doc : doc;
     // The popup will be attached to the toolbox document or HUD document in the case
     // such as the browser console which doesn't have a toolbox.
@@ -487,8 +490,8 @@ class JSTerm extends Component {
           },
 
           Esc: false,
-          "Cmd-F": false,
-          "Ctrl-F": false,
+          // Don't handle Ctrl/Cmd + F so it can be listened by a parent node
+          [Editor.accel("F")]: false,
         },
       });
 
@@ -562,6 +565,18 @@ class JSTerm extends Component {
       } else {
         this.setEditorWidth(null);
       }
+
+      if (this.autocompletePopup.isOpen) {
+        this.autocompletePopup.hidePopup();
+      }
+    }
+
+    if (
+      nextProps.autocompletePopupPosition !==
+        this.props.autocompletePopupPosition &&
+      this.autocompletePopup
+    ) {
+      this.autocompletePopup.position = nextProps.autocompletePopupPosition;
     }
   }
 
@@ -628,6 +643,10 @@ class JSTerm extends Component {
     }
 
     if (!this.props.editorMode) {
+      // Calling this.props.terminalInputChanged instead of this.terminalInputChanged
+      // because we want to instantly hide the instant evaluation result, and don't want
+      // the delay we have in this.terminalInputChanged.
+      this.props.terminalInputChanged("");
       this._setValue("");
     }
     this.clearCompletion();
@@ -736,6 +755,18 @@ class JSTerm extends Component {
     const { from, to, origin, text } = change;
     const isAddedText =
       from.line === to.line && from.ch === to.ch && origin === "+input";
+
+    // if there was no changes (hitting delete on an empty input, or suppr when at the end
+    // of the input), we bail out.
+    if (
+      !isAddedText &&
+      origin === "+delete" &&
+      from.line === to.line &&
+      from.ch === to.ch
+    ) {
+      return;
+    }
+
     const addedText = text.join("");
     const completionText = this.getAutoCompletionText();
 
@@ -767,9 +798,10 @@ class JSTerm extends Component {
     if (!addedCharacterMatchCompletion && !addedCharacterMatchPopupItem) {
       this.autocompletePopup.hidePopup();
     } else if (
-      completionText &&
       !change.canceled &&
-      (addedCharacterMatchCompletion || addedCharacterMatchPopupItem)
+      (completionText ||
+        addedCharacterMatchCompletion ||
+        addedCharacterMatchPopupItem)
     ) {
       // The completion text will be updated when the debounced autocomplete update action
       // is done, so in the meantime we set the pending value to pendingCompletionText.
@@ -934,7 +966,7 @@ class JSTerm extends Component {
    *        }
    * @fires autocomplete-updated
    */
-  updateAutocompletionPopup(data) {
+  async updateAutocompletionPopup(data) {
     if (!this.editor) {
       return;
     }
@@ -942,7 +974,6 @@ class JSTerm extends Component {
     const { matches, matchProp, isElementAccess } = data;
     if (!matches.length) {
       this.clearCompletion();
-      this.emit("autocomplete-updated");
       return;
     }
 
@@ -1003,7 +1034,7 @@ class JSTerm extends Component {
       const xOffset = -1 * matchProp.length * this._inputCharWidth;
       const yOffset = 5;
       const popupAlignElement = this.props.serviceContainer.getJsTermTooltipAnchor();
-      popup.openPopup(popupAlignElement, xOffset, yOffset, 0, {
+      await popup.openPopup(popupAlignElement, xOffset, yOffset, 0, {
         preventSelectCallback: true,
       });
     } else if (items.length < minimumAutoCompleteLength && popup.isOpen) {
@@ -1056,6 +1087,7 @@ class JSTerm extends Component {
   /**
    * Clear the current completion information, cancel any pending autocompletion update
    * and close the autocomplete popup, if needed.
+   * @fires autocomplete-updated
    */
   clearCompletion() {
     this.autocompleteUpdate.cancel();
@@ -1063,17 +1095,17 @@ class JSTerm extends Component {
     this.terminalInputChanged(this._getValue());
 
     this.setAutoCompletionText("");
+    let onPopupClosed = Promise.resolve();
     if (this.autocompletePopup) {
       this.autocompletePopup.clearItems();
 
       if (this.autocompletePopup.isOpen) {
-        this.autocompletePopup.once("popup-closed", () => {
-          this.focus();
-        });
+        onPopupClosed = this.autocompletePopup.once("popup-closed");
         this.autocompletePopup.hidePopup();
+        onPopupClosed.then(() => this.focus());
       }
-      this.emit("autocomplete-updated");
     }
+    onPopupClosed.then(() => this.emit("autocomplete-updated"));
   }
 
   /**
@@ -1298,16 +1330,16 @@ class JSTerm extends Component {
     });
   }
 
-  renderEvaluationSelector() {
+  renderEvaluationContextSelector() {
     if (
       !this.props.webConsoleUI.wrapper.toolbox ||
       this.props.editorMode ||
-      !this.props.showEvaluationSelector
+      !this.props.showEvaluationContextSelector
     ) {
       return null;
     }
 
-    return EvaluationSelector(this.props);
+    return EvaluationContextSelector(this.props);
   }
 
   renderEditorOnboarding() {
@@ -1350,16 +1382,13 @@ class JSTerm extends Component {
   }
 
   render() {
-    if (
-      this.props.webConsoleUI.isBrowserConsole &&
-      !Services.prefs.getBoolPref("devtools.chrome.enabled")
-    ) {
+    if (!this.props.inputEnabled) {
       return null;
     }
 
     return dom.div(
       {
-        className: "jsterm-input-container devtools-input devtools-monospace",
+        className: "jsterm-input-container devtools-input",
         key: "jsterm-container",
         "aria-live": "off",
         tabIndex: -1,
@@ -1370,7 +1399,7 @@ class JSTerm extends Component {
       },
       dom.div(
         { className: "webconsole-input-buttons" },
-        this.renderEvaluationSelector(),
+        this.renderEvaluationContextSelector(),
         this.renderOpenEditorButton()
       ),
       this.renderEditorOnboarding()
@@ -1386,7 +1415,8 @@ function mapStateToProps(state) {
     getValueFromHistory: direction => getHistoryValue(state, direction),
     autocompleteData: getAutocompleteState(state),
     showEditorOnboarding: state.ui.showEditorOnboarding,
-    showEvaluationSelector: state.ui.showEvaluationSelector,
+    showEvaluationContextSelector: state.ui.showEvaluationContextSelector,
+    autocompletePopupPosition: state.prefs.eagerEvaluation ? "top" : "bottom",
   };
 }
 
@@ -1406,7 +1436,4 @@ function mapDispatchToProps(dispatch) {
   };
 }
 
-module.exports = connect(
-  mapStateToProps,
-  mapDispatchToProps
-)(JSTerm);
+module.exports = connect(mapStateToProps, mapDispatchToProps)(JSTerm);

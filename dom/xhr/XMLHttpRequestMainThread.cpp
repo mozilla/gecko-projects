@@ -186,8 +186,10 @@ static void AddLoadFlags(nsIRequest* request, nsLoadFlags newFlags) {
 
 bool XMLHttpRequestMainThread::sDontWarnAboutSyncXHR = false;
 
-XMLHttpRequestMainThread::XMLHttpRequestMainThread()
-    : mResponseBodyDecodedPos(0),
+XMLHttpRequestMainThread::XMLHttpRequestMainThread(
+    nsIGlobalObject* aGlobalObject)
+    : XMLHttpRequest(aGlobalObject),
+      mResponseBodyDecodedPos(0),
       mResponseType(XMLHttpRequestResponseType::_empty),
       mRequestObserver(nullptr),
       mState(XMLHttpRequest_Binding::UNSENT),
@@ -321,7 +323,7 @@ void XMLHttpRequestMainThread::SetRequestObserver(
   mRequestObserver = aObserver;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(XMLHttpRequestMainThread)
+NS_IMPL_CYCLE_COLLECTION_MULTI_ZONE_JSHOLDER_CLASS(XMLHttpRequestMainThread)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(XMLHttpRequestMainThread,
                                                   XMLHttpRequestEventTarget)
@@ -2418,7 +2420,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
     rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL, mPrincipal,
                        mClientInfo.ref(), mController, secFlags,
                        nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
-                       mCookieSettings,
+                       mCookieJarSettings,
                        mPerformanceStorage,  // aPerformanceStorage
                        loadGroup,
                        nullptr,  // aCallbacks
@@ -2427,7 +2429,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
     // Otherwise use the principal.
     rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL, mPrincipal,
                        secFlags, nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
-                       mCookieSettings,
+                       mCookieJarSettings,
                        mPerformanceStorage,  // aPerformanceStorage
                        loadGroup,
                        nullptr,  // aCallbacks
@@ -2518,7 +2520,7 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
       mAuthorRequestHeaders.Set("accept", NS_LITERAL_CSTRING("*/*"));
     }
 
-    mAuthorRequestHeaders.ApplyToChannel(httpChannel);
+    mAuthorRequestHeaders.ApplyToChannel(httpChannel, false);
 
     if (!IsSystemXHR()) {
       nsCOMPtr<nsPIDOMWindowInner> owner = GetOwner();
@@ -3249,13 +3251,26 @@ nsresult XMLHttpRequestMainThread::OnRedirectVerifyCallback(nsresult result) {
   NS_ASSERTION(mNewRedirectChannel, "mNewRedirectChannel not set in callback");
 
   if (NS_SUCCEEDED(result)) {
+    bool rewriteToGET = false;
+    nsCOMPtr<nsIHttpChannel> oldHttpChannel = GetCurrentHttpChannel();
+    if (uint32_t responseCode = 0;
+        oldHttpChannel &&
+        NS_SUCCEEDED(oldHttpChannel->GetResponseStatus(&responseCode))) {
+      // Fetch 4.4.11
+      rewriteToGET =
+          ((responseCode == 301 || responseCode == 302) &&
+           mRequestMethod.LowerCaseEqualsASCII("post")) ||
+          (responseCode == 303 && !mRequestMethod.LowerCaseEqualsASCII("get") &&
+           !mRequestMethod.LowerCaseEqualsASCII("head"));
+    }
+
     mChannel = mNewRedirectChannel;
 
-    nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(mChannel));
-    if (httpChannel) {
+    nsCOMPtr<nsIHttpChannel> newHttpChannel(do_QueryInterface(mChannel));
+    if (newHttpChannel) {
       // Ensure all original headers are duplicated for the new channel (bug
       // #553888)
-      mAuthorRequestHeaders.ApplyToChannel(httpChannel);
+      mAuthorRequestHeaders.ApplyToChannel(newHttpChannel, rewriteToGET);
     }
   } else {
     mErrorLoad = ErrorType::eRedirect;
@@ -3277,8 +3292,7 @@ nsresult XMLHttpRequestMainThread::OnRedirectVerifyCallback(nsresult result) {
 //
 
 NS_IMETHODIMP
-XMLHttpRequestMainThread::OnProgress(nsIRequest* aRequest,
-                                     nsISupports* aContext, int64_t aProgress,
+XMLHttpRequestMainThread::OnProgress(nsIRequest* aRequest, int64_t aProgress,
                                      int64_t aProgressMax) {
   // When uploading, OnProgress reports also headers in aProgress and
   // aProgressMax. So, try to remove the headers, if possible.
@@ -3303,18 +3317,17 @@ XMLHttpRequestMainThread::OnProgress(nsIRequest* aRequest,
   }
 
   if (mProgressEventSink) {
-    mProgressEventSink->OnProgress(aRequest, aContext, aProgress, aProgressMax);
+    mProgressEventSink->OnProgress(aRequest, aProgress, aProgressMax);
   }
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-XMLHttpRequestMainThread::OnStatus(nsIRequest* aRequest, nsISupports* aContext,
-                                   nsresult aStatus,
+XMLHttpRequestMainThread::OnStatus(nsIRequest* aRequest, nsresult aStatus,
                                    const char16_t* aStatusArg) {
   if (mProgressEventSink) {
-    mProgressEventSink->OnStatus(aRequest, aContext, aStatus, aStatusArg);
+    mProgressEventSink->OnStatus(aRequest, aStatus, aStatusArg);
   }
 
   return NS_OK;
@@ -3942,15 +3955,22 @@ void RequestHeaders::MergeOrSet(const nsACString& aName,
 
 void RequestHeaders::Clear() { mHeaders.Clear(); }
 
-void RequestHeaders::ApplyToChannel(nsIHttpChannel* aHttpChannel) const {
+void RequestHeaders::ApplyToChannel(nsIHttpChannel* aChannel,
+                                    bool aStripRequestBodyHeader) const {
   for (const RequestHeader& header : mHeaders) {
+    if (aStripRequestBodyHeader &&
+        (header.mName.LowerCaseEqualsASCII("content-type") ||
+         header.mName.LowerCaseEqualsASCII("content-encoding") ||
+         header.mName.LowerCaseEqualsASCII("content-language") ||
+         header.mName.LowerCaseEqualsASCII("content-location"))) {
+      continue;
+    }
     if (header.mValue.IsEmpty()) {
-      DebugOnly<nsresult> rv =
-          aHttpChannel->SetEmptyRequestHeader(header.mName);
+      DebugOnly<nsresult> rv = aChannel->SetEmptyRequestHeader(header.mName);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     } else {
       DebugOnly<nsresult> rv =
-          aHttpChannel->SetRequestHeader(header.mName, header.mValue, false);
+          aChannel->SetRequestHeader(header.mName, header.mValue, false);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }

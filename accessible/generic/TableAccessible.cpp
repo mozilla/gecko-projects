@@ -11,6 +11,7 @@
 
 #include "nsTableCellFrame.h"
 #include "nsTableWrapperFrame.h"
+#include "TableCellAccessible.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -40,6 +41,8 @@ bool TableAccessible::IsProbablyLayoutTable() {
 #endif
 
   Accessible* thisacc = AsAccessible();
+
+  MOZ_ASSERT(!thisacc->IsDefunct(), "Table accessible should not be defunct");
 
   // Need to see all elements while document is being edited.
   if (thisacc->Document()->State() & states::EDITABLE) {

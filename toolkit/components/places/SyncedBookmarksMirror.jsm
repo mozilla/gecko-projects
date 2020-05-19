@@ -88,8 +88,8 @@ const DEFAULT_MAX_FRECENCIES_TO_RECALCULATE = 400;
 // Use a shared jankYielder in these functions
 XPCOMUtils.defineLazyGetter(this, "yieldState", () => Async.yieldState());
 
-/** Adapts a `Log.jsm` logger to a `mozISyncedBookmarksMirrorLogger`. */
-class MirrorLoggerAdapter {
+/** Adapts a `Log.jsm` logger to a `mozIServicesLogger`. */
+class LogAdapter {
   constructor(log) {
     this.log = log;
   }
@@ -97,18 +97,18 @@ class MirrorLoggerAdapter {
   get maxLevel() {
     let level = this.log.level;
     if (level <= Log.Level.All) {
-      return Ci.mozISyncedBookmarksMirrorLogger.LEVEL_TRACE;
+      return Ci.mozIServicesLogger.LEVEL_TRACE;
     }
     if (level <= Log.Level.Info) {
-      return Ci.mozISyncedBookmarksMirrorLogger.LEVEL_DEBUG;
+      return Ci.mozIServicesLogger.LEVEL_DEBUG;
     }
     if (level <= Log.Level.Warn) {
-      return Ci.mozISyncedBookmarksMirrorLogger.LEVEL_WARN;
+      return Ci.mozIServicesLogger.LEVEL_WARN;
     }
     if (level <= Log.Level.Error) {
-      return Ci.mozISyncedBookmarksMirrorLogger.LEVEL_ERROR;
+      return Ci.mozIServicesLogger.LEVEL_ERROR;
     }
-    return Ci.mozISyncedBookmarksMirrorLogger.LEVEL_OFF;
+    return Ci.mozIServicesLogger.LEVEL_OFF;
   }
 
   trace(message) {
@@ -266,7 +266,7 @@ class SyncedBookmarksMirror {
     this.merger.db = db.unsafeRawConnection.QueryInterface(
       Ci.mozIStorageConnection
     );
-    this.merger.logger = new MirrorLoggerAdapter(MirrorLog);
+    this.merger.logger = new LogAdapter(MirrorLog);
 
     // Automatically close the database connection on shutdown. `progress`
     // tracks state for shutdown hang reporting.
@@ -763,11 +763,7 @@ class SyncedBookmarksMirror {
           signal.removeEventListener("abort", onAbort);
           switch (code) {
             case Cr.NS_ERROR_STORAGE_BUSY:
-              reject(
-                new SyncedBookmarksMirror.MergeConflictError(
-                  "Local tree changed during merge"
-                )
-              );
+              reject(new SyncedBookmarksMirror.MergeConflictError(message));
               break;
 
             case Cr.NS_ERROR_ABORT:
@@ -1545,9 +1541,7 @@ async function initializeMirrorDatabase(db) {
     /* The server modified time, in milliseconds. */
     serverModified INTEGER NOT NULL DEFAULT 0,
     needsMerge BOOLEAN NOT NULL DEFAULT 0,
-    validity INTEGER NOT NULL DEFAULT ${
-      Ci.mozISyncedBookmarksMerger.VALIDITY_VALID
-    },
+    validity INTEGER NOT NULL DEFAULT ${Ci.mozISyncedBookmarksMerger.VALIDITY_VALID},
     isDeleted BOOLEAN NOT NULL DEFAULT 0,
     kind INTEGER NOT NULL DEFAULT -1,
     /* The creation date, in milliseconds. */
@@ -1846,9 +1840,7 @@ async function initializeTempMirrorEntities(db) {
                      WHERE b.fk = NEW.placeId AND
                            p.title = NEW.tag AND
                            p.parent = (SELECT id FROM moz_bookmarks
-                                       WHERE guid = '${
-                                         PlacesUtils.bookmarks.tagsGuid
-                                       }')),
+                                       WHERE guid = '${PlacesUtils.bookmarks.tagsGuid}')),
                     GENERATE_GUID()),
              (SELECT b.id FROM moz_bookmarks b
               JOIN moz_bookmarks p ON p.id = b.parent
@@ -1858,9 +1850,7 @@ async function initializeTempMirrorEntities(db) {
               JOIN moz_bookmarks p ON p.id = b.parent
               WHERE p.title = NEW.tag AND
                     p.parent = (SELECT id FROM moz_bookmarks
-                                WHERE guid = '${
-                                  PlacesUtils.bookmarks.tagsGuid
-                                }')),
+                                WHERE guid = '${PlacesUtils.bookmarks.tagsGuid}')),
              ${PlacesUtils.bookmarks.TYPE_BOOKMARK}, NEW.placeId,
              NEW.lastModifiedMicroseconds,
              NEW.lastModifiedMicroseconds

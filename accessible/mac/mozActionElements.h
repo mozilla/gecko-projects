@@ -11,8 +11,9 @@
 @interface mozButtonAccessible : mozAccessible {
 }
 - (BOOL)hasPopup;
-- (void)click;
-- (BOOL)isTab;
+@end
+
+@interface mozPopupButtonAccessible : mozButtonAccessible
 @end
 
 @interface mozCheckboxAccessible : mozButtonAccessible
@@ -20,16 +21,16 @@
 - (int)isChecked;
 @end
 
-/* Class for tabs - not individual tabs */
-@interface mozTabsAccessible : mozAccessible {
-  NSMutableArray* mTabs;
-}
-- (id)tabs;
-@end
-
 /**
  * Accessible for a PANE
  */
 @interface mozPaneAccessible : mozAccessible
+
+@end
+
+/**
+ * Base accessible for an incrementable
+ */
+@interface mozIncrementableAccessible : mozAccessible
 
 @end

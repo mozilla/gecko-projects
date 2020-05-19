@@ -94,8 +94,8 @@ interface RTCPeerConnection : EventTarget  {
   Promise<DOMString> getIdentityAssertion();
   Promise<RTCSessionDescriptionInit> createOffer (optional RTCOfferOptions options = {});
   Promise<RTCSessionDescriptionInit> createAnswer (optional RTCAnswerOptions options = {});
-  Promise<void> setLocalDescription (RTCSessionDescriptionInit description);
-  Promise<void> setRemoteDescription (RTCSessionDescriptionInit description);
+  Promise<void> setLocalDescription (optional RTCSessionDescriptionInit description = {});
+  Promise<void> setRemoteDescription (optional RTCSessionDescriptionInit description = {});
   readonly attribute RTCSessionDescription? localDescription;
   readonly attribute RTCSessionDescription? currentLocalDescription;
   readonly attribute RTCSessionDescription? pendingLocalDescription;
@@ -138,21 +138,6 @@ interface RTCPeerConnection : EventTarget  {
   sequence<RTCRtpReceiver> getReceivers();
   sequence<RTCRtpTransceiver> getTransceivers();
 
-  // test-only: for testing getContributingSources
-  [ChromeOnly]
-  DOMHighResTimeStamp mozGetNowInRtpSourceReferenceTime();
-  // test-only: for testing getContributingSources
-  [ChromeOnly]
-  void mozInsertAudioLevelForContributingSource(RTCRtpReceiver receiver,
-                                                unsigned long source,
-                                                DOMHighResTimeStamp timestamp,
-                                                unsigned long rtpTimestamp,
-                                                boolean hasLevel,
-                                                byte level);
-  [ChromeOnly]
-  void mozAddRIDExtension(RTCRtpReceiver receiver, unsigned short extensionId);
-  [ChromeOnly]
-  void mozAddRIDFilter(RTCRtpReceiver receiver, DOMString rid);
   [ChromeOnly]
   void mozSetPacketCallback(mozPacketCallback callback);
   [ChromeOnly]

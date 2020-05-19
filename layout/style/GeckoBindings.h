@@ -24,6 +24,7 @@ class nsAtom;
 class nsIURI;
 class nsSimpleContentList;
 struct nsFont;
+class ServoComputedData;
 
 namespace mozilla {
 class ComputedStyle;
@@ -106,7 +107,8 @@ void Gecko_DestroyStyleChildrenIterator(mozilla::dom::StyleChildrenIterator*);
 const nsINode* Gecko_GetNextStyleChild(mozilla::dom::StyleChildrenIterator*);
 
 nsAtom* Gecko_Element_ImportedPart(const nsAttrValue*, nsAtom*);
-nsAtom* Gecko_Element_ExportedPart(const nsAttrValue*, nsAtom*);
+nsAtom** Gecko_Element_ExportedParts(const nsAttrValue*, nsAtom*,
+                                     size_t* aOutLength);
 
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::SheetLoadDataHolder,
                                    SheetLoadDataHolder);
@@ -344,11 +346,6 @@ void Gecko_SetListStyleImageImageValue(
 
 void Gecko_CopyListStyleImageFrom(nsStyleList* dest, const nsStyleList* src);
 
-// cursor style.
-void Gecko_SetCursorArrayCapacity(nsStyleUI*, size_t);
-void Gecko_AppendCursorImage(nsStyleUI*, const mozilla::StyleComputedImageUrl*);
-void Gecko_CopyCursorArrayFrom(nsStyleUI* dest, const nsStyleUI* src);
-
 // Dirtiness tracking.
 void Gecko_SetNodeFlags(const nsINode* node, uint32_t flags);
 void Gecko_UnsetNodeFlags(const nsINode* node, uint32_t flags);
@@ -530,8 +527,6 @@ mozilla::StyleSheet* Gecko_StyleSheet_Clone(
 
 void Gecko_StyleSheet_AddRef(const mozilla::StyleSheet* aSheet);
 void Gecko_StyleSheet_Release(const mozilla::StyleSheet* aSheet);
-nsCSSKeyword Gecko_LookupCSSKeyword(const uint8_t* string, uint32_t len);
-const char* Gecko_CSSKeywordString(nsCSSKeyword keyword, uint32_t* len);
 bool Gecko_IsDocumentBody(const mozilla::dom::Element* element);
 
 // We use an int32_t here instead of a LookAndFeel::ColorID
@@ -574,15 +569,15 @@ void Gecko_SetJemallocThreadLocalArena(bool enabled);
 #undef CSS_PSEUDO_ELEMENT
 
 bool Gecko_ErrorReportingEnabled(const mozilla::StyleSheet* sheet,
-                                 const mozilla::css::Loader* loader);
+                                 const mozilla::css::Loader* loader,
+                                 uint64_t* aOutWindowId);
 
 void Gecko_ReportUnexpectedCSSError(
-    const mozilla::StyleSheet* sheet, const mozilla::css::Loader* loader,
-    nsIURI* uri, const char* message, const char* param, uint32_t paramLen,
-    const char* prefix, const char* prefixParam, uint32_t prefixParamLen,
-    const char* suffix, const char* source, uint32_t sourceLen,
-    const char* selectors, uint32_t selectorsLen, uint32_t lineNumber,
-    uint32_t colNumber);
+    uint64_t windowId, nsIURI* uri, const char* message, const char* param,
+    uint32_t paramLen, const char* prefix, const char* prefixParam,
+    uint32_t prefixParamLen, const char* suffix, const char* source,
+    uint32_t sourceLen, const char* selectors, uint32_t selectorsLen,
+    uint32_t lineNumber, uint32_t colNumber);
 
 // DOM APIs.
 void Gecko_ContentList_AppendAll(nsSimpleContentList* aContentList,
@@ -639,6 +634,9 @@ bool Gecko_MediaFeatures_HasSystemMetric(const mozilla::dom::Document*,
 bool Gecko_MediaFeatures_IsResourceDocument(const mozilla::dom::Document*);
 nsAtom* Gecko_MediaFeatures_GetOperatingSystemVersion(
     const mozilla::dom::Document*);
+
+void Gecko_GetSafeAreaInsets(const nsPresContext*, float*, float*, float*,
+                             float*);
 
 void Gecko_PrintfStderr(const nsCString*);
 

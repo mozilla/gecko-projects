@@ -2,7 +2,7 @@
  * Bug 1277803 - A test case for testing favicon loading across different first party domains.
  */
 
-if (Services.prefs.getBoolPref("fission.autostart")) {
+if (SpecialPowers.useRemoteSubframes) {
   requestLongerTimeout(2);
 }
 
@@ -319,6 +319,8 @@ async function doTestForAllTabsFavicon(
   await promiseFaviconLoaded;
 
   assertIconIsData(tabInfo.tab);
+
+  gTabsPanel.init();
 
   // Make the popup of allTabs showing up and trigger the loading of the favicon.
   let allTabsView = document.getElementById("allTabsMenu-allTabsView");

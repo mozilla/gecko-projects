@@ -4,6 +4,7 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import io
 import json
 import logging
 import mozpack.path as mozpath
@@ -83,6 +84,19 @@ class ObjdirMismatchException(BadEnvironmentException):
         return "Objdir mismatch: %s != %s" % (self.objdir1, self.objdir2)
 
 
+class BinaryNotFoundException(Exception):
+    """Raised when the binary is not found in the expected location."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def __str__(self):
+        return 'Binary expected at {} does not exist.'.format(self.path)
+
+    def help(self):
+        return 'It looks like your program isn\'t built. You can run |./mach build| to build it.'
+
+
 class MozbuildObject(ProcessExecutionMixin):
     """Base class providing basic functionality useful to many modules.
 
@@ -140,13 +154,13 @@ class MozbuildObject(ProcessExecutionMixin):
         default.
         """
 
-        cwd = cwd or os.getcwd()
+        cwd = os.path.realpath(cwd or os.getcwd())
         topsrcdir = None
         topobjdir = None
         mozconfig = MozconfigLoader.AUTODETECT
 
         def load_mozinfo(path):
-            info = json.load(open(path, 'rt'))
+            info = json.load(io.open(path, 'rt', encoding='utf-8'))
             topsrcdir = info.get('topsrcdir')
             topobjdir = os.path.dirname(path)
             mozconfig = info.get('mozconfig')
@@ -215,7 +229,7 @@ class MozbuildObject(ProcessExecutionMixin):
             return True
 
         deps = []
-        with open(dep_file, 'r') as fh:
+        with io.open(dep_file, 'r', encoding='utf-8', newline='\n') as fh:
             deps = fh.read().splitlines()
 
         mtime = os.path.getmtime(output)
@@ -240,7 +254,7 @@ class MozbuildObject(ProcessExecutionMixin):
         # we last built the backend, re-generate the backend if
         # so.
         outputs = []
-        with open(backend_file, 'r') as fh:
+        with io.open(backend_file, 'r', encoding='utf-8', newline='\n') as fh:
             outputs = fh.read().splitlines()
         for output in outputs:
             if not os.path.isfile(mozpath.join(self.topobjdir, output)):
@@ -540,12 +554,9 @@ class MozbuildObject(ProcessExecutionMixin):
         if where == 'staged-package':
             stem = os.path.join(stem, substs['MOZ_APP_NAME'])
 
-        if substs['OS_ARCH'] == 'Darwin':
-            if substs['MOZ_BUILD_APP'] == 'xulrunner':
-                stem = os.path.join(stem, 'XUL.framework')
-            else:
-                stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
-                                    'MacOS')
+        if substs['OS_ARCH'] == 'Darwin' and 'MOZ_MACBUNDLE_NAME' in substs:
+            stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
+                                'MacOS')
         elif where == 'default':
             stem = os.path.join(stem, 'bin')
 
@@ -555,7 +566,7 @@ class MozbuildObject(ProcessExecutionMixin):
         path = os.path.join(stem, leaf)
 
         if validate_exists and not os.path.exists(path):
-            raise Exception('Binary expected at %s does not exist.' % path)
+            raise BinaryNotFoundException(path)
 
         return path
 
@@ -582,8 +593,8 @@ class MozbuildObject(ProcessExecutionMixin):
                                   'Mozilla Build System', '-group', 'mozbuild',
                                   '-message', msg], ensure_exit_code=False)
             elif sys.platform.startswith('win'):
-                from ctypes import Structure, windll, POINTER, sizeof
-                from ctypes.wintypes import DWORD, HANDLE, WINFUNCTYPE, BOOL, UINT
+                from ctypes import Structure, windll, POINTER, sizeof, WINFUNCTYPE
+                from ctypes.wintypes import DWORD, HANDLE, BOOL, UINT
 
                 class FLASHWINDOW(Structure):
                     _fields_ = [("cbSize", UINT),
@@ -730,7 +741,7 @@ class MozbuildObject(ProcessExecutionMixin):
             fn = self._run_command_in_srcdir
 
         append_env = dict(append_env or ())
-        append_env[b'MACH'] = '1'
+        append_env['MACH'] = '1'
 
         params = {
             'args': args,
@@ -956,6 +967,11 @@ class MachCommandConditions(object):
         return False
 
     @staticmethod
+    def is_firefox_or_thunderbird(cls):
+        """Must have a Firefox or Thunderbird build."""
+        return MachCommandConditions.is_firefox(cls) or MachCommandConditions.is_thunderbird(cls)
+
+    @staticmethod
     def is_android(cls):
         """Must have an Android build."""
         if hasattr(cls, 'substs'):
@@ -1014,6 +1030,15 @@ class MachCommandConditions(object):
         """Must not be an artifact build."""
         if hasattr(cls, 'substs'):
             return not MachCommandConditions.is_artifact_build(cls)
+        return False
+
+    @staticmethod
+    def is_buildapp_in(cls, apps):
+        """Must have a build for one of the given app"""
+        for app in apps:
+            attr = getattr(MachCommandConditions, 'is_{}'.format(app), None)
+            if attr and attr(cls):
+                return True
         return False
 
 

@@ -402,6 +402,7 @@ class XPCJSContext final : public mozilla::CycleCollectedJSContext,
     IDX_CLASS_ID,
     IDX_INTERFACE_ID,
     IDX_INITIALIZER,
+    IDX_PRINT,
     IDX_TOTAL_COUNT  // just a count of the above
   };
 
@@ -585,8 +586,8 @@ class XPCJSRuntime final : public mozilla::CycleCollectedJSRuntime {
   JS::Value mStrJSVals[XPCJSContext::IDX_TOTAL_COUNT];
 
   struct Hasher {
-    typedef RefPtr<mozilla::BasePrincipal> Key;
-    typedef Key Lookup;
+    using Key = RefPtr<mozilla::BasePrincipal>;
+    using Lookup = Key;
     static uint32_t hash(const Lookup& l) { return l->GetOriginNoSuffixHash(); }
     static bool match(const Key& k, const Lookup& l) {
       return k->FastEquals(l);
@@ -788,7 +789,6 @@ extern bool XPC_WN_GetterSetter(JSContext* cx, unsigned argc, JS::Value* vp);
 /***************************************************************************/
 // XPCWrappedNativeScope is one-to-one with a JS compartment.
 
-class nsXPCComponentsBase;
 class XPCWrappedNativeScope final
     : public mozilla::LinkedListElement<XPCWrappedNativeScope> {
  public:
@@ -802,7 +802,7 @@ class XPCWrappedNativeScope final
     return mWrappedNativeProtoMap.get();
   }
 
-  nsXPCComponentsBase* GetComponents() const { return mComponents; }
+  nsXPCComponents* GetComponents() const { return mComponents; }
 
   bool AttachComponentsObject(JSContext* aCx);
 
@@ -889,7 +889,7 @@ class XPCWrappedNativeScope final
  private:
   mozilla::UniquePtr<Native2WrappedNativeMap> mWrappedNativeMap;
   mozilla::UniquePtr<ClassInfo2WrappedNativeProtoMap> mWrappedNativeProtoMap;
-  RefPtr<nsXPCComponentsBase> mComponents;
+  RefPtr<nsXPCComponents> mComponents;
   JS::Compartment* mCompartment;
 
   JS::WeakMapPtr<JSObject*, JSObject*> mXrayExpandos;
@@ -1091,7 +1091,7 @@ class MOZ_STACK_CLASS XPCNativeSetKey final {
   // |addition| inserted after existing interfaces. |addition| must
   // not already be present in |baseSet|.
   explicit XPCNativeSetKey(XPCNativeSet* baseSet, XPCNativeInterface* addition);
-  ~XPCNativeSetKey() {}
+  ~XPCNativeSetKey() = default;
 
   XPCNativeSet* GetBaseSet() const { return mBaseSet; }
   XPCNativeInterface* GetAddition() const { return mAddition; }
@@ -1826,7 +1826,7 @@ class XPCConvert {
                              const void* buf, const nsXPTType& type,
                              const nsID* iid, uint32_t count, nsresult* pErr);
 
-  typedef std::function<void*(uint32_t*)> ArrayAllocFixupLen;
+  using ArrayAllocFixupLen = std::function<void*(uint32_t*)>;
 
   /**
    * Convert a JS::Value into a native array.
@@ -1889,13 +1889,12 @@ class nsXPCException {
 };
 
 /***************************************************************************/
-// 'Components' object implementations. nsXPCComponentsBase has the
-// less-privileged stuff that we're willing to expose to XBL.
+// 'Components' object implementation.
 
-class nsXPCComponentsBase : public nsIXPCComponentsBase {
+class nsXPCComponents final : public nsIXPCComponents {
  public:
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIXPCCOMPONENTSBASE
+  NS_DECL_NSIXPCCOMPONENTS
 
  public:
   void SystemIsBeingShutDown() { ClearMembers(); }
@@ -1903,32 +1902,15 @@ class nsXPCComponentsBase : public nsIXPCComponentsBase {
   XPCWrappedNativeScope* GetScope() { return mScope; }
 
  protected:
-  virtual ~nsXPCComponentsBase();
+  ~nsXPCComponents();
 
-  explicit nsXPCComponentsBase(XPCWrappedNativeScope* aScope);
-  virtual void ClearMembers();
+  explicit nsXPCComponents(XPCWrappedNativeScope* aScope);
+  void ClearMembers();
 
   XPCWrappedNativeScope* mScope;
 
-  // Unprivileged members from nsIXPCComponentsBase.
   RefPtr<nsXPCComponents_Interfaces> mInterfaces;
   RefPtr<nsXPCComponents_Results> mResults;
-
-  friend class XPCWrappedNativeScope;
-};
-
-class nsXPCComponents : public nsXPCComponentsBase, public nsIXPCComponents {
- public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_FORWARD_NSIXPCCOMPONENTSBASE(nsXPCComponentsBase::)
-  NS_DECL_NSIXPCCOMPONENTS
-
- protected:
-  explicit nsXPCComponents(XPCWrappedNativeScope* aScope);
-  virtual ~nsXPCComponents();
-  virtual void ClearMembers() override;
-
-  // Privileged members added by nsIXPCComponents.
   RefPtr<nsXPCComponents_Classes> mClasses;
   RefPtr<nsXPCComponents_ID> mID;
   RefPtr<nsXPCComponents_Exception> mException;
@@ -2083,11 +2065,11 @@ class TypedAutoMarkingPtr : public AutoMarkingPtr {
   T* mPtr;
 };
 
-typedef TypedAutoMarkingPtr<XPCWrappedNative> AutoMarkingWrappedNativePtr;
-typedef TypedAutoMarkingPtr<XPCWrappedNativeTearOff>
-    AutoMarkingWrappedNativeTearOffPtr;
-typedef TypedAutoMarkingPtr<XPCWrappedNativeProto>
-    AutoMarkingWrappedNativeProtoPtr;
+using AutoMarkingWrappedNativePtr = TypedAutoMarkingPtr<XPCWrappedNative>;
+using AutoMarkingWrappedNativeTearOffPtr =
+    TypedAutoMarkingPtr<XPCWrappedNativeTearOff>;
+using AutoMarkingWrappedNativeProtoPtr =
+    TypedAutoMarkingPtr<XPCWrappedNativeProto>;
 
 /***************************************************************************/
 namespace xpc {
@@ -2171,7 +2153,7 @@ class XPCVariant : public nsIVariant {
   void RemovePurple() { mRefCnt.RemovePurple(); }
 
  protected:
-  virtual ~XPCVariant() {}
+  virtual ~XPCVariant() = default;
 
   bool InitializeData(JSContext* cx);
 
@@ -2237,6 +2219,7 @@ struct GlobalProperties {
   bool CSSRule : 1;
   bool Directory : 1;
   bool Document : 1;
+  bool DOMException : 1;
   bool DOMParser : 1;
   bool DOMTokenList : 1;
   bool Element : 1;
@@ -2635,13 +2618,6 @@ class CompartmentPrivate {
   // This compartment corresponds to a WebExtension content script, and
   // receives various bits of special compatibility behavior.
   bool isWebExtensionContentScript;
-
-  // If CPOWs are disabled for browser code via the
-  // dom.ipc.cpows.forbid-unsafe-from-browser preferences, then only
-  // add-ons can use CPOWs. This flag allows a non-addon scope
-  // to opt into CPOWs. It's necessary for the implementation of
-  // RemoteAddonsParent.jsm.
-  bool allowCPOWs;
 
   // True if this compartment is a UA widget compartment.
   bool isUAWidgetCompartment;

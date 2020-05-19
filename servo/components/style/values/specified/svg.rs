@@ -21,13 +21,13 @@ use style_traits::{StyleParseErrorKind, ToCss};
 pub type SVGPaint = generic::GenericSVGPaint<Color, SpecifiedUrl>;
 
 /// <length> | <percentage> | <number> | context-value
-pub type SVGLength = generic::SVGLength<LengthPercentage>;
+pub type SVGLength = generic::GenericSVGLength<LengthPercentage>;
 
 /// A non-negative version of SVGLength.
-pub type SVGWidth = generic::SVGLength<NonNegativeLengthPercentage>;
+pub type SVGWidth = generic::GenericSVGLength<NonNegativeLengthPercentage>;
 
 /// [ <length> | <percentage> | <number> ]# | context-value
-pub type SVGStrokeDashArray = generic::SVGStrokeDashArray<NonNegativeLengthPercentage>;
+pub type SVGStrokeDashArray = generic::GenericSVGStrokeDashArray<NonNegativeLengthPercentage>;
 
 /// Whether the `context-value` value is enabled.
 #[cfg(feature = "gecko")]
@@ -146,8 +146,13 @@ impl SVGPaintOrder {
 
     /// Get variant of `paint-order`
     pub fn order_at(&self, pos: u8) -> PaintOrder {
-        // Safe because PaintOrder covers all possible patterns.
-        unsafe { std::mem::transmute((self.0 >> pos * PAINT_ORDER_SHIFT) & PAINT_ORDER_MASK) }
+        match (self.0 >> pos * PAINT_ORDER_SHIFT) & PAINT_ORDER_MASK {
+            0 => PaintOrder::Normal,
+            1 => PaintOrder::Fill,
+            2 => PaintOrder::Stroke,
+            3 => PaintOrder::Markers,
+            _ => unreachable!("this cannot happen"),
+        }
     }
 }
 

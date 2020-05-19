@@ -7,7 +7,10 @@
 "use strict";
 
 module.exports = {
-  DOMTokenList: [["prototype", "item"], ["prototype", "contains"]],
+  DOMTokenList: [
+    ["prototype", "item"],
+    ["prototype", "contains"],
+  ],
   Document: [
     ["prototype", "getElementsByTagName"],
     ["prototype", "getElementsByTagNameNS"],
@@ -36,6 +39,7 @@ module.exports = {
     ["prototype", "querySelectorAll"],
     ["prototype", "getAsFlexContainer"],
     ["prototype", "getGridFragments"],
+    ["prototype", "hasGridFragments"],
     ["prototype", "getElementsWithGrid"],
   ],
   FormData: [

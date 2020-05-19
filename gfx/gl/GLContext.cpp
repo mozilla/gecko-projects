@@ -38,6 +38,7 @@
 #include "mozilla/StaticPrefs_gl.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/layers/TextureForwarder.h"  // for LayersIPCChannel
 
 #include "OGLShaderProgram.h"  // for ShaderProgramType
 
@@ -709,17 +710,6 @@ bool GLContext::InitImpl() {
       // breaks WebGL.
       MarkUnsupported(GLFeature::framebuffer_multisample);
     }
-
-#ifdef XP_MACOSX
-    // The Mac Nvidia driver, for versions up to and including 10.8,
-    // don't seem to properly support this.  See 814839
-    // this has been fixed in Mac OS X 10.9. See 907946
-    // and it also works in 10.8.3 and higher.  See 1094338.
-    if (Vendor() == gl::GLVendor::NVIDIA &&
-        !nsCocoaFeatures::IsAtLeastVersion(10, 8, 3)) {
-      MarkUnsupported(GLFeature::depth_texture);
-    }
-#endif
 
     const auto versionStr = (const char*)fGetString(LOCAL_GL_VERSION);
     if (strstr(versionStr, "Mesa")) {
@@ -2087,7 +2077,7 @@ static void ReportArrayContents(
 
   printf_stderr("%s:\n", title);
 
-  nsTArray<GLContext::NamedResource> copy(aArray);
+  nsTArray<GLContext::NamedResource> copy(aArray.Clone());
   copy.Sort();
 
   GLContext* lastContext = nullptr;
@@ -2119,9 +2109,7 @@ void GLContext::ReportOutstandingNames() {
 
 #endif /* DEBUG */
 
-void GLContext::GuaranteeResolve() {
-  fFinish();
-}
+void GLContext::GuaranteeResolve() { fFinish(); }
 
 const gfx::IntSize& GLContext::OffscreenSize() const {
   MOZ_ASSERT(IsOffscreen());

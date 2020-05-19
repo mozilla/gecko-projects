@@ -11,6 +11,10 @@ const { LoginManagerParent } = ChromeUtils.import(
 const { LoginManagerPrompter } = ChromeUtils.import(
   "resource://gre/modules/LoginManagerPrompter.jsm"
 );
+const { PopupNotifications } = ChromeUtils.import(
+  "resource://gre/modules/PopupNotifications.jsm"
+);
+
 const { TestUtils } = ChromeUtils.import(
   "resource://testing-common/TestUtils.jsm"
 );
@@ -407,8 +411,22 @@ add_task(
 add_task(async function test_addUsernameBeforeAutoSaveEdit() {
   startTestConditions(99);
   let { generatedPassword } = stubGeneratedPasswordForBrowsingContextId(99);
-  let { fakePromptToChangePassword, restorePrompter } = stubPrompter();
+  let {
+    fakePromptToChangePassword,
+    restorePrompter,
+    resetPrompterHistory,
+  } = stubPrompter();
   let rootBrowser = LMP.getRootBrowser();
+  let fakePopupNotifications = {
+    getNotification: sinon.stub().returns({ dismissed: true }),
+  };
+  sinon.stub(LoginHelper, "getBrowserForPrompt").callsFake(() => {
+    return {
+      ownerGlobal: {
+        PopupNotifications: fakePopupNotifications,
+      },
+    };
+  });
 
   let storageChangedPromised = TestUtils.topicObserved(
     "passwordmgr-storage-changed",
@@ -454,7 +472,14 @@ add_task(async function test_addUsernameBeforeAutoSaveEdit() {
     "promptToChangePassword had a truthy 'notifySaved' argument"
   );
 
-  info("Add a username in storage");
+  info("Checking the getNotification stub");
+  ok(
+    !fakePopupNotifications.getNotification.called,
+    "getNotification didn't get called yet"
+  );
+  resetPrompterHistory();
+
+  info("Add a username to the auto-saved login in storage");
   let loginWithUsername = login.clone();
   loginWithUsername.username = "added_username";
   LoginManagerPrompter._updateLogin(login, loginWithUsername);
@@ -465,6 +490,7 @@ add_task(async function test_addUsernameBeforeAutoSaveEdit() {
     "passwordmgr-storage-changed",
     (_, data) => data == "modifyLogin"
   );
+  // will update the doorhanger with changed password
   await LMP._onPasswordEditedOrGenerated(rootBrowser, {
     browsingContextId: 99,
     origin: "https://www.example.com",
@@ -481,6 +507,7 @@ add_task(async function test_addUsernameBeforeAutoSaveEdit() {
   let [dataArray] = await storageChangedPromised;
   login = dataArray.queryElementAt(1, Ci.nsILoginInfo);
   loginWithUsername.password = newPassword;
+  // the password should be updated in storage, but not the username (until the user confirms the doorhanger)
   assertLoginProperties(login, loginWithUsername);
   ok(login.matches(loginWithUsername, false), "Check updated login");
   equal(
@@ -488,6 +515,26 @@ add_task(async function test_addUsernameBeforeAutoSaveEdit() {
     1,
     "Should have 1 saved login still"
   );
+
+  ok(
+    fakePopupNotifications.getNotification.calledOnce,
+    "getNotification was called"
+  );
+  ok(LMP._getPrompter.calledOnce, "Checking _getPrompter was called");
+  ok(
+    fakePromptToChangePassword.calledOnce,
+    "Checking promptToChangePassword was called"
+  );
+  ok(
+    fakePromptToChangePassword.getCall(0).args[3],
+    "promptToChangePassword had a truthy 'dismissed' argument"
+  );
+  // The generated password changed, so we expect notifySaved to be true
+  ok(
+    fakePromptToChangePassword.getCall(0).args[4],
+    "promptToChangePassword should have a falsey 'notifySaved' argument"
+  );
+  resetPrompterHistory();
 
   info(
     "Simulate a second edit to check that the telemetry event for the first edit is not recorded twice"
@@ -497,6 +544,7 @@ add_task(async function test_addUsernameBeforeAutoSaveEdit() {
     "passwordmgr-storage-changed",
     (_, data) => data == "modifyLogin"
   );
+  info("Calling _onPasswordEditedOrGenerated again");
   await LMP._onPasswordEditedOrGenerated(rootBrowser, {
     browsingContextId: 99,
     origin: "https://www.example.com",
@@ -523,7 +571,153 @@ add_task(async function test_addUsernameBeforeAutoSaveEdit() {
 
   checkEditTelemetryRecorded(1, "with auto-save");
 
+  ok(
+    fakePromptToChangePassword.calledOnce,
+    "Checking promptToChangePassword was called"
+  );
+  equal(
+    fakePromptToChangePassword.getCall(0).args[2].password,
+    newerPassword,
+    "promptToChangePassword had the updated password"
+  );
+  ok(
+    fakePromptToChangePassword.getCall(0).args[3],
+    "promptToChangePassword had a truthy 'dismissed' argument"
+  );
+
   LoginManagerParent._browsingContextGlobal.get.restore();
+  LoginHelper.getBrowserForPrompt.restore();
+  restorePrompter();
+  LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().clear();
+  Services.logins.removeAllLogins();
+  Services.telemetry.clearEvents();
+});
+
+add_task(async function test_editUsernameOfFilledSavedLogin() {
+  startTestConditions(99);
+  stubGeneratedPasswordForBrowsingContextId(99);
+  let {
+    fakePromptToChangePassword,
+    fakePromptToSavePassword,
+    restorePrompter,
+    resetPrompterHistory,
+  } = stubPrompter();
+  let rootBrowser = LMP.getRootBrowser();
+  let fakePopupNotifications = {
+    getNotification: sinon.stub().returns({ dismissed: true }),
+  };
+  sinon.stub(LoginHelper, "getBrowserForPrompt").callsFake(() => {
+    return {
+      ownerGlobal: {
+        PopupNotifications: fakePopupNotifications,
+      },
+    };
+  });
+
+  let login0Props = Object.assign({}, loginTemplate, {
+    username: "someusername",
+    password: "qweqweq",
+  });
+  info("Adding initial login: " + JSON.stringify(login0Props));
+  let savedLogin = await LoginTestUtils.addLogin(login0Props);
+
+  info(
+    "Saved initial login: " + JSON.stringify(Services.logins.getAllLogins()[0])
+  );
+
+  equal(
+    Services.logins.getAllLogins().length,
+    1,
+    "Should have 1 saved login at the start of the test"
+  );
+
+  // first prompt to save a new login
+  let newUsername = "differentuser";
+  let newPassword = login0Props.password + "🔥";
+  await LMP._onPasswordEditedOrGenerated(rootBrowser, {
+    browsingContextId: 99,
+    origin: "https://www.example.com",
+    formActionOrigin: "https://www.mozilla.org",
+    autoFilledLoginGuid: savedLogin.guid,
+    newPasswordField: { value: newPassword },
+    usernameField: { value: newUsername },
+    triggeredByFillingGenerated: false,
+  });
+
+  let expected = new LoginInfo(
+    login0Props.origin,
+    login0Props.formActionOrigin,
+    null,
+    newUsername,
+    newPassword
+  );
+
+  ok(LMP._getPrompter.calledOnce, "Checking _getPrompter was called");
+  info("Checking the getNotification stub");
+  ok(
+    !fakePopupNotifications.getNotification.called,
+    "getNotification was not called"
+  );
+  ok(
+    fakePromptToSavePassword.calledOnce,
+    "Checking promptToSavePassword was called"
+  );
+  ok(
+    fakePromptToSavePassword.getCall(0).args[2],
+    "promptToSavePassword had a truthy 'dismissed' argument"
+  );
+  ok(
+    !fakePromptToSavePassword.getCall(0).args[3],
+    "promptToSavePassword had a falsey 'notifySaved' argument"
+  );
+  assertLoginProperties(fakePromptToSavePassword.getCall(0).args[1], expected);
+  resetPrompterHistory();
+
+  // then prompt with matching username/password
+  await LMP._onPasswordEditedOrGenerated(rootBrowser, {
+    browsingContextId: 99,
+    origin: "https://www.example.com",
+    formActionOrigin: "https://www.mozilla.org",
+    autoFilledLoginGuid: savedLogin.guid,
+    newPasswordField: { value: login0Props.password },
+    usernameField: { value: login0Props.username },
+    triggeredByFillingGenerated: false,
+  });
+
+  expected = new LoginInfo(
+    login0Props.origin,
+    login0Props.formActionOrigin,
+    null,
+    login0Props.username,
+    login0Props.password
+  );
+
+  ok(LMP._getPrompter.calledOnce, "Checking _getPrompter was called");
+  info("Checking the getNotification stub");
+  ok(
+    fakePopupNotifications.getNotification.called,
+    "getNotification was called"
+  );
+  ok(
+    fakePromptToChangePassword.calledOnce,
+    "Checking promptToChangePassword was called"
+  );
+  ok(
+    fakePromptToChangePassword.getCall(0).args[3],
+    "promptToChangePassword had a truthy 'dismissed' argument"
+  );
+  ok(
+    !fakePromptToChangePassword.getCall(0).args[4],
+    "promptToChangePassword had a falsey 'notifySaved' argument"
+  );
+  assertLoginProperties(
+    fakePromptToChangePassword.getCall(0).args[2],
+    expected
+  );
+  resetPrompterHistory();
+
+  LoginManagerParent._browsingContextGlobal.get.restore();
+  LoginHelper.getBrowserForPrompt.restore();
   restorePrompter();
   LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().clear();
   Services.logins.removeAllLogins();

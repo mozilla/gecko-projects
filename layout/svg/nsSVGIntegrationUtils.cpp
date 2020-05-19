@@ -443,8 +443,9 @@ typedef nsSVGIntegrationUtils::PaintFramesParams PaintFramesParams;
 
 /**
  * Paint css-positioned-mask onto a given target(aMaskDT).
+ * Return value indicates if mask is complete.
  */
-static void PaintMaskSurface(const PaintFramesParams& aParams,
+static bool PaintMaskSurface(const PaintFramesParams& aParams,
                              DrawTarget* aMaskDT, float aOpacity,
                              ComputedStyle* aSC,
                              const nsTArray<nsSVGMaskFrame*>& aMaskFrames,
@@ -466,6 +467,8 @@ static void PaintMaskSurface(const PaintFramesParams& aParams,
       gfxContext::CreatePreservingTransformOrNull(aMaskDT);
   MOZ_ASSERT(maskContext);
 
+  bool isMaskComplete = true;
+
   // Multiple SVG masks interleave with image mask. Paint each layer onto
   // aMaskDT one at a time.
   for (int i = aMaskFrames.Length() - 1; i >= 0; i--) {
@@ -486,8 +489,9 @@ static void PaintMaskSurface(const PaintFramesParams& aParams,
       if (svgMask) {
         Matrix tmp = aMaskDT->GetTransform();
         aMaskDT->SetTransform(Matrix());
-        aMaskDT->MaskSurface(ColorPattern(Color(0.0, 0.0, 0.0, 1.0)), svgMask,
-                             Point(0, 0), DrawOptions(1.0, compositionOp));
+        aMaskDT->MaskSurface(ColorPattern(DeviceColor(0.0, 0.0, 0.0, 1.0)),
+                             svgMask, Point(0, 0),
+                             DrawOptions(1.0, compositionOp));
         aMaskDT->SetTransform(tmp);
       }
     } else if (svgReset->mMask.mLayers[i].mImage.IsResolved()) {
@@ -505,9 +509,11 @@ static void PaintMaskSurface(const PaintFramesParams& aParams,
       aParams.imgParams.result &= nsCSSRendering::PaintStyleImageLayerWithSC(
           params, *maskContext, aSC, *aParams.frame->StyleBorder());
     } else {
-      aParams.imgParams.result &= ImgDrawResult::NOT_READY;
+      isMaskComplete = false;
     }
   }
+
+  return isMaskComplete;
 }
 
 struct MaskPaintResult {
@@ -570,11 +576,13 @@ static MaskPaintResult CreateAndPaintMaskSurface(
   // position. This makes sure that we combine the masks in device space.
   Matrix maskSurfaceMatrix = ctx.CurrentMatrix();
 
-  PaintMaskSurface(aParams, maskDT, paintResult.opacityApplied ? aOpacity : 1.0,
-                   aSC, aMaskFrames, maskSurfaceMatrix, aOffsetToUserSpace);
+  bool isMaskComplete = PaintMaskSurface(
+      aParams, maskDT, paintResult.opacityApplied ? aOpacity : 1.0, aSC,
+      aMaskFrames, maskSurfaceMatrix, aOffsetToUserSpace);
 
-  if (aParams.imgParams.result != ImgDrawResult::SUCCESS &&
-      aParams.imgParams.result != ImgDrawResult::SUCCESS_NOT_COMPLETE) {
+  if (!isMaskComplete ||
+      (aParams.imgParams.result != ImgDrawResult::SUCCESS &&
+       aParams.imgParams.result != ImgDrawResult::SUCCESS_NOT_COMPLETE)) {
     // Now we know the status of mask resource since we used it while painting.
     // According to the return value of PaintMaskSurface, we know whether mask
     // resource is resolvable or not.
@@ -748,7 +756,10 @@ class AutoPopGroup {
   gfxContext* mContext;
 };
 
-bool nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams) {
+bool nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams,
+                                      bool& aOutIsMaskComplete) {
+  aOutIsMaskComplete = true;
+
   nsSVGUtils::MaskUsage maskUsage;
   nsSVGUtils::DetermineMaskUsage(aParams.frame, aParams.handleOpacity,
                                  maskUsage);
@@ -806,7 +817,7 @@ bool nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams) {
     if (!maskUsage.shouldGenerateMaskLayer) {
       // Only have basic-shape clip-path effect. Fill clipped region by
       // opaque white.
-      ctx.SetColor(Color(1.0, 1.0, 1.0, 1.0));
+      ctx.SetDeviceColor(DeviceColor::MaskOpaqueWhite());
       ctx.Fill();
 
       return true;
@@ -819,10 +830,10 @@ bool nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams) {
     matSR.SetContext(&ctx);
 
     EffectOffsets offsets = MoveContextOriginToUserSpace(frame, aParams);
-    PaintMaskSurface(aParams, maskTarget,
-                     shouldPushOpacity ? 1.0 : maskUsage.opacity,
-                     firstFrame->Style(), maskFrames, ctx.CurrentMatrix(),
-                     offsets.offsetToUserSpace);
+    aOutIsMaskComplete = PaintMaskSurface(
+        aParams, maskTarget, shouldPushOpacity ? 1.0 : maskUsage.opacity,
+        firstFrame->Style(), maskFrames, ctx.CurrentMatrix(),
+        offsets.offsetToUserSpace);
   }
 
   // Paint clip-path onto ctx.
@@ -1014,7 +1025,7 @@ void PaintMaskAndClipPathInternal(const PaintFramesParams& aParams,
     gfxRect drawingRect = nsLayoutUtils::RectToGfxRect(
         aParams.borderArea, frame->PresContext()->AppUnitsPerDevPixel());
     context.SnappedRectangle(drawingRect);
-    Color overlayColor(0.0f, 0.0f, 0.0f, 0.8f);
+    sRGBColor overlayColor(0.0f, 0.0f, 0.0f, 0.8f);
     if (maskUsage.shouldGenerateMaskLayer) {
       overlayColor.r = 1.0f;  // red represents css positioned mask.
     }
@@ -1106,11 +1117,6 @@ void nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams) {
                                        aParams.imgParams, opacity);
 }
 
-static float ClampStdDeviation(float aStdDeviation) {
-  // Cap software blur radius for performance reasons.
-  return std::min(std::max(0.0f, aStdDeviation), 100.0f);
-}
-
 bool nsSVGIntegrationUtils::CreateWebRenderCSSFilters(
     Span<const StyleFilter> aFilters, nsIFrame* aFrame,
     WrFiltersHolder& aWrFilters) {
@@ -1161,9 +1167,9 @@ bool nsSVGIntegrationUtils::CreateWebRenderCSSFilters(
         // TODO(emilio): we should go directly from css pixels -> device pixels.
         float appUnitsPerDevPixel =
             aFrame->PresContext()->AppUnitsPerDevPixel();
-        wrFilters.AppendElement(mozilla::wr::FilterOp::Blur(
-            ClampStdDeviation(NSAppUnitsToFloatPixels(
-                filter.AsBlur().ToAppUnits(), appUnitsPerDevPixel))));
+        wrFilters.AppendElement(
+            mozilla::wr::FilterOp::Blur(NSAppUnitsToFloatPixels(
+                filter.AsBlur().ToAppUnits(), appUnitsPerDevPixel)));
         break;
       }
       case StyleFilter::Tag::DropShadow: {

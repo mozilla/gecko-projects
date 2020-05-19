@@ -8,6 +8,7 @@
 #define nsSHistory_h
 
 #include "nsCOMPtr.h"
+#include "nsDocShellLoadState.h"
 #include "nsExpirationTracker.h"
 #include "nsISHistory.h"
 #include "nsSHEntryShared.h"
@@ -58,10 +59,15 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
 
   // Structure used in SetChildHistoryEntry
   struct SwapEntriesData {
-    nsDocShell* ignoreShell;     // constant; the shell to ignore
+    mozilla::dom::BrowsingContext*
+        ignoreBC;                // constant; the browsing context to ignore
     nsISHEntry* destTreeRoot;    // constant; the root of the dest tree
     nsISHEntry* destTreeParent;  // constant; the node under destTreeRoot
                                  // whose children will correspond to aEntry
+    uint64_t otherPid;  // constant; pid of the process which indirectly called
+                        // SetChildHistoryEntry
+    // see comment for WalkHistoryEntriesFunc
+    nsTArray<EntriesAndBrowsingContextData>* entriesToUpdate;
   };
 
   nsSHistory(mozilla::dom::BrowsingContext* aRootBC, const nsID& aDocShellID);
@@ -83,11 +89,15 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
   static already_AddRefed<nsISHEntry> GetRootSHEntry(nsISHEntry* aEntry);
 
   // Callback prototype for WalkHistoryEntries.
-  // aEntry is the child history entry, aShell is its corresponding docshell,
-  // aChildIndex is the child's index in its parent entry, and aData is
-  // the opaque pointer passed to WalkHistoryEntries.
+  // `aEntry` is the child history entry, `aBC` is its corresponding browsing
+  // context, `aChildIndex` is the child's index in its parent entry, and
+  // `aData` is the opaque pointer passed to WalkHistoryEntries. Both structs
+  // that are passed as `aData` to this function have a field
+  // `aEntriesToUpdate`, which is an array of entries we need to update in
+  // docshell, if the 'SH in parent' pref is on (which implies that this method
+  // is executed in the parent)
   typedef nsresult (*WalkHistoryEntriesFunc)(nsISHEntry* aEntry,
-                                             nsDocShell* aShell,
+                                             mozilla::dom::BrowsingContext* aBC,
                                              int32_t aChildIndex, void* aData);
 
   // Clone a session history tree for subframe navigation.
@@ -98,25 +108,45 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
   // have that pointer updated to point to the cloned history entry.
   // If aCloneChildren is true then the children of the entry with id
   // |aCloneID| will be cloned into |aReplaceEntry|.
-  static nsresult CloneAndReplace(nsISHEntry* aSrcEntry, nsDocShell* aSrcShell,
-                                  uint32_t aCloneID, nsISHEntry* aReplaceEntry,
-                                  bool aCloneChildren, nsISHEntry** aDestEntry);
+  static nsresult CloneAndReplace(
+      nsISHEntry* aSrcEntry, mozilla::dom::BrowsingContext* aOwnerBC,
+      uint32_t aCloneID, nsISHEntry* aReplaceEntry, bool aCloneChildren,
+      nsISHEntry** aDestEntry, uint64_t aOtherPid,
+      nsTArray<EntriesAndBrowsingContextData>* aEntriesToUpdate);
 
   // Child-walking callback for CloneAndReplace
-  static nsresult CloneAndReplaceChild(nsISHEntry* aEntry, nsDocShell* aShell,
+  static nsresult CloneAndReplaceChild(nsISHEntry* aEntry,
+                                       mozilla::dom::BrowsingContext* aOwnerBC,
                                        int32_t aChildIndex, void* aData);
 
   // Child-walking callback for SetHistoryEntry
-  static nsresult SetChildHistoryEntry(nsISHEntry* aEntry, nsDocShell* aShell,
+  static nsresult SetChildHistoryEntry(nsISHEntry* aEntry,
+                                       mozilla::dom::BrowsingContext* aBC,
                                        int32_t aEntryIndex, void* aData);
 
-  // For each child of aRootEntry, find the corresponding docshell which is
-  // a child of aRootShell, and call aCallback. The opaque pointer aData
+  // For each child of aRootEntry, find the corresponding shell which is
+  // a child of aBC, and call aCallback. The opaque pointer aData
   // is passed to the callback.
   static nsresult WalkHistoryEntries(nsISHEntry* aRootEntry,
-                                     nsDocShell* aRootShell,
+                                     mozilla::dom::BrowsingContext* aBC,
                                      WalkHistoryEntriesFunc aCallback,
                                      void* aData);
+
+  nsresult AddToRootSessionHistory(
+      bool aCloneChildren, nsISHEntry* aOSHE,
+      mozilla::dom::BrowsingContext* aBC, nsISHEntry* aEntry,
+      uint32_t aLoadType, bool aShouldPersist, uint64_t aOtherPid,
+      mozilla::Maybe<int32_t>* aPreviousEntryIndex,
+      mozilla::Maybe<int32_t>* aLoadedEntryIndex,
+      nsTArray<EntriesAndBrowsingContextData>* aEntriesToUpdate,
+      int32_t* aEntriesPurged);
+
+  nsresult AddChildSHEntryHelper(
+      nsISHEntry* aCloneRef, nsISHEntry* aNewEntry,
+      mozilla::dom::BrowsingContext* aBC, bool aCloneChildren,
+      uint64_t aOtherPid,
+      nsTArray<EntriesAndBrowsingContextData>* aEntriesToUpdate,
+      int32_t* aEntriesPurged, nsISHEntry** aNextEntry);
 
   nsTArray<nsCOMPtr<nsISHEntry>>& Entries() { return mEntries; }
 
@@ -140,9 +170,10 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
   // If this doesn't return an error then either aLoadResult is set to nothing,
   // in which case the caller should ignore the load, or it returns a valid
   // LoadEntryResult in aLoadResult which the caller should use to do the load.
-  nsresult Reload(uint32_t aReloadFlags, Maybe<LoadEntryResult>& aLoadResult);
-  nsresult ReloadCurrentEntry(LoadEntryResult& aLoadResult);
-  nsresult GotoIndex(int32_t aIndex, LoadEntryResult& aLoadResult);
+  nsresult Reload(uint32_t aReloadFlags,
+                  nsTArray<LoadEntryResult>& aLoadResults);
+  nsresult ReloadCurrentEntry(nsTArray<LoadEntryResult>& aLoadResults);
+  nsresult GotoIndex(int32_t aIndex, nsTArray<LoadEntryResult>& aLoadResults);
 
   void WindowIndices(int32_t aIndex, int32_t* aOutStartIndex,
                      int32_t* aOutEndIndex);
@@ -160,13 +191,13 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
   nsresult LoadDifferingEntries(nsISHEntry* aPrevEntry, nsISHEntry* aNextEntry,
                                 mozilla::dom::BrowsingContext* aRootBC,
                                 long aLoadType, bool& aDifferenceFound,
-                                LoadEntryResult& aLoadResult);
+                                nsTArray<LoadEntryResult>& aLoadResults);
   nsresult InitiateLoad(nsISHEntry* aFrameEntry,
                         mozilla::dom::BrowsingContext* aFrameBC, long aLoadType,
-                        LoadEntryResult& aLoadResult);
+                        nsTArray<LoadEntryResult>& aLoadResult);
 
   nsresult LoadEntry(int32_t aIndex, long aLoadType, uint32_t aHistCmd,
-                     LoadEntryResult& aLoad);
+                     nsTArray<LoadEntryResult>& aLoadResults);
 
 #ifdef DEBUG
   nsresult PrintHistory();
@@ -190,12 +221,27 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
 
   nsresult LoadNextPossibleEntry(int32_t aNewIndex, long aLoadType,
                                  uint32_t aHistCmd,
-                                 LoadEntryResult& aLoadResult);
+                                 nsTArray<LoadEntryResult>& aLoadResults);
 
   // aIndex is the index of the entry which may be removed.
   // If aKeepNext is true, aIndex is compared to aIndex + 1,
   // otherwise comparison is done to aIndex - 1.
   bool RemoveDuplicate(int32_t aIndex, bool aKeepNext);
+
+  // We need to update entries in docshell and browsing context.
+  // If our docshell is located in parent or 'SH in parent' pref is off we can
+  // update it directly, Otherwise, we have two choices. If the browsing context
+  // that owns the docshell is in the same process as the process who called us
+  // over IPC, then we save entries that need to be updated in a list, and once
+  // we have returned from the IPC call, we update the docshell in the child
+  // process. Otherwise, if the browsing context is in a different process, we
+  // do a nested IPC call to that process to update the docshell in that
+  // process.
+  static void HandleEntriesToSwapInDocShell(
+      mozilla::dom::BrowsingContext* aBC, nsISHEntry* aOldEntry,
+      nsISHEntry* aNewEntry,
+      nsTArray<EntriesAndBrowsingContextData>* aEntriesToUpdate,
+      uint64_t aOtherPid);
 
  protected:
   // Length of mEntries.

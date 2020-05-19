@@ -105,9 +105,9 @@ NS_IMETHODIMP ProxyHandlerInfo::GetDefaultDescription(
 }
 
 /* void launchWithURI (in nsIURI aURI,
-                       [optional] in nsIInterfaceRequestor aWindowContext); */
+                       [optional] in BrowsingContext aBrowsingContext); */
 NS_IMETHODIMP ProxyHandlerInfo::LaunchWithURI(
-    nsIURI* aURI, nsIInterfaceRequestor* aWindowContext) {
+    nsIURI* aURI, mozilla::dom::BrowsingContext* aBrowsingContext) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -170,13 +170,18 @@ NS_IMETHODIMP ProxyMIMEInfo::SetFileExtensions(const nsACString& aExtensions) {
 /* boolean extensionExists (in AUTF8String aExtension); */
 NS_IMETHODIMP ProxyMIMEInfo::ExtensionExists(const nsACString& aExtension,
                                              bool* _retval) {
-  *_retval = mProxyHandlerInfo->Extensions().Contains(aExtension);
+  *_retval = mProxyHandlerInfo->Extensions().Contains(
+      aExtension, nsCaseInsensitiveCStringArrayComparator());
   return NS_OK;
 }
 
 /* void appendExtension (in AUTF8String aExtension); */
 NS_IMETHODIMP ProxyMIMEInfo::AppendExtension(const nsACString& aExtension) {
-  mProxyHandlerInfo->Extensions().AppendElement(aExtension);
+  if (!aExtension.IsEmpty() &&
+      !mProxyHandlerInfo->Extensions().Contains(
+          aExtension, nsCaseInsensitiveCStringArrayComparator())) {
+    mProxyHandlerInfo->Extensions().AppendElement(aExtension);
+  }
   return NS_OK;
 }
 
@@ -185,6 +190,7 @@ NS_IMETHODIMP ProxyMIMEInfo::GetPrimaryExtension(
     nsACString& aPrimaryExtension) {
   const auto& extensions = mProxyHandlerInfo->Extensions();
   if (extensions.IsEmpty()) {
+    aPrimaryExtension.Truncate();
     return NS_ERROR_FAILURE;
   }
   aPrimaryExtension = extensions[0];
@@ -214,6 +220,11 @@ NS_IMETHODIMP ProxyMIMEInfo::GetPossibleLocalHandlers(
 
 /* void launchWithFile (in nsIFile aFile); */
 NS_IMETHODIMP ProxyMIMEInfo::LaunchWithFile(nsIFile* aFile) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+/* boolean isCurrentAppOSDefault(); */
+NS_IMETHODIMP ProxyMIMEInfo::IsCurrentAppOSDefault(bool* _retval) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

@@ -89,7 +89,7 @@ class AudioBlock : private AudioChunk {
   AudioBlock& operator=(const AudioChunk& aChunk) {
     MOZ_ASSERT(aChunk.mDuration == WEBAUDIO_BLOCK_SIZE);
     SetBuffer(aChunk.mBuffer);
-    mChannelData = aChunk.mChannelData;
+    mChannelData = aChunk.mChannelData.Clone();
     mVolume = aChunk.mVolume;
     mBufferFormat = aChunk.mBufferFormat;
     return *this;
@@ -130,6 +130,6 @@ class AudioBlock : private AudioChunk {
 
 }  // namespace mozilla
 
-DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioBlock)
+MOZ_DECLARE_RELOCATE_USING_MOVE_CONSTRUCTOR(mozilla::AudioBlock)
 
 #endif  // MOZILLA_AUDIOBLOCK_H_

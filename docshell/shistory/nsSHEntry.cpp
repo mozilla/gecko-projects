@@ -8,17 +8,20 @@
 
 #include <algorithm>
 
-#include "nsIContentSecurityPolicy.h"
+#include "nsDocShell.h"
 #include "nsDocShellEditorData.h"
 #include "nsDocShellLoadTypes.h"
+#include "nsIContentSecurityPolicy.h"
 #include "nsIContentViewer.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIInputStream.h"
 #include "nsILayoutHistoryState.h"
+#include "nsIMutableArray.h"
 #include "nsIStructuredCloneContainer.h"
 #include "nsIURI.h"
 #include "nsSHEntryShared.h"
 #include "nsSHistory.h"
+#include "SHEntryChild.h"
 
 #include "mozilla/Logging.h"
 #include "nsIReferrerInfo.h"
@@ -1018,6 +1021,48 @@ nsSHEntry::GetBfcacheID(uint64_t* aBFCacheID) {
       "Classes inheriting from nsSHEntry should implement this. "
       "Bug 1546344 will clean this up.");
   return NS_OK;
+}
+
+void nsSHEntry::SyncTreesForSubframeNavigation(
+    uint64_t aOtherPid, nsISHEntry* aEntry,
+    mozilla::dom::BrowsingContext* aTopBC,
+    mozilla::dom::BrowsingContext* aIgnoreBC,
+    nsTArray<EntriesAndBrowsingContextData>* aEntriesToUpdate) {
+  MOZ_ASSERT(aEntriesToUpdate || aOtherPid == 0,
+             "our entries to update is null");
+
+  // We need to sync up the browsing context and session history trees for
+  // subframe navigation.  If the load was in a subframe, we forward up to
+  // the top browsing context, which will then recursively sync up all browsing
+  // contexts to their corresponding entries in the new session history tree. If
+  // we don't do this, then we can cache a content viewer on the wrong cloned
+  // entry, and subsequently restore it at the wrong time.
+  nsCOMPtr<nsISHEntry> newRootEntry = nsSHistory::GetRootSHEntry(aEntry);
+  if (newRootEntry) {
+    // newRootEntry is now the new root entry.
+    // Find the old root entry as well.
+
+    // Need a strong ref. on |oldRootEntry| so it isn't destroyed when
+    // SetChildHistoryEntry() does SwapHistoryEntries() (bug 304639).
+    nsCOMPtr<nsISHEntry> oldRootEntry = nsSHistory::GetRootSHEntry(this);
+
+    if (oldRootEntry) {
+      nsSHistory::SwapEntriesData data = {aIgnoreBC, newRootEntry, nullptr,
+                                          aOtherPid, aEntriesToUpdate};
+      nsSHistory::SetChildHistoryEntry(oldRootEntry, aTopBC, 0, &data);
+    }
+  }
+}
+
+NS_IMETHODIMP_(void)
+nsSHEntry::SyncTreesForSubframeNavigation(
+    nsISHEntry* aEntry, mozilla::dom::BrowsingContext* aTopBC,
+    mozilla::dom::BrowsingContext* aIgnoreBC) {
+  SyncTreesForSubframeNavigation(
+        0 /* unused, this will be set in SHEntryParent::RecvSyncTrees */,
+        aEntry, aTopBC, aIgnoreBC,
+        nullptr /* this will be given in SHEntryCHild::SyncTrees if we
+                are going over IPC, else, it is not needed */);
 }
 
 void nsSHEntry::EvictContentViewer() {

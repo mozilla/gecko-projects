@@ -14,7 +14,7 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Legend)
 namespace mozilla {
 namespace dom {
 
-HTMLLegendElement::~HTMLLegendElement() {}
+HTMLLegendElement::~HTMLLegendElement() = default;
 
 NS_IMPL_ELEMENT_CLONE(HTMLLegendElement)
 
@@ -91,7 +91,6 @@ void HTMLLegendElement::Focus(const FocusOptions& aOptions,
   aError = fm->MoveFocus(
       nullptr, this, nsIFocusManager::MOVEFOCUS_FORWARD,
       nsIFocusManager::FLAG_NOPARENTFRAME |
-          nsIFocusManager::FLAG_BYELEMENTFOCUS |
           nsFocusManager::FocusOptionsToFocusManagerFlags(aOptions),
       getter_AddRefs(result));
 }

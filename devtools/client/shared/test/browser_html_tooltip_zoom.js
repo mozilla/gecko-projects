@@ -25,7 +25,7 @@ function getTooltipContent(doc) {
 }
 
 add_task(async function() {
-  const [host, , doc] = await createHost("window", TEST_URI);
+  const { host, doc } = await createHost("window", TEST_URI);
 
   // Creating a window host is not correctly waiting when DevTools run in content frame
   // See Bug 1571421.
@@ -35,8 +35,7 @@ add_task(async function() {
   await pushPref("devtools.toolbox.zoomValue", zoom.toString(10));
 
   // Change this xul zoom to the x1.5 since this test doesn't use the toolbox preferences.
-  const contentViewer = host.frame.docShell.contentViewer;
-  contentViewer.fullZoom = zoom;
+  host.frame.docShell.browsingContext.fullZoom = zoom;
   const tooltip = new HTMLTooltip(doc, { useXulWrapper: true });
 
   info("Set tooltip content");

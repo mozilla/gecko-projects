@@ -12,7 +12,6 @@
 
 #include "gc/FreeOp.h"
 #include "jit/JitFrames.h"
-#include "js/StableStringChars.h"
 #include "util/BitArray.h"
 #include "vm/AsyncFunction.h"
 #include "vm/GlobalObject.h"
@@ -25,8 +24,6 @@
 #include "vm/Stack-inl.h"
 
 using namespace js;
-
-using JS::AutoStableStringChars;
 
 /* static */
 size_t RareArgumentsData::bytesRequired(size_t numActuals) {
@@ -463,10 +460,8 @@ bool ArgumentsObject::obj_mayResolve(const JSAtomState& names, jsid id,
     }
     return atom == names.length || atom == names.callee;
   }
-  if (JSID_IS_SYMBOL(id)) {
-    return JSID_TO_SYMBOL(id)->code() == JS::SymbolCode::iterator;
-  }
-  return true;
+
+  return id.isInt() || id.isWellKnownSymbol(JS::SymbolCode::iterator);
 }
 
 static bool MappedArgGetter(JSContext* cx, HandleObject obj, HandleId id,
@@ -942,7 +937,7 @@ size_t ArgumentsObject::objectMoved(JSObject* dst, JSObject* src) {
   size_t nbytesTotal = 0;
   uint32_t nDataBytes = ArgumentsData::bytesRequired(nsrc->data()->numArgs);
   if (!nursery.isInside(nsrc->data())) {
-    nursery.removeMallocedBuffer(nsrc->data());
+    nursery.removeMallocedBufferDuringMinorGC(nsrc->data());
   } else {
     AutoEnterOOMUnsafeRegion oomUnsafe;
     uint8_t* data = nsrc->zone()->pod_malloc<uint8_t>(nDataBytes);
@@ -962,7 +957,7 @@ size_t ArgumentsObject::objectMoved(JSObject* dst, JSObject* src) {
   if (RareArgumentsData* srcRareData = nsrc->maybeRareData()) {
     uint32_t nbytes = RareArgumentsData::bytesRequired(nsrc->initialLength());
     if (!nursery.isInside(srcRareData)) {
-      nursery.removeMallocedBuffer(srcRareData);
+      nursery.removeMallocedBufferDuringMinorGC(srcRareData);
     } else {
       AutoEnterOOMUnsafeRegion oomUnsafe;
       uint8_t* dstRareData = nsrc->zone()->pod_malloc<uint8_t>(nbytes);

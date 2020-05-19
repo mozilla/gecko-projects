@@ -139,7 +139,7 @@ nsTableRowFrame::nsTableRowFrame(ComputedStyle* aStyle,
   ResetBSize(0);
 }
 
-nsTableRowFrame::~nsTableRowFrame() {}
+nsTableRowFrame::~nsTableRowFrame() = default;
 
 void nsTableRowFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                            nsIFrame* aPrevInFlow) {
@@ -552,12 +552,12 @@ void nsTableRowFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
 nsIFrame::LogicalSides nsTableRowFrame::GetLogicalSkipSides(
     const ReflowInput* aReflowInput) const {
+  LogicalSides skip(mWritingMode);
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
                    StyleBoxDecorationBreak::Clone)) {
-    return LogicalSides();
+    return skip;
   }
 
-  LogicalSides skip;
   if (nullptr != GetPrevInFlow()) {
     skip |= eLogicalSideBitsBStart;
   }

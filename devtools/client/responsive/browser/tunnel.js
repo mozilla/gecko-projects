@@ -91,7 +91,7 @@ function tunnelToInnerBrowser(outer, inner) {
   // <iframe mozbrowser>.
   const mirroringProgressListener = {
     onStateChange: (webProgress, request, stateFlags, status) => {
-      if (webProgress && webProgress.isTopLevel) {
+      if (webProgress?.isTopLevel) {
         inner._characterSet = outer._characterSet;
         inner._documentURI = outer._documentURI;
         inner._documentContentType = outer._documentContentType;
@@ -99,7 +99,7 @@ function tunnelToInnerBrowser(outer, inner) {
     },
 
     onLocationChange: (webProgress, request, location, flags) => {
-      if (webProgress && webProgress.isTopLevel) {
+      if (webProgress?.isTopLevel) {
         inner._documentURI = outer._documentURI;
         inner._documentContentType = outer._documentContentType;
         inner._contentTitle = outer._contentTitle;
@@ -678,9 +678,9 @@ MessageManagerTunnel.prototype = {
 
     debug(`${name} inner -> outer, sync: ${sync}`);
     if (sync) {
-      return this.outerChildMM.sendSyncMessage(name, data, objects, principal);
+      return this.outerChildMM.sendSyncMessage(name, data);
     }
-    this.outerChildMM.sendAsyncMessage(name, data, objects, principal);
+    this.outerChildMM.sendAsyncMessage(name, data);
     return undefined;
   },
 

@@ -18,38 +18,31 @@
 
 namespace js {
 
-static void InterpretObjLiteralValue(ObjLiteralAtomVector& atoms,
-                                     const ObjLiteralInsn& insn,
-                                     MutableHandleValue propVal) {
+static JS::Value InterpretObjLiteralValue(const ObjLiteralAtomVector& atoms,
+                                          const ObjLiteralInsn& insn) {
   switch (insn.getOp()) {
     case ObjLiteralOpcode::ConstValue:
-      propVal.set(insn.getConstValue());
-      break;
+      return insn.getConstValue();
     case ObjLiteralOpcode::ConstAtom: {
       uint32_t index = insn.getAtomIndex();
-      propVal.setString(atoms[index]);
-      break;
+      return StringValue(atoms[index]);
     }
     case ObjLiteralOpcode::Null:
-      propVal.setNull();
-      break;
+      return NullValue();
     case ObjLiteralOpcode::Undefined:
-      propVal.setUndefined();
-      break;
+      return UndefinedValue();
     case ObjLiteralOpcode::True:
-      propVal.setBoolean(true);
-      break;
+      return BooleanValue(true);
     case ObjLiteralOpcode::False:
-      propVal.setBoolean(false);
-      break;
+      return BooleanValue(false);
     default:
       MOZ_CRASH("Unexpected object-literal instruction opcode");
   }
 }
 
 static JSObject* InterpretObjLiteralObj(
-    JSContext* cx, ObjLiteralAtomVector& atoms,
-    mozilla::Span<const uint8_t> literalInsns, ObjLiteralFlags flags) {
+    JSContext* cx, const ObjLiteralAtomVector& atoms,
+    const mozilla::Span<const uint8_t> literalInsns, ObjLiteralFlags flags) {
   bool specificGroup = flags.contains(ObjLiteralFlag::SpecificGroup);
   bool singleton = flags.contains(ObjLiteralFlag::Singleton);
   bool noValues = flags.contains(ObjLiteralFlag::NoValues);
@@ -57,30 +50,25 @@ static JSObject* InterpretObjLiteralObj(
   ObjLiteralReader reader(literalInsns);
   ObjLiteralInsn insn;
 
-  jsid propId;
-  Rooted<Value> propVal(cx);
   Rooted<IdValueVector> properties(cx, IdValueVector(cx));
 
   // Compute property values and build the key/value-pair list.
-  while (true) {
-    if (!reader.readInsn(&insn)) {
-      break;
-    }
+  while (reader.readInsn(&insn)) {
     MOZ_ASSERT(insn.isValid());
 
+    jsid propId;
     if (insn.getKey().isArrayIndex()) {
       propId = INT_TO_JSID(insn.getKey().getArrayIndex());
     } else {
       propId = AtomToId(atoms[insn.getKey().getAtomIndex()]);
     }
 
-    if (noValues) {
-      propVal.setUndefined();
-    } else {
-      InterpretObjLiteralValue(atoms, insn, &propVal);
+    JS::Value propVal;
+    if (!noValues) {
+      propVal = InterpretObjLiteralValue(atoms, insn);
     }
 
-    if (!properties.append(IdValuePair(propId, propVal))) {
+    if (!properties.emplaceBack(propId, propVal)) {
       return nullptr;
     }
   }
@@ -91,43 +79,23 @@ static JSObject* InterpretObjLiteralObj(
         singleton ? SingletonObject : TenuredObject);
   }
 
-  gc::AllocKind allocKind = gc::GetGCObjectKind(properties.length());
-  RootedPlainObject result(
-      cx, NewBuiltinClassInstance<PlainObject>(cx, allocKind, TenuredObject));
-  if (!result) {
-    return nullptr;
-  }
-
-  Rooted<JS::PropertyKey> propKey(cx);
-  for (const auto& kvPair : properties) {
-    propKey.set(kvPair.id);
-    propVal.set(kvPair.value);
-    if (!NativeDefineDataProperty(cx, result, propKey, propVal,
-                                  JSPROP_ENUMERATE)) {
-      return nullptr;
-    }
-  }
-  return result;
+  return NewPlainObjectWithProperties(cx, properties.begin(),
+                                      properties.length(), TenuredObject);
 }
 
 static JSObject* InterpretObjLiteralArray(
-    JSContext* cx, ObjLiteralAtomVector& atoms,
-    mozilla::Span<const uint8_t> literalInsns, ObjLiteralFlags flags) {
+    JSContext* cx, const ObjLiteralAtomVector& atoms,
+    const mozilla::Span<const uint8_t> literalInsns, ObjLiteralFlags flags) {
   bool isCow = flags.contains(ObjLiteralFlag::ArrayCOW);
   ObjLiteralReader reader(literalInsns);
   ObjLiteralInsn insn;
 
   Rooted<ValueVector> elements(cx, ValueVector(cx));
-  Rooted<Value> propVal(cx);
 
-  while (true) {
-    if (!reader.readInsn(&insn)) {
-      break;
-    }
+  while (reader.readInsn(&insn)) {
     MOZ_ASSERT(insn.isValid());
 
-    propVal.setUndefined();
-    InterpretObjLiteralValue(atoms, insn, &propVal);
+    JS::Value propVal = InterpretObjLiteralValue(atoms, insn);
     if (!elements.append(propVal)) {
       return nullptr;
     }
@@ -146,8 +114,8 @@ static JSObject* InterpretObjLiteralArray(
   return result;
 }
 
-JSObject* InterpretObjLiteral(JSContext* cx, ObjLiteralAtomVector& atoms,
-                              mozilla::Span<const uint8_t> literalInsns,
+JSObject* InterpretObjLiteral(JSContext* cx, const ObjLiteralAtomVector& atoms,
+                              const mozilla::Span<const uint8_t> literalInsns,
                               ObjLiteralFlags flags) {
   return flags.contains(ObjLiteralFlag::Array)
              ? InterpretObjLiteralArray(cx, atoms, literalInsns, flags)

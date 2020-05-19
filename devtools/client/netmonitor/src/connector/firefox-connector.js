@@ -8,6 +8,7 @@ const Services = require("Services");
 const {
   ACTIVITY_TYPE,
   EVENTS,
+  TEST_EVENTS,
 } = require("devtools/client/netmonitor/src/constants");
 const FirefoxDataProvider = require("devtools/client/netmonitor/src/connector/firefox-data-provider");
 const {
@@ -32,7 +33,6 @@ class FirefoxConnector {
     this.willNavigate = this.willNavigate.bind(this);
     this.navigate = this.navigate.bind(this);
     this.displayCachedEvents = this.displayCachedEvents.bind(this);
-    this.onDocEvent = this.onDocEvent.bind(this);
     this.sendHTTPRequest = this.sendHTTPRequest.bind(this);
     this.setPreferences = this.setPreferences.bind(this);
     this.triggerActivity = this.triggerActivity.bind(this);
@@ -46,6 +46,7 @@ class FirefoxConnector {
     this.getLongString = this.getLongString.bind(this);
     this.getNetworkRequest = this.getNetworkRequest.bind(this);
     this.onTargetAvailable = this.onTargetAvailable.bind(this);
+    this.onResourceAvailable = this.onResourceAvailable.bind(this);
   }
 
   get currentTarget() {
@@ -71,6 +72,11 @@ class FirefoxConnector {
       [this.toolbox.targetList.TYPES.FRAME],
       this.onTargetAvailable
     );
+
+    await this.toolbox.resourceWatcher.watch(
+      [this.toolbox.resourceWatcher.TYPES.DOCUMENT_EVENTS],
+      { onAvailable: this.onResourceAvailable }
+    );
   }
 
   disconnect() {
@@ -86,6 +92,11 @@ class FirefoxConnector {
       this.onTargetAvailable
     );
 
+    this.toolbox.resourceWatcher.unwatch(
+      [this.toolbox.resourceWatcher.TYPES.DOCUMENT_EVENTS],
+      { onAvailable: this.onResourceAvailable }
+    );
+
     if (this.actions) {
       this.actions.batchReset();
     }
@@ -93,7 +104,6 @@ class FirefoxConnector {
     this.removeListeners();
 
     this.currentTarget.off("will-navigate", this.willNavigate);
-    this.currentTarget.off("navigate", this.navigate);
 
     this.webConsoleFront = null;
     this.dataProvider = null;
@@ -107,8 +117,8 @@ class FirefoxConnector {
     await this.addListeners();
   }
 
-  async onTargetAvailable({ targetFront, isTopLevel, isTargetSwitching }) {
-    if (!isTopLevel) {
+  async onTargetAvailable({ targetFront, isTargetSwitching }) {
+    if (!targetFront.isTopLevel) {
       return;
     }
 
@@ -122,7 +132,6 @@ class FirefoxConnector {
     // Paused network panel should be automatically resumed when page
     // reload, so `will-navigate` listener needs to be there all the time.
     targetFront.on("will-navigate", this.willNavigate);
-    targetFront.on("navigate", this.navigate);
 
     this.webConsoleFront = await this.currentTarget.getFront("console");
 
@@ -136,22 +145,17 @@ class FirefoxConnector {
     await this.addListeners();
 
     // Initialize Responsive Emulation front for network throttling.
-    try {
-      this.responsiveFront = await this.currentTarget.getFront("responsive");
-    } catch (e) {
-      console.error(e);
-    }
-
-    // Bug 1606852: For backwards compatibility, we need to get the emulation actor. The Responsive
-    // actor is only available in Firefox 73 or newer. We can remove this call when Firefox 73
-    // is on release.
-    if (!this.responsiveFront) {
-      this.responsiveFront = await this.currentTarget.getFront("emulation");
-    }
+    this.responsiveFront = await this.currentTarget.getFront("responsive");
 
     // Displaying cache events is only intended for the UI panel.
     if (this.actions) {
       this.displayCachedEvents();
+    }
+  }
+
+  async onResourceAvailable({ resourceType, targetFront, resource }) {
+    if (resourceType === this.toolbox.resourceWatcher.TYPES.DOCUMENT_EVENTS) {
+      this.onDocEvent(resource);
     }
   }
 
@@ -161,7 +165,6 @@ class FirefoxConnector {
       "networkEventUpdate",
       this.dataProvider.onNetworkEventUpdate
     );
-    this.webConsoleFront.on("documentEvent", this.onDocEvent);
 
     // Support for WebSocket monitoring is currently hidden behind this pref.
     if (Services.prefs.getBoolPref("devtools.netmonitor.features.webSockets")) {
@@ -184,10 +187,6 @@ class FirefoxConnector {
         // Support for FF68 or older
       }
     }
-
-    // The console actor supports listening to document events like
-    // DOMContentLoaded and load.
-    await this.webConsoleFront.startListeners(["DocumentEvents"]);
   }
 
   removeListeners() {
@@ -214,7 +213,6 @@ class FirefoxConnector {
         "networkEventUpdate",
         this.dataProvider.onNetworkEventUpdate
       );
-      this.webConsoleFront.off("docEvent", this.onDocEvent);
     }
   }
 
@@ -300,11 +298,20 @@ class FirefoxConnector {
    * @param {object} marker
    */
   onDocEvent(event) {
+    if (event.name === "dom-loading") {
+      // Netmonitor does not support dom-loading event yet.
+      return;
+    }
+
     if (this.actions) {
       this.actions.addTimingMarker(event);
     }
 
-    this.emitForTests(EVENTS.TIMELINE_EVENT, event);
+    if (event.name === "dom-complete") {
+      this.navigate();
+    }
+
+    this.emitForTests(TEST_EVENTS.TIMELINE_EVENT, event);
   }
 
   /**
@@ -499,7 +506,7 @@ class FirefoxConnector {
       });
     }
 
-    this.emitForTests(EVENTS.THROTTLING_CHANGED, { profile });
+    this.emitForTests(TEST_EVENTS.THROTTLING_CHANGED, { profile });
   }
 
   /**

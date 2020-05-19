@@ -44,6 +44,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/RangeBoundary.h"
 #include "nsIContentPolicy.h"
+#include "nsIScriptError.h"
 #include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
 #include "nsRFPService.h"
@@ -108,7 +109,6 @@ class nsWrapperCache;
 class nsAttrValue;
 class nsITransferable;
 class nsPIWindowRoot;
-class nsIWindowProvider;
 class nsIReferrerInfo;
 
 struct JSRuntime;
@@ -130,12 +130,16 @@ class HTMLEditor;
 class PresShell;
 class TextEditor;
 
-enum class StorageAccess;
+struct InputEventOptions;
 
 namespace dom {
+class BrowserChild;
+class BrowserParent;
 class BrowsingContext;
 class BrowsingContextGroup;
+class ContentChild;
 class ContentFrameMessageManager;
+class ContentParent;
 struct CustomElementDefinition;
 class DataTransfer;
 class DocumentFragment;
@@ -149,11 +153,8 @@ struct LifecycleCallbackArgs;
 struct LifecycleAdoptedCallbackArgs;
 class MessageBroadcaster;
 class NodeInfo;
-class ContentChild;
-class ContentParent;
-class BrowserChild;
 class Selection;
-class BrowserParent;
+class StaticRange;
 class WorkerPrivate;
 }  // namespace dom
 
@@ -233,6 +234,7 @@ class nsContentUtils {
 #else
       ;
 #endif
+  static bool IsErrorPage(nsIURI* aURI);
 
   static bool IsCallerChromeOrFuzzingEnabled(JSContext* aCx, JSObject*) {
     return ThreadsafeIsSystemCaller(aCx) || IsFuzzingEnabled();
@@ -609,7 +611,12 @@ class nsContentUtils {
   enum ParseHTMLIntegerResultFlags {
     eParseHTMLInteger_NoFlags = 0,
     // eParseHTMLInteger_NonStandard is set if the string representation of the
-    // integer was not the canonical one (e.g. had extra leading '+' or '0').
+    // integer was not the canonical one, but matches at least one of the
+    // following:
+    //   * had leading whitespaces
+    //   * had '+' sign
+    //   * had leading '0'
+    //   * was '-0'
     eParseHTMLInteger_NonStandard = 1 << 0,
     eParseHTMLInteger_DidNotConsumeAllInput = 1 << 1,
     // Set if one or more error flags were set.
@@ -621,7 +628,15 @@ class nsContentUtils {
   };
   static int32_t ParseHTMLInteger(const nsAString& aValue,
                                   ParseHTMLIntegerResultFlags* aResult);
+  static int32_t ParseHTMLInteger(const nsACString& aValue,
+                                  ParseHTMLIntegerResultFlags* aResult);
 
+ private:
+  template <class StringT>
+  static int32_t ParseHTMLIntegerImpl(const StringT& aValue,
+                                      ParseHTMLIntegerResultFlags* aResult);
+
+ public:
   /**
    * Parse a margin string of format 'top, right, bottom, left' into
    * an nsIntMargin.
@@ -906,7 +921,7 @@ class nsContentUtils {
       int32_t aLoadFlags, const nsAString& initiatorType,
       imgRequestProxy** aRequest,
       uint32_t aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE,
-      bool aUseUrgentStartForChannel = false);
+      bool aUseUrgentStartForChannel = false, bool aLinkPreload = false);
 
   /**
    * Obtain an image loader that respects the given document/channel's privacy
@@ -980,17 +995,6 @@ class nsContentUtils {
                                const char*** aArgNames);
 
   /**
-   * Returns origin attributes of the document.
-   **/
-  static mozilla::OriginAttributes GetOriginAttributes(Document* aDoc);
-
-  /**
-   * Returns origin attributes of the load group.
-   **/
-  static mozilla::OriginAttributes GetOriginAttributes(
-      nsILoadGroup* aLoadGroup);
-
-  /**
    * Returns true if this document is in a Private Browsing window.
    */
   static bool IsInPrivateBrowsing(Document* aDoc);
@@ -1034,12 +1038,15 @@ class nsContentUtils {
   /**
    * Report simple error message to the browser console
    *   @param aErrorText the error message
-   *   @param classification Name of the module reporting error
+   *   @param aCategory Name of the module reporting error
+   *   @param aFromPrivateWindow Whether from private window or not
+   *   @param aFromChromeContext Whether from chrome context or not
+   *   @param [aErrorFlags] See nsIScriptError.
    */
-  static void LogSimpleConsoleError(const nsAString& aErrorText,
-                                    const char* classification,
-                                    bool aFromPrivateWindow,
-                                    bool aFromChromeContext);
+  static void LogSimpleConsoleError(
+      const nsAString& aErrorText, const char* aCategory,
+      bool aFromPrivateWindow, bool aFromChromeContext,
+      uint32_t aErrorFlags = nsIScriptError::errorFlag);
 
   /**
    * Report a non-localized error message to the error console.
@@ -1422,12 +1429,16 @@ class nsContentUtils {
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
+  // TODO: annotate with `MOZ_CAN_RUN_SCRIPT`
+  // (https://bugzilla.mozilla.org/show_bug.cgi?id=1625902).
   static nsresult DispatchTrustedEvent(Document* aDoc, nsISupports* aTarget,
                                        const nsAString& aEventName, CanBubble,
                                        Cancelable,
                                        Composed aComposed = Composed::eDefault,
                                        bool* aDefaultAction = nullptr);
 
+  // TODO: annotate with `MOZ_CAN_RUN_SCRIPT`
+  // (https://bugzilla.mozilla.org/show_bug.cgi?id=1625902).
   static nsresult DispatchTrustedEvent(Document* aDoc, nsISupports* aTarget,
                                        const nsAString& aEventName,
                                        CanBubble aCanBubble,
@@ -1492,28 +1503,12 @@ class nsContentUtils {
    *                            value.  Note that this can be nullptr only
    *                            when the dispatching event is not cancelable.
    */
-  MOZ_CAN_RUN_SCRIPT
-  static nsresult DispatchInputEvent(Element* aEventTarget) {
-    return DispatchInputEvent(aEventTarget, mozilla::eEditorInput,
-                              mozilla::EditorInputType::eUnknown, nullptr,
-                              InputEventOptions());
-  }
-  struct MOZ_STACK_CLASS InputEventOptions final {
-    InputEventOptions() = default;
-    explicit InputEventOptions(const nsAString& aData)
-        : mData(aData), mDataTransfer(nullptr) {}
-    explicit InputEventOptions(mozilla::dom::DataTransfer* aDataTransfer);
-
-    nsString mData;
-    mozilla::dom::DataTransfer* mDataTransfer;
-  };
-  MOZ_CAN_RUN_SCRIPT
-  static nsresult DispatchInputEvent(Element* aEventTarget,
-                                     mozilla::EventMessage aEventMessage,
-                                     mozilla::EditorInputType aEditorInputType,
-                                     mozilla::TextEditor* aTextEditor,
-                                     const InputEventOptions& aOptions,
-                                     nsEventStatus* aEventStatus = nullptr);
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchInputEvent(Element* aEventTarget);
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchInputEvent(
+      Element* aEventTarget, mozilla::EventMessage aEventMessage,
+      mozilla::EditorInputType aEditorInputType,
+      mozilla::TextEditor* aTextEditor, mozilla::InputEventOptions&& aOptions,
+      nsEventStatus* aEventStatus = nullptr);
 
   /**
    * This method creates and dispatches a untrusted event.
@@ -1689,6 +1684,12 @@ class nsContentUtils {
    * @param aNode The node for which to get the eventlistener manager.
    */
   static mozilla::EventListenerManager* GetExistingListenerManagerForNode(
+      const nsINode* aNode);
+
+  static void AddEntryToDOMArenaTable(nsINode* aNode,
+                                      mozilla::dom::DOMArena* aDOMArena);
+
+  static already_AddRefed<mozilla::dom::DOMArena> TakeEntryFromDOMArenaTable(
       const nsINode* aNode);
 
   static void UnmarkGrayJSListenersInCCGenerationDocuments();
@@ -2095,10 +2096,6 @@ class nsContentUtils {
     return sScriptBlockerCount == 0;
   }
 
-  // XXXcatalinb: workaround for weird include error when trying to reference
-  // ipdl types in WindowWatcher.
-  static nsIWindowProvider* GetWindowProviderForContentProcess();
-
   // Returns the browser window with the most recent time stamp that is
   // not in private browsing mode.
   static already_AddRefed<nsPIDOMWindowOuter> GetMostRecentNonPBWindow();
@@ -2205,7 +2202,6 @@ class nsContentUtils {
    *
    * @note this should be used for HTML5 origin determination.
    */
-  static nsresult GetASCIIOrigin(nsIPrincipal* aPrincipal, nsACString& aOrigin);
   static nsresult GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin);
   static nsresult GetUTFOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin);
   static nsresult GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin);
@@ -2472,15 +2468,6 @@ class nsContentUtils {
   static bool IsSubDocumentTabbable(nsIContent* aContent);
 
   /**
-   * Returns if aNode ignores user focus.
-   *
-   * @param aNode node to test
-   *
-   * @return Whether the node ignores user focus.
-   */
-  static bool IsUserFocusIgnored(nsINode* aNode);
-
-  /**
    * Returns if aContent has the 'scrollgrab' property.
    * aContent may be null (in this case false is returned).
    */
@@ -2509,6 +2496,12 @@ class nsContentUtils {
    * Checks if internal PDF viewer is enabled.
    */
   static bool IsPDFJSEnabled();
+
+  /**
+   * Checks to see whether the given principal is the internal PDF
+   * viewer principal.
+   */
+  static bool IsPDFJS(nsIPrincipal* aPrincipal);
 
   /**
    * Checks if internal SWF player is enabled.
@@ -2945,6 +2938,12 @@ class nsContentUtils {
   static bool IsThirdPartyTrackingResourceWindow(nsPIDOMWindowInner* aWindow);
 
   /*
+   * Returns true if this window's channel has been marked as a first-party
+   * tracking resource.
+   */
+  static bool IsFirstPartyTrackingResourceWindow(nsPIDOMWindowInner* aWindow);
+
+  /*
    * Serializes a HTML nsINode into its markup representation.
    */
   static bool SerializeNodeToMarkup(nsINode* aRoot, bool aDescendentsOnly,
@@ -3231,6 +3230,14 @@ class nsContentUtils {
 
   static nsGlobalWindowInner* CallerInnerWindow();
 
+  /*
+   * Return safe area insets of window that defines as
+   * https://drafts.csswg.org/css-env-1/#safe-area-insets.
+   */
+  static mozilla::ScreenIntMargin GetWindowSafeAreaInsets(
+      nsIScreen* aScreen, const mozilla::ScreenIntMargin& aSafeareaInsets,
+      const mozilla::LayoutDeviceIntRect& aWindowRect);
+
  private:
   static bool InitializeEventTable();
 
@@ -3370,6 +3377,8 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
     case nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER:
     case nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER:
     case nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS:
+    case nsIContentPolicy::TYPE_INTERNAL_AUDIOWORKLET:
+    case nsIContentPolicy::TYPE_INTERNAL_PAINTWORKLET:
       return nsIContentPolicy::TYPE_SCRIPT;
 
     case nsIContentPolicy::TYPE_INTERNAL_EMBED:
@@ -3401,6 +3410,9 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
     case nsIContentPolicy::TYPE_INTERNAL_DTD:
     case nsIContentPolicy::TYPE_INTERNAL_FORCE_ALLOWED_DTD:
       return nsIContentPolicy::TYPE_DTD;
+
+    case nsIContentPolicy::TYPE_INTERNAL_FONT_PRELOAD:
+      return nsIContentPolicy::TYPE_FONT;
 
     default:
       return aType;

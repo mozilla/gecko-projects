@@ -63,6 +63,8 @@
 #  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end,  \
                                       count, cache, innerWindowID, timings, \
                                       redirect, ...)
+#  define PROFILER_ADD_TEXT_MARKER(markerName, text, categoryPair, startTime, \
+                                   endTime, ...)
 
 #  define PROFILER_TRACING_MARKER(categoryString, markerName, categoryPair, \
                                   kind)
@@ -104,6 +106,7 @@ static inline UniqueProfilerBacktrace profiler_get_backtrace() {
 #  include "nscore.h"
 #  include "nsString.h"
 
+#  include <functional>
 #  include <stdint.h>
 
 class ProfilerBacktrace;
@@ -111,6 +114,7 @@ class ProfilerCodeAddressService;
 class ProfilerMarkerPayload;
 class SpliceableJSONWriter;
 namespace mozilla {
+class ProfileBufferControlledChunkManager;
 namespace net {
 struct TimingStruct;
 enum CacheDisposition : uint8_t;
@@ -265,8 +269,7 @@ class RacyFeatures {
   // We combine the active bit with the feature bits so they can be read or
   // written in a single atomic operation. Accesses to this atomic are not
   // recorded by web replay as they may occur at non-deterministic points.
-  static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed,
-                         recordreplay::Behavior::DontPreserve>
+  static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed>
       sActiveAndFeatures;
 };
 
@@ -282,18 +285,18 @@ bool IsThreadBeingProfiled();
 
 static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_ENTRIES =
 #  if !defined(ARCH_ARMV6)
-    mozilla::MakePowerOfTwo32<1u << 20>();  // 1'048'576 entries = 8MB
+    mozilla::MakePowerOfTwo32<8 * 1024 * 1024>();  // 8M entries = 64MB
 #  else
-    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072 entries = 1MB
+    mozilla::MakePowerOfTwo32<512 * 1024>();  // 512k entries = 4MB
 #  endif
 
 // Startup profiling usually need to capture more data, especially on slow
 // systems.
 static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_STARTUP_ENTRIES =
 #  if !defined(ARCH_ARMV6)
-    mozilla::MakePowerOfTwo32<1u << 22>();  // 4'194'304 entries = 32MB
+    mozilla::MakePowerOfTwo32<64 * 1024 * 1024>();  // 64M entries = 512MB
 #  else
-    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072 entries = 1MB
+    mozilla::MakePowerOfTwo32<512 * 1024>();  // 512k entries = 4MB
 #  endif
 
 #  define PROFILER_DEFAULT_DURATION 20 /* seconds, for tests only */
@@ -436,7 +439,7 @@ using PostSamplingCallback = std::function<void(SamplingState)>;
 //   please be mindful not to block for a long time (e.g., just dispatch a
 //   runnable to another thread.) Calling profiler functions from the callback
 //   is allowed.
-MOZ_MUST_USE bool profiler_callback_after_sampling(
+[[nodiscard]] bool profiler_callback_after_sampling(
     PostSamplingCallback&& aCallback);
 
 // Pause and resume the profiler. No-ops if the profiler is inactive. While
@@ -543,6 +546,10 @@ void profiler_get_start_params(
     uint32_t* aFeatures,
     mozilla::Vector<const char*, 0, mozilla::MallocAllocPolicy>* aFilters,
     uint64_t* aActiveBrowsingContextID);
+
+// Get the chunk manager used in the current profiling session, or null.
+mozilla::ProfileBufferControlledChunkManager*
+profiler_get_controlled_chunk_manager();
 
 // The number of milliseconds since the process started. Operates the same
 // whether the profiler is active or inactive.
@@ -845,7 +852,9 @@ void profiler_add_network_marker(
     mozilla::TimeStamp aStart, mozilla::TimeStamp aEnd, int64_t aCount,
     mozilla::net::CacheDisposition aCacheDisposition, uint64_t aInnerWindowID,
     const mozilla::net::TimingStruct* aTimings = nullptr,
-    nsIURI* aRedirectURI = nullptr, UniqueProfilerBacktrace aSource = nullptr);
+    nsIURI* aRedirectURI = nullptr, UniqueProfilerBacktrace aSource = nullptr,
+    const mozilla::Maybe<nsDependentCString>& aContentType =
+        mozilla::Nothing());
 
 enum TracingKind {
   TRACING_EVENT,
@@ -909,6 +918,10 @@ void profiler_add_text_marker(
     const mozilla::Maybe<uint64_t>& aInnerWindowID = mozilla::Nothing(),
     UniqueProfilerBacktrace aCause = nullptr);
 
+#  define PROFILER_ADD_TEXT_MARKER(markerName, text, categoryPair, startTime, \
+                                   endTime, ...)                              \
+    profiler_add_text_marker(markerName, text, categoryPair, startTime,       \
+                             endTime, ##__VA_ARGS__)
 class MOZ_RAII AutoProfilerTextMarker {
  public:
   AutoProfilerTextMarker(const char* aMarkerName, const nsACString& aText,
@@ -1105,9 +1118,7 @@ class ProfilingStackOwner {
 
   class ProfilingStack mProfilingStack;
 
-  mutable Atomic<int32_t, MemoryOrdering::ReleaseAcquire,
-                 recordreplay::Behavior::DontPreserve>
-      mRefCnt;
+  mutable Atomic<int32_t, MemoryOrdering::ReleaseAcquire> mRefCnt;
 };
 
 // This class creates a non-owning ProfilingStack reference. Objects of this

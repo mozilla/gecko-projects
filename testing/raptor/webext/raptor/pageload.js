@@ -51,33 +51,21 @@ var getLoadTime = false;
 // performance.timing measurement used as 'starttime'
 var startMeasure = "fetchStart";
 
-function raptorContentHandler() {
+async function raptorContentHandler() {
   raptorLog("pageloadjs raptorContentHandler!");
   // let the main raptor runner know that we (pageloadjs) is ready!
-  sendPageloadReady();
+  await sendPageloadReady();
 
   // retrieve test settings from local ext storage
+  let settings;
   if (typeof browser !== "undefined") {
-    // firefox, returns promise
-    browser.storage.local.get("settings").then(function(item) {
-      setup(item.settings);
-    });
+    ({ settings } = await browser.storage.local.get("settings"));
   } else {
-    // chrome, no promise so use callback
-    chrome.storage.local.get("settings", function(item) {
-      setup(item.settings);
-    });
+    ({ settings } = await new Promise(resolve => {
+      chrome.storage.local.get("settings", resolve);
+    }));
   }
-}
-
-function sendPageloadReady() {
-  // send message to runnerjs indicating pageloadjs is ready to start getting measures
-  raptorLog("sending pageloadjs-ready message to runnerjs");
-  chrome.runtime.sendMessage({ type: "pageloadjs-ready" }, function(response) {
-    if (response !== undefined) {
-      raptorLog(`${response.text}`);
-    }
-  });
+  setup(settings);
 }
 
 function setup(settings) {
@@ -141,18 +129,18 @@ function setup(settings) {
 }
 
 function measureHero() {
-  var obs = null;
+  let obs;
 
-  var heroElementsFound = window.document.querySelectorAll("[elementtiming]");
+  const heroElementsFound = window.document.querySelectorAll("[elementtiming]");
   raptorLog(`found ${heroElementsFound.length} hero elements in the page`);
 
   if (heroElementsFound) {
-    function callbackHero(entries, observer) {
-      entries.forEach(entry => {
-        var heroFound = entry.target.getAttribute("elementtiming");
+    async function callbackHero(entries, observer) {
+      for (const entry in entries) {
+        const heroFound = entry.target.getAttribute("elementtiming");
         // mark the time now as when hero element received
         perfData.mark(heroFound);
-        var resultType = `hero:${heroFound}`;
+        const resultType = `hero:${heroFound}`;
         raptorLog(`found ${resultType}`);
         // calculcate result: performance.timing.fetchStart - time when we got hero element
         perfData.measure(
@@ -160,16 +148,16 @@ function measureHero() {
           (startMark = startMeasure),
           (endMark = heroFound)
         );
-        var perfResult = perfData.getEntriesByName(resultType);
-        var _result = Math.round(perfResult[0].duration);
-        sendResult(resultType, _result);
+        const perfResult = perfData.getEntriesByName(resultType);
+        const _result = Math.round(perfResult[0].duration);
+        await sendResult(resultType, _result);
         perfData.clearMarks();
         perfData.clearMeasures();
         obs.disconnect();
-      });
+      }
     }
     // we want the element 100% visible on the viewport
-    var options = { root: null, rootMargin: "0px", threshold: [1] };
+    const options = { root: null, rootMargin: "0px", threshold: [1] };
     try {
       obs = new window.IntersectionObserver(callbackHero, options);
       heroElementsFound.forEach(function(el) {
@@ -186,20 +174,21 @@ function measureHero() {
   }
 }
 
-function measureFNBPaint() {
-  var x = window.performance.timing.timeToNonBlankPaint;
+async function measureFNBPaint() {
+  const x = window.performance.timing.timeToNonBlankPaint;
 
   if (typeof x == "undefined") {
     raptorLog(
-      "ERROR: timeToNonBlankPaint is undefined; ensure the pref is enabled"
+      "timeToNonBlankPaint is undefined; ensure the pref is enabled",
+      "error"
     );
     return;
   }
   if (x > 0) {
     raptorLog("got fnbpaint");
     gRetryCounter = 0;
-    var startTime = perfData.timing.fetchStart;
-    sendResult("fnbpaint", x - startTime);
+    const startTime = perfData.timing.fetchStart;
+    await sendResult("fnbpaint", x - startTime);
   } else {
     gRetryCounter += 1;
     if (gRetryCounter <= 10) {
@@ -215,20 +204,21 @@ function measureFNBPaint() {
   }
 }
 
-function measureDCF() {
-  var x = window.performance.timing.timeToDOMContentFlushed;
+async function measureDCF() {
+  const x = window.performance.timing.timeToDOMContentFlushed;
 
   if (typeof x == "undefined") {
     raptorLog(
-      "ERROR: domContentFlushed is undefined; ensure the pref is enabled"
+      "domContentFlushed is undefined; ensure the pref is enabled",
+      "error"
     );
     return;
   }
   if (x > 0) {
     raptorLog(`got domContentFlushed: ${x}`);
     gRetryCounter = 0;
-    var startTime = perfData.timing.fetchStart;
-    sendResult("dcf", x - startTime);
+    const startTime = perfData.timing.fetchStart;
+    await sendResult("dcf", x - startTime);
   } else {
     gRetryCounter += 1;
     if (gRetryCounter <= 10) {
@@ -242,20 +232,21 @@ function measureDCF() {
   }
 }
 
-function measureTTFI() {
-  var x = window.performance.timing.timeToFirstInteractive;
+async function measureTTFI() {
+  const x = window.performance.timing.timeToFirstInteractive;
 
   if (typeof x == "undefined") {
     raptorLog(
-      "ERROR: timeToFirstInteractive is undefined; ensure the pref is enabled"
+      "timeToFirstInteractive is undefined; ensure the pref is enabled",
+      "error"
     );
     return;
   }
   if (x > 0) {
     raptorLog(`got timeToFirstInteractive: ${x}`);
     gRetryCounter = 0;
-    var startTime = perfData.timing.fetchStart;
-    sendResult("ttfi", x - startTime);
+    const startTime = perfData.timing.fetchStart;
+    await sendResult("ttfi", x - startTime);
   } else {
     gRetryCounter += 1;
     // NOTE: currently the gecko implementation doesn't look at network
@@ -272,23 +263,21 @@ function measureTTFI() {
     } else {
       // unable to get a value for TTFI - negative value will be filtered out later
       raptorLog("TTFI was not available for this pageload");
-      sendResult("ttfi", -1);
+      await sendResult("ttfi", -1);
     }
   }
 }
 
-function measureFCP() {
+async function measureFCP() {
   // see https://developer.mozilla.org/en-US/docs/Web/API/PerformancePaintTiming
-  var resultType = "fcp";
-  var result;
+  let result = window.performance.timing.timeToContentfulPaint;
 
   // Firefox implementation of FCP is not yet spec-compliant (see Bug 1519410)
-  result = window.performance.timing.timeToContentfulPaint;
   if (typeof result == "undefined") {
     // we're on chromium
     result = 0;
-    let perfEntries = perfData.getEntriesByType("paint");
 
+    const perfEntries = perfData.getEntriesByType("paint");
     if (perfEntries.length >= 2) {
       if (
         perfEntries[1].name == "first-contentful-paint" &&
@@ -304,10 +293,10 @@ function measureFCP() {
     raptorLog("got time to first-contentful-paint");
     if (typeof browser !== "undefined") {
       // Firefox returns a timestamp, not the actual measurement in MS; need to calculate result
-      var startTime = perfData.timing.fetchStart;
+      const startTime = perfData.timing.fetchStart;
       result = result - startTime;
     }
-    sendResult(resultType, result);
+    await sendResult("fcp", result);
     perfData.clearMarks();
     perfData.clearMeasures();
   } else {
@@ -325,18 +314,18 @@ function measureFCP() {
   }
 }
 
-function measureLoadTime() {
-  var x = window.performance.timing.loadEventStart;
+async function measureLoadTime() {
+  const x = window.performance.timing.loadEventStart;
 
   if (typeof x == "undefined") {
-    raptorLog("ERROR: loadEventStart is undefined");
+    raptorLog("loadEventStart is undefined", "error");
     return;
   }
   if (x > 0) {
     raptorLog(`got loadEventStart: ${x}`);
     gRetryCounter = 0;
-    var startTime = perfData.timing.fetchStart;
-    sendResult("loadtime", x - startTime);
+    const startTime = perfData.timing.fetchStart;
+    await sendResult("loadtime", x - startTime);
   } else {
     gRetryCounter += 1;
     if (gRetryCounter <= 40 * (1000 / 200)) {
@@ -352,20 +341,54 @@ function measureLoadTime() {
   }
 }
 
-function sendResult(_type, _value) {
-  // send result back to background runner script
-  raptorLog(`sending result back to runner: ${_type} ${_value}`);
-  chrome.runtime.sendMessage({ type: _type, value: _value }, function(
-    response
-  ) {
-    if (response !== undefined) {
-      raptorLog(response.text);
-    }
-  });
+/**
+ * Send message to runnerjs indicating pageloadjs is ready to start getting measures
+ */
+async function sendPageloadReady() {
+  raptorLog("sending pageloadjs-ready message to runnerjs");
+
+  let response;
+  if (typeof browser !== "undefined") {
+    response = await browser.runtime.sendMessage({ type: "pageloadjs-ready" });
+  } else {
+    response = await new Promise(resolve => {
+      chrome.runtime.sendMessage({ type: "pageloadjs-ready" }, resolve);
+    });
+  }
+
+  if (response) {
+    raptorLog(`Response: ${response.text}`);
+  }
 }
 
-function raptorLog(logText) {
-  console.log(`[raptor-pageloadjs] ${logText}`);
+/**
+ * Send result back to background runner script
+ */
+async function sendResult(type, value) {
+  raptorLog(`sending result back to runner: ${type} ${value}`);
+
+  let response;
+  if (typeof browser !== "undefined") {
+    response = await browser.runtime.sendMessage({ type, value });
+  } else {
+    response = await new Promise(resolve => {
+      chrome.runtime.sendMessage({ type, value }, resolve);
+    });
+  }
+
+  if (response) {
+    raptorLog(`Response: ${response.text}`);
+  }
+}
+
+function raptorLog(text, level = "info") {
+  let prefix = "";
+
+  if (level == "error") {
+    prefix = "ERROR: ";
+  }
+
+  console[level](`${prefix}[raptor-pageloadjs] ${text}`);
 }
 
 if (window.addEventListener) {

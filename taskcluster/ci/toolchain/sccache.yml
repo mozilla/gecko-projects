@@ -22,10 +22,8 @@ linux64-sccache:
     run:
         toolchain-artifact: public/build/sccache.tar.xz
     fetches:
-        fetch:
-            - openssl-1.1.0g
         toolchain:
-            - linux64-rust-1.39
+            - linux64-rust-1.41
             - linux64-binutils
 
 macosx64-sccache:
@@ -35,10 +33,9 @@ macosx64-sccache:
     worker:
         max-run-time: 1800
         env:
-            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run-on-projects:
         - trunk
-        - try
     run:
         arguments: ['x86_64-apple-darwin']
         resources:
@@ -49,7 +46,7 @@ macosx64-sccache:
         toolchain:
             - linux64-rust-macos-1.41
             - linux64-clang-9
-            - linux64-cctools-port
+            - linux64-cctools-clang-9-port
             - linux64-llvm-dsymutil
             - linux64-binutils
 

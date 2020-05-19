@@ -112,8 +112,6 @@ MKDIR ?= mkdir
 SLEEP ?= sleep
 TOUCH ?= touch
 
-PYTHON_PATH = $(PYTHON) $(topsrcdir)/config/pythonpath.py
-
 #
 # Build using PIC by default
 #
@@ -136,17 +134,11 @@ ifdef MOZ_PROFILE_GENERATE
 PGO_CFLAGS += -DNS_FREE_PERMANENT_DATA=1
 PGO_CFLAGS += $(if $(filter $(notdir $<),$(notdir $(NO_PROFILE_GUIDED_OPTIMIZE))),,$(PROFILE_GEN_CFLAGS))
 PGO_LDFLAGS += $(PROFILE_GEN_LDFLAGS)
-ifeq (WINNT,$(OS_ARCH))
-AR_FLAGS += -LTCG
-endif
 endif # MOZ_PROFILE_GENERATE
 
 ifdef MOZ_PROFILE_USE
 PGO_CFLAGS += $(if $(filter $(notdir $<),$(notdir $(NO_PROFILE_GUIDED_OPTIMIZE))),,$(PROFILE_USE_CFLAGS))
 PGO_LDFLAGS += $(PROFILE_USE_LDFLAGS)
-ifeq (WINNT,$(OS_ARCH))
-AR_FLAGS += -LTCG
-endif
 endif # MOZ_PROFILE_USE
 endif # NO_PROFILE_GUIDED_OPTIMIZE
 
@@ -339,7 +331,7 @@ endif
 PWD := $(CURDIR)
 endif
 
-NSINSTALL_PY := $(PYTHON) $(abspath $(MOZILLA_DIR)/config/nsinstall.py)
+NSINSTALL_PY := $(PYTHON3) $(abspath $(MOZILLA_DIR)/config/nsinstall.py)
 ifneq (,$(or $(filter WINNT,$(HOST_OS_ARCH)),$(if $(COMPILE_ENVIRONMENT),,1)))
 NSINSTALL = $(NSINSTALL_PY)
 else
@@ -434,8 +426,6 @@ endif # ! WINNT
 # autoconf.mk sets OBJ_SUFFIX to an error to avoid use before including
 # this file
 OBJ_SUFFIX := $(_OBJ_SUFFIX)
-
-PLY_INCLUDE = -I$(MOZILLA_DIR)/other-licenses/ply
 
 # Enable verbose logs when not using `make -s`
 ifeq (,$(findstring s, $(filter-out --%, $(MAKEFLAGS))))

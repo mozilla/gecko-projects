@@ -71,7 +71,7 @@ void nsPartChannel::SetContentDisposition(
   nsCOMPtr<nsIURI> uri;
   GetURI(getter_AddRefs(uri));
   NS_GetFilenameFromDisposition(mContentDispositionFilename,
-                                mContentDispositionHeader, uri);
+                                mContentDispositionHeader);
   mContentDisposition =
       NS_GetContentDispositionFromHeader(mContentDispositionHeader, this);
 }
@@ -424,7 +424,7 @@ nsMultiMixedConv::AsyncConvertData(const char* aFromType, const char* aToType,
 
 NS_IMETHODIMP
 nsMultiMixedConv::GetConvertedType(const nsACString& aFromType,
-                                   nsACString& aToType) {
+                                   nsIChannel* aChannel, nsACString& aToType) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1037,10 +1037,8 @@ nsresult nsMultiMixedConv::ProcessHeader() {
 
 nsresult NS_NewMultiMixedConv(nsMultiMixedConv** aMultiMixedConv) {
   MOZ_ASSERT(aMultiMixedConv != nullptr, "null ptr");
-  if (!aMultiMixedConv) return NS_ERROR_NULL_POINTER;
 
-  *aMultiMixedConv = new nsMultiMixedConv();
-
-  NS_ADDREF(*aMultiMixedConv);
+  RefPtr<nsMultiMixedConv> conv = new nsMultiMixedConv();
+  conv.forget(aMultiMixedConv);
   return NS_OK;
 }

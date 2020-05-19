@@ -13,6 +13,7 @@ var { XPCOMUtils } = ChromeUtils.import(
 );
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AboutNewTab: "resource:///modules/AboutNewTab.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.jsm",
@@ -20,13 +21,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   ShellService: "resource:///modules/ShellService.jsm",
 });
-
-XPCOMUtils.defineLazyServiceGetter(
-  this,
-  "aboutNewTabService",
-  "@mozilla.org/browser/aboutnewtab-service;1",
-  "nsIAboutNewTabService"
-);
 
 XPCOMUtils.defineLazyGetter(this, "ReferrerInfo", () =>
   Components.Constructor(
@@ -42,7 +36,7 @@ Object.defineProperty(this, "BROWSER_NEW_TAB_URL", {
     if (PrivateBrowsingUtils.isWindowPrivate(window)) {
       if (
         !PrivateBrowsingUtils.permanentPrivateBrowsing &&
-        !aboutNewTabService.overridden
+        !AboutNewTab.newTabURLOverridden
       ) {
         return "about:privatebrowsing";
       }
@@ -61,12 +55,12 @@ Object.defineProperty(this, "BROWSER_NEW_TAB_URL", {
       if (
         !privateAllowed &&
         (extensionControlled ||
-          aboutNewTabService.newTabURL.startsWith("moz-extension://"))
+          AboutNewTab.newTabURL.startsWith("moz-extension://"))
       ) {
         return "about:privatebrowsing";
       }
     }
-    return aboutNewTabService.newTabURL;
+    return AboutNewTab.newTabURL;
   },
 });
 
@@ -117,13 +111,12 @@ function doGetProtocolFlags(aURI) {
 /**
  * openUILink handles clicks on UI elements that cause URLs to load.
  *
- * As the third argument, you may pass an object with the same properties as
- * accepted by openUILinkIn, plus "ignoreButton" and "ignoreAlt".
- *
- * @param url {string}
- * @param event {Event | Object} Event or JSON object representing an Event
+ * @param {string} url
+ * @param {Event | Object} event Event or JSON object representing an Event
  * @param {Boolean | Object} aIgnoreButton
- * @param {Boolean} aIgnoreButton
+ *                           Boolean or object with the same properties as
+ *                           accepted by openUILinkIn, plus "ignoreButton"
+ *                           and "ignoreAlt".
  * @param {Boolean} aIgnoreAlt
  * @param {Boolean} aAllowThirdPartyFixup
  * @param {Object} aPostData
@@ -229,10 +222,14 @@ function whereToOpenLink(e, ignoreButton, ignoreAlt) {
   var alt = e.altKey && !ignoreAlt;
 
   // ignoreButton allows "middle-click paste" to use function without always opening in a new window.
-  var middle = !ignoreButton && e.button == 1;
-  var middleUsesTabs = Services.prefs.getBoolPref(
+  let middle = !ignoreButton && e.button == 1;
+  let middleUsesTabs = Services.prefs.getBoolPref(
     "browser.tabs.opentabfor.middleclick",
     true
+  );
+  let middleUsesNewWindow = Services.prefs.getBoolPref(
+    "middlemouse.openNewWindow",
+    false
   );
 
   // Don't do anything special with right-mouse clicks.  They're probably clicks on context menu items.
@@ -246,7 +243,7 @@ function whereToOpenLink(e, ignoreButton, ignoreAlt) {
     return "save";
   }
 
-  if (shift || (middle && !middleUsesTabs)) {
+  if (shift || (middle && !middleUsesTabs && middleUsesNewWindow)) {
     return "window";
   }
 
@@ -391,8 +388,6 @@ function openLinkIn(url, where, params) {
   }
 
   if (where == "save") {
-    // TODO(1073187): propagate referrerPolicy.
-    // ContentClick.jsm passes isContentWindowPrivate for saveURL instead of passing a CPOW initiatingDoc
     if ("isContentWindowPrivate" in params) {
       saveURL(
         url,
@@ -633,19 +628,6 @@ function openLinkIn(url, where, params) {
         );
       }
 
-      // When navigating a recording tab, use a new content process in order to
-      // start a new recording.
-      if (
-        targetBrowser.hasAttribute("recordExecution") &&
-        targetBrowser.currentURI.spec != "about:blank"
-      ) {
-        w.gBrowser.updateBrowserRemoteness(targetBrowser, {
-          recordExecution: "*",
-          newFrameloader: true,
-          remoteType: E10SUtils.DEFAULT_REMOTE_TYPE,
-        });
-      }
-
       targetBrowser.loadURI(url, {
         triggeringPrincipal: aTriggeringPrincipal,
         csp: aCsp,
@@ -668,7 +650,7 @@ function openLinkIn(url, where, params) {
       focusUrlBar =
         !loadInBackground &&
         w.isBlankPageURL(url) &&
-        !aboutNewTabService.willNotifyUser;
+        !AboutNewTab.willNotifyUser;
 
       let tabUsedForLoad = w.gBrowser.loadOneTab(url, {
         referrerInfo: aReferrerInfo,
@@ -1110,6 +1092,8 @@ function buildHelpMenu() {
   if (typeof gSafeBrowsing != "undefined") {
     gSafeBrowsing.setReportPhishingMenu();
   }
+
+  updateImportCommandEnabledState();
 }
 
 function isElementVisible(aElement) {
@@ -1150,12 +1134,16 @@ function openPrefsHelp(aEvent) {
 }
 
 /**
- * Updates visibility of "Import From Another Browser" command depending on
- * the DisableProfileImport policy.
+ * Updates the enabled state of the "Import From Another Browser" command
+ * depending on the DisableProfileImport policy.
  */
-function updateFileMenuImportUIVisibility(id) {
+function updateImportCommandEnabledState() {
   if (!Services.policies.isAllowed("profileImport")) {
-    let command = document.getElementById(id);
-    command.setAttribute("disabled", "true");
+    document
+      .getElementById("cmd_file_importFromAnotherBrowser")
+      .setAttribute("disabled", "true");
+    document
+      .getElementById("cmd_help_importFromAnotherBrowser")
+      .setAttribute("disabled", "true");
   }
 }

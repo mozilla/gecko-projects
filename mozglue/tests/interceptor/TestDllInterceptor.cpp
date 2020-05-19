@@ -16,7 +16,6 @@
 
 #include "AssemblyPayloads.h"
 #include "mozilla/DynamicallyLinkedFunctionPtr.h"
-#include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WindowsVersion.h"
 #include "nsWindowsDllInterceptor.h"
@@ -330,17 +329,8 @@ bool TestHook(const char (&dll)[N], const char* func, PredicateT&& aPred,
     nsModuleHandle mod(::LoadLibrary(dll));
     FARPROC funcAddr = ::GetProcAddress(mod, func);
     if (funcAddr) {
-      // For each CPU arch, we output the maximum number of bytes required to
-      // patch the function.
-#if defined(_M_ARM64)
-      const uint32_t kNumBytesToDump = 16;
-#elif defined(_M_IX86)
-      const uint32_t kNumBytesToDump = 5;
-#elif defined(_M_X64)
-      const uint32_t kNumBytesToDump = 13;
-#else
-#  error "Unsupported CPU architecture"
-#endif
+      const uint32_t kNumBytesToDump =
+          WindowsDllInterceptor::GetWorstCaseRequiredBytesToPatch();
 
       printf("\tFirst %u bytes of function:\n\t", kNumBytesToDump);
 
@@ -738,6 +728,9 @@ bool TestAssemblyFunctions() {
     // Skip the stub address check as we always generate a trampoline for x86.
     TestCase("PushRet", NoStubAddressCheck),
     TestCase("MovEaxJump", NoStubAddressCheck),
+    TestCase("Opcode83", NoStubAddressCheck),
+    TestCase("LockPrefix", NoStubAddressCheck),
+    TestCase("LooksLikeLockPrefix", NoStubAddressCheck),
 #    endif
 #  endif  // MOZ_CODE_COVERAGE
 #endif    // defined(__clang__)

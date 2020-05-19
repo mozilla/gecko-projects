@@ -264,10 +264,16 @@ RemoteVideoDecoderParent::RemoteVideoDecoderParent(
         KnowsCompositorVideo::TryCreateForIdentifier(*aIdentifier);
   }
 
+  RefPtr<layers::ImageContainer> container = new layers::ImageContainer();
+  if (mKnowsCompositor && XRE_IsRDDProcess()) {
+    // Ensure to allocate recycle allocator
+    container->EnsureRecycleAllocatorForRDD(mKnowsCompositor);
+  }
+
   CreateDecoderParams params(mVideoInfo);
   params.mTaskQueue = mDecodeTaskQueue;
   params.mKnowsCompositor = mKnowsCompositor;
-  params.mImageContainer = new layers::ImageContainer();
+  params.mImageContainer = container;
   params.mRate = CreateDecoderParams::VideoFrameRate(aFramerate);
   params.mOptions = aOptions;
   MediaResult error(NS_OK);
@@ -342,17 +348,25 @@ MediaResult RemoteVideoDecoderParent::ProcessDecodedData(
                                                            mKnowsCompositor);
       }
 
-      if (texture && !texture->IsAddedToCompositableClient()) {
-        texture->InitIPDLActor(mKnowsCompositor);
-        texture->SetAddedToCompositableClient();
-      }
       if (texture) {
+        if (!texture->IsAddedToCompositableClient()) {
+          texture->InitIPDLActor(mKnowsCompositor);
+          texture->SetAddedToCompositableClient();
+        }
         sd = mParent->StoreImage(video->mImage, texture);
         size = texture->GetSize();
       }
-    } else {
-      PlanarYCbCrImage* image =
-          static_cast<PlanarYCbCrImage*>(video->mImage.get());
+    }
+
+    // If failed to create a GPU accelerated surface descriptor, fall back to
+    // copying frames via shmem.
+    if (!IsSurfaceDescriptorValid(sd)) {
+      PlanarYCbCrImage* image = video->mImage->AsPlanarYCbCrImage();
+      if (!image) {
+        return MediaResult(NS_ERROR_UNEXPECTED,
+                           "Expected Planar YCbCr image in "
+                           "RemoteVideoDecoderParent::ProcessDecodedData");
+      }
 
       SurfaceDescriptorBuffer sdBuffer;
       ShmemBuffer buffer = AllocateBuffer(image->GetDataSize());

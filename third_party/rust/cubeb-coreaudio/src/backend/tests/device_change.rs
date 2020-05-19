@@ -32,17 +32,17 @@ fn test_switch_device() {
 }
 
 fn test_switch_device_in_scope(scope: Scope) {
-    // Do nothing if there is no 2 available devices at least.
-    let devices = test_get_devices_in_scope(scope.clone());
-    if devices.len() < 2 {
-        println!("Need 2 devices for {:?} at least.", scope);
-        return;
-    }
-
     println!(
         "Switch default device for {:?} while the stream is working.",
         scope
     );
+
+    // Do nothing if there is no 2 available devices at least.
+    let devices = test_get_devices_in_scope(scope.clone());
+    if devices.len() < 2 {
+        println!("Need 2 devices for {:?} at least. Skip.", scope);
+        return;
+    }
 
     let mut device_switcher = TestDeviceSwitcher::new(scope.clone());
 
@@ -337,6 +337,7 @@ fn test_register_device_changed_callback_to_check_default_device_changed(stm_typ
 
     if !run_available {
         println!("No enough devices to run the test!");
+        return;
     }
 
     let changed_count = Arc::new(Mutex::new(0u32));

@@ -16,6 +16,7 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TreeContentViewBinding.h"
+#include "mozilla/dom/XULTreeElement.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/Document.h"
 
@@ -37,7 +38,7 @@ class Row {
         mSubtreeSize(0),
         mFlags(0) {}
 
-  ~Row() {}
+  ~Row() = default;
 
   void SetContainer(bool aContainer) {
     aContainer ? mFlags |= ROW_FLAG_CONTAINER : mFlags &= ~ROW_FLAG_CONTAINER;

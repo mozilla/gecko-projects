@@ -119,6 +119,10 @@ const SNAPSHOT_SCHEMA = {
           required: true,
           type: "string",
         },
+        distributionID: {
+          required: true,
+          type: "string",
+        },
         userAgent: {
           required: true,
           type: "string",
@@ -289,6 +293,10 @@ const SNAPSHOT_SCHEMA = {
         "fission.autostart": {
           required: false,
           type: "boolean",
+        },
+        "dom.ipc.processCount.webIsolated": {
+          required: false,
+          type: "number",
         },
       },
     },
@@ -637,15 +645,6 @@ const SNAPSHOT_SCHEMA = {
         },
       },
     },
-    javaScript: {
-      required: true,
-      type: "object",
-      properties: {
-        incrementalGCEnabled: {
-          type: "boolean",
-        },
-      },
-    },
     accessibility: {
       required: true,
       type: "object",
@@ -822,6 +821,28 @@ const SNAPSHOT_SCHEMA = {
               },
             },
           },
+        },
+      },
+    },
+    startupCache: {
+      required: false,
+      type: "object",
+      properties: {
+        DiskCachePath: {
+          required: true,
+          type: "string",
+        },
+        IgnoreDiskCache: {
+          required: true,
+          type: "boolean",
+        },
+        FoundDiskCacheOnInit: {
+          required: true,
+          type: "boolean",
+        },
+        WroteToDiskCache: {
+          required: true,
+          type: "boolean",
         },
       },
     },

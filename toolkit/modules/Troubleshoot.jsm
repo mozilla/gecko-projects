@@ -46,6 +46,7 @@ const PREFS_WHITELIST = [
   "browser.search.log",
   "browser.search.openintab",
   "browser.search.param",
+  "browser.search.region",
   "browser.search.searchEnginesURL",
   "browser.search.suggest.enabled",
   "browser.search.update",
@@ -198,6 +199,9 @@ var dataProviders = {
         Services.sysinfo.getProperty("version"),
       version: AppConstants.MOZ_APP_VERSION_DISPLAY,
       buildID: Services.appinfo.appBuildID,
+      distributionID: Services.prefs
+        .getDefaultBranch("")
+        .getCharPref("distribution.id", ""),
       userAgent: Cc["@mozilla.org/network/protocol;1?name=http"].getService(
         Ci.nsIHttpProtocolHandler
       ).userAgent,
@@ -387,6 +391,10 @@ var dataProviders = {
         remoteTypes.gpu = 1;
       }
     } catch (e) {}
+
+    if (Services.io.socketProcessLaunched) {
+      remoteTypes.socket = 1;
+    }
 
     let data = {
       remoteTypes,
@@ -689,17 +697,6 @@ var dataProviders = {
     done(data);
   },
 
-  javaScript: function javaScript(done) {
-    let data = {};
-    let winEnumer = Services.ww.getWindowEnumerator();
-    if (winEnumer.hasMoreElements()) {
-      data.incrementalGCEnabled = winEnumer
-        .getNext()
-        .windowUtils.isIncrementalGCEnabled();
-    }
-    done(data);
-  },
-
   accessibility: function accessibility(done) {
     let data = {};
     data.isActive = Services.appinfo.accessibilityEnabled;
@@ -712,6 +709,18 @@ var dataProviders = {
     data.handlerUsed = Services.appinfo.accessibleHandlerUsed;
     data.instantiator = Services.appinfo.accessibilityInstantiator;
     done(data);
+  },
+
+  startupCache: function startupCache(done) {
+    const startupInfo = Cc["@mozilla.org/startupcacheinfo;1"].getService(
+      Ci.nsIStartupCacheInfo
+    );
+    done({
+      DiskCachePath: startupInfo.DiskCachePath,
+      IgnoreDiskCache: startupInfo.IgnoreDiskCache,
+      FoundDiskCacheOnInit: startupInfo.FoundDiskCacheOnInit,
+      WroteToDiskCache: startupInfo.WroteToDiskCache,
+    });
   },
 
   libraryVersions: function libraryVersions(done) {

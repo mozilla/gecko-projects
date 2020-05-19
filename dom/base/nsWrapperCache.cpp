@@ -24,8 +24,9 @@ bool nsWrapperCache::HasJSObjectMovedOp(JSObject* aWrapper) {
 #endif
 
 void nsWrapperCache::HoldJSObjects(void* aScriptObjectHolder,
-                                   nsScriptObjectTracer* aTracer) {
-  cyclecollector::HoldJSObjectsImpl(aScriptObjectHolder, aTracer);
+                                   nsScriptObjectTracer* aTracer,
+                                   JS::Zone* aWrapperZone) {
+  cyclecollector::HoldJSObjectsImpl(aScriptObjectHolder, aTracer, aWrapperZone);
   if (mWrapper && !JS::ObjectIsTenured(mWrapper)) {
     CycleCollectedJSRuntime::Get()->NurseryWrapperPreserved(mWrapper);
   }
@@ -38,11 +39,6 @@ void nsWrapperCache::SetWrapperJSObject(JSObject* aWrapper) {
   if (aWrapper && !JS::ObjectIsTenured(aWrapper)) {
     CycleCollectedJSRuntime::Get()->NurseryWrapperAdded(this);
   }
-
-  // Never collect the wrapper object while recording or replaying, to avoid
-  // non-deterministic behaviors if the cache is emptied and then refilled at
-  // a different point when replaying.
-  recordreplay::HoldJSObject(aWrapper);
 }
 
 void nsWrapperCache::ReleaseWrapper(void* aScriptObjectHolder) {
@@ -104,6 +100,11 @@ void nsWrapperCache::CheckCCWrapperTraversal(void* aScriptObjectHolder,
     return;
   }
 
+  // Temporarily make this a preserving wrapper so that TraceWrapper() traces
+  // it.
+  bool wasPreservingWrapper = PreservingWrapper();
+  SetPreservingWrapper(true);
+
   DebugWrapperTraversalCallback callback(wrapper);
 
   // The CC traversal machinery cannot trigger GC; however, the analysis cannot
@@ -121,6 +122,8 @@ void nsWrapperCache::CheckCCWrapperTraversal(void* aScriptObjectHolder,
   MOZ_ASSERT(callback.mFound,
              "Cycle collection participant didn't trace preserved wrapper! "
              "This will probably crash.");
+
+  SetPreservingWrapper(wasPreservingWrapper);
 }
 
 #endif  // DEBUG

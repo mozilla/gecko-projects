@@ -19,6 +19,7 @@ XPIDL_SOURCES += [
     'nsICertificateDialogs.idl',
     'nsICertOverrideService.idl',
     'nsIClientAuthDialogs.idl',
+    'nsIClientAuthRemember.idl',
     'nsIContentSignatureVerifier.idl',
     'nsICryptoHash.idl',
     'nsICryptoHMAC.idl',
@@ -90,8 +91,10 @@ EXPORTS.mozilla += [
 ]
 
 EXPORTS.mozilla.psm += [
-    'PSMContentListener.h',
+    'PSMIPCCommon.h',
     'TransportSecurityInfo.h',
+    'VerifySSLServerCertChild.h',
+    'VerifySSLServerCertParent.h',
 ]
 
 EXPORTS.ipc += [
@@ -136,7 +139,7 @@ UNIFIED_SOURCES += [
     'nsTLSSocketProvider.cpp',
     'OSKeyStore.cpp',
     'PKCS11ModuleDB.cpp',
-    'PSMContentListener.cpp',
+    'PSMIPCCommon.cpp',
     'PSMRunnable.cpp',
     'PublicKeyPinningService.cpp',
     'RootCertificateTelemetryUtils.cpp',
@@ -144,6 +147,8 @@ UNIFIED_SOURCES += [
     'SharedSSLState.cpp',
     'SSLServerCertVerification.cpp',
     'TransportSecurityInfo.cpp',
+    'VerifySSLServerCertChild.cpp',
+    'VerifySSLServerCertParent.cpp',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
@@ -184,7 +189,8 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     ]
 
 IPDL_SOURCES += [
-    'PPSMContentDownloader.ipdl',
+    'PSMIPCTypes.ipdlh',
+    'PVerifySSLServerCert.ipdl',
 ]
 
 if CONFIG['MOZ_XUL']:
@@ -226,7 +232,6 @@ LOCAL_INCLUDES += [
 
 GeneratedFile('nsSTSPreloadList.h',
               script='../../../xpcom/ds/tools/make_dafsa.py',
-              py2=True,
               inputs=['nsSTSPreloadList.inc'])
 
 DEFINES['SSL_DISABLE_DEPRECATED_CIPHER_SUITE_NAMES'] = 'True'

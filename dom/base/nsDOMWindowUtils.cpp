@@ -176,7 +176,7 @@ namespace {
 
 class NativeInputRunnable final : public PrioritizableRunnable {
   explicit NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent);
-  ~NativeInputRunnable() {}
+  ~NativeInputRunnable() = default;
 
  public:
   static already_AddRefed<nsIRunnable> Create(
@@ -1155,8 +1155,8 @@ nsDOMWindowUtils::ElementFromPoint(float aX, float aY,
   nsCOMPtr<Document> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
-  RefPtr<Element> el =
-      doc->ElementFromPointHelper(aX, aY, aIgnoreRootScrollFrame, aFlushLayout);
+  RefPtr<Element> el = doc->ElementFromPointHelper(
+      aX, aY, aIgnoreRootScrollFrame, aFlushLayout, ViewportType::Layout);
   el.forget(aReturn);
   return NS_OK;
 }
@@ -1167,12 +1167,10 @@ nsDOMWindowUtils::NodesFromRect(float aX, float aY, float aTopSize,
                                 float aLeftSize, bool aIgnoreRootScrollFrame,
                                 bool aFlushLayout, bool aOnlyVisible,
                                 nsINodeList** aReturn) {
-  nsCOMPtr<Document> doc = GetDocument();
+  RefPtr<Document> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
-  nsSimpleContentList* list = new nsSimpleContentList(doc);
-  NS_ADDREF(list);
-  *aReturn = list;
+  auto list = MakeRefPtr<nsSimpleContentList>(doc);
 
   AutoTArray<RefPtr<nsINode>, 8> nodes;
   doc->NodesFromRect(aX, aY, aTopSize, aRightSize, aBottomSize, aLeftSize,
@@ -1181,6 +1179,8 @@ nsDOMWindowUtils::NodesFromRect(float aX, float aY, float aTopSize,
   for (auto& node : nodes) {
     list->AppendElement(node->AsContent());
   }
+
+  list.forget(aReturn);
   return NS_OK;
 }
 
@@ -1691,6 +1691,16 @@ nsDOMWindowUtils::GetFocusedActionHint(nsAString& aType) {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetFocusedInputMode(nsAString& aInputMode) {
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+  aInputMode = widget->GetInputContext().mHTMLInputInputmode;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetViewId(Element* aElement, nsViewID* aResult) {
   if (aElement && nsLayoutUtils::FindIDFor(aElement, aResult)) {
     return NS_OK;
@@ -1703,6 +1713,19 @@ nsDOMWindowUtils::GetScreenPixelsPerCSSPixel(float* aScreenPixels) {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
   *aScreenPixels = window->GetDevicePixelRatio(CallerType::System);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetScreenPixelsPerCSSPixelNoOverride(float* aScreenPixels) {
+  nsPresContext* presContext = GetPresContext();
+  if (!presContext) {
+    *aScreenPixels = 1.0;
+    return NS_OK;
+  }
+
+  *aScreenPixels =
+      float(AppUnitsPerCSSPixel()) / float(presContext->AppUnitsPerDevPixel());
   return NS_OK;
 }
 
@@ -2446,12 +2469,35 @@ nsDOMWindowUtils::FlushApzRepaints(bool* aOutResult) {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::DisableApzForElement(Element* aElement) {
+  aElement->SetProperty(nsGkAtoms::apzDisabled, reinterpret_cast<void*>(true));
+  nsIScrollableFrame* sf = nsLayoutUtils::FindScrollableFrameFor(aElement);
+  if (!sf) {
+    return NS_OK;
+  }
+  nsIFrame* frame = do_QueryFrame(sf);
+  if (!frame) {
+    return NS_OK;
+  }
+  frame->SchedulePaint();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::ZoomToFocusedInput() {
+  if (!Preferences::GetBool("apz.zoom-to-focused-input.enabled")) {
+    return NS_OK;
+  }
+
   nsIWidget* widget = GetWidget();
   if (!widget) {
     return NS_OK;
   }
+
   // If APZ is not enabled, this function is a no-op.
+  //
+  // FIXME(emilio): This is not quite true anymore now that we also
+  // ScrollIntoView() too...
   if (!widget->AsyncPanZoomEnabled()) {
     return NS_OK;
   }
@@ -2461,16 +2507,75 @@ nsDOMWindowUtils::ZoomToFocusedInput() {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIContent> content = fm->GetFocusedElement();
-  if (!content) {
+  RefPtr<Element> element = fm->GetFocusedElement();
+  if (!element) {
     return NS_OK;
   }
 
   RefPtr<PresShell> presShell =
-      APZCCallbackHelper::GetRootContentDocumentPresShellForContent(content);
+      APZCCallbackHelper::GetRootContentDocumentPresShellForContent(element);
   if (!presShell) {
     return NS_OK;
   }
+
+  bool shouldSkip = [&] {
+    nsIFrame* frame = element->GetPrimaryFrame();
+    if (!frame) {
+      return true;
+    }
+
+    // Skip zooming to focused inputs in fixed subtrees, as we'd scroll to the
+    // top unnecessarily, see bug 1627734.
+    //
+    // We could try to teach apz to zoom to a rect only without panning, or
+    // maybe we could give it a rect offsetted by the root scroll position, if
+    // we wanted to do this.
+    //
+    // Note that we only do this if the frame belongs to `presShell` (that is,
+    // we still zoom in fixed elements in subdocuments, as they're not fixed to
+    // the root content document).
+    if (frame->PresShell() == presShell) {
+      for (; frame; frame = frame->GetParent()) {
+        if (frame->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
+            nsLayoutUtils::IsReallyFixedPos(frame)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }();
+
+  if (shouldSkip) {
+    return NS_OK;
+  }
+
+  RefPtr<Document> document = presShell->GetDocument();
+  if (!document) {
+    return NS_OK;
+  }
+
+  uint32_t presShellId;
+  ScrollableLayerGuid::ViewID viewId;
+  if (!APZCCallbackHelper::GetOrCreateScrollIdentifiers(
+          document->GetDocumentElement(), &presShellId, &viewId)) {
+    return NS_OK;
+  }
+
+  uint32_t flags = layers::DISABLE_ZOOM_OUT;
+  if (!Preferences::GetBool("formhelper.autozoom")) {
+    flags |= layers::PAN_INTO_VIEW_ONLY;
+  } else {
+    flags |= layers::ONLY_ZOOM_TO_DEFAULT_SCALE;
+  }
+
+  // The content may be inside a scrollable subframe inside a non-scrollable
+  // root content document. In this scenario, we want to ensure that the
+  // main-thread side knows to scroll the content into view before we get
+  // the bounding content rect and ask APZ to adjust the visual viewport.
+  presShell->ScrollContentIntoView(
+      element, ScrollAxis(kScrollMinimum, WhenToScroll::IfNotVisible),
+      ScrollAxis(kScrollMinimum, WhenToScroll::IfNotVisible),
+      ScrollFlags::ScrollOverflowHidden);
 
   nsIScrollableFrame* rootScrollFrame =
       presShell->GetRootScrollFrameAsScrollable();
@@ -2478,65 +2583,15 @@ nsDOMWindowUtils::ZoomToFocusedInput() {
     return NS_OK;
   }
 
-  nsIFrame* currentFrame = content->GetPrimaryFrame();
-  nsIFrame* rootFrame = presShell->GetRootFrame();
-  nsIFrame* scrolledFrame = rootScrollFrame->GetScrolledFrame();
-  bool isFixedPos = true;
-
-  while (currentFrame) {
-    if (currentFrame == rootFrame) {
-      break;
-    }
-    if (currentFrame == scrolledFrame) {
-      // we are in the rootScrollFrame so this element is not fixed
-      isFixedPos = false;
-      break;
-    }
-    currentFrame = nsLayoutUtils::GetCrossDocParentFrame(currentFrame);
-  }
-
-  if (isFixedPos) {
-    // We didn't find the scrolledFrame in our parent frames so this content
-    // must be fixed position. Zooming into fixed position content doesn't make
-    // sense so just return with out panning and zooming.
+  CSSRect bounds =
+      nsLayoutUtils::GetBoundingContentRect(element, rootScrollFrame);
+  if (bounds.IsEmpty()) {
+    // Do not zoom on empty bounds. Bail out.
     return NS_OK;
   }
 
-  Document* document = presShell->GetDocument();
-  if (!document) {
-    return NS_OK;
-  }
-
-  uint32_t presShellId;
-  ScrollableLayerGuid::ViewID viewId;
-  if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(
-          document->GetDocumentElement(), &presShellId, &viewId)) {
-    uint32_t flags = layers::DISABLE_ZOOM_OUT;
-    if (!Preferences::GetBool("formhelper.autozoom")) {
-      flags |= layers::PAN_INTO_VIEW_ONLY;
-    } else {
-      flags |= layers::ONLY_ZOOM_TO_DEFAULT_SCALE;
-    }
-
-    // The content may be inside a scrollable subframe inside a non-scrollable
-    // root content document. In this scenario, we want to ensure that the
-    // main-thread side knows to scroll the content into view before we get
-    // the bounding content rect and ask APZ to adjust the visual viewport.
-    presShell->ScrollContentIntoView(
-        content, ScrollAxis(kScrollMinimum, WhenToScroll::IfNotVisible),
-        ScrollAxis(kScrollMinimum, WhenToScroll::IfNotVisible),
-        ScrollFlags::ScrollOverflowHidden);
-
-    CSSRect bounds =
-        nsLayoutUtils::GetBoundingContentRect(content, rootScrollFrame);
-    if (bounds.IsEmpty()) {
-      // Do not zoom on empty bounds. Bail out.
-      return NS_OK;
-    }
-    bounds.Inflate(15.0f, 0.0f);
-    widget->ZoomToRect(presShellId, viewId, bounds, flags);
-  }
-
+  bounds.Inflate(15.0f, 0.0f);
+  widget->ZoomToRect(presShellId, viewId, bounds, flags);
   return NS_OK;
 }
 
@@ -2560,9 +2615,7 @@ nsDOMWindowUtils::ComputeAnimationDistance(Element* aElement,
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
-  RefPtr<ComputedStyle> computedStyle =
-      nsComputedDOMStyle::GetComputedStyle(aElement, nullptr);
-  *aResult = v1.ComputeDistance(property, v2, computedStyle);
+  *aResult = v1.ComputeDistance(property, v2);
   return NS_OK;
 }
 
@@ -2903,8 +2956,7 @@ NS_IMETHODIMP
 nsDOMWindowUtils::GetFileReferences(const nsAString& aDatabaseName, int64_t aId,
                                     JS::Handle<JS::Value> aOptions,
                                     int32_t* aRefCnt, int32_t* aDBRefCnt,
-                                    int32_t* aSliceRefCnt, JSContext* aCx,
-                                    bool* aResult) {
+                                    JSContext* aCx, bool* aResult) {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
@@ -2919,18 +2971,19 @@ nsDOMWindowUtils::GetFileReferences(const nsAString& aDatabaseName, int64_t aId,
     return NS_ERROR_UNEXPECTED;
   }
 
-  quota::PersistenceType persistenceType =
-      quota::PersistenceTypeFromStorage(options.mStorage);
+  const quota::PersistenceType persistenceType =
+      options.mStorage.WasPassed()
+          ? quota::PersistenceTypeFromStorageType(options.mStorage.Value())
+          : quota::PERSISTENCE_TYPE_DEFAULT;
 
   RefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::Get();
 
   if (mgr) {
     rv = mgr->BlockAndGetFileReferences(persistenceType, origin, aDatabaseName,
-                                        aId, aRefCnt, aDBRefCnt, aSliceRefCnt,
-                                        aResult);
+                                        aId, aRefCnt, aDBRefCnt, aResult);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
-    *aRefCnt = *aDBRefCnt = *aSliceRefCnt = -1;
+    *aRefCnt = *aDBRefCnt = -1;
     *aResult = false;
   }
 
@@ -2947,12 +3000,6 @@ nsDOMWindowUtils::FlushPendingFileDeletions() {
     }
   }
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::IsIncrementalGCEnabled(JSContext* cx, bool* aResult) {
-  *aResult = JS::IsIncrementalGCEnabled(cx);
   return NS_OK;
 }
 
@@ -3178,9 +3225,10 @@ nsDOMWindowUtils::SelectAtPoint(float aX, float aY, uint32_t aSelectBehavior,
   nsCOMPtr<nsIWidget> widget = GetWidget(&offset);
   LayoutDeviceIntPoint pt =
       nsContentUtils::ToWidgetPoint(CSSPoint(aX, aY), offset, GetPresContext());
-  nsPoint ptInRoot =
-      nsLayoutUtils::GetEventCoordinatesRelativeTo(widget, pt, rootFrame);
-  nsIFrame* targetFrame = nsLayoutUtils::GetFrameForPoint(rootFrame, ptInRoot);
+  nsPoint ptInRoot = nsLayoutUtils::GetEventCoordinatesRelativeTo(
+      widget, pt, RelativeTo{rootFrame});
+  nsIFrame* targetFrame =
+      nsLayoutUtils::GetFrameForPoint(RelativeTo{rootFrame}, ptInRoot);
   // This can happen if the page hasn't loaded yet or if the point
   // is outside the frame.
   if (!targetFrame) {
@@ -3189,8 +3237,8 @@ nsDOMWindowUtils::SelectAtPoint(float aX, float aY, uint32_t aSelectBehavior,
 
   // Convert point to coordinates relative to the target frame, which is
   // what targetFrame's SelectByTypeAtPoint expects.
-  nsPoint relPoint =
-      nsLayoutUtils::GetEventCoordinatesRelativeTo(widget, pt, targetFrame);
+  nsPoint relPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(
+      widget, pt, RelativeTo{targetFrame});
 
   nsresult rv = static_cast<nsFrame*>(targetFrame)
                     ->SelectByTypeAtPoint(GetPresContext(), relPoint, amount,
@@ -3705,24 +3753,6 @@ nsDOMWindowUtils::PostRestyleSelfEvent(Element* aElement) {
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetMediaSuspend(uint32_t* aSuspend) {
-  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
-  NS_ENSURE_STATE(window);
-
-  *aSuspend = window->GetMediaSuspend();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::SetMediaSuspend(uint32_t aSuspend) {
-  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
-  NS_ENSURE_STATE(window);
-
-  window->SetMediaSuspend(aSuspend);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDOMWindowUtils::SetChromeMargin(int32_t aTop, int32_t aRight, int32_t aBottom,
                                   int32_t aLeft) {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
@@ -4079,6 +4109,14 @@ nsDOMWindowUtils::WrCapture() {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::WrToggleCaptureSequence() {
+  if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
+    wrbc->ToggleCaptureSequence();
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::SetCompositionRecording(bool aValue, Promise** aOutPromise) {
   return aValue ? StartCompositionRecording(aOutPromise)
                 : StopCompositionRecording(true, aOutPromise);
@@ -4296,5 +4334,28 @@ NS_IMETHODIMP
 nsDOMWindowUtils::GetPaintCount(uint64_t* aPaintCount) {
   auto* presShell = GetPresShell();
   *aPaintCount = presShell ? presShell->GetPaintCount() : 0;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetWebrtcRawDeviceId(nsAString& aRawDeviceId) {
+  if (!XRE_IsParentProcess()) {
+    MOZ_CRASH(
+        "GetWebrtcRawDeviceId is only available in the parent "
+        "process");
+  }
+
+  nsIWidget* widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+
+  int64_t rawDeviceId =
+      (int64_t)(widget->GetNativeData(NS_NATIVE_WINDOW_WEBRTC_DEVICE_ID));
+  if (!rawDeviceId) {
+    return NS_ERROR_FAILURE;
+  }
+
+  aRawDeviceId.AppendInt(rawDeviceId);
   return NS_OK;
 }

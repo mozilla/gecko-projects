@@ -25,15 +25,16 @@ def valid_windows_version(value):
 
 
 option(env='WINDOWSSDKDIR', nargs=1,
-       help='Directory containing the Windows SDK',
-       when=host_is_windows)
+       help='Directory containing the Windows SDK')
 
 
-@depends('WINDOWSSDKDIR', host, when=host_is_windows)
-def windows_sdk_dir(value, host):
+@depends('WINDOWSSDKDIR', host, c_compiler)
+def windows_sdk_dir(value, host, compiler):
     if value:
         return value
-    if host.kernel != 'WINNT':
+    # Ideally, we'd actually check for host/target ABI being MSVC, but
+    # that's waiting for bug 1617793.
+    if host.kernel != 'WINNT' or compiler.type != 'clang-cl':
         return ()
 
     return set(x[1] for x in get_registry_values(
@@ -95,14 +96,17 @@ def valid_windows_sdk_dir_result(value):
         return '0x%04x in %s' % (value.version, quote(value.path))
 
 
-@depends(c_compiler, windows_sdk_dir, valid_windows_version, 'WINDOWSSDKDIR',
-         when=host_is_windows)
+@depends(c_compiler, windows_sdk_dir, valid_windows_version, 'WINDOWSSDKDIR')
 @checking('for Windows SDK', valid_windows_sdk_dir_result)
 @imports(_from='__builtin__', _import='sorted')
 @imports(_from='__builtin__', _import='Exception')
 @imports(_from='textwrap', _import='dedent')
 def valid_windows_sdk_dir(compiler, windows_sdk_dir, target_version,
                           windows_sdk_dir_env):
+    # Ideally, we'd actually check for host/target ABI being MSVC, but
+    # that's waiting for bug 1617793.
+    if compiler.type != 'clang-cl':
+        return None
     if windows_sdk_dir_env:
         windows_sdk_dir_env = windows_sdk_dir_env[0]
     sdks = {}
@@ -117,8 +121,8 @@ def valid_windows_sdk_dir(compiler, windows_sdk_dir, target_version,
             shared_dir = os.path.join(sdk.include, 'shared')
             result = try_preprocess(compiler.wrapper + [compiler.compiler] +
                                     compiler.flags +
-                                    ['-I', um_dir, '-I', shared_dir], 'C',
-                                    check)
+                                    ['-X', '-I', um_dir, '-I', shared_dir], 'C',
+                                    check, onerror=lambda: '')
             if result:
                 maxver = result.splitlines()[-1]
                 try:
@@ -165,12 +169,16 @@ def valid_ucrt_sdk_dir_result(value):
         return '%s in %s' % (value.version, quote(value.path))
 
 
-@depends(windows_sdk_dir, 'WINDOWSSDKDIR', when=host_is_windows)
+@depends(windows_sdk_dir, 'WINDOWSSDKDIR', c_compiler)
 @checking('for Universal CRT SDK', valid_ucrt_sdk_dir_result)
 @imports('os')
 @imports(_from='__builtin__', _import='sorted')
 @imports(_import='mozpack.path', _as='mozpath')
-def valid_ucrt_sdk_dir(windows_sdk_dir, windows_sdk_dir_env):
+def valid_ucrt_sdk_dir(windows_sdk_dir, windows_sdk_dir_env, compiler):
+    # Ideally, we'd actually check for host/target ABI being MSVC, but
+    # that's waiting for bug 1617793.
+    if compiler.type != 'clang-cl':
+        return None
     if windows_sdk_dir_env:
         windows_sdk_dir_env = windows_sdk_dir_env[0]
     sdks = {}
@@ -425,13 +433,6 @@ set_config('HOST_LINKER_LIBPATHS', host_linker_libpaths)
 set_config('HOST_LINKER_LIBPATHS_BAT', host_linker_libpaths_bat)
 
 
-# The when is technically wrong and should be removed and the code that
-# @depends on the option will need to be adapted when actual support for
-# clang-cl cross-builds emerge.
-option(env='MT', nargs=1, help='Path to the Microsoft Manifest Tool',
-       when=host_is_windows)
-
-
 @depends(valid_windows_sdk_dir, valid_ucrt_sdk_dir, host)
 @imports(_from='os', _import='environ')
 def sdk_bin_path(valid_windows_sdk_dir, valid_ucrt_sdk_dir, host):
@@ -456,16 +457,21 @@ def sdk_bin_path(valid_windows_sdk_dir, valid_ucrt_sdk_dir, host):
     return result
 
 
-mt = check_prog('MT', ('mt.exe',), input='MT',
-                paths=sdk_bin_path, when=host_is_windows)
+# allow_missing=True for mingw builds, until bug 1617793
+mt = check_prog('MT', ('mt.exe',), allow_missing=True, paths=sdk_bin_path)
 
 
 # Check that MT is not something unexpected like "magnetic tape manipulation
 # utility".
-@depends_if(mt)
+@depends(mt, wine)
 @checking('whether MT is really Microsoft Manifest Tool', lambda x: bool(x))
-def valid_mt(path):
-    out = check_cmd_output(path, onerror=lambda: '').splitlines()
+def valid_mt(path, wine):
+    if not path:
+        return None
+    if wine and path.lower().endswith('.exe'):
+        out = check_cmd_output(wine, path, onerror=lambda: '').splitlines()
+    else:
+        out = check_cmd_output(path, onerror=lambda: '').splitlines()
     out = '\n'.join(l for l in out
                     if 'Microsoft (R) Manifest Tool' in l)
     if out:
@@ -488,4 +494,4 @@ host_link = check_prog('HOST_LINKER', ('lld-link',), input='HOST_LINKER',
 add_old_configure_assignment('LINKER', link)
 
 
-check_prog('MAKECAB', ('makecab.exe',), when=host_is_windows)
+check_prog('MAKECAB', ('makecab.exe',), allow_missing=True, when=target_is_windows)

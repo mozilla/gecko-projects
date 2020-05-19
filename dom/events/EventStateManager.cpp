@@ -4,8 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
@@ -20,6 +22,9 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DragEvent.h"
 #include "mozilla/dom/Event.h"
@@ -53,6 +58,7 @@
 #include "nsIFrame.h"
 #include "nsFrameLoaderOwner.h"
 #include "nsIWidget.h"
+#include "nsLiteralString.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsIFormControl.h"
@@ -128,6 +134,10 @@ static inline int32_t RoundDown(double aDouble) {
   return (aDouble > 0) ? static_cast<int32_t>(floor(aDouble))
                        : static_cast<int32_t>(ceil(aDouble));
 }
+
+static UniquePtr<WidgetMouseEvent> CreateMouseOrPointerWidgetEvent(
+    WidgetMouseEvent* aMouseEvent, EventMessage aMessage,
+    EventTarget* aRelatedTarget);
 
 /******************************************************************/
 /* mozilla::UITimerCallback                                       */
@@ -251,8 +261,7 @@ nsresult EventStateManager::UpdateUserActivityTimer() {
   if (!gUserInteractionTimerCallback) return NS_OK;
 
   if (!gUserInteractionTimer) {
-    gUserInteractionTimer =
-        NS_NewTimer(SystemGroup::EventTargetFor(TaskCategory::Other)).take();
+    gUserInteractionTimer = NS_NewTimer().take();
   }
 
   if (gUserInteractionTimer) {
@@ -346,13 +355,14 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(EventStateManager)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(EventStateManager)
 
-NS_IMPL_CYCLE_COLLECTION(EventStateManager, mCurrentTargetContent,
-                         mGestureDownContent, mGestureDownFrameOwner,
-                         mLastLeftMouseDownContent, mLastMiddleMouseDownContent,
-                         mLastRightMouseDownContent, mActiveContent,
-                         mHoverContent, mURLTargetContent,
-                         mMouseEnterLeaveHelper, mPointersEnterLeaveHelper,
-                         mDocument, mIMEContentObserver, mAccessKeys)
+NS_IMPL_CYCLE_COLLECTION_WEAK(EventStateManager, mCurrentTargetContent,
+                              mGestureDownContent, mGestureDownFrameOwner,
+                              mLastLeftMouseDownContent,
+                              mLastMiddleMouseDownContent,
+                              mLastRightMouseDownContent, mActiveContent,
+                              mHoverContent, mURLTargetContent,
+                              mMouseEnterLeaveHelper, mPointersEnterLeaveHelper,
+                              mDocument, mIMEContentObserver, mAccessKeys)
 
 void EventStateManager::ReleaseCurrentIMEContentObserver() {
   if (mIMEContentObserver) {
@@ -1062,13 +1072,9 @@ bool EventStateManager::LookForAccessKeyAndExecute(
         if (shouldActivate) {
           focusChanged =
               element->PerformAccesskey(shouldActivate, aIsTrustedEvent);
-        } else {
-          nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-          if (fm) {
-            fm->SetFocus(element, nsIFocusManager::FLAG_BYKEY |
-                                      nsIFocusManager::FLAG_BYELEMENTFOCUS);
-            focusChanged = true;
-          }
+        } else if (nsFocusManager* fm = nsFocusManager::GetFocusManager()) {
+          fm->SetFocus(element, nsIFocusManager::FLAG_BYKEY);
+          focusChanged = true;
         }
 
         if (focusChanged && aIsTrustedEvent) {
@@ -1272,12 +1278,13 @@ bool EventStateManager::WalkESMTreeToHandleAccessKey(
 }  // end of HandleAccessKey
 
 void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
-                                                  nsFrameLoader* aFrameLoader,
+                                                  BrowserParent* aRemoteTarget,
                                                   nsEventStatus* aStatus) {
-  BrowserParent* remote = BrowserParent::GetFrom(aFrameLoader);
-  if (!remote) {
-    return;
-  }
+  MOZ_ASSERT(aEvent);
+  MOZ_ASSERT(aRemoteTarget);
+  MOZ_ASSERT(aStatus);
+
+  BrowserParent* remote = aRemoteTarget;
 
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   bool isContextMenuKey = mouseEvent && mouseEvent->IsContextMenuKeyEvent();
@@ -1303,6 +1310,29 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
 
   switch (aEvent->mClass) {
     case eMouseEventClass: {
+      // If a mouse is over a remote target A, and then moves to
+      // remote target B, we'd deliver the event directly to remote target B
+      // after the moving, A would never get notified that the mouse left.
+      // So we generate a exit event to notify A after the move.
+      // XXXedgar, if the synthesized mouse events could deliver to the correct
+      // process directly (see
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=1549355), we probably
+      // don't need to check mReason then.
+      BrowserParent* oldRemote = BrowserParent::GetLastMouseRemoteTarget();
+      if (mouseEvent->mReason == WidgetMouseEvent::eReal && oldRemote &&
+          remote != oldRemote) {
+        UniquePtr<WidgetMouseEvent> mouseExitEvent =
+            CreateMouseOrPointerWidgetEvent(mouseEvent, eMouseExitFromWidget,
+                                            mouseEvent->mRelatedTarget);
+        oldRemote->SendRealMouseEvent(*mouseExitEvent);
+
+        if (mouseEvent->mMessage != eMouseExitFromWidget &&
+            mouseEvent->mMessage != eMouseEnterIntoWidget) {
+          // This is to make cursor would be updated correctly.
+          remote->MouseEnterIntoWidget();
+        }
+      }
+
       remote->SendRealMouseEvent(*mouseEvent);
       return;
     }
@@ -1374,8 +1404,8 @@ bool EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
   // Collect the remote event targets we're going to forward this
   // event to.
   //
-  // NB: the elements of |targets| must be unique, for correctness.
-  AutoTArray<nsCOMPtr<nsIContent>, 1> targets;
+  // NB: the elements of |remoteTargets| must be unique, for correctness.
+  AutoTArray<RefPtr<BrowserParent>, 1> remoteTargets;
   if (aEvent->mClass != eTouchEventClass || aEvent->mMessage == eTouchStart) {
     // If this event only has one target, and it's remote, add it to
     // the array.
@@ -1383,8 +1413,8 @@ bool EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
                           ? sLastDragOverFrame.GetFrame()
                           : GetEventTarget();
     nsIContent* target = frame ? frame->GetContent() : nullptr;
-    if (IsRemoteTarget(target)) {
-      targets.AppendElement(target);
+    if (BrowserParent* remoteTarget = BrowserParent::GetFrom(target)) {
+      remoteTargets.AppendElement(remoteTarget);
     }
   } else {
     // This is a touch event with possibly multiple touch points.
@@ -1410,31 +1440,20 @@ bool EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
         continue;
       }
       nsCOMPtr<nsIContent> target = do_QueryInterface(targetPtr);
-      if (IsRemoteTarget(target) && !targets.Contains(target)) {
-        targets.AppendElement(target);
+      BrowserParent* remoteTarget = BrowserParent::GetFrom(target);
+      if (remoteTarget && !remoteTargets.Contains(remoteTarget)) {
+        remoteTargets.AppendElement(remoteTarget);
       }
     }
   }
 
-  if (targets.Length() == 0) {
+  if (remoteTargets.Length() == 0) {
     return false;
   }
 
-  // Look up the frame loader for all the remote targets we found, and
-  // then dispatch the event to the remote content they represent.
-  for (uint32_t i = 0; i < targets.Length(); ++i) {
-    nsIContent* target = targets[i];
-    RefPtr<nsFrameLoaderOwner> loaderOwner = do_QueryObject(target);
-    if (!loaderOwner) {
-      continue;
-    }
-
-    RefPtr<nsFrameLoader> frameLoader = loaderOwner->GetFrameLoader();
-    if (!frameLoader) {
-      continue;
-    }
-
-    DispatchCrossProcessEvent(aEvent, frameLoader, aStatus);
+  // Dispatch the event to the remote target.
+  for (uint32_t i = 0; i < remoteTargets.Length(); ++i) {
+    DispatchCrossProcessEvent(aEvent, remoteTargets[i], aStatus);
   }
   return aEvent->HasBeenPostedToRemoteProcess();
 }
@@ -1472,8 +1491,7 @@ void EventStateManager::CreateClickHoldTimer(nsPresContext* inPresContext,
       Preferences::GetInt("ui.click_hold_context_menus.delay", 500);
   NS_NewTimerWithFuncCallback(
       getter_AddRefs(mClickHoldTimer), sClickHoldCallback, this, clickHoldDelay,
-      nsITimer::TYPE_ONE_SHOT, "EventStateManager::CreateClickHoldTimer",
-      SystemGroup::EventTargetFor(TaskCategory::Other));
+      nsITimer::TYPE_ONE_SHOT, "EventStateManager::CreateClickHoldTimer");
 }  // CreateClickHoldTimer
 
 //
@@ -2184,57 +2202,24 @@ bool EventStateManager::DoDefaultDragStart(
   return true;
 }
 
-nsresult EventStateManager::GetContentViewer(nsIContentViewer** aCv) {
-  *aCv = nullptr;
-
-  nsPIDOMWindowOuter* window = mDocument->GetWindow();
-  if (!window) return NS_ERROR_FAILURE;
-  nsCOMPtr<nsPIDOMWindowOuter> rootWindow = window->GetPrivateRoot();
-  if (!rootWindow) return NS_ERROR_FAILURE;
-
-  BrowserChild* browserChild = BrowserChild::GetFrom(rootWindow);
-  if (!browserChild) {
-    nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-    if (!fm) return NS_ERROR_FAILURE;
-
-    nsCOMPtr<mozIDOMWindowProxy> activeWindow;
-    fm->GetActiveWindow(getter_AddRefs(activeWindow));
-    if (rootWindow != activeWindow) return NS_OK;
-  } else {
-    if (!browserChild->ParentIsActive()) return NS_OK;
+void EventStateManager::ChangeZoom(bool aIncrease) {
+  // Send the zoom change to the top level browser so it will be handled by the
+  // front end in the same way as other zoom actions.
+  nsIDocShell* docShell = mDocument->GetDocShell();
+  if (!docShell) {
+    return;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> contentWindow =
-      nsGlobalWindowOuter::Cast(rootWindow)->GetContent();
-  if (!contentWindow) return NS_ERROR_FAILURE;
+  BrowsingContext* bc = docShell->GetBrowsingContext();
+  if (!bc) {
+    return;
+  }
 
-  Document* doc = contentWindow->GetDoc();
-  if (!doc) return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsISupports> container = doc->GetContainer();
-  if (!container) return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsIDocShell> docshell = do_QueryInterface(container);
-  docshell->GetContentViewer(aCv);
-  if (!*aCv) return NS_ERROR_FAILURE;
-
-  return NS_OK;
-}
-
-nsresult EventStateManager::ChangeZoom(int32_t change) {
-  MOZ_ASSERT(change == 1 || change == -1, "Can only change by +/- 10%.");
-
-  // Send the zoom change as a chrome event so it will be handled
-  // by the front end actors in the same way as other zoom actions.
-  // This excludes documents hosted in non-browser containers, like
-  // in a WebExtension.
-  nsContentUtils::DispatchChromeEvent(
-      mDocument, ToSupports(mDocument),
-      (change == 1 ? NS_LITERAL_STRING("DoZoomEnlargeBy10")
-                   : NS_LITERAL_STRING("DoZoomReduceBy10")),
-      CanBubble::eYes, Cancelable::eYes);
-
-  return NS_OK;
+  if (XRE_IsParentProcess()) {
+    bc->Canonical()->DispatchWheelZoomChange(aIncrease);
+  } else if (BrowserChild* child = BrowserChild::GetFrom(docShell)) {
+    child->SendWheelZoomChange(aIncrease);
+  }
 }
 
 void EventStateManager::DoScrollHistory(int32_t direction) {
@@ -2256,15 +2241,10 @@ void EventStateManager::DoScrollZoom(nsIFrame* aTargetFrame,
   // Exclude content in chrome docshells.
   nsIContent* content = aTargetFrame->GetContent();
   if (content && !nsContentUtils::IsInChromeDocshell(content->OwnerDoc())) {
-    // positive adjustment to decrease zoom, negative to increase
-    int32_t change = (adjustment > 0) ? -1 : 1;
-
+    // Positive adjustment to decrease zoom, negative to increase
+    const bool increase = adjustment <= 0;
     EnsureDocument(mPresContext);
-    ChangeZoom(change);
-    nsContentUtils::DispatchChromeEvent(
-        mDocument, ToSupports(mDocument),
-        NS_LITERAL_STRING("ZoomChangeUsingMouseWheel"), CanBubble::eYes,
-        Cancelable::eYes);
+    ChangeZoom(increase);
   }
 }
 
@@ -3103,8 +3083,7 @@ void EventStateManager::PostHandleKeyboardEvent(
   switch (aKeyboardEvent->mKeyNameIndex) {
     case KEY_NAME_INDEX_ZoomIn:
     case KEY_NAME_INDEX_ZoomOut:
-      ChangeZoom(aKeyboardEvent->mKeyNameIndex == KEY_NAME_INDEX_ZoomIn ? 1
-                                                                        : -1);
+      ChangeZoom(aKeyboardEvent->mKeyNameIndex == KEY_NAME_INDEX_ZoomIn);
       aStatus = nsEventStatus_eConsumeNoDefault;
       break;
     default:
@@ -3184,9 +3163,7 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           // In some cases, we do not want to even blur the current focused
           // element. Those cases are:
           // 1. -moz-user-focus CSS property is set to 'ignore';
-          // 2. Element with NS_EVENT_STATE_DISABLED
-          //    (aka :disabled pseudo-class for HTML element);
-          // 3. XUL control element has the disabled property set to 'true'.
+          // 2. XUL control element has the disabled property set to 'true'.
           //
           // We can't use nsIFrame::IsFocusable() because we want to blur when
           // we click on a visibility: none element.
@@ -3197,24 +3174,15 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           suppressBlur = (ui->mUserFocus == StyleUserFocus::Ignore);
 
           nsCOMPtr<Element> element = do_QueryInterface(aEvent->mTarget);
-          if (!suppressBlur) {
-            suppressBlur =
-                element && element->State().HasState(NS_EVENT_STATE_DISABLED);
-          }
-
           if (!suppressBlur && element) {
             nsCOMPtr<nsIDOMXULControlElement> xulControl =
                 element->AsXULControl();
             if (xulControl) {
-              bool disabled;
+              bool disabled = false;
               xulControl->GetDisabled(&disabled);
               suppressBlur = disabled;
             }
           }
-        }
-
-        if (!suppressBlur) {
-          suppressBlur = nsContentUtils::IsUserFocusIgnored(activeContent);
         }
 
         // When a root content which isn't editable but has an editable HTML
@@ -3319,30 +3287,6 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // if we're here, the event handler returned false, so stop
         // any of our own processing of a drag. Workaround for bug 43258.
         StopTrackingDragGesture(true);
-
-        // When the event was cancelled, there is currently a chrome document
-        // focused and a mousedown just occurred on a content document, ensure
-        // that the window that was clicked is focused.
-        EnsureDocument(mPresContext);
-        nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-        if (mDocument && fm) {
-          nsCOMPtr<mozIDOMWindowProxy> window;
-          fm->GetFocusedWindow(getter_AddRefs(window));
-          auto* currentWindow = nsPIDOMWindowOuter::From(window);
-          if (currentWindow && mDocument->GetWindow() &&
-              currentWindow != mDocument->GetWindow() &&
-              !nsContentUtils::IsChromeDoc(mDocument)) {
-            nsCOMPtr<nsPIDOMWindowOuter> currentTop;
-            nsCOMPtr<nsPIDOMWindowOuter> newTop;
-            currentTop = currentWindow->GetInProcessTop();
-            newTop = mDocument->GetWindow()->GetInProcessTop();
-            nsCOMPtr<Document> currentDoc = currentWindow->GetExtantDoc();
-            if (nsContentUtils::IsChromeDoc(currentDoc) ||
-                (currentTop && newTop && currentTop != newTop)) {
-              fm->SetFocusedWindow(mDocument->GetWindow());
-            }
-          }
-        }
       }
       SetActiveManager(this, activeContent);
     } break;
@@ -3857,7 +3801,7 @@ static bool ShouldBlockCustomCursor(nsPresContext* aPresContext,
   }
 
   nsPoint point = nsLayoutUtils::GetEventCoordinatesRelativeTo(
-      aEvent, topLevel->PresShell()->GetRootFrame());
+      aEvent, RelativeTo{topLevel->PresShell()->GetRootFrame()});
 
   nsSize size(CSSPixel::ToAppUnits(width), CSSPixel::ToAppUnits(height));
   nsPoint hotspot(CSSPixel::ToAppUnits(aCursor.mHotspot.x),
@@ -3870,37 +3814,23 @@ static bool ShouldBlockCustomCursor(nsPresContext* aPresContext,
 static gfx::IntPoint ComputeHotspot(imgIContainer* aContainer,
                                     const Maybe<gfx::Point>& aHotspot) {
   MOZ_ASSERT(aContainer);
+
   // css3-ui says to use the CSS-specified hotspot if present,
   // otherwise use the intrinsic hotspot, otherwise use the top left
   // corner.
-  uint32_t hotspotX, hotspotY;
   if (aHotspot) {
     int32_t imgWidth, imgHeight;
     aContainer->GetWidth(&imgWidth);
     aContainer->GetHeight(&imgHeight);
-
-    // XXX std::max(NS_lround(x), 0)?
-    hotspotX = aHotspot->x > 0.0f ? uint32_t(aHotspot->x + 0.5f) : uint32_t(0);
-    if (hotspotX >= uint32_t(imgWidth)) hotspotX = imgWidth - 1;
-    hotspotY = aHotspot->y > 0.0f ? uint32_t(aHotspot->y + 0.5f) : uint32_t(0);
-    if (hotspotY >= uint32_t(imgHeight)) hotspotY = imgHeight - 1;
-  } else {
-    hotspotX = 0;
-    hotspotY = 0;
-    nsCOMPtr<nsIProperties> props(do_QueryInterface(aContainer));
-    if (props) {
-      nsCOMPtr<nsISupportsPRUint32> hotspotXWrap, hotspotYWrap;
-
-      props->Get("hotspotX", NS_GET_IID(nsISupportsPRUint32),
-                 getter_AddRefs(hotspotXWrap));
-      props->Get("hotspotY", NS_GET_IID(nsISupportsPRUint32),
-                 getter_AddRefs(hotspotYWrap));
-
-      if (hotspotXWrap) hotspotXWrap->GetData(&hotspotX);
-      if (hotspotYWrap) hotspotYWrap->GetData(&hotspotY);
-    }
+    auto hotspot = gfx::IntPoint::Round(*aHotspot);
+    return {std::max(std::min(hotspot.x, imgWidth - 1), 0),
+            std::max(std::min(hotspot.y, imgHeight - 1), 0)};
   }
-  return {hotspotX, hotspotY};
+
+  gfx::IntPoint hotspot;
+  aContainer->GetHotspotX(&hotspot.x);
+  aContainer->GetHotspotY(&hotspot.y);
+  return hotspot;
 }
 
 static CursorImage ComputeCustomCursor(nsPresContext* aPresContext,
@@ -3916,9 +3846,9 @@ static CursorImage ComputeCustomCursor(nsPresContext* aPresContext,
   // If we are falling back because any cursor before us is loading, let the
   // consumer know.
   bool loading = false;
-  for (const nsCursorImage& image : style.StyleUI()->mCursorImages) {
+  for (const auto& image : style.StyleUI()->mCursor.images.AsSpan()) {
     uint32_t status;
-    imgRequestProxy* req = image.GetImage();
+    imgRequestProxy* req = image.url.GetImage();
     if (!req || NS_FAILED(req->GetImageStatus(&status))) {
       continue;
     }
@@ -3935,8 +3865,8 @@ static CursorImage ComputeCustomCursor(nsPresContext* aPresContext,
       continue;
     }
     Maybe<gfx::Point> specifiedHotspot =
-        image.mHaveHotspot ? Some(gfx::Point{image.mHotspotX, image.mHotspotY})
-                           : Nothing();
+        image.has_hotspot ? Some(gfx::Point{image.hotspot_x, image.hotspot_y})
+                          : Nothing();
     gfx::IntPoint hotspot = ComputeHotspot(container, specifiedHotspot);
     CursorImage result{hotspot, std::move(container), loading};
     if (ShouldBlockCustomCursor(aPresContext, aEvent, result)) {
@@ -3966,8 +3896,8 @@ void EventStateManager::UpdateCursor(nsPresContext* aPresContext,
   }
   // If not locked, look for correct cursor
   else if (aTargetFrame) {
-    nsPoint pt =
-        nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, aTargetFrame);
+    nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(
+        aEvent, RelativeTo{aTargetFrame});
     Maybe<nsIFrame::Cursor> framecursor = aTargetFrame->GetCursor(pt);
     // Avoid setting cursor when the mouse is over a windowless plugin.
     if (!framecursor) {
@@ -4195,36 +4125,38 @@ class MOZ_STACK_CLASS ESMEventCB : public EventDispatchingCallback {
   nsCOMPtr<nsIContent> mTarget;
 };
 
-static void CreateMouseOrPointerWidgetEvent(
+static UniquePtr<WidgetMouseEvent> CreateMouseOrPointerWidgetEvent(
     WidgetMouseEvent* aMouseEvent, EventMessage aMessage,
-    nsIContent* aRelatedContent, nsAutoPtr<WidgetMouseEvent>& aNewEvent) {
+    EventTarget* aRelatedTarget) {
   WidgetPointerEvent* sourcePointer = aMouseEvent->AsPointerEvent();
+  UniquePtr<WidgetMouseEvent> newEvent;
   if (sourcePointer) {
     AUTO_PROFILER_LABEL("CreateMouseOrPointerWidgetEvent", OTHER);
 
-    nsAutoPtr<WidgetPointerEvent> newPointerEvent;
-    newPointerEvent = new WidgetPointerEvent(aMouseEvent->IsTrusted(), aMessage,
-                                             aMouseEvent->mWidget);
+    WidgetPointerEvent* newPointerEvent = new WidgetPointerEvent(
+        aMouseEvent->IsTrusted(), aMessage, aMouseEvent->mWidget);
     newPointerEvent->mIsPrimary = sourcePointer->mIsPrimary;
     newPointerEvent->mWidth = sourcePointer->mWidth;
     newPointerEvent->mHeight = sourcePointer->mHeight;
     newPointerEvent->mInputSource = sourcePointer->mInputSource;
-    newPointerEvent->mRelatedTarget = aRelatedContent;
-    aNewEvent = newPointerEvent.forget();
+
+    newEvent = WrapUnique(newPointerEvent);
   } else {
-    aNewEvent =
-        new WidgetMouseEvent(aMouseEvent->IsTrusted(), aMessage,
-                             aMouseEvent->mWidget, WidgetMouseEvent::eReal);
-    aNewEvent->mRelatedTarget = aRelatedContent;
+    newEvent = MakeUnique<WidgetMouseEvent>(aMouseEvent->IsTrusted(), aMessage,
+                                            aMouseEvent->mWidget,
+                                            WidgetMouseEvent::eReal);
   }
-  aNewEvent->mRefPoint = aMouseEvent->mRefPoint;
-  aNewEvent->mModifiers = aMouseEvent->mModifiers;
-  aNewEvent->mButton = aMouseEvent->mButton;
-  aNewEvent->mButtons = aMouseEvent->mButtons;
-  aNewEvent->mPressure = aMouseEvent->mPressure;
-  aNewEvent->mPluginEvent = aMouseEvent->mPluginEvent;
-  aNewEvent->mInputSource = aMouseEvent->mInputSource;
-  aNewEvent->pointerId = aMouseEvent->pointerId;
+  newEvent->mRelatedTarget = aRelatedTarget;
+  newEvent->mRefPoint = aMouseEvent->mRefPoint;
+  newEvent->mModifiers = aMouseEvent->mModifiers;
+  newEvent->mButton = aMouseEvent->mButton;
+  newEvent->mButtons = aMouseEvent->mButtons;
+  newEvent->mPressure = aMouseEvent->mPressure;
+  newEvent->mPluginEvent = aMouseEvent->mPluginEvent;
+  newEvent->mInputSource = aMouseEvent->mInputSource;
+  newEvent->pointerId = aMouseEvent->pointerId;
+
+  return newEvent;
 }
 
 nsIFrame* EventStateManager::DispatchMouseOrPointerEvent(
@@ -4255,9 +4187,8 @@ nsIFrame* EventStateManager::DispatchMouseOrPointerEvent(
   nsCOMPtr<nsIContent> targetContent = aTargetContent;
   nsCOMPtr<nsIContent> relatedContent = aRelatedContent;
 
-  nsAutoPtr<WidgetMouseEvent> dispatchEvent;
-  CreateMouseOrPointerWidgetEvent(aMouseEvent, aMessage, relatedContent,
-                                  dispatchEvent);
+  UniquePtr<WidgetMouseEvent> dispatchEvent =
+      CreateMouseOrPointerWidgetEvent(aMouseEvent, aMessage, relatedContent);
 
   AutoWeakFrame previousTarget = mCurrentTarget;
   mCurrentTargetContent = targetContent;
@@ -4266,8 +4197,8 @@ nsIFrame* EventStateManager::DispatchMouseOrPointerEvent(
 
   nsEventStatus status = nsEventStatus_eIgnore;
   ESMEventCB callback(targetContent);
-  EventDispatcher::Dispatch(targetContent, mPresContext, dispatchEvent, nullptr,
-                            &status, &callback);
+  EventDispatcher::Dispatch(targetContent, mPresContext, dispatchEvent.get(),
+                            nullptr, &status, &callback);
 
   if (mPresContext) {
     // Although the primary frame was checked in event callback, it may not be
@@ -4279,9 +4210,9 @@ nsIFrame* EventStateManager::DispatchMouseOrPointerEvent(
     if (IsRemoteTarget(targetContent)) {
       if (aMessage == eMouseOut) {
         // For remote content, send a "top-level" widget mouse exit event.
-        nsAutoPtr<WidgetMouseEvent> remoteEvent;
-        CreateMouseOrPointerWidgetEvent(aMouseEvent, eMouseExitFromWidget,
-                                        relatedContent, remoteEvent);
+        UniquePtr<WidgetMouseEvent> remoteEvent =
+            CreateMouseOrPointerWidgetEvent(aMouseEvent, eMouseExitFromWidget,
+                                            relatedContent);
         remoteEvent->mExitFrom = WidgetMouseEvent::eTopLevel;
 
         // mCurrentTarget is set to the new target, so we must reset it to the
@@ -4289,12 +4220,12 @@ nsIFrame* EventStateManager::DispatchMouseOrPointerEvent(
         // will be set back below.) HandleCrossProcessEvent will query for the
         // proper target via GetEventTarget which will return mCurrentTarget.
         mCurrentTarget = targetFrame;
-        HandleCrossProcessEvent(remoteEvent, &status);
+        HandleCrossProcessEvent(remoteEvent.get(), &status);
       } else if (aMessage == eMouseOver) {
-        nsAutoPtr<WidgetMouseEvent> remoteEvent;
-        CreateMouseOrPointerWidgetEvent(aMouseEvent, eMouseEnterIntoWidget,
-                                        relatedContent, remoteEvent);
-        HandleCrossProcessEvent(remoteEvent, &status);
+        UniquePtr<WidgetMouseEvent> remoteEvent =
+            CreateMouseOrPointerWidgetEvent(aMouseEvent, eMouseEnterIntoWidget,
+                                            relatedContent);
+        HandleCrossProcessEvent(remoteEvent.get(), &status);
       }
     }
   }
@@ -5030,10 +4961,6 @@ nsresult EventStateManager::InitAndDispatchClickEvent(
   nsresult rv = aPresShell->HandleEventWithTarget(
       &event, targetFrame, MOZ_KnownLive(target), &status);
 
-  if (event.mFlags.mHadNonPrivilegedClickListeners && !aNoContentDispatch) {
-    Telemetry::AccumulateCategorical(
-        Telemetry::LABELS_TYPES_OF_USER_CLICKS::Has_JS_Listener);
-  }
   // Copy mMultipleActionsPrevented flag from a click event to the mouseup
   // event only when it's set to true.  It may be set to true if an editor has
   // already handled it.  This is important to avoid two or more default
@@ -5160,14 +5087,6 @@ nsresult EventStateManager::DispatchClickEvents(
     }
   }
 
-  // notDispatchToContents is used here because we don't want to
-  // count auxclicks.
-  if (XRE_IsParentProcess() && !IsRemoteTarget(aClickTarget) &&
-      !notDispatchToContents) {
-    Telemetry::AccumulateCategorical(
-        Telemetry::LABELS_TYPES_OF_USER_CLICKS::Browser_Chrome);
-  }
-
   return rv;
 }
 
@@ -5201,7 +5120,7 @@ nsresult EventStateManager::HandleMiddleClickPaste(
     if (NS_WARN_IF(!document)) {
       return NS_ERROR_FAILURE;
     }
-    nsCopySupport::GetSelectionForCopy(document, getter_AddRefs(selection));
+    selection = nsCopySupport::GetSelectionForCopy(document);
     if (NS_WARN_IF(!selection)) {
       return NS_ERROR_FAILURE;
     }
@@ -5250,8 +5169,7 @@ nsresult EventStateManager::HandleMiddleClickPaste(
   }
 
   // Check if the editor is still the good target to paste.
-  if (aTextEditor->Destroyed() || aTextEditor->IsReadonly() ||
-      aTextEditor->IsDisabled()) {
+  if (aTextEditor->Destroyed() || aTextEditor->IsReadonly()) {
     // XXX Should we consume the event when the editor is readonly and/or
     //     disabled?
     return NS_OK;
@@ -5259,7 +5177,7 @@ nsresult EventStateManager::HandleMiddleClickPaste(
 
   // The selection may have been modified during reflow.  Therefore, we
   // should adjust event target to pass IsAcceptableInputEvent().
-  nsRange* range = selection->GetRangeAt(0);
+  const nsRange* range = selection->GetRangeAt(0);
   if (!range) {
     return NS_OK;
   }

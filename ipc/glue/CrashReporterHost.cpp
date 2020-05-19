@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CrashReporterHost.h"
-#include "CrashReporterMetadataShmem.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/Telemetry.h"
@@ -59,10 +57,8 @@ namespace mozilla {
 namespace ipc {
 
 CrashReporterHost::CrashReporterHost(GeckoProcessType aProcessType,
-                                     const Shmem& aShmem,
                                      CrashReporter::ThreadId aThreadId)
     : mProcessType(aProcessType),
-      mShmem(aShmem),
       mThreadId(aThreadId),
       mStartTime(::time(nullptr)),
       mFinalized(false) {}
@@ -101,11 +97,6 @@ bool CrashReporterHost::AdoptMinidump(nsIFile* aFile,
 }
 
 int32_t CrashReporterHost::GetCrashType() {
-  if (mExtraAnnotations[CrashReporter::Annotation::RecordReplayHang]
-          .EqualsLiteral("1")) {
-    return nsICrashService::CRASH_TYPE_HANG;
-  }
-
   if (mExtraAnnotations[CrashReporter::Annotation::PluginHang].EqualsLiteral(
           "1")) {
     return nsICrashService::CRASH_TYPE_HANG;
@@ -118,22 +109,14 @@ bool CrashReporterHost::FinalizeCrashReport() {
   MOZ_ASSERT(!mFinalized);
   MOZ_ASSERT(HasMinidump());
 
-  CrashReporter::AnnotationTable annotations;
-
-  annotations[CrashReporter::Annotation::ProcessType] =
+  mExtraAnnotations[CrashReporter::Annotation::ProcessType] =
       XRE_ChildProcessTypeToAnnotation(mProcessType);
 
   char startTime[32];
   SprintfLiteral(startTime, "%lld", static_cast<long long>(mStartTime));
-  annotations[CrashReporter::Annotation::StartupTime] =
+  mExtraAnnotations[CrashReporter::Annotation::StartupTime] =
       nsDependentCString(startTime);
 
-  // We might not have shmem (for example, when running crashreporter tests).
-  if (mShmem.IsReadable()) {
-    CrashReporterMetadataShmem::ReadAppNotes(mShmem, annotations);
-  }
-
-  MergeCrashAnnotations(mExtraAnnotations, annotations);
   CrashReporter::WriteExtraFile(mDumpID, mExtraAnnotations);
 
   RecordCrash(mProcessType, GetCrashType(), mDumpID);
@@ -239,6 +222,20 @@ void CrashReporterHost::AddAnnotation(CrashReporter::Annotation aKey,
 void CrashReporterHost::AddAnnotation(CrashReporter::Annotation aKey,
                                       const nsACString& aValue) {
   mExtraAnnotations[aKey] = aValue;
+}
+
+bool CrashReporterHost::IsLikelyOOM() {
+  // The data is only populated during the call to `FinalizeCrashReport()`.
+  MOZ_ASSERT(mFinalized);
+
+  // If `OOMAllocationSize` was set, we know that the crash happened
+  // because an allocation failed (`malloc` returned `nullptr`).
+  //
+  // As Unix systems generally allow `malloc` to return a non-null value
+  // even when no virtual memory is available, this doesn't cover all
+  // cases of OOM under Unix (far from it).
+  return mExtraAnnotations[CrashReporter::Annotation::OOMAllocationSize]
+             .Length() > 0;
 }
 
 }  // namespace ipc

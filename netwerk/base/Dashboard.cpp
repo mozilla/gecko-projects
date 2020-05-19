@@ -267,13 +267,6 @@ LookupHelper::OnLookupComplete(nsICancelable* aRequest, nsIDNSRecord* aRecord,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-LookupHelper::OnLookupByTypeComplete(nsICancelable* aRequest,
-                                     nsIDNSByTypeRecord* aRes,
-                                     nsresult aStatus) {
-  return NS_OK;
-}
-
 nsresult LookupHelper::ConstructAnswer(LookupArgument* aArgument) {
   nsIDNSRecord* aRecord = aArgument->mRecord;
   AutoSafeJSContext cx;
@@ -500,9 +493,9 @@ Dashboard::AddHost(const nsACString& aHost, uint32_t aSerial, bool aEncrypted) {
     if (mWs.data.Contains(mData)) {
       return NS_OK;
     }
-    if (!mWs.data.AppendElement(mData)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    // XXX(Bug 1631371) Check if this should use a fallible operation as it
+    // pretended earlier.
+    mWs.data.AppendElement(mData);
     return NS_OK;
   }
   return NS_ERROR_FAILURE;
@@ -766,7 +759,7 @@ nsresult Dashboard::GetRcwnData(RcwnData* aData) {
   return NS_OK;
 }
 
-void HttpConnInfo::SetHTTP1ProtocolVersion(HttpVersion pv) {
+void HttpConnInfo::SetHTTPProtocolVersion(HttpVersion pv) {
   switch (pv) {
     case HttpVersion::v0_9:
       protocolVersion.AssignLiteral(u"http/0.9");
@@ -778,23 +771,14 @@ void HttpConnInfo::SetHTTP1ProtocolVersion(HttpVersion pv) {
       protocolVersion.AssignLiteral(u"http/1.1");
       break;
     case HttpVersion::v2_0:
-      protocolVersion.AssignLiteral(u"http/2.0");
+      protocolVersion.AssignLiteral(u"http/2");
       break;
     case HttpVersion::v3_0:
-      protocolVersion.AssignLiteral(u"http/3.0");
+      protocolVersion.AssignLiteral(u"http/3");
       break;
     default:
       protocolVersion.AssignLiteral(u"unknown protocol version");
   }
-}
-
-void HttpConnInfo::SetHTTP2ProtocolVersion(SpdyVersion pv) {
-  MOZ_ASSERT(pv == SpdyVersion::HTTP_2);
-  protocolVersion.AssignLiteral(u"h2");
-}
-
-void HttpConnInfo::SetHTTP3ProtocolVersion() {
-  protocolVersion.AssignLiteral(u"h3");
 }
 
 NS_IMETHODIMP

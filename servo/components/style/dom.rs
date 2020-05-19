@@ -22,7 +22,7 @@ use crate::shared_lock::Locked;
 use crate::stylist::CascadeData;
 use crate::traversal_flags::TraversalFlags;
 use crate::{Atom, LocalName, Namespace, WeakAtom};
-use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
+use atomic_refcell::{AtomicRef, AtomicRefMut};
 use selectors::matching::{ElementSelectorFlags, QuirksMode, VisitedHandlingMode};
 use selectors::sink::Push;
 use selectors::Element as SelectorsElement;
@@ -522,6 +522,14 @@ pub trait TElement:
     {
     }
 
+    /// Internal iterator for the part names that this element exports for a
+    /// given part name.
+    fn each_exported_part<F>(&self, _name: &Atom, _callback: F)
+    where
+        F: FnMut(&Atom),
+    {
+    }
+
     /// Whether a given element may generate a pseudo-element.
     ///
     /// This is useful to avoid computing, for example, pseudo styles for
@@ -689,18 +697,14 @@ pub trait TElement:
     /// Unsafe following the same reasoning as ensure_data.
     unsafe fn clear_data(&self);
 
-    /// Gets a reference to the ElementData container.
-    fn get_data(&self) -> Option<&AtomicRefCell<ElementData>>;
+    /// Whether there is an ElementData container.
+    fn has_data(&self) -> bool;
 
     /// Immutably borrows the ElementData.
-    fn borrow_data(&self) -> Option<AtomicRef<ElementData>> {
-        self.get_data().map(|x| x.borrow())
-    }
+    fn borrow_data(&self) -> Option<AtomicRef<ElementData>>;
 
     /// Mutably borrows the ElementData.
-    fn mutate_data(&self) -> Option<AtomicRefMut<ElementData>> {
-        self.get_data().map(|x| x.borrow_mut())
-    }
+    fn mutate_data(&self) -> Option<AtomicRefMut<ElementData>>;
 
     /// Whether we should skip any root- or item-based display property
     /// blockification on this element.  (This function exists so that Gecko

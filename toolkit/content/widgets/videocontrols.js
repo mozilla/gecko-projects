@@ -111,7 +111,7 @@ this.VideoControlsWidget = class {
    * toggle. Those requirements currently are:
    *
    * 1. The video must be 45 seconds in length or longer.
-   * 2. Neither the width or the height of the video can be less than 160px.
+   * 2. Neither the width or the height of the video can be less than 140px.
    * 3. The video must have audio.
    * 4. The video must not a MediaStream video (Bug 1592539)
    *
@@ -119,26 +119,46 @@ this.VideoControlsWidget = class {
    * media.videocontrols.picture-in-picture.video-toggle.always-show pref, which
    * is mostly used for testing.
    *
-   * @param {Object} prefs The preferences set that was passed to the UAWidget.
-   * @param {Element} someVideo The <video> to test.
+   * @param {Object} prefs
+   *   The preferences set that was passed to the UAWidget.
+   * @param {Element} someVideo
+   *   The <video> to test.
+   * @param {Object} reflowedDimensions
+   *   An object representing the reflowed dimensions of the <video>. Properties
+   *   are:
+   *
+   *     videoWidth (Number):
+   *       The width of the video in pixels.
+   *
+   *     videoHeight (Number):
+   *       The height of the video in pixels.
+   *
    * @return {Boolean}
    */
-  static shouldShowPictureInPictureToggle(prefs, someVideo) {
+  static shouldShowPictureInPictureToggle(
+    prefs,
+    someVideo,
+    reflowedDimensions
+  ) {
     if (
       prefs["media.videocontrols.picture-in-picture.video-toggle.always-show"]
     ) {
       return true;
     }
 
-    const MIN_VIDEO_LENGTH = 45; // seconds
+    const MIN_VIDEO_LENGTH =
+      prefs[
+        "media.videocontrols.picture-in-picture.video-toggle.min-video-secs"
+      ];
+
     if (someVideo.duration < MIN_VIDEO_LENGTH) {
       return false;
     }
 
-    const MIN_VIDEO_DIMENSION = 160; // pixels
+    const MIN_VIDEO_DIMENSION = 140; // pixels
     if (
-      someVideo.videoWidth < MIN_VIDEO_DIMENSION ||
-      someVideo.videoHeight < MIN_VIDEO_DIMENSION
+      reflowedDimensions.videoWidth < MIN_VIDEO_DIMENSION ||
+      reflowedDimensions.videoHeight < MIN_VIDEO_DIMENSION
     ) {
       return false;
     }
@@ -216,6 +236,7 @@ this.VideoControlsImplWidget = class {
         "stalled",
         "mozvideoonlyseekbegin",
         "mozvideoonlyseekcompleted",
+        "durationchange",
       ],
 
       showHours: false,
@@ -341,7 +362,7 @@ this.VideoControlsImplWidget = class {
           // We have to check again if the media has audio here.
           if (!this.isAudioOnly && !this.video.mozHasAudio) {
             this.muteButton.setAttribute("noAudio", "true");
-            this.muteButton.setAttribute("disabled", "true");
+            this.muteButton.disabled = true;
           }
         }
 
@@ -523,7 +544,8 @@ this.VideoControlsImplWidget = class {
           !this.isShowingPictureInPictureMessage &&
           VideoControlsWidget.shouldShowPictureInPictureToggle(
             this.prefs,
-            this.video
+            this.video,
+            this.reflowedDimensions
           )
         ) {
           this.pictureInPictureToggleButton.removeAttribute("hidden");
@@ -696,9 +718,12 @@ this.VideoControlsImplWidget = class {
             );
             if (!this.isAudioOnly && !this.video.mozHasAudio) {
               this.muteButton.setAttribute("noAudio", "true");
-              this.muteButton.setAttribute("disabled", "true");
+              this.muteButton.disabled = true;
             }
             this.adjustControlSize();
+            this.updatePictureInPictureToggleDisplay();
+            break;
+          case "durationchange":
             this.updatePictureInPictureToggleDisplay();
             break;
           case "loadeddata":
@@ -854,6 +879,7 @@ this.VideoControlsImplWidget = class {
             this.updateReflowedDimensions();
             this.reflowTriggeringCallValidator.isReflowTriggeringPropsAllowed = false;
             this.adjustControlSize();
+            this.updatePictureInPictureToggleDisplay();
             break;
           case "fullscreenchange":
             this.onFullscreenChange();
@@ -1819,7 +1845,7 @@ this.VideoControlsImplWidget = class {
 
       get isClosedCaptionAvailable() {
         // There is no rendering area, no need to show the caption.
-        if (!this.video.videoWidth || !this.video.videoHeight) {
+        if (this.isAudioOnly) {
           return false;
         }
         return this.overlayableTextTracks.length;
@@ -2567,7 +2593,7 @@ this.VideoControlsImplWidget = class {
       %videocontrolsDTD;
       ]>
       <div class="videocontrols" xmlns="http://www.w3.org/1999/xhtml" role="none">
-        <link rel="stylesheet" type="text/css" href="chrome://global/skin/media/videocontrols.css" />
+        <link rel="stylesheet" href="chrome://global/skin/media/videocontrols.css" />
         <div id="controlsContainer" class="controlsContainer" role="none">
           <div id="statusOverlay" class="statusOverlay stackItem" hidden="true">
             <div id="statusIcon" class="statusIcon"></div>
@@ -2826,7 +2852,7 @@ this.NoControlsMobileImplWidget = class {
       %videocontrolsDTD;
       ]>
       <div class="videocontrols" xmlns="http://www.w3.org/1999/xhtml" role="none">
-        <link rel="stylesheet" type="text/css" href="chrome://global/skin/media/videocontrols.css" />
+        <link rel="stylesheet" href="chrome://global/skin/media/videocontrols.css" />
         <div id="controlsContainer" class="controlsContainer" role="none" hidden="true">
           <div class="controlsOverlay stackItem">
             <div class="controlsSpacerStack">
@@ -2881,7 +2907,7 @@ this.NoControlsPictureInPictureImplWidget = class {
       %videocontrolsDTD;
       ]>
       <div class="videocontrols" xmlns="http://www.w3.org/1999/xhtml" role="none">
-        <link rel="stylesheet" type="text/css" href="chrome://global/skin/media/videocontrols.css" />
+        <link rel="stylesheet" href="chrome://global/skin/media/videocontrols.css" />
         <div id="controlsContainer" class="controlsContainer" role="none">
           <div class="pictureInPictureOverlay stackItem" status="pictureInPicture">
             <div id="statusIcon" class="statusIcon" type="pictureInPicture"></div>
@@ -2923,6 +2949,13 @@ this.NoControlsDesktopImplWidget = class {
             }
             break;
           }
+          case "resizevideocontrols": {
+            this.updateReflowedDimensions();
+            this.updatePictureInPictureToggleDisplay();
+            break;
+          }
+          case "durationchange":
+          // Intentional fall-through
           case "loadedmetadata": {
             this.updatePictureInPictureToggleDisplay();
             break;
@@ -2935,7 +2968,8 @@ this.NoControlsDesktopImplWidget = class {
           this.pipToggleEnabled &&
           VideoControlsWidget.shouldShowPictureInPictureToggle(
             this.prefs,
-            this.video
+            this.video,
+            this.reflowedDimensions
           )
         ) {
           this.pictureInPictureToggleButton.removeAttribute("hidden");
@@ -2979,6 +3013,8 @@ this.NoControlsDesktopImplWidget = class {
         });
 
         this.video.addEventListener("loadedmetadata", this);
+        this.video.addEventListener("durationchange", this);
+        this.videocontrols.addEventListener("resizevideocontrols", this);
       },
 
       terminate() {
@@ -2987,6 +3023,22 @@ this.NoControlsDesktopImplWidget = class {
         });
 
         this.video.removeEventListener("loadedmetadata", this);
+        this.video.removeEventListener("durationchange", this);
+        this.videocontrols.removeEventListener("resizevideocontrols", this);
+      },
+
+      updateReflowedDimensions() {
+        this.reflowedDimensions.videoHeight = this.video.clientHeight;
+        this.reflowedDimensions.videoWidth = this.video.clientWidth;
+        this.reflowedDimensions.videocontrolsWidth = this.videocontrols.clientWidth;
+      },
+
+      reflowedDimensions: {
+        // Set the dimensions to intrinsic <video> dimensions before the first
+        // update.
+        videoHeight: 150,
+        videoWidth: 300,
+        videocontrolsWidth: 0,
       },
 
       get pipToggleEnabled() {
@@ -3024,7 +3076,7 @@ this.NoControlsDesktopImplWidget = class {
       %videocontrolsDTD;
       ]>
       <div class="videocontrols" xmlns="http://www.w3.org/1999/xhtml" role="none">
-        <link rel="stylesheet" type="text/css" href="chrome://global/skin/media/videocontrols.css" />
+        <link rel="stylesheet" href="chrome://global/skin/media/videocontrols.css" />
         <div id="controlsContainer" class="controlsContainer" role="none">
           <div class="controlsOverlay stackItem">
             <button id="pictureInPictureToggleButton" class="pictureInPictureToggleButton">

@@ -31,7 +31,7 @@ const {
   SINGLE_USER_THRESHOLD,
   SYNC_API_VERSION,
 } = ChromeUtils.import("resource://services-sync/constants.js");
-const { Store, SyncEngine, Tracker } = ChromeUtils.import(
+const { Store, SyncEngine, LegacyTracker } = ChromeUtils.import(
   "resource://services-sync/engines.js"
 );
 const { CryptoWrapper } = ChromeUtils.import(
@@ -1191,9 +1191,7 @@ ClientStore.prototype = {
       let truncatedCommands = Utils.tryFitItems(commands, maxPayloadSize);
       if (truncatedCommands.length != record.commands.length) {
         this._log.warn(
-          `Removing commands from client ${id} (from ${
-            record.commands.length
-          } to ${truncatedCommands.length})`
+          `Removing commands from client ${id} (from ${record.commands.length} to ${truncatedCommands.length})`
         );
         // Restore original order.
         record.commands = truncatedCommands.sort(
@@ -1223,10 +1221,10 @@ ClientStore.prototype = {
 };
 
 function ClientsTracker(name, engine) {
-  Tracker.call(this, name, engine);
+  LegacyTracker.call(this, name, engine);
 }
 ClientsTracker.prototype = {
-  __proto__: Tracker.prototype,
+  __proto__: LegacyTracker.prototype,
 
   _enabled: false,
 

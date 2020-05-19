@@ -59,7 +59,9 @@ BLOCK_WIN8PLUS_ONLY = 'BLOCK_WIN8PLUS_ONLY'
 BLOCK_WIN8_ONLY = 'BLOCK_WIN8_ONLY'
 USE_TIMESTAMP = 'USE_TIMESTAMP'
 CHILD_PROCESSES_ONLY = 'CHILD_PROCESSES_ONLY'
+BROWSER_PROCESS_ONLY = 'BROWSER_PROCESS_ONLY'
 SUBSTITUTE_LSP_PASSTHROUGH = 'SUBSTITUTE_LSP_PASSTHROUGH'
+REDIRECT_TO_NOOP_ENTRYPOINT = 'REDIRECT_TO_NOOP_ENTRYPOINT'
 
 # Only these flags are available in the input script
 INPUT_ONLY_FLAGS = {
@@ -277,9 +279,7 @@ class BlocklistDescriptor(object):
 
         # Sort the list on entry name so that the blocklist code may use
         # binary search if it so chooses.
-        filtered_list.sort(key=lambda e: e.get_name())
-
-        return filtered_list
+        return sorted(filtered_list, key=lambda e: e.get_name())
 
     @staticmethod
     def get_fd(outspec_leaf_name):
@@ -355,12 +355,11 @@ LSP_OUTPUT_SPEC = [
 
 GENERATED_BLOCKLIST_FILES = [
     BlocklistDescriptor('A11y', ['BROWSER_PROCESS'], outspec=A11Y_OUTPUT_SPEC),
-    # Child is not used by anything at the moment, so we'll just leave this
-    # descriptor commented out for now.
-    # BlocklistDescriptor('Child', ['ALL_PROCESSES', 'CHILD_PROCESSES']),
     BlocklistDescriptor('Launcher', ALL_DEFINITION_LISTS, flagspec={
+                        'BROWSER_PROCESS': {BROWSER_PROCESS_ONLY},
                         'CHILD_PROCESSES': {CHILD_PROCESSES_ONLY}}),
     BlocklistDescriptor('Legacy', ALL_DEFINITION_LISTS, flagspec={
+                        'BROWSER_PROCESS': {BROWSER_PROCESS_ONLY},
                         'CHILD_PROCESSES': {CHILD_PROCESSES_ONLY}}),
     # Roughed-in for the moment; we'll enable this in bug 1238735
     # BlocklistDescriptor('LSP', ALL_DEFINITION_LISTS, outspec=LSP_OUTPUT_SPEC),
@@ -371,11 +370,7 @@ GENERATED_BLOCKLIST_FILES = [
 
 class PETimeStamp(object):
     def __init__(self, ts):
-        # Since we can't specify the long literal suffix in python 3, we'll
-        # compute max_timestamp this way to ensure that it is defined as a
-        # long in python 2
-        max_timestamp = (long(2) ** 32) - 1
-        assert isinstance(max_timestamp, long)
+        max_timestamp = (2 ** 32) - 1
         if ts < 0 or ts > max_timestamp:
             raise ValueError('Invalid timestamp value')
         self._value = ts
@@ -413,7 +408,7 @@ class Version(object):
             elif isinstance(args[0], PETimeStamp):
                 self._ver = args[0]
             else:
-                self._ver = long(args[0])
+                self._ver = int(args[0])
         elif len(args) == 4:
             self.validate_iterable(args)
 
@@ -433,14 +428,14 @@ class Version(object):
 
     def build_long(self, args):
         self.validate_iterable(args)
-        return (long(args[0]) << 48) | (long(args[1]) << 32) | \
-            (long(args[2]) << 16) | long(args[3])
+        return (int(args[0]) << 48) | (int(args[1]) << 32) | \
+            (int(args[2]) << 16) | int(args[3])
 
     def is_timestamp(self):
         return isinstance(self._ver, PETimeStamp)
 
     def __str__(self):
-        if isinstance(self._ver, long):
+        if isinstance(self._ver, int):
             if self._ver == Version.ALL_VERSIONS:
                 return 'DllBlockInfo::ALL_VERSIONS'
 
@@ -571,6 +566,27 @@ class A11yBlocklistEntry(DllBlocklistEntry):
         super(A11yBlocklistEntry, self).__init__(name, ver, flags, **kwargs)
 
 
+class RedirectToNoOpEntryPoint(DllBlocklistEntry):
+    """ Represents a blocklist entry to hook the entrypoint into a function
+    just returning TRUE to keep a module alive and harmless.
+    This entry is intended to block a DLL which is injected by IAT patching
+    which is planted by a kernel callback routine for LoadImage because
+    blocking such a DLL makes a process fail to launch.
+    """
+
+    def __init__(self, name, ver, flags=(), **kwargs):
+        """These arguments are identical to DllBlocklistEntry.__init__
+        """
+
+        super(RedirectToNoOpEntryPoint, self).__init__(name, ver, flags, **kwargs)
+
+    def get_flags_list(self):
+        flags = super(RedirectToNoOpEntryPoint, self).get_flags_list()
+        # RedirectToNoOpEntryPoint items always include the following flag
+        flags.add(REDIRECT_TO_NOOP_ENTRYPOINT)
+        return flags
+
+
 class LspBlocklistEntry(DllBlocklistEntry):
     """ Represents a blocklist entry for a WinSock Layered Service Provider (LSP).
     """
@@ -667,6 +683,7 @@ def gen_blocklists(first_fd, defs_filename):
         'A11yBlocklistEntry': A11yBlocklistEntry,
         'DllBlocklistEntry': DllBlocklistEntry,
         'LspBlocklistEntry': LspBlocklistEntry,
+        'RedirectToNoOpEntryPoint': RedirectToNoOpEntryPoint,
         # Add the special version types
         'ALL_VERSIONS': Version.ALL_VERSIONS,
         'UNVERSIONED': Version.UNVERSIONED,

@@ -89,6 +89,9 @@ const BUFFERED_BOOKMARK_VALIDATOR_VERSION = 2;
 // bookmark merge.
 const BUFFERED_BOOKMARK_APPLY_TIMEOUT_MS = 5 * 60 * 60 * 1000; // 5 minutes
 
+// The default frecency value to use when not known.
+const FRECENCY_UNKNOWN = -1;
+
 function isSyncedRootNode(node) {
   return (
     node.root == "bookmarksMenuFolder" ||
@@ -1013,11 +1016,6 @@ BufferedBookmarksEngine.prototype = {
     await super.finalize();
     await this._store.finalize();
   },
-
-  // Returns a new watchdog. Exposed for tests.
-  _newWatchdog() {
-    return Async.watchdog();
-  },
 };
 
 /**
@@ -1070,10 +1068,19 @@ BaseBookmarksStore.prototype = {
 
     // Add in the bookmark's frecency if we have something.
     if (record.bmkUri != null) {
-      let frecency = await PlacesSyncUtils.history.fetchURLFrecency(
-        record.bmkUri
-      );
-      if (frecency != -1) {
+      let frecency = FRECENCY_UNKNOWN;
+      try {
+        frecency = await PlacesSyncUtils.history.fetchURLFrecency(
+          record.bmkUri
+        );
+      } catch (ex) {
+        this._log.warn(
+          `Failed to fetch frecency for ${record.id}; assuming default`,
+          ex
+        );
+        this._log.trace("Record {id} has invalid URL ${bmkUri}", record);
+      }
+      if (frecency != FRECENCY_UNKNOWN) {
         index += frecency;
       }
     }
@@ -1381,20 +1388,6 @@ function BookmarksTracker(name, engine) {
 BookmarksTracker.prototype = {
   __proto__: Tracker.prototype,
 
-  // `_ignore` checks the change source for each observer notification, so we
-  // don't want to let the engine ignore all changes during a sync.
-  get ignoreAll() {
-    return false;
-  },
-
-  // Define an empty setter so that the engine doesn't throw a `TypeError`
-  // setting a read-only property.
-  set ignoreAll(value) {},
-
-  // We never want to persist changed IDs, as the changes are already stored
-  // in Places.
-  persistChangedIDs: false,
-
   onStart() {
     PlacesUtils.bookmarks.addObserver(this, true);
     this._placesListener = new PlacesWeakCallbackWrapper(
@@ -1420,25 +1413,8 @@ BookmarksTracker.prototype = {
     Svc.Obs.remove("bookmarks-restore-failed", this);
   },
 
-  // Ensure we aren't accidentally using the base persistence.
-  addChangedID(id, when) {
-    throw new Error("Don't add IDs to the bookmarks tracker");
-  },
-
-  removeChangedID(id) {
-    throw new Error("Don't remove IDs from the bookmarks tracker");
-  },
-
-  // This method is called at various times, so we override with a no-op
-  // instead of throwing.
-  clearChangedIDs() {},
-
   async getChangedIDs() {
     return PlacesSyncUtils.bookmarks.pullChanges();
-  },
-
-  set changedIDs(obj) {
-    throw new Error("Don't set initial changed bookmark IDs");
   },
 
   observe(subject, topic, data) {
@@ -1470,7 +1446,6 @@ BookmarksTracker.prototype = {
 
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavBookmarkObserver,
-    Ci.nsINavBookmarkObserver_MOZILLA_1_9_1_ADDITIONS,
     Ci.nsISupportsWeakReference,
   ]),
 

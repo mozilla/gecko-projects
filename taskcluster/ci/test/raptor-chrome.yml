@@ -10,7 +10,7 @@ job-defaults:
             default: 1800
     suite: raptor
     workdir: /home/cltbld
-    run-on-projects: ['try']
+    run-on-projects: []
     tier: 2
     virtualization:
         by-test-platform:
@@ -119,6 +119,15 @@ raptor-tp6-10-chrome:
     mozharness:
         extra-options:
             - --test=raptor-tp6-10
+            - --app=chrome
+
+raptor-tp6-11-chrome:
+    description: "Raptor tp6-11 on Chrome"
+    try-name: raptor-tp6-11-chrome
+    treeherder-symbol: Rap-ChR(tp6-11)
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6-11
             - --app=chrome
 
 raptor-speedometer-chrome:
@@ -493,6 +502,15 @@ raptor-tp6-30-chrome-cold:
             - --test=raptor-tp6-30-cold
             - --app=chrome
 
+raptor-tp6-31-chrome-cold:
+    description: "Raptor tp6-31 cold page-load on Chrome"
+    try-name: raptor-tp6-31-chrome-cold
+    treeherder-symbol: Rap-ChR(tp6-c-31)
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6-31-cold
+            - --app=chrome
+
 raptor-ares6-chrome:
     description: "Raptor Ares6 on Chrome"
     try-name: raptor-ares6-chrome
@@ -522,12 +540,86 @@ raptor-youtube-playback-chrome:
     description: "Raptor YouTube Playback on Chrome"
     try-name: raptor-youtube-playback-chrome
     treeherder-symbol: Rap-ChR(ytp)
+    max-run-time: 2700
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback
+            - --app=chrome
+
+raptor-youtube-playback-av1-sfr-chrome:
+    description: "Raptor YouTube Playback AV1 SFR on Chrome"
+    try-name: raptor-youtube-playback-av1-sfr-chrome
+    treeherder-symbol: Rap-ChR(ytp-av1-sfr)
+    max-run-time:
+        by-test-platform:
+            windows10-aarch64/opt: 3600
+            default: 1800
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback-av1-sfr
+            - --app=chrome
+
+raptor-youtube-playback-h264-sfr-chrome:
+    description: "Raptor YouTube Playback H264 SFR on Chrome"
+    try-name: raptor-youtube-playback-h264-sfr-chrome
+    treeherder-symbol: Rap-ChR(ytp-h264-sfr)
+    max-run-time:
+        by-test-platform:
+            windows10-aarch64/opt: 3600
+            default: 1800
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback-h264-sfr
+            - --app=chrome
+
+raptor-youtube-playback-vp9-sfr-chrome:
+    description: "Raptor YouTube Playback VP9 SFR on Chrome"
+    try-name: raptor-youtube-playback-vp9-sfr-chrome
+    treeherder-symbol: Rap-ChR(ytp-vp9-sfr)
+    max-run-time:
+        by-test-platform:
+            windows10-aarch64/opt: 3600
+            default: 1800
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback-vp9-sfr
+            - --app=chrome
+
+raptor-youtube-playback-widevine-hfr-chrome:
+    description: "Raptor YouTube Playback Widevine HFR on Chrome"
+    try-name: raptor-youtube-playback-widevine-hfr-chrome
+    treeherder-symbol: Rap-ChR(ytp-widevine-hfr)
     max-run-time:
         by-test-platform:
             windows10-aarch64/opt: 3600
             default: 2700
-    tier: 2
     mozharness:
         extra-options:
-            - --test=raptor-youtube-playback
+            - --test=raptor-youtube-playback-widevine-hfr
+            - --app=chrome
+
+raptor-youtube-playback-widevine-h264-sfr-chrome:
+    description: "Raptor YouTube Playback Widevine H264 SFR on Chrome"
+    try-name: raptor-youtube-playback-widevine-h264-sfr-chrome
+    treeherder-symbol: Rap-ChR(ytp-widevine-h264-sfr)
+    max-run-time:
+        by-test-platform:
+            windows10-aarch64/opt: 3600
+            default: 2700
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback-widevine-h264-sfr
+            - --app=chrome
+
+raptor-youtube-playback-widevine-vp9-sfr-chrome:
+    description: "Raptor YouTube Playback Widevine VP9 SFR on Chrome"
+    try-name: raptor-youtube-playback-widevine-vp9-sfr-chrome
+    treeherder-symbol: Rap-ChR(ytp-widevine-vp9-sfr)
+    max-run-time:
+        by-test-platform:
+            windows10-aarch64/opt: 3600
+            default: 2700
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback-widevine-vp9-sfr
             - --app=chrome

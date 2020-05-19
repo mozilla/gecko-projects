@@ -21,6 +21,9 @@ const { ExtensionUtils } = ChromeUtils.import(
   "resource://gre/modules/ExtensionUtils.jsm"
 );
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 const { DefaultMap } = ExtensionUtils;
 
@@ -132,6 +135,17 @@ let ACTORS = {
     allFrames: true,
   },
 
+  Controllers: {
+    parent: {
+      moduleURI: "resource://gre/actors/ControllersParent.jsm",
+    },
+    child: {
+      moduleURI: "resource://gre/actors/ControllersChild.jsm",
+    },
+
+    allFrames: true,
+  },
+
   DateTimePicker: {
     parent: {
       moduleURI: "resource://gre/actors/DateTimePickerParent.jsm",
@@ -169,6 +183,7 @@ let ACTORS = {
     },
 
     allFrames: true,
+    messageManagerGroups: ["browsers", "test"],
   },
 
   // This is the actor that responds to requests from the find toolbar and
@@ -232,6 +247,7 @@ let ACTORS = {
     },
 
     allFrames: true,
+    messageManagerGroups: ["browsers", ""],
   },
   PictureInPicture: {
     parent: {
@@ -300,6 +316,14 @@ let ACTORS = {
     allFrames: true,
   },
 
+  SidebarSearch: {
+    parent: {
+      moduleURI: "resource://gre/actors/SidebarSearchParent.jsm",
+    },
+
+    allFrames: true,
+  },
+
   // This actor is available for all pages that one can
   // view the source of, however it won't be created until a
   // request to view the source is made via the message
@@ -361,38 +385,25 @@ let ACTORS = {
     allFrames: true,
   },
 
-  WebNavigation: {
-    child: {
-      moduleURI: "resource://gre/actors/WebNavigationChild.jsm",
-    },
-  },
-
-  Zoom: {
+  UnselectedTabHover: {
     parent: {
-      moduleURI: "resource://gre/actors/ZoomParent.jsm",
+      moduleURI: "resource://gre/actors/UnselectedTabHoverParent.jsm",
     },
     child: {
-      moduleURI: "resource://gre/actors/ZoomChild.jsm",
+      moduleURI: "resource://gre/actors/UnselectedTabHoverChild.jsm",
       events: {
-        PreFullZoomChange: {},
-        FullZoomChange: {},
-        TextZoomChange: {},
-        DoZoomEnlargeBy10: {
-          capture: true,
-          mozSystemGroup: true,
-        },
-        DoZoomReduceBy10: {
-          capture: true,
-          mozSystemGroup: true,
-        },
-        mozupdatedremoteframedimensions: {
-          capture: true,
-          mozSystemGroup: true,
-        },
+        "UnselectedTabHover:Enable": {},
+        "UnselectedTabHover:Disable": {},
       },
     },
 
     allFrames: true,
+  },
+
+  WebNavigation: {
+    child: {
+      moduleURI: "resource://gre/actors/WebNavigationChild.jsm",
+    },
   },
 };
 
@@ -485,18 +496,10 @@ let ACTORS = {
  * sub-frames, it must use "allFrames".
  */
 let LEGACY_ACTORS = {
-  Controllers: {
-    child: {
-      module: "resource://gre/actors/ControllersChild.jsm",
-      messages: ["ControllerCommands:Do", "ControllerCommands:DoWithParams"],
-    },
-  },
-
   ManifestMessages: {
     child: {
       module: "resource://gre/modules/ManifestMessagesChild.jsm",
       messages: [
-        "DOM:Manifest:FireAppInstalledEvent",
         "DOM:ManifestObtainer:Obtain",
         "DOM:WebManifest:fetchIcon",
         "DOM:WebManifest:hasManifestLink",
@@ -518,17 +521,6 @@ let LEGACY_ACTORS = {
         "Printing:Preview:ParseDocument",
         "Printing:Print",
       ],
-    },
-  },
-
-  UnselectedTabHover: {
-    child: {
-      module: "resource://gre/actors/UnselectedTabHoverChild.jsm",
-      events: {
-        "UnselectedTabHover:Enable": {},
-        "UnselectedTabHover:Disable": {},
-      },
-      messages: ["Browser:UnselectedTabHover"],
     },
   },
 };
@@ -579,6 +571,28 @@ var ActorManagerParent = {
 
   addActors(actors) {
     for (let [actorName, actor] of Object.entries(actors)) {
+      // If enablePreference is set, only register the actor while the
+      // preference is set to true.
+      if (actor.enablePreference) {
+        let actorNameProp = actorName + "_Preference";
+        XPCOMUtils.defineLazyPreferenceGetter(
+          this,
+          actorNameProp,
+          actor.enablePreference,
+          false,
+          (prefName, prevValue, isEnabled) => {
+            if (isEnabled) {
+              ChromeUtils.registerWindowActor(actorName, actor);
+            } else {
+              ChromeUtils.unregisterWindowActor(actorName, actor);
+            }
+          }
+        );
+        if (!this[actorNameProp]) {
+          continue;
+        }
+      }
+
       ChromeUtils.registerWindowActor(actorName, actor);
     }
   },

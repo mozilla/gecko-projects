@@ -22,6 +22,7 @@
 #include "frontend/SourceNotes.h"
 #include "js/TypeDecls.h"
 #include "js/UniquePtr.h"
+#include "vm/BytecodeFormatFlags.h"  // JOF_*
 #include "vm/Opcodes.h"
 #include "vm/Printer.h"
 
@@ -32,54 +33,6 @@ enum class JSOp : uint8_t {
 #define ENUMERATE_OPCODE(op, ...) op,
   FOR_EACH_OPCODE(ENUMERATE_OPCODE)
 #undef ENUMERATE_OPCODE
-};
-
-/*
- * [SMDOC] Bytecode Format flags (JOF_*)
- */
-enum {
-  JOF_BYTE = 0,         /* single bytecode, no immediates */
-  JOF_UINT8 = 1,        /* unspecified uint8_t argument */
-  JOF_UINT16 = 2,       /* unspecified uint16_t argument */
-  JOF_UINT24 = 3,       /* unspecified uint24_t argument */
-  JOF_UINT32 = 4,       /* unspecified uint32_t argument */
-  JOF_INT8 = 5,         /* int8_t literal */
-  JOF_INT32 = 6,        /* int32_t literal */
-  JOF_JUMP = 7,         /* int32_t jump offset */
-  JOF_TABLESWITCH = 8,  /* table switch */
-  JOF_ENVCOORD = 9,     /* embedded ScopeCoordinate immediate */
-  JOF_ARGC = 10,        /* uint16_t argument count */
-  JOF_QARG = 11,        /* function argument index */
-  JOF_LOCAL = 12,       /* var or block-local variable */
-  JOF_RESUMEINDEX = 13, /* yield, await, or gosub resume index */
-  JOF_ATOM = 14,        /* uint32_t constant index */
-  JOF_OBJECT = 15,      /* uint32_t object index */
-  JOF_REGEXP = 16,      /* uint32_t regexp index */
-  JOF_DOUBLE = 17,      /* inline DoubleValue */
-  JOF_SCOPE = 18,       /* uint32_t scope index */
-  JOF_ICINDEX = 19,     /* uint32_t IC index */
-  JOF_LOOPHEAD = 20,    /* JSOp::LoopHead, combines JOF_ICINDEX and JOF_UINT8 */
-  JOF_BIGINT = 21,      /* uint32_t index for BigInt value */
-  JOF_CLASS_CTOR = 22,  /* uint32_t atom index, sourceStart, sourceEnd */
-  JOF_CODE_OFFSET = 23, /* int32_t bytecode offset */
-  JOF_TYPEMASK = 0x001f, /* mask for above immediate types */
-
-  JOF_NAME = 1 << 5,     /* name operation */
-  JOF_PROP = 2 << 5,     /* obj.prop operation */
-  JOF_ELEM = 3 << 5,     /* obj[index] operation */
-  JOF_MODEMASK = 3 << 5, /* mask for above addressing modes */
-
-  JOF_PROPSET = 1 << 7,      /* property/element/name set operation */
-  JOF_PROPINIT = 1 << 8,     /* property/element/name init operation */
-  JOF_DETECTING = 1 << 9,    /* object detection for warning-quelling */
-  JOF_CHECKSLOPPY = 1 << 10, /* op can only be generated in sloppy mode */
-  JOF_CHECKSTRICT = 1 << 11, /* op can only be generated in strict mode */
-  JOF_INVOKE = 1 << 12,      /* any call, construct, or eval instruction */
-  JOF_CONSTRUCT = 1 << 13,   /* invoke instruction using [[Construct]] entry */
-  JOF_SPREAD = 1 << 14,      /* invoke instruction using spread argument */
-  JOF_GNAME = 1 << 15,       /* predicted global name */
-  JOF_TYPESET = 1 << 16,     /* has an entry in a script's type sets */
-  JOF_IC = 1 << 17,          /* baseline may use an IC for this op */
 };
 
 /* Shorthand for type from format. */
@@ -209,7 +162,7 @@ static MOZ_ALWAYS_INLINE void SET_UINT32_INDEX(jsbytecode* pc, uint32_t index) {
   SET_UINT32(pc, index);
 }
 
-// Index limit is determined by SN_4BYTE_OFFSET_FLAG, see
+// Index limit is determined by SrcNote::FourByteOffsetFlag, see
 // frontend/BytecodeEmitter.h.
 static const unsigned INDEX_LIMIT_LOG2 = 31;
 static const uint32_t INDEX_LIMIT = uint32_t(1) << INDEX_LIMIT_LOG2;
@@ -374,19 +327,21 @@ static inline uint32_t JOF_OPTYPE(JSOp op) {
 static inline bool IsJumpOpcode(JSOp op) { return JOF_OPTYPE(op) == JOF_JUMP; }
 
 static inline bool BytecodeFallsThrough(JSOp op) {
+  // Note:
+  // * JSOp::Yield/JSOp::Await is considered to fall through, like JSOp::Call.
+  // * JSOp::Gosub falls through indirectly, after executing a 'finally'.
   switch (op) {
     case JSOp::Goto:
     case JSOp::Default:
     case JSOp::Return:
     case JSOp::RetRval:
+    case JSOp::Retsub:
     case JSOp::FinalYieldRval:
     case JSOp::Throw:
     case JSOp::ThrowMsg:
+    case JSOp::ThrowSetConst:
     case JSOp::TableSwitch:
       return false;
-    case JSOp::Gosub:
-      /* These fall through indirectly, after executing a 'finally'. */
-      return true;
     default:
       return true;
   }
@@ -530,22 +485,6 @@ static inline bool BytecodeFlowsToBitop(jsbytecode* pc) {
 extern bool IsValidBytecodeOffset(JSContext* cx, JSScript* script,
                                   size_t offset);
 
-inline bool FlowsIntoNext(JSOp op) {
-  // JSOp::Yield/JSOp::Await is considered to flow into the next instruction,
-  // like JSOp::Call.
-  switch (op) {
-    case JSOp::RetRval:
-    case JSOp::Return:
-    case JSOp::Throw:
-    case JSOp::Goto:
-    case JSOp::Retsub:
-    case JSOp::FinalYieldRval:
-      return false;
-    default:
-      return true;
-  }
-}
-
 inline bool IsArgOp(JSOp op) { return JOF_OPTYPE(op) == JOF_QARG; }
 
 inline bool IsLocalOp(JSOp op) { return JOF_OPTYPE(op) == JOF_LOCAL; }
@@ -581,8 +520,6 @@ inline bool IsRelationalOp(JSOp op) {
 inline bool IsCheckStrictOp(JSOp op) {
   return CodeSpec(op).format & JOF_CHECKSTRICT;
 }
-
-inline bool IsDetecting(JSOp op) { return CodeSpec(op).format & JOF_DETECTING; }
 
 inline bool IsNameOp(JSOp op) { return CodeSpec(op).format & JOF_NAME; }
 
@@ -727,12 +664,15 @@ bool GetPredecessorBytecodes(JSScript* script, jsbytecode* pc,
                              PcVector& predecessors);
 
 #if defined(DEBUG) || defined(JS_JITSPEW)
+
+enum class DisassembleSkeptically { No, Yes };
+
 /*
  * Disassemblers, for debugging only.
  */
-extern MOZ_MUST_USE bool Disassemble(JSContext* cx,
-                                     JS::Handle<JSScript*> script, bool lines,
-                                     Sprinter* sp);
+extern MOZ_MUST_USE bool Disassemble(
+    JSContext* cx, JS::Handle<JSScript*> script, bool lines, Sprinter* sp,
+    DisassembleSkeptically skeptically = DisassembleSkeptically::No);
 
 unsigned Disassemble1(JSContext* cx, JS::Handle<JSScript*> script,
                       jsbytecode* pc, unsigned loc, bool lines, Sprinter* sp);

@@ -10,6 +10,7 @@ const {
   PureComponent,
 } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 loader.lazyRequireGetter(
   this,
@@ -24,6 +25,10 @@ const UnsupportedBrowserList = createFactory(
 
 const Types = require("devtools/client/inspector/compatibility/types");
 
+const NodePane = createFactory(
+  require("devtools/client/inspector/compatibility/components/NodePane")
+);
+
 // For test
 loader.lazyRequireGetter(
   this,
@@ -36,6 +41,9 @@ class IssueItem extends PureComponent {
   static get propTypes() {
     return {
       ...Types.issue,
+      hideBoxModelHighlighter: PropTypes.func.isRequired,
+      setSelectedNode: PropTypes.func.isRequired,
+      showBoxModelHighlighterForNode: PropTypes.func.isRequired,
     };
   }
 
@@ -57,6 +65,9 @@ class IssueItem extends PureComponent {
 
     if (Services.prefs.getBoolPref("devtools.testing", false)) {
       for (const [key, value] of Object.entries(this.props)) {
+        if (key === "nodes") {
+          continue;
+        }
         const datasetKey = `data-qa-${toSnakeCase(key)}`;
         testDataSet[datasetKey] = JSON.stringify(value);
       }
@@ -86,6 +97,70 @@ class IssueItem extends PureComponent {
       : null;
   }
 
+  _renderDescription() {
+    const {
+      deprecated,
+      experimental,
+      property,
+      unsupportedBrowsers,
+      url,
+    } = this.props;
+
+    const classes = ["compatibility-issue-item__description"];
+
+    if (deprecated) {
+      classes.push("compatibility-issue-item__description--deprecated");
+    }
+
+    if (experimental) {
+      classes.push("compatibility-issue-item__description--experimental");
+    }
+
+    if (unsupportedBrowsers.length) {
+      classes.push("compatibility-issue-item__description--unsupported");
+    }
+
+    return dom.div(
+      {
+        className: classes.join(" "),
+      },
+      dom.a(
+        {
+          className: "compatibility-issue-item__mdn-link devtools-monospace",
+          href:
+            url +
+            "?utm_source=devtools&utm_medium=inspector-compatibility&utm_campaign=default",
+          title: url,
+          onClick: e => this._onLinkClicked(e),
+        },
+        property
+      ),
+      this._renderCauses(),
+      this._renderUnsupportedBrowserList()
+    );
+  }
+
+  _renderNodeList() {
+    const { nodes } = this.props;
+
+    if (!nodes) {
+      return null;
+    }
+
+    const {
+      hideBoxModelHighlighter,
+      setSelectedNode,
+      showBoxModelHighlighterForNode,
+    } = this.props;
+
+    return NodePane({
+      nodes,
+      hideBoxModelHighlighter,
+      setSelectedNode,
+      showBoxModelHighlighterForNode,
+    });
+  }
+
   _renderUnsupportedBrowserList() {
     const { unsupportedBrowsers } = this.props;
 
@@ -95,45 +170,16 @@ class IssueItem extends PureComponent {
   }
 
   render() {
-    const {
-      deprecated,
-      experimental,
-      property,
-      unsupportedBrowsers,
-      url,
-    } = this.props;
-
-    const classes = ["compatibility-issue-item"];
-
-    if (deprecated) {
-      classes.push("compatibility-issue-item--deprecated");
-    }
-
-    if (experimental) {
-      classes.push("compatibility-issue-item--experimental");
-    }
-
-    if (unsupportedBrowsers.length) {
-      classes.push("compatibility-issue-item--unsupported");
-    }
+    const { property } = this.props;
 
     return dom.li(
       {
-        className: classes.join(" "),
+        className: "compatibility-issue-item",
         key: property,
         ...this._getTestDataAttributes(),
       },
-      dom.a(
-        {
-          className: "compatibility-issue-item__mdn-link devtools-monospace",
-          href: url,
-          title: url,
-          onClick: e => this._onLinkClicked(e),
-        },
-        property
-      ),
-      this._renderCauses(),
-      this._renderUnsupportedBrowserList()
+      this._renderDescription(),
+      this._renderNodeList()
     );
   }
 }

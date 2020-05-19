@@ -114,6 +114,10 @@ void AccessibleWrap::Shutdown() {
     // bug 1440267 is fixed.
     unk = static_cast<IAccessibleHyperlink*>(this);
     mscom::Interceptor::DisconnectRemotesForTarget(unk);
+    for (auto& assocUnk : mAssociatedCOMObjectsForDisconnection) {
+      mscom::Interceptor::DisconnectRemotesForTarget(assocUnk);
+    }
+    mAssociatedCOMObjectsForDisconnection.Clear();
   }
 
   Accessible::Shutdown();
@@ -630,9 +634,9 @@ AccessibleWrap::get_accFocus(
 class AccessibleEnumerator final : public IEnumVARIANT {
  public:
   explicit AccessibleEnumerator(const nsTArray<Accessible*>& aArray)
-      : mArray(aArray), mCurIndex(0) {}
+      : mArray(aArray.Clone()), mCurIndex(0) {}
   AccessibleEnumerator(const AccessibleEnumerator& toCopy)
-      : mArray(toCopy.mArray), mCurIndex(toCopy.mCurIndex) {}
+      : mArray(toCopy.mArray.Clone()), mCurIndex(toCopy.mCurIndex) {}
   ~AccessibleEnumerator() {}
 
   // IUnknown
@@ -752,6 +756,7 @@ AccessibleWrap::get_accSelection(VARIANT __RPC_FAR* pvarChildren) {
   } else if (count > 1) {
     RefPtr<AccessibleEnumerator> pEnum =
         new AccessibleEnumerator(selectedItems);
+    AssociateCOMObjectForDisconnection(pEnum);
     pvarChildren->vt =
         VT_UNKNOWN;  // this must be VT_UNKNOWN for an IEnumVARIANT
     NS_ADDREF(pvarChildren->punkVal = pEnum);

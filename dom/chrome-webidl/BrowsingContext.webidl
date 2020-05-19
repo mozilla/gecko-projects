@@ -5,6 +5,29 @@
 
 interface nsIDocShell;
 
+interface mixin LoadContextMixin {
+  readonly attribute WindowProxy? associatedWindow;
+
+  readonly attribute WindowProxy? topWindow;
+
+  readonly attribute Element? topFrameElement;
+
+  readonly attribute boolean isContent;
+
+  [SetterThrows]
+  attribute boolean usePrivateBrowsing;
+
+  readonly attribute boolean useRemoteTabs;
+
+  readonly attribute boolean useRemoteSubframes;
+
+  [BinaryName="useTrackingProtectionWebIDL"]
+  attribute boolean useTrackingProtection;
+
+  [NewObject, Throws]
+  readonly attribute any originAttributes;
+};
+
 [Exposed=Window, ChromeOnly]
 interface BrowsingContext {
   static BrowsingContext? get(unsigned long long aId);
@@ -20,7 +43,8 @@ interface BrowsingContext {
 
   readonly attribute BrowsingContext top;
 
-  sequence<BrowsingContext> getChildren();
+  [Cached, Frozen, Pure]
+  readonly attribute sequence<BrowsingContext> children;
 
   readonly attribute nsIDocShell? docShell;
 
@@ -33,6 +57,14 @@ interface BrowsingContext {
   readonly attribute BrowsingContextGroup group;
 
   readonly attribute WindowProxy? window;
+
+  readonly attribute WindowContext? currentWindowContext;
+
+  readonly attribute WindowContext? parentWindowContext;
+
+  readonly attribute WindowContext? topWindowContext;
+
+  attribute [TreatNullAs=EmptyString] DOMString customUserAgent;
 
   /**
    * The sandbox flags on the browsing context. These reflect the value of the
@@ -52,10 +84,29 @@ interface BrowsingContext {
   // active for the browsing context.
   attribute boolean inRDMPane;
 
+  attribute float fullZoom;
+
+  attribute float textZoom;
+
+  /**
+   * Whether this docshell should save entries in global history.
+   */
+  attribute boolean useGlobalHistory;
+
   // Extension to give chrome JS the ability to set the window screen
   // orientation while in RDM.
   void setRDMPaneOrientation(OrientationType type, float rotationAngle);
+
+  // Extension to give chrome JS the ability to set a maxTouchPoints override
+  // while in RDM.
+  void setRDMPaneMaxTouchPoints(octet maxTouchPoints);
+
+  // The watchedByDevTools flag indicates whether or not DevTools are currently
+  // debugging this browsing context.
+  [SetterThrows] attribute boolean watchedByDevTools;
 };
+
+BrowsingContext includes LoadContextMixin;
 
 [Exposed=Window, ChromeOnly]
 interface CanonicalBrowsingContext : BrowsingContext {
@@ -92,10 +143,6 @@ interface CanonicalBrowsingContext : BrowsingContext {
    */
   [Throws]
   void loadURI(DOMString aURI, optional LoadURIOptions aOptions = {});
-
-  [Throws]
-  Promise<unsigned long long> changeFrameRemoteness(
-      DOMString remoteType, unsigned long long pendingSwitchId);
 
   readonly attribute nsISHistory? sessionHistory;
 };

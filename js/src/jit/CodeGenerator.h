@@ -7,6 +7,8 @@
 #ifndef jit_CodeGenerator_h
 #define jit_CodeGenerator_h
 
+#include "jsfriendapi.h"
+
 #include "jit/CacheIR.h"
 #if defined(JS_ION_PERF)
 #  include "jit/PerfSpewer.h"
@@ -164,14 +166,19 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   void emitApplyGeneric(T* apply);
   template <typename T>
   void emitCallInvokeFunction(T* apply, Register extraStackSize);
-  void emitAllocateSpaceForApply(Register argcreg, Register extraStackSpace,
-                                 Label* end);
+  void emitAllocateSpaceForApply(Register argcreg, Register extraStackSpace);
+  void emitAllocateSpaceForConstructAndPushNewTarget(
+      Register argcreg, Register newTargetAndExtraStackSpace);
   void emitCopyValuesForApply(Register argvSrcBase, Register argvIndex,
                               Register copyreg, size_t argvSrcOffset,
                               size_t argvDstOffset);
   void emitPopArguments(Register extraStackSize);
+  void emitPushElementsAsArguments(Register tmpArgc, Register elementsAndArgc,
+                                   Register extraStackSpace);
   void emitPushArguments(LApplyArgsGeneric* apply, Register extraStackSpace);
   void emitPushArguments(LApplyArrayGeneric* apply, Register extraStackSpace);
+  void emitPushArguments(LConstructArrayGeneric* construct,
+                         Register extraStackSpace);
 
   void visitNewArrayCallVM(LNewArray* lir);
   void visitNewObjectVMCall(LNewObject* lir);
@@ -260,6 +267,11 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   template <class OrderedHashTable>
   void emitLoadIteratorValues(Register result, Register temp, Register front);
 
+  void emitStringToInt64(LInstruction* lir, Register input, Register64 output);
+
+  void emitCreateBigInt(LInstruction* lir, Scalar::Type type, Register64 input,
+                        Register output, Register maybeTemp);
+
   template <size_t NumDefs>
   void emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir);
 
@@ -317,12 +329,11 @@ class CodeGenerator final : public CodeGeneratorSpecific {
 
   void emitStoreElementTyped(const LAllocation* value, MIRType valueType,
                              MIRType elementType, Register elements,
-                             const LAllocation* index,
-                             int32_t offsetAdjustment);
+                             const LAllocation* index);
 
   // Bailout if an element about to be written to is a hole.
   void emitStoreHoleCheck(Register elements, const LAllocation* index,
-                          int32_t offsetAdjustment, LSnapshot* snapshot);
+                          LSnapshot* snapshot);
 
   void emitAssertRangeI(const Range* r, Register input);
   void emitAssertRangeD(const Range* r, FloatRegister input,

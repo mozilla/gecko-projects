@@ -30,7 +30,7 @@ class nsContentSecurityManager : public nsIContentSecurityManager,
   NS_DECL_NSICONTENTSECURITYMANAGER
   NS_DECL_NSICHANNELEVENTSINK
 
-  nsContentSecurityManager() {}
+  nsContentSecurityManager() = default;
 
   static nsresult doContentSecurityCheck(
       nsIChannel* aChannel, nsCOMPtr<nsIStreamListener>& aInAndOutListener);
@@ -42,8 +42,9 @@ class nsContentSecurityManager : public nsIContentSecurityManager,
   static nsresult CheckChannel(nsIChannel* aChannel);
   static nsresult CheckFTPSubresourceLoad(nsIChannel* aChannel);
   static nsresult CheckAllowLoadInSystemPrivilegedContext(nsIChannel* aChannel);
+  static nsresult CheckChannelHasProtocolSecurityFlag(nsIChannel* aChannel);
 
-  virtual ~nsContentSecurityManager() {}
+  virtual ~nsContentSecurityManager() = default;
 };
 
 #endif /* nsContentSecurityManager_h___ */

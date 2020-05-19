@@ -14,7 +14,7 @@ loader.lazyRequireGetter(this, "Tools", "devtools/client/definitions", true);
 loader.lazyRequireGetter(
   this,
   "DevToolsClient",
-  "devtools/shared/client/devtools-client",
+  "devtools/client/devtools-client",
   true
 );
 loader.lazyRequireGetter(this, "l10n", "devtools/client/webconsole/utils/l10n");
@@ -136,7 +136,8 @@ class BrowserConsoleManager {
 
     this._devToolsClient = new DevToolsClient(DevToolsServer.connectPipe());
     await this._devToolsClient.connect();
-    return this._devToolsClient.mainRoot.getMainProcess();
+    const descriptor = await this._devToolsClient.mainRoot.getMainProcess();
+    return descriptor.getTarget();
   }
 
   async openWindow() {

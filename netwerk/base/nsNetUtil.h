@@ -33,7 +33,7 @@ class nsIAuthPrompt;
 class nsIAuthPrompt2;
 class nsIChannel;
 class nsIChannelPolicy;
-class nsICookieSettings;
+class nsICookieJarSettings;
 class nsIDownloadObserver;
 class nsIEventTarget;
 class nsIFileProtocolHandler;
@@ -61,6 +61,11 @@ class ClientInfo;
 class PerformanceStorage;
 class ServiceWorkerDescriptor;
 }  // namespace dom
+
+namespace ipc {
+class FileDescriptor;
+}  // namespace ipc
+
 }  // namespace mozilla
 
 template <class>
@@ -159,7 +164,7 @@ nsresult NS_NewChannelInternal(
     const mozilla::Maybe<mozilla::dom::ClientInfo>& aLoadingClientInfo,
     const mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings = nullptr,
+    nsICookieJarSettings* aCookieJarSettings = nullptr,
     mozilla::dom::PerformanceStorage* aPerformanceStorage = nullptr,
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
@@ -192,7 +197,7 @@ nsresult NS_NewChannelWithTriggeringPrincipal(
     nsIChannel** outChannel, nsIURI* aUri, nsIPrincipal* aLoadingPrincipal,
     nsIPrincipal* aTriggeringPrincipal, nsSecurityFlags aSecurityFlags,
     nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings = nullptr,
+    nsICookieJarSettings* aCookieJarSettings = nullptr,
     mozilla::dom::PerformanceStorage* aPerformanceStorage = nullptr,
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
@@ -206,7 +211,7 @@ nsresult NS_NewChannelWithTriggeringPrincipal(
     const mozilla::dom::ClientInfo& aLoadingClientInfo,
     const mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings = nullptr,
+    nsICookieJarSettings* aCookieJarSettings = nullptr,
     mozilla::dom::PerformanceStorage* aPerformanceStorage = nullptr,
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
@@ -227,7 +232,7 @@ nsresult NS_NewChannel(
 nsresult NS_NewChannel(
     nsIChannel** outChannel, nsIURI* aUri, nsIPrincipal* aLoadingPrincipal,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings = nullptr,
+    nsICookieJarSettings* aCookieJarSettings = nullptr,
     mozilla::dom::PerformanceStorage* aPerformanceStorage = nullptr,
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
@@ -240,7 +245,7 @@ nsresult NS_NewChannel(
     const mozilla::dom::ClientInfo& aLoadingClientInfo,
     const mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    nsICookieSettings* aCookieSettings = nullptr,
+    nsICookieJarSettings* aCookieJarSettings = nullptr,
     mozilla::dom::PerformanceStorage* aPerformanceStorage = nullptr,
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
@@ -462,6 +467,9 @@ nsresult NS_NewLocalFileOutputStream(nsIOutputStream** result, nsIFile* file,
                                      int32_t ioFlags = -1, int32_t perm = -1,
                                      int32_t behaviorFlags = 0);
 
+nsresult NS_NewLocalFileOutputStream(nsIOutputStream** result,
+                                     const mozilla::ipc::FileDescriptor& fd);
+
 // returns a file output stream which can be QI'ed to nsISafeOutputStream.
 nsresult NS_NewAtomicFileOutputStream(nsIOutputStream** result, nsIFile* file,
                                       int32_t ioFlags = -1, int32_t perm = -1,
@@ -477,7 +485,7 @@ nsresult NS_NewLocalFileStream(nsIFileStream** result, nsIFile* file,
                                int32_t ioFlags = -1, int32_t perm = -1,
                                int32_t behaviorFlags = 0);
 
-MOZ_MUST_USE nsresult NS_NewBufferedInputStream(
+[[nodiscard]] nsresult NS_NewBufferedInputStream(
     nsIInputStream** aResult, already_AddRefed<nsIInputStream> aInputStream,
     uint32_t aBufferSize);
 
@@ -581,15 +589,6 @@ inline void NS_QueryNotificationCallbacks(nsIInterfaceRequestor* callbacks,
  * Returns false if channel's callbacks don't implement nsILoadContext.
  */
 bool NS_UsePrivateBrowsing(nsIChannel* channel);
-
-/**
- * Extract the OriginAttributes from the channel's triggering principal.
- * If aUsingStoragePrincipal is set to true, the originAttributes could have
- * first-party isolation domain set to the top-level URI.
- */
-bool NS_GetOriginAttributes(nsIChannel* aChannel,
-                            mozilla::OriginAttributes& aAttributes,
-                            bool aUsingStoragePrincipal = false);
 
 /**
  * Returns true if the channel has visited any cross-origin URLs on any
@@ -804,6 +803,19 @@ nsresult NS_MaybeOpenChannelUsingOpen(nsIChannel* aChannel,
 nsresult NS_MaybeOpenChannelUsingAsyncOpen(nsIChannel* aChannel,
                                            nsIStreamListener* aListener);
 
+/**
+ * Returns nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP if `aHeader` is
+ * "require-corp" and nsILoadInfo::EMBEDDER_POLICY_NULL otherwise.
+ *
+ * See: https://mikewest.github.io/corpp/#parsing
+ */
+inline nsILoadInfo::CrossOriginEmbedderPolicy
+NS_GetCrossOriginEmbedderPolicyFromHeader(const nsACString& aHeader) {
+  return aHeader.EqualsLiteral("require-corp")
+             ? nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP
+             : nsILoadInfo::EMBEDDER_POLICY_NULL;
+}
+
 /** Given the first (disposition) token from a Content-Disposition header,
  * tell whether it indicates the content is inline or attachment
  * @param aDispToken the disposition token from the content-disposition header
@@ -821,12 +833,10 @@ uint32_t NS_GetContentDispositionFromHeader(const nsACString& aHeader,
 /** Extracts the filename out of a content-disposition header
  * @param aFilename [out] The filename. Can be empty on error.
  * @param aDisposition Value of a Content-Disposition header
- * @param aURI Optional. Will be used to get a fallback charset for the
- *        filename, if it is QI'able to nsIURL
+
  */
 nsresult NS_GetFilenameFromDisposition(nsAString& aFilename,
-                                       const nsACString& aDisposition,
-                                       nsIURI* aURI = nullptr);
+                                       const nsACString& aDisposition);
 
 /**
  * Make sure Personal Security Manager is initialized

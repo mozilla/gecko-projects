@@ -9,6 +9,7 @@
 #include "PaintedLayerMLGPU.h"
 #include "ImageLayerMLGPU.h"
 #include "CanvasLayerMLGPU.h"
+#include "ContainerLayerMLGPU.h"
 #include "GeckoProfiler.h"  // for profiler_*
 #include "gfxEnv.h"         // for gfxEnv
 #include "MLGDevice.h"
@@ -211,7 +212,6 @@ void LayerManagerMLGPU::BeginTransactionWithDrawTarget(
 
   mTarget = aTarget;
   mTargetRect = aRect;
-  return;
 }
 
 // Helper class for making sure textures are unlocked.

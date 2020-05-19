@@ -7,29 +7,12 @@
 
 # The following section contains the accessibility scalars.
 a11y:
-  sitezoom:
-    bug_numbers:
-      - 1590485
-    description: >
-      Boolean tracking if the user has the site-specific zoom enabled or disabled.
-    expires: "78"
-    kind: boolean
-    notification_emails:
-      - accessibility@mozilla.com
-      - mreschenberg@mozilla.com
-    products:
-      - 'firefox'
-    record_in_processes:
-      - 'main'
-    release_channel_collection: opt-out
-    keyed: false
-
   backplate:
     bug_numbers:
       - 1539212
     description: >
       Boolean tracking if the user has the backplate preference enabled or disabled.
-    expires: "78"
+    expires: "80"
     kind: boolean
     notification_emails:
       - accessibility@mozilla.com
@@ -90,7 +73,7 @@ a11y:
       The result is split into keys which represent the values of
       browser.display.document_color_use: "default", "always", or "never".
     keyed: true
-    expires: "78"
+    expires: "80"
     kind: boolean
     notification_emails:
       - accessibility@mozilla.com
@@ -443,6 +426,107 @@ browser.engagement.navigation:
     record_in_processes:
       - 'main'
 
+browser.startup:
+  slow_startup_notification_disabled:
+    bug_numbers:
+      - 1601993
+      - 1634224
+    description:
+      Whether the slow startup notification bar is disabled for the user.
+    expires: "85"
+    kind: boolean
+    notification_emails:
+      - mconley@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
+  too_new_for_notification:
+    bug_numbers:
+      - 1601993
+      - 1634224
+    description:
+      Whether the slow startup notification bar was suppressed because the profile is too new.
+    expires: "85"
+    kind: boolean
+    notification_emails:
+      - mconley@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
+  slow_startup_notified:
+    bug_numbers:
+      - 1601993
+      - 1634224
+    description:
+      Whether the slow startup notification bar was shown to the user during this session.
+    expires: "85"
+    kind: boolean
+    notification_emails:
+      - mconley@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
+  recorded_time:
+    bug_numbers:
+      - 1601993
+      - 1634224
+    description: >
+      The startup time computed by the slow startup notification bar in milliseconds.
+    expires: "85"
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
+  average_time:
+    bug_numbers:
+      - 1601993
+      - 1634224
+    description: >
+      The average startup time computed by the slow startup notification bar in milliseconds.
+    expires: "85"
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
+  action:
+    bug_numbers:
+      - 1601993
+      - 1634224
+    description: >
+      The action that the user took with the slow startup notification bar.
+      0: No action (default)
+      1: User chose to open SUMO document on slow startup
+      2: User chose to never show the notification bar again
+      3: User dismissed the notification bar
+    expires: "85"
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
 # The following section contains the browser usage scalars.
 browser.usage:
   graphite:
@@ -476,6 +560,26 @@ browser.usage:
       - 'firefox'
       - 'fennec'
       - 'geckoview'
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+browser.input:
+  touch_event_count:
+    bug_numbers:
+      - 1626099
+    description: >-
+      Windows only.
+      Counts occurrences of touch events,
+      measured when user starts a touch event.
+    expires: "90"
+    kind: uint
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+      - ktaeleman@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
     record_in_processes:
       - 'main'
       - 'content'
@@ -534,69 +638,6 @@ extensions.updates:
     record_in_processes:
       - main
 
-# This section is for probes used to measure use of the Webextensions storage.sync API.
-storage.sync.api.usage:
-  extensions_using:
-    bug_numbers:
-      - 1328974
-    description: >
-      The count of webextensions that have data stored in the chrome.storage.sync API.
-      This includes extensions that have not used the storage.sync API this session.
-      This includes items that were not stored this session.
-      This scalar is collected after every sync.
-    expires: "64"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - eglassercamp@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-  items_stored:
-    bug_numbers:
-      - 1328974
-    description: >
-      The count of items in storage.sync storage, broken down by extension ID.
-      This includes extensions that have not used the storage.sync API this session.
-      This includes items that were not stored this session.
-      This scalar is collected after every sync.
-    expires: "64"
-    kind: uint
-    keyed: true
-    notification_emails:
-      - eglassercamp@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-  storage_consumed:
-    bug_numbers:
-      - 1328974
-    description: >
-      The count of bytes used in storage.sync, broken down by extension ID.
-      This includes extensions that have not used the storage.sync API this session.
-      This includes items that were not stored this session.
-      This scalar is collected after every sync.
-    expires: "64"
-    kind: uint
-    keyed: true
-    notification_emails:
-      - eglassercamp@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
 identity.fxaccounts:
   missed_commands_fetched:
     bug_numbers:
@@ -621,11 +662,12 @@ security:
     bug_numbers:
       - 1265472
       - 1558870
+      - 1630155
     description: >
       Counts of how often Web Authentication was used in this session, keyed
       by authenticator protocol, method and result. Currently: U2FRegisterFinish,
       U2FRegisterAbort, U2FSignFinish, U2FSignAbort.
-    expires: "78"
+    expires: "88"
     kind: uint
     keyed: true
     notification_emails:
@@ -706,6 +748,21 @@ security:
       - 'geckoview'
     record_in_processes:
       - main
+  https_only_mode_enabled:
+    bug_numbers:
+      - 1620244
+    description: >
+      Measures user retention of the HTTPS-Only Mode.
+      0 = never enabled, 1 = enabled, 2 = disabled (but was enabled)
+    expires: never
+    kind: uint
+    notification_emails:
+      - julianwels@mozilla.com
+      - seceng-telemetry@mozilla.com
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
 
 pwmgr:
   potentially_breached_passwords:
@@ -798,10 +855,11 @@ contentblocking:
 datasanitization:
   network_cookie_lifetimePolicy:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
-      This scalar reports the value of the network.cookie.lifetimePolicy pref.      
-    expires: "76"
+      This scalar reports the value of the network.cookie.lifetimePolicy pref.
+    expires: "80"
     kind: uint
     notification_emails:
       - ewright@mozilla.com
@@ -813,10 +871,11 @@ datasanitization:
       - main
   privacy_sanitize_sanitizeOnShutdown:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.sanitize.sanitizeOnShutdown pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -828,10 +887,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_cookies:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.cookies pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -843,10 +903,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_history:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.history pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -858,10 +919,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_formdata:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.formdata pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -873,10 +935,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_downloads:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.downloads pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -888,10 +951,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_cache:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.cache pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -903,10 +967,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_sessions:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.sessions pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -918,10 +983,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_offlineApps:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.offlineApps pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -933,10 +999,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_siteSettings:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.siteSettings pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -948,10 +1015,11 @@ datasanitization:
       - main
   privacy_clearOnShutdown_openWindows:
     bug_numbers:
-      - 1589753 
+      - 1589753
+      - 1617241
     description: >
       A boolean reporting the value of the privacy.clearOnShutdown.openWindows pref.
-    expires: "76"
+    expires: "80"
     kind: boolean
     notification_emails:
       - ewright@mozilla.com
@@ -964,9 +1032,10 @@ datasanitization:
   session_permission_exceptions:
     bug_numbers:
       - 1589753
+      - 1617241
     description: >
       A count of how many "session" cookie exceptions a user has set.
-    expires: "76"
+    expires: "80"
     kind: uint
     notification_emails:
       - ewright@mozilla.com
@@ -1026,17 +1095,15 @@ pictureinpicture:
     description: >
       The number of times a Picture-in-Picture window was opened, per trigger
       mechanism (e.g.: the video toggle, the context menu).
-    expires: "78"
+    expires: "82"
     kind: uint
     keyed: true
     notification_emails:
       - mconley@mozilla.com
       - astevenson@mozilla.com
-    release_channel_collection: opt-in
+    release_channel_collection: opt-out
     products:
       - 'firefox'
-      - 'fennec'
-      - 'geckoview'
     record_in_processes:
       - content
   closed_method:
@@ -1047,17 +1114,15 @@ pictureinpicture:
       The number of times a Picture-in-Picture window was closed, per trigger
       mechanism (e.g.: the close button, the unpip button, originating tab going away,
       process shutdown, etc).
-    expires: "78"
+    expires: "82"
     kind: uint
     keyed: true
     notification_emails:
       - mconley@mozilla.com
       - astevenson@mozilla.com
-    release_channel_collection: opt-in
+    release_channel_collection: opt-out
     products:
       - 'firefox'
-      - 'fennec'
-      - 'geckoview'
     record_in_processes:
       - main
 
@@ -1222,83 +1287,6 @@ preferences:
       - 'geckoview'
     record_in_processes:
       - 'main'
-
-webrtc.hostnameobfuscation:
-  disabled_failed:
-    bug_numbers:
-      - 1569250
-    description: >
-      The number of times the connection failed with hostname obfuscation
-      disabled. Hostname obfuscation uses mDNS addresses to prevent browser
-      fingerprinting by using WebRTC to collect local IP addresses.
-    expires: "77"
-    kind: uint
-    notification_emails:
-      - dminor@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  disabled_succeeded:
-    bug_numbers:
-      - 1569250
-    description: >
-      The number of times the connection succeeded with hostname obfuscation
-      disabled. Hostname obfuscation uses mDNS addresses to prevent browser
-      fingerprinting by using WebRTC to collect local IP addresses.
-    expires: "77"
-    kind: uint
-    notification_emails:
-      - dminor@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  enabled_failed:
-    bug_numbers:
-      - 1569250
-    description: >
-      The number of times the connection failed with hostname obfuscation
-      enabled. Hostname obfuscation uses mDNS addresses to prevent browser
-      fingerprinting by using WebRTC to collect local IP addresses.
-    expires: "77"
-    kind: uint
-    notification_emails:
-      - dminor@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  enabled_succeeded:
-    bug_numbers:
-      - 1569250
-    description: >
-      The number of times the connection succeeded with hostname obfuscation
-      enabled. Hostname obfuscation uses mDNS addresses to prevent browser
-      fingerprinting by using WebRTC to collect local IP addresses.
-    expires: "77"
-    kind: uint
-    notification_emails:
-      - dminor@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
 
 webrtc.video:
   recv_codec_used:
@@ -2655,6 +2643,23 @@ telemetry:
       - 'main'
       - 'content'
 
+  failed_late_write:
+    bug_numbers:
+      - 1610134
+    description: >
+      The number of times a late write stack failed to be parsed.
+    expires: never
+    kind: uint
+    notification_emails:
+      - emalysz@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+      - 'fennec'
+      - 'geckoview'
+    record_in_processes:
+      - 'main'
+
 telemetry.discarded:
   accumulations:
     bug_numbers:
@@ -2915,22 +2920,6 @@ gfx.adapter:
     record_in_processes:
       - 'main'
     release_channel_collection: opt-out
-  device_id_last_seen:
-    bug_numbers:
-      - 1601091
-    description: >
-      Graphics adapter device identification
-      This is a temporary workaround for some early telemetry system issues. See Bug 1601091 for more information
-    expires: "76"
-    kind: string
-    notification_emails:
-      - gfx-telemetry-alerts@mozilla.com
-      - ktaeleman@mozilla.com
-    products:
-      - 'geckoview_streaming'
-    record_in_processes:
-      - 'main'
-    release_channel_collection: opt-out
   subsystem_id:
     bug_numbers:
       - 1594145
@@ -3037,22 +3026,6 @@ gfx:
     record_in_processes:
       - 'main'
     release_channel_collection: opt-out
-  compositor_last_seen:
-    bug_numbers:
-      - 1601091
-    description: >
-      Name of the graphics compositor in use. possible values are "opengl, d3d11, client, webrender or basic".
-      This is a temporary workaround for some early telemetry system issues. See Bug 1601091 for more information
-    expires: "76"
-    kind: string
-    notification_emails:
-      - gfx-telemetry-alerts@mozilla.com
-      - ktaeleman@mozilla.com
-    products:
-      - 'geckoview_streaming'
-    record_in_processes:
-      - 'main'
-    release_channel_collection: opt-out
   headless:
     bug_numbers:
       - 1594145
@@ -3065,6 +3038,23 @@ gfx:
       - ktaeleman@mozilla.com
     products:
       - 'geckoview_streaming'
+    record_in_processes:
+      - 'main'
+    release_channel_collection: opt-out
+  os_compositor:
+    bug_numbers:
+      - 1623492
+    description: >
+      Boolean indicating whether the os compositor is being used by WebRender.
+      Only collected in the first subsession.
+    expires: never
+    kind: boolean
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+      - jmuizelaar@mozilla.com
+    products:
+      - 'firefox'
+      - 'geckoview'
     record_in_processes:
       - 'main'
     release_channel_collection: opt-out
@@ -3350,6 +3340,73 @@ pdf.viewer:
       - 'main'
       - 'content'
 
+# The following section contains scalars for the Unknown Content Type (Helper App) dialog.
+unknowncontenttype:
+  pdf_action:
+    bug_numbers:
+      - 773942
+    description: >
+      A counter incremented every time a user uses the Unknown Content Type dialog
+      for PDF files, with counts grouped by action chosen (see keys). Some external
+      applications that have very high adoption are counted specifically.
+      Note: 'OPEN_WITH_SYSTEM_DEFAULT' may eventually resolve to one of Acrobat, Foxit, MsEdge, Chromium, etc.
+    keyed: true
+    keys:
+      - 'OPEN_WITH_INTERNAL_HANDLER'
+      - 'OPEN_WITH_SYSTEM_DEFAULT'
+      - 'OPEN_WITH_ACROBAT'
+      - 'OPEN_WITH_FOXIT'
+      - 'OPEN_WITH_MSEDGE'
+      - 'OPEN_WITH_CHROMIUM'
+      - 'OPEN_WITH_PREVIEW'
+      - 'OPEN_WITH_OTHER'
+      - 'SAVE'
+      - 'CANCEL'
+    expires: "85"
+    kind: uint
+    notification_emails:
+      - jaws@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
+# The following section contains scalars for printing.
+printing:
+  error:
+    bug_numbers:
+      - 1630105
+    description: >
+      A counter incremented every time the user encounters an error printing.
+      The result is split into keys which represent the values of
+      error codes related to printing. Possible values are listed in 'keys'.
+      "FAILURE" is a catch-all code for an error we don't recognize.
+    keyed: true
+    keys:
+      - 'GFX_PRINTER_NO_PRINTER_AVAILABLE'
+      - 'GFX_PRINTER_NAME_NOT_FOUND'
+      - 'GFX_PRINTER_COULD_NOT_OPEN_FILE'
+      - 'GFX_PRINTER_STARTDOC'
+      - 'GFX_PRINTER_ENDDOC'
+      - 'GFX_PRINTER_STARTPAGE'
+      - 'GFX_PRINTER_DOC_IS_BUSY'
+      - 'ABORT'
+      - 'NOT_AVAILABLE'
+      - 'NOT_IMPLEMENTED'
+      - 'OUT_OF_MEMORY'
+      - 'UNEXPECTED'
+      - 'FAILURE'
+    expires: never
+    kind: uint
+    notification_emails:
+      - jaws@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
 # The following section contains probes that record timestamps.
 timestamps:
   first_paint:
@@ -3630,7 +3687,7 @@ update:
     keyed: true
     notification_emails:
       - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
+      - bytesized@mozilla.com
     release_channel_collection: opt-out
     products:
       - 'firefox'
@@ -3658,972 +3715,6 @@ update:
       - main
     operating_systems:
       - windows
-
-update.startup:
-  from_app_version:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the previous application version that the update was applied to
-      when the update makes it to the last phase where the application has
-      exited and started.
-    expires: "76"
-    kind: string
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-
-  mar_partial_size_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes of a partial update MAR file when
-      the update makes it to the last phase where the application has exited and
-      started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  mar_complete_size_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes of a complete update MAR file when
-      the update makes it to the last phase where the application has exited and
-      started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-update.startup.intervals:
-  check:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the check phase of the update process
-      when an update makes it to the last phase where the application has exited
-      and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  download_bits_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the BITS downloader for a partial update MAR file when the
-      update makes it to the last phase where the application has exited and
-      and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  download_bits_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the BITS downloader for a complete update MAR file when the
-      update makes it to the last phase where the application has exited and
-      started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  download_internal_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the internal application downloader for a partial update MAR
-      file when the update makes it to the last phase where the application has
-      exited and and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  download_internal_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the internal application downloader for a complete update
-      MAR file when the update makes it to the last phase where the application
-      has exited and and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  stage_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the stage phase of the update process
-      for a partial update MAR file when the update makes it to the last phase
-      where the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  stage_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the stage phase of the update process
-      for a complete update MAR file when the update makes it to the last phase
-      where the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  apply_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the apply phase of the update process
-      for a partial update MAR file when the update makes it to the last phase
-      where the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  apply_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the apply phase of the update process
-      for a complete update MAR file when the update makes it to the last phase
-      where the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-update.startup.downloads:
-  bits_partial_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded using the BITS downloader for
-      a partial update MAR file when the update makes it to the last phase where
-      the application has exited and started. This value can be different than
-      the size of the update MAR file because the value is only monitored
-      during the initial download while the application is running and not if
-      the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  bits_partial_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the BITS downloader for a
-      partial update MAR file when the update makes it to the last phase where
-      the application has exited and started. This value can be used with the
-      value of update.startup.downloads.bits_partial_bytes to estimate the bytes
-      per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  bits_complete_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded using the BITS downloader for
-      a complete update MAR file when the update makes it to the last phase
-      where the application has exited and started. This value can be different
-      than the size of the update MAR file because the value is only monitored
-      during the initial download while the application is running and not if
-      the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  bits_complete_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the BITS downloader for a
-      complete update MAR file when the update makes it to the last phase where
-      the application has exited and started. This value can be used with the
-      value of update.startup.downloads.bits_complete_bytes to estimate the
-      bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  internal_partial_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded using the internal application
-      downloader for a partial update MAR file when the update makes it to the
-      last phase where the application has exited and started. This value can be
-      different than the size of the update MAR file because the value is only
-      monitored during the initial download while the application is running and
-      not if the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  internal_partial_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the internal application
-      downloader for a partial update MAR file when the update makes it to the
-      last phase where the application has exited and started. This value can be
-      used with the value of update.startup.downloads.internal_partial_bytes to
-      estimate the bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  internal_complete_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded by the internal
-      application downloader for a complete update MAR file when an update makes
-      it to the last phase where the application has exited and started. This
-      value can be different than the size of the update MAR file because the
-      value is only monitored during the initial download while the
-      application is running and not if the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  internal_complete_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the internal application
-      downloader for a complete update MAR file when the update makes it to the
-      last phase where the application has exited and started. This value can be
-      used with the value of update.startup.downloads.internal_complete_bytes to
-      estimate the bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-update.session:
-  from_app_version:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the previous application version that the update was applied to
-      when the update has finished due to a failure before the application has
-      exited and started.
-    expires: "76"
-    kind: string
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-
-  mar_partial_size_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes of a partial update MAR file when
-      the update has finished due to a failure before the application has exited
-      and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  mar_complete_size_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes of a complete update MAR file when
-      the update has finished due to a failure before the application has exited
-      and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-update.session.intervals:
-  check:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the check phase of the update process
-      when an update has finished due to a failure before the application has
-      exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  download_bits_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the BITS downloader for a partial update MAR file when the
-      update has finished due to a failure before the application has exited
-      and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  download_bits_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the BITS downloader for a complete update MAR file when the
-      update has finished due to a failure before the application has exited and
-      started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  download_internal_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the internal application downloader for a partial update MAR
-      file when the update has finished due to a failure before the application
-      has exited and and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  download_internal_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the download phase of the update
-      process using the internal application downloader for a complete update
-      MAR file when the update has finished due to a failure before the
-      application has exited and and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  stage_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the stage phase of the update process
-      for a partial update MAR file when the update has finished due to a
-      failure before the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  stage_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the stage phase of the update process
-      for a complete update MAR file when the update has finished due to a
-      failure before the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  apply_partial:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the apply phase of the update process
-      for a partial update MAR file when the update has finished due to a
-      failure before the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  apply_complete:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the interval in seconds of the apply phase of the update process
-      for a complete update MAR file when the update has finished due to a
-      failure before the application has exited and started.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-update.session.downloads:
-  bits_partial_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded using the BITS downloader for
-      a partial update MAR file when the update has finished due to a failure
-      before the application has exited and started. This value can be
-      different than the size of the update MAR file because the value is only
-      monitored during the initial download while the application is running and
-      not if the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  bits_partial_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the BITS downloader for a
-      partial update MAR file when the update has finished due to a failure
-      before the application has exited and started. This value can be used with
-      the value of update.session.downloads.bits_partial_bytes to estimate the
-      bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  bits_complete_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded using the BITS downloader for
-      a complete update MAR file when the update has finished due to a failure
-      before the application has exited and started. This value can be different
-      than the size of the update MAR file because the value is only monitored
-      during the initial download while the application is running and not if
-      the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  bits_complete_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the BITS downloader for a
-      complete update MAR file when the update has finished due to a failure
-      before the application has exited and started. This value can be used with
-      the value of update.session.downloads.bits_complete_bytes to estimate the
-      bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-    operating_systems:
-      - "windows"
-
-  internal_partial_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded using the internal
-      application downloader for a partial update MAR file when the update has
-      finished due to a failure before the application has exited and started.
-      This value can be different than the size of the update MAR file because
-      the value is only monitored during the initial download while the
-      application is running and not if the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  internal_partial_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the internal application
-      downloader for a partial update MAR file when the update has finished due
-      to a failure before the application has exited and started. This value can
-      be used with the value of update.session.downloads.internal_partial_bytes
-      to estimate the bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  internal_complete_bytes:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of bytes downloaded by the internal
-      application downloader for a complete update MAR file when an update has
-      finished due to a failure before the application has exited and started.
-      This value can be different than the size of the update MAR file because
-      the value is only monitored during the initial download while the
-      application is running and not if the download is resumed.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-
-  internal_complete_seconds:
-    bug_numbers:
-      - 1539154
-      - 1578262
-    description: >
-      Records the total number of seconds spent downloading during the initial
-      download without exiting the application using the internal application
-      downloader for a complete update MAR file when the update has finished due
-      to a failure before the application has exited and started. This value can
-      be used with the value of update.session.downloads.internal_complete_bytes
-      to estimate the bytes per second for the download.
-    expires: "76"
-    kind: uint
-    keyed: false
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-      - rstrong@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
 
 # The following section contains search counters.
 browser.search:
@@ -4667,13 +3758,37 @@ browser.search:
     record_in_processes:
       - main
 
+  data_transferred:
+    bug_numbers:
+      - 1614777
+      - 1619954
+    description: >
+      Records bytes that have been transferred for search requests, including
+      top-level documents, sub-resources, iframes and search suggestions.
+      The key format could be one of:
+        <search-provider-name>
+        <search-provider-name>-pb
+        sggt-<search-engine-id>
+        sggt-<search-engine-id>-pb
+    expires: "82"
+    keyed: true
+    kind: uint
+    notification_emails:
+      - gachen@mozilla.com
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+    release_channel_collection: opt-out
+
 browser.searchinit:
   engines_cache_corrupted:
     bug_numbers:
       - 1578807
+      - 1621610
     description: >-
           Whether the list of engines in the search cache was found to be corrupt during initialization.
-    expires: "77"
+    expires: "85"
     kind: boolean
     notification_emails:
       - fx-search@mozilla.com
@@ -4711,6 +3826,7 @@ startup:
     bug_numbers:
       - 1522934
       - 1570652
+      - 1623406
     description: >
       How the profile was selected during startup. One of the following reasons:
         unknown:
@@ -4743,12 +3859,15 @@ startup:
           A first run of the application created a new profile to use.
         default:
           The default profile was selected as normal.
-    expires: "77"
+    expires: "88"
     keyed: false
     kind: string
     notification_emails:
       - dtownsend@mozilla.com
       - rtestard@mozilla.com
+      - gkaberere@mozilla.com
+      - jhollek@mozilla.com
+      - echo@mozilla.com
     release_channel_collection: opt-out
     products:
       - 'firefox'
@@ -4786,7 +3905,7 @@ script.preloader:
     description:
       How many times we ended up recompiling a script from the script preloader
       on the main thread.
-    expires: "77"
+    expires: "81"
     keyed: false
     kind: uint
     notification_emails:
@@ -4802,6 +3921,46 @@ script.preloader:
       - 'content'
 
 networking:
+  nss_initialization:
+    bug_numbers:
+      - 1628734
+    description:
+      The time in milliseconds to initialize the NSS component in the
+      parent process.
+    expires: "never"
+    keyed: false
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+      - dkeeler@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+      - 'fennec'
+      - 'geckoview'
+    record_in_processes:
+      - 'main'
+
+  loading_certs_task:
+    bug_numbers:
+      - 1628734
+    description:
+      The time in milliseconds to load any external certificates. This occurs
+      off of the main-thread, but can block main-thread operations.
+    expires: "never"
+    keyed: false
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+      - dkeeler@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+      - 'fennec'
+      - 'geckoview'
+    record_in_processes:
+      - 'main'
+
   data_transferred_v3_kb:
     bug_numbers:
       - 1533363
@@ -4811,6 +3970,7 @@ networking:
       - 1550756
       - 1572666
       - 1590124
+      - 1621800
     description: >
       How many KB of HTTP data transferred by type, there are some categories
       separated by keys based on 5 parameters:
@@ -4845,7 +4005,7 @@ networking:
         "Y21_P3FpLead",
         "Y22_P3FpBg",
         "Y23_P3FpOth"
-    expires: "77"
+    expires: "84"
     keyed: true
     kind: uint
     notification_emails:
@@ -4946,29 +4106,6 @@ networking:
     release_channel_collection: opt-out
 
 blocklist:
-  lastModified_xml:
-    bug_numbers:
-      - 1572711
-      - 1607744
-    description: >
-      Keep track of the lastupdate datetime from a successfully loaded xml blocklist,
-      set to "Invalid Date" or "Missing Date" when the timestamp is invalid or missing.
-      (based on the lastupdate attribute set on the XML document element,
-      converted from a milliseconds timestamp into a datetime string in UTC format).
-    expires: "77"
-    kind: string
-    release_channel_collection: opt-out
-    notification_emails:
-      - addons-dev-internal@mozilla.com
-      - lgreco@mozilla.com
-      - awagner@mozilla.com
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'thunderbird'
-    record_in_processes:
-      - main
-
   lastModified_rs_addons:
     bug_numbers:
       - 1572711
@@ -5008,27 +4145,6 @@ blocklist:
       - awagner@mozilla.com
     products:
       - 'firefox'
-      - 'thunderbird'
-    record_in_processes:
-      - main
-
-  useXML:
-    bug_numbers:
-      - 1572711
-      - 1607744
-    description: >
-      Keep track of the currently enabled blocklist engine (set to false if the
-      remote settings blocklist is the one enabled).
-    expires: "77"
-    kind: boolean
-    release_channel_collection: opt-out
-    notification_emails:
-      - addons-dev-internal@mozilla.com
-      - lgreco@mozilla.com
-      - awagner@mozilla.com
-    products:
-      - 'firefox'
-      - 'fennec'
       - 'thunderbird'
     record_in_processes:
       - main
@@ -5085,6 +4201,24 @@ deletion.request:
     record_into_store:
       - 'deletion-request'
 
+  sync_device_id:
+    bug_numbers:
+      - 1604844
+    description: >
+      An identifier used by sync ping, to identify the current Firefox profile for a specific Account.
+    expires: never
+    kind: string
+    notification_emails:
+      - rfkelly@mozilla.com
+      - sync-team@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+    record_into_store:
+      - 'deletion-request'
+
 fxrPC:
   isFirstRun:
     bug_numbers:
@@ -5114,6 +4248,25 @@ policies:
     kind: uint
     notification_emails:
       - mkaply@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - main
+
+urlbar:
+  tips:
+    bug_numbers:
+      - 1608461
+    description: >
+      A keyed uint recording how many times particular tips are shown in the
+      Urlbar and how often their confirm and help buttons are pressed.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - fx-search@mozilla.com
+      - tbrooks@mozilla.com
     release_channel_collection: opt-out
     products:
       - 'firefox'
@@ -5713,6 +4866,22 @@ corroborate:
       - 'geckoview'
     record_in_processes:
       - main
+
+privacy.feature:
+  first_party_isolation_enabled:
+    bug_numbers:
+      - 1631676
+    description: >
+      The value of preference "privacy.firstparty.isolate"
+    expires: "never"
+    kind: boolean
+    notification_emails:
+      - gachen@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
 
 # NOTE: Please don't add new definitions below this point. Consider adding
 # them earlier in the file and leave the telemetry.test category as the last

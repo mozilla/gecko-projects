@@ -148,10 +148,22 @@ interface nsISearchEngine : nsISupports
   readonly attribute AString searchForm;
 
   /**
+   * The identifier to use for this engine when submitting to telemetry.
+   */
+  readonly attribute AString telemetryId;
+
+  /**
    * An optional unique identifier for this search engine within the context of
    * the distribution, as provided by the distributing entity.
    */
   readonly attribute AString identifier;
+
+  /**
+   * Whether or not this extension is provided by the application, e.g. it is
+   * in the list of configured search engines, or provided by a distribution
+   * set-up.
+   */
+  readonly attribute boolean isAppProvided;
 
   /**
    * Gets a string representing the hostname from which search results for a
@@ -182,6 +194,11 @@ interface nsISearchParseSubmissionResult : nsISupports
    * terms were specified or the URL does not represent a search submission.
    */
   readonly attribute AString terms;
+
+  /**
+   * The name of the query parameter used by `engine` for queries. E.g. "q".
+   */
+  readonly attribute AString termsParameterName;
 
   /**
    * The offset of the string |terms| in the URL passed in to

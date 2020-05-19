@@ -2,17 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DocumentLayer, PremultipliedColorF, AlphaType};
+use api::{AlphaType, DocumentLayer, PremultipliedColorF, YuvFormat, YuvColorSpace};
+use api::EdgeAaSegmentMask;
 use api::units::*;
 use crate::spatial_tree::{SpatialTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use crate::gpu_cache::{GpuCacheAddress, GpuDataRequest};
 use crate::internal_types::FastHashMap;
-use crate::prim_store::EdgeAaSegmentMask;
 use crate::render_task::RenderTaskAddress;
 use crate::renderer::ShaderColorMode;
 use std::i32;
 use crate::util::{TransformedRectKind, MatrixHelpers};
 use crate::glyph_rasterizer::SubpixelDirection;
+use crate::util::pack_as_float;
 
 // Contains type that must exactly match the same structures declared in GLSL.
 
@@ -22,14 +23,9 @@ pub const VECS_PER_TRANSFORM: usize = 8;
 #[repr(C)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct ZBufferId(i32);
+pub struct ZBufferId(pub i32);
 
-// We get 24 bits of Z value - use up 22 bits of it to give us
-// 4 bits to account for GPU issues. This seems to manifest on
-// some GPUs under certain perspectives due to z interpolation
-// precision problems.
 const MAX_DOCUMENT_LAYERS : i8 = 1 << 3;
-const MAX_ITEMS_PER_DOCUMENT_LAYER : i32 = 1 << 19;
 const MAX_DOCUMENT_LAYER_VALUE : i8 = MAX_DOCUMENT_LAYERS / 2 - 1;
 const MIN_DOCUMENT_LAYER_VALUE : i8 = -MAX_DOCUMENT_LAYERS / 2;
 
@@ -45,20 +41,23 @@ impl ZBufferId {
 pub struct ZBufferIdGenerator {
     base: i32,
     next: i32,
+    max_items_per_document_layer: i32,
 }
 
 impl ZBufferIdGenerator {
-    pub fn new(layer: DocumentLayer) -> Self {
+    pub fn new(layer: DocumentLayer, max_depth_ids: i32) -> Self {
         debug_assert!(layer >= MIN_DOCUMENT_LAYER_VALUE);
         debug_assert!(layer <= MAX_DOCUMENT_LAYER_VALUE);
+        let max_items_per_document_layer = max_depth_ids / MAX_DOCUMENT_LAYERS as i32;
         ZBufferIdGenerator {
-            base: layer as i32 * MAX_ITEMS_PER_DOCUMENT_LAYER,
-            next: 0
+            base: layer as i32 * max_items_per_document_layer,
+            next: 0,
+            max_items_per_document_layer,
         }
     }
 
     pub fn next(&mut self) -> ZBufferId {
-        debug_assert!(self.next < MAX_ITEMS_PER_DOCUMENT_LAYER);
+        debug_assert!(self.next < self.max_items_per_document_layer);
         let id = ZBufferId(self.next + self.base);
         self.next += 1;
         id
@@ -237,14 +236,30 @@ impl ResolveInstanceData {
 }
 
 /// Vertex format for picture cache composite shader.
+/// When editing the members, update desc::COMPOSITE
+/// so its list of instance_attributes matches:
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct CompositeInstance {
+    // Device space rectangle of surface
     rect: DeviceRect,
+    // Device space clip rect for this surface
     clip_rect: DeviceRect,
+    // Color for solid color tiles, white otherwise
     color: PremultipliedColorF,
-    layer: f32,
+
+    // Packed into a single vec4 (aParams)
     z_id: f32,
+    color_space_or_uv_type: f32, // YuvColorSpace for YUV;
+                                 // UV coordinate space for RGB
+    yuv_format: f32,            // YuvFormat
+    yuv_rescale: f32,
+
+    // UV rectangles (pixel space) for color / yuv texture planes
+    uv_rects: [TexelRect; 3],
+
+    // Texture array layers for color / yuv texture planes
+    texture_layers: [f32; 3],
 }
 
 impl CompositeInstance {
@@ -255,12 +270,61 @@ impl CompositeInstance {
         layer: f32,
         z_id: ZBufferId,
     ) -> Self {
+        let uv = TexelRect::new(0.0, 0.0, 1.0, 1.0);
         CompositeInstance {
             rect,
             clip_rect,
             color,
-            layer,
             z_id: z_id.0 as f32,
+            color_space_or_uv_type: pack_as_float(0u32),
+            yuv_format: 0.0,
+            yuv_rescale: 0.0,
+            texture_layers: [layer, 0.0, 0.0],
+            uv_rects: [uv, uv, uv],
+        }
+    }
+
+    pub fn new_rgb(
+        rect: DeviceRect,
+        clip_rect: DeviceRect,
+        color: PremultipliedColorF,
+        layer: f32,
+        z_id: ZBufferId,
+        uv_rect: TexelRect,
+    ) -> Self {
+        CompositeInstance {
+            rect,
+            clip_rect,
+            color,
+            z_id: z_id.0 as f32,
+            color_space_or_uv_type: pack_as_float(1u32),
+            yuv_format: 0.0,
+            yuv_rescale: 0.0,
+            texture_layers: [layer, 0.0, 0.0],
+            uv_rects: [uv_rect, uv_rect, uv_rect],
+        }
+    }
+
+    pub fn new_yuv(
+        rect: DeviceRect,
+        clip_rect: DeviceRect,
+        z_id: ZBufferId,
+        yuv_color_space: YuvColorSpace,
+        yuv_format: YuvFormat,
+        yuv_rescale: f32,
+        texture_layers: [f32; 3],
+        uv_rects: [TexelRect; 3],
+    ) -> Self {
+        CompositeInstance {
+            rect,
+            clip_rect,
+            color: PremultipliedColorF::WHITE,
+            z_id: z_id.0 as f32,
+            color_space_or_uv_type: pack_as_float(yuv_color_space as u32),
+            yuv_format: pack_as_float(yuv_format as u32),
+            yuv_rescale,
+            texture_layers,
+            uv_rects,
         }
     }
 }

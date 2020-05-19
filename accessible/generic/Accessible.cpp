@@ -116,15 +116,10 @@ Accessible::Accessible(nsIContent* aContent, DocAccessible* aDoc)
       mHideEventTarget(false) {
   mBits.groupInfo = nullptr;
   mInt.mIndexOfEmbeddedChild = -1;
-
-  // Assign an ID to this Accessible for use in UniqueID().
-  recordreplay::RegisterThing(this);
 }
 
 Accessible::~Accessible() {
   NS_ASSERTION(!mDoc, "LastRelease was never called!?!");
-
-  recordreplay::UnregisterThing(this);
 }
 
 ENameValueFlag Accessible::Name(nsString& aName) const {
@@ -152,8 +147,8 @@ ENameValueFlag Accessible::Name(nsString& aName) const {
       return eNameFromTooltip;
     }
   } else if (mContent->IsSVGElement()) {
-    // If user agents need to choose among multiple ‘desc’ or ‘title’ elements
-    // for processing, the user agent shall choose the first one.
+    // If user agents need to choose among multiple 'desc' or 'title'
+    // elements for processing, the user agent shall choose the first one.
     for (nsIContent* childElm = mContent->GetFirstChild(); childElm;
          childElm = childElm->GetNextSibling()) {
       if (childElm->IsSVGElement(nsGkAtoms::desc)) {
@@ -171,14 +166,13 @@ ENameValueFlag Accessible::Name(nsString& aName) const {
 void Accessible::Description(nsString& aDescription) {
   // There are 4 conditions that make an accessible have no accDescription:
   // 1. it's a text node; or
-  // 2. It has no DHTML describedby property
+  // 2. It has no ARIA describedby or description property
   // 3. it doesn't have an accName; or
   // 4. its title attribute already equals to its accName nsAutoString name;
 
   if (!HasOwnContent() || mContent->IsText()) return;
 
-  nsTextEquivUtils::GetTextEquivFromIDRefs(this, nsGkAtoms::aria_describedby,
-                                           aDescription);
+  ARIADescription(aDescription);
 
   if (aDescription.IsEmpty()) {
     NativeDescription(aDescription);
@@ -533,26 +527,8 @@ Accessible* Accessible::ChildAtPoint(int32_t aX, int32_t aY,
   nsPoint offset(presContext->DevPixelsToAppUnits(aX) - screenRect.X(),
                  presContext->DevPixelsToAppUnits(aY) - screenRect.Y());
 
-  // We need to take into account a non-1 resolution set on the presshell.
-  // This happens in mobile platforms with async pinch zooming.
-  offset = offset.RemoveResolution(presContext->PresShell()->GetResolution());
-
-  // We need to translate with the offset of the edge of the visual
-  // viewport from top edge of the layout viewport.
-  offset += presContext->PresShell()->GetVisualViewportOffset() -
-            presContext->PresShell()->GetLayoutViewportOffset();
-
-  EnumSet<nsLayoutUtils::FrameForPointOption> options = {
-#ifdef MOZ_WIDGET_ANDROID
-      // This is needed in Android to ignore the clipping of the scroll frame
-      // when zoomed in. May regress something on other platforms, so
-      // keeping it Android-exclusive for now.
-      nsLayoutUtils::FrameForPointOption::IgnoreRootScrollFrame
-#endif
-  };
-
-  nsIFrame* foundFrame =
-      nsLayoutUtils::GetFrameForPoint(startFrame, offset, options);
+  nsIFrame* foundFrame = nsLayoutUtils::GetFrameForPoint(
+      RelativeTo{startFrame, ViewportType::Visual}, offset);
 
   nsIContent* content = nullptr;
   if (!foundFrame || !(content = foundFrame->GetContent()))
@@ -770,33 +746,27 @@ void Accessible::XULElmName(DocAccessible* aDocument, nsIContent* aElm,
   /**
    * 3 main cases for XUL Controls to be labeled
    *   1 - control contains label="foo"
-   *   2 - control has, as a child, a label element
+   *   2 - non-child label contains control="controlID"
    *        - label has either value="foo" or children
-   *   3 - non-child label contains control="controlID"
-   *        - label has either value="foo" or children
+   *   3 - name from subtree; e.g. a child label element
+   * Cases 1 and 2 are handled here.
+   * Case 3 is handled by GetNameFromSubtree called in NativeName.
    * Once a label is found, the search is discontinued, so a control
-   *  that has a label child as well as having a label external to
+   *  that has a label attribute as well as having a label external to
    *  the control that uses the control="controlID" syntax will use
-   *  the child label for its Name.
+   *  the label attribute for its Name.
    */
 
   // CASE #1 (via label attribute) -- great majority of the cases
-  nsCOMPtr<nsIDOMXULSelectControlItemElement> itemEl =
-      aElm->AsElement()->AsXULSelectControlItem();
-  if (itemEl) {
-    itemEl->GetLabel(aName);
-  } else {
-    // Use @label if this is not a select control element, which uses label
-    // attribute to indicate, which option is selected.
-    nsCOMPtr<nsIDOMXULSelectControlElement> select =
-        aElm->AsElement()->AsXULSelectControl();
-    if (!select) {
-      aElm->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
-    }
+  // Only do this if this is not a select control element, which uses label
+  // attribute to indicate, which option is selected.
+  nsCOMPtr<nsIDOMXULSelectControlElement> select =
+      aElm->AsElement()->AsXULSelectControl();
+  if (!select) {
+    aElm->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
   }
 
-  // CASES #2 and #3 ------ label as a child or <label control="id" ... >
-  // </label>
+  // CASE #2 -- label as <label control="id" ... ></label>
   if (aName.IsEmpty()) {
     NameFromAssociatedXULLabel(aDocument, aElm, aName);
   }
@@ -1035,31 +1005,8 @@ already_AddRefed<nsIPersistentProperties> Accessible::NativeAttributes() {
   // Get container-foo computed live region properties based on the closest
   // container with the live region attribute. Inner nodes override outer nodes
   // within the same document. The inner nodes can be used to override live
-  // region behavior on more general outer nodes. However, nodes in outer
-  // documents override nodes in inner documents: outer doc author may want to
-  // override properties on a widget they used in an iframe.
-  nsIContent* startContent = mContent;
-  while (startContent) {
-    dom::Document* doc = startContent->GetComposedDoc();
-    if (!doc) break;
-
-    nsAccUtils::SetLiveContainerAttributes(attributes, startContent,
-                                           doc->GetRootElement());
-
-    // Allow ARIA live region markup from outer documents to override
-    nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = doc->GetDocShell();
-    if (!docShellTreeItem) break;
-
-    nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
-    docShellTreeItem->GetInProcessSameTypeParent(
-        getter_AddRefs(sameTypeParent));
-    if (!sameTypeParent || sameTypeParent == docShellTreeItem) break;
-
-    dom::Document* parentDoc = doc->GetInProcessParentDocument();
-    if (!parentDoc) break;
-
-    startContent = parentDoc->FindContentForSubDocument(doc);
-  }
+  // region behavior on more general outer nodes.
+  nsAccUtils::SetLiveContainerAttributes(attributes, mContent);
 
   if (!mContent->IsElement()) return attributes.forget();
 
@@ -1668,6 +1615,20 @@ Relation Accessible::RelationByType(RelationType aType) const {
         rel.AppendTarget(GetGroupInfo()->ConceptualParent());
       }
 
+      // If this is an OOP iframe document, we can't support NODE_CHILD_OF
+      // here, since the iframe resides in a different process. This is fine
+      // because the client will then request the parent instead, which will be
+      // correctly handled by platform/AccessibleOrProxy code.
+      if (XRE_IsContentProcess() && IsRoot()) {
+        dom::Document* doc =
+            const_cast<Accessible*>(this)->AsDoc()->DocumentNode();
+        dom::BrowsingContext* bc = doc->GetBrowsingContext();
+        MOZ_ASSERT(bc);
+        if (!bc->Top()->IsInProcess()) {
+          return rel;
+        }
+      }
+
       // If accessible is in its own Window, or is the root of a document,
       // then we should provide NODE_CHILD_OF relation so that MSAA clients
       // can easily get to true parent instead of getting to oleacc's
@@ -1967,6 +1928,22 @@ void Accessible::ARIAName(nsString& aName) const {
 }
 
 // Accessible protected
+void Accessible::ARIADescription(nsString& aDescription) const {
+  // aria-describedby takes precedence over aria-description
+  nsresult rv = nsTextEquivUtils::GetTextEquivFromIDRefs(
+      this, nsGkAtoms::aria_describedby, aDescription);
+  if (NS_SUCCEEDED(rv)) {
+    aDescription.CompressWhitespace();
+  }
+
+  if (aDescription.IsEmpty() && mContent->IsElement() &&
+      mContent->AsElement()->GetAttr(
+          kNameSpaceID_None, nsGkAtoms::aria_description, aDescription)) {
+    aDescription.CompressWhitespace();
+  }
+}
+
+// Accessible protected
 ENameValueFlag Accessible::NativeName(nsString& aName) const {
   if (mContent->IsHTMLElement()) {
     Accessible* label = nullptr;
@@ -1997,8 +1974,8 @@ ENameValueFlag Accessible::NativeName(nsString& aName) const {
   }
 
   if (mContent->IsSVGElement()) {
-    // If user agents need to choose among multiple ‘desc’ or ‘title’ elements
-    // for processing, the user agent shall choose the first one.
+    // If user agents need to choose among multiple 'desc' or 'title'
+    // elements for processing, the user agent shall choose the first one.
     for (nsIContent* childElm = mContent->GetFirstChild(); childElm;
          childElm = childElm->GetNextSibling()) {
       if (childElm->IsSVGElement(nsGkAtoms::title)) {
@@ -2106,10 +2083,13 @@ bool Accessible::InsertChildAt(uint32_t aIndex, Accessible* aChild) {
   if (!aChild) return false;
 
   if (aIndex == mChildren.Length()) {
-    if (!mChildren.AppendElement(aChild)) return false;
-
+    // XXX(Bug 1631371) Check if this should use a fallible operation as it
+    // pretended earlier.
+    mChildren.AppendElement(aChild);
   } else {
-    if (!mChildren.InsertElementAt(aIndex, aChild)) return false;
+    // XXX(Bug 1631371) Check if this should use a fallible operation as it
+    // pretended earlier.
+    mChildren.InsertElementAt(aIndex, aChild);
 
     MOZ_ASSERT(mStateFlags & eKidsMutating, "Illicit children change");
 
@@ -2580,7 +2560,17 @@ AccGroupInfo* Accessible::GetGroupInfo() const {
   }
 
   mBits.groupInfo = AccGroupInfo::CreateGroupInfo(this);
+  mStateFlags &= ~eGroupInfoDirty;
   return mBits.groupInfo;
+}
+
+void Accessible::MaybeFireFocusableStateChange(bool aPreviouslyFocusable) {
+  bool isFocusable = (State() & states::FOCUSABLE);
+  if (isFocusable != aPreviouslyFocusable) {
+    RefPtr<AccEvent> focusableChangeEvent =
+        new AccStateChangeEvent(this, states::FOCUSABLE, isFocusable);
+    mDoc->FireDelayedEvent(focusableChangeEvent);
+  }
 }
 
 void Accessible::GetPositionAndSizeInternal(int32_t* aPosInSet,
@@ -2648,6 +2638,18 @@ int32_t Accessible::GetLevelInternal() {
       }
     } else {
       ++level;  // level is 1-index based
+    }
+  } else if (role == roles::COMMENT) {
+    // For comments, count the ancestor elements with the same role to get the
+    // level.
+    level = 1;
+
+    Accessible* parent = this;
+    while ((parent = parent->Parent())) {
+      roles::Role parentRole = parent->Role();
+      if (parentRole == roles::COMMENT) {
+        ++level;
+      }
     }
   }
 

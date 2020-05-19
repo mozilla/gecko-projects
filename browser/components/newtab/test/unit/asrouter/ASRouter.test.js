@@ -70,6 +70,7 @@ describe("ASRouter", () => {
   let FakeBookmarkPanelHub;
   let FakeToolbarBadgeHub;
   let FakeToolbarPanelHub;
+  let FakeMomentsPageHub;
   let personalizedCfrScores;
 
   function createFakeStorage() {
@@ -167,6 +168,11 @@ describe("ASRouter", () => {
       uninit: sandbox.stub(),
       registerBadgeNotificationListener: sandbox.stub(),
     };
+    FakeMomentsPageHub = {
+      init: sandbox.stub(),
+      uninit: sandbox.stub(),
+      executeAction: sandbox.stub(),
+    };
     globals.set({
       // Testing framework doesn't know how to `defineLazyModuleGetter` so we're
       // importing these modules into the global scope ourselves.
@@ -183,6 +189,7 @@ describe("ASRouter", () => {
       BookmarkPanelHub: FakeBookmarkPanelHub,
       ToolbarBadgeHub: FakeToolbarBadgeHub,
       ToolbarPanelHub: FakeToolbarPanelHub,
+      MomentsPageHub: FakeMomentsPageHub,
       KintoHttpClient: class {
         bucket() {
           return this;
@@ -198,6 +205,10 @@ describe("ASRouter", () => {
         download() {
           return Promise.resolve("/path/to/download");
         }
+      },
+      ExperimentAPI: {
+        getExperiment: sandbox.stub().returns({ branch: { value: [] } }),
+        ready: sandbox.stub().resolves(),
       },
     });
     await createRouterAndInit();
@@ -252,6 +263,7 @@ describe("ASRouter", () => {
       assert.calledOnce(FakeToolbarBadgeHub.init);
       assert.calledOnce(FakeToolbarPanelHub.init);
       assert.calledOnce(FakeBookmarkPanelHub.init);
+      assert.calledOnce(FakeMomentsPageHub.init);
 
       assert.calledWithExactly(
         FakeToolbarBadgeHub.init,
@@ -272,6 +284,17 @@ describe("ASRouter", () => {
           getMessages: Router.handleMessageRequest,
           dispatch: Router.dispatch,
           handleUserAction: Router.handleUserAction,
+        }
+      );
+
+      assert.calledWithExactly(
+        FakeMomentsPageHub.init,
+        Router.waitForInitialized,
+        {
+          handleMessageRequest: Router.handleMessageRequest,
+          addImpression: Router.addImpression,
+          blockMessageById: Router.blockMessageById,
+          dispatch: Router.dispatch,
         }
       );
 
@@ -598,6 +621,24 @@ describe("ASRouter", () => {
       assert.notCalled(CFRPageActions.forceRecommendation);
       assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
+    });
+    it("should route moments messages to the right hub", () => {
+      Router.routeMessageToTarget(
+        { template: "update_action" },
+        target,
+        "",
+        true
+      );
+
+      assert.calledOnce(FakeMomentsPageHub.executeAction);
+      assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
+      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
+      assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
+      assert.notCalled(CFRPageActions.addRecommendation);
+      assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
+      assert.notCalled(target.sendAsyncMessage);
     });
     it("should route toolbar_badge message to the right hub", () => {
       Router.routeMessageToTarget({ template: "toolbar_badge" }, target);
@@ -609,6 +650,7 @@ describe("ASRouter", () => {
       assert.notCalled(CFRPageActions.forceRecommendation);
       assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
     });
     it("should route milestone_message to the right hub", () => {
       Router.routeMessageToTarget({ template: "milestone_message" }, target);
@@ -620,6 +662,7 @@ describe("ASRouter", () => {
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
       assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
     });
     it("should route fxa_bookmark_panel message to the right hub force = true", () => {
       Router.routeMessageToTarget(
@@ -636,6 +679,7 @@ describe("ASRouter", () => {
       assert.notCalled(CFRPageActions.forceRecommendation);
       assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
     });
     it("should route cfr_doorhanger message to the right hub force = false", () => {
       Router.routeMessageToTarget(
@@ -652,6 +696,7 @@ describe("ASRouter", () => {
       assert.notCalled(CFRPageActions.forceRecommendation);
       assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
     });
     it("should route cfr_doorhanger message to the right hub force = true", () => {
       Router.routeMessageToTarget(
@@ -668,6 +713,44 @@ describe("ASRouter", () => {
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
+    });
+    it("should route cfr_urlbar_chiclet message to the right hub force = false", () => {
+      Router.routeMessageToTarget(
+        { template: "cfr_urlbar_chiclet" },
+        target,
+        { param: {} },
+        false
+      );
+
+      assert.calledOnce(CFRPageActions.addRecommendation);
+      const { args } = CFRPageActions.addRecommendation.firstCall;
+      // Host should be null
+      assert.isNull(args[1]);
+      assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
+      assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
+      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
+      assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
+      assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
+    });
+    it("should route cfr_urlbar_chiclet message to the right hub force = true", () => {
+      Router.routeMessageToTarget(
+        { template: "cfr_urlbar_chiclet" },
+        target,
+        {},
+        true
+      );
+
+      assert.calledOnce(CFRPageActions.forceRecommendation);
+      assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
+      assert.notCalled(CFRPageActions.addRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
+      assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
+      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
+      assert.notCalled(target.sendAsyncMessage);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
     });
     it("should route default to sending to content", () => {
       Router.routeMessageToTarget({ template: "snippets" }, target, {}, true);
@@ -679,6 +762,7 @@ describe("ASRouter", () => {
       assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
+      assert.notCalled(FakeMomentsPageHub.executeAction);
     });
   });
 
@@ -706,7 +790,7 @@ describe("ASRouter", () => {
       // Since we've previously gotten messages during init and we haven't advanced our fake timer,
       // no updates should be triggered.
       await Router.loadMessagesFromAllProviders();
-      assert.equal(Router.state, previousState);
+      assert.deepEqual(Router.state, previousState);
     });
     it("should not trigger an update if we only have local providers", async () => {
       await createRouterAndInit([
@@ -719,11 +803,14 @@ describe("ASRouter", () => {
       ]);
 
       const previousState = Router.state;
+      const stub = sandbox.stub(MessageLoaderUtils, "loadMessagesForProvider");
 
       clock.tick(300);
 
       await Router.loadMessagesFromAllProviders();
-      assert.equal(Router.state, previousState);
+
+      assert.deepEqual(Router.state, previousState);
+      assert.notCalled(stub);
     });
     it("should apply personalization if defined", async () => {
       personalizedCfrScores = { FOO: 1, BAR: 2 };
@@ -1626,7 +1713,10 @@ describe("ASRouter", () => {
         await Router.onMessage(msg);
 
         assert.calledWith(global.fetch, url);
-        assert.lengthOf(Router.state.providers.filter(p => p.url === url), 0);
+        assert.lengthOf(
+          Router.state.providers.filter(p => p.url === url),
+          0
+        );
       });
       it("should make a request to the provided endpoint on ADMIN_CONNECT_STATE and remove the endpoint", async () => {
         const url = "https://snippets-admin.mozilla.org/foo";
@@ -1637,7 +1727,10 @@ describe("ASRouter", () => {
         await Router.onMessage(msg);
 
         assert.calledWith(global.fetch, url);
-        assert.lengthOf(Router.state.providers.filter(p => p.url === url), 0);
+        assert.lengthOf(
+          Router.state.providers.filter(p => p.url === url),
+          0
+        );
       });
       it("should dispatch SNIPPETS_PREVIEW_MODE when adding a preview endpoint", async () => {
         const url = "https://snippets-admin.mozilla.org/foo";
@@ -1663,7 +1756,10 @@ describe("ASRouter", () => {
         });
         await Router.onMessage(msg);
 
-        assert.lengthOf(Router.state.providers.filter(p => p.url === url), 0);
+        assert.lengthOf(
+          Router.state.providers.filter(p => p.url === url),
+          0
+        );
       });
       it("should reject bad urls", async () => {
         const url = "foo";
@@ -1673,7 +1769,10 @@ describe("ASRouter", () => {
         });
         await Router.onMessage(msg);
 
-        assert.lengthOf(Router.state.providers.filter(p => p.url === url), 0);
+        assert.lengthOf(
+          Router.state.providers.filter(p => p.url === url),
+          0
+        );
       });
       it("should handle onboarding message provider", async () => {
         const handleMessageRequestStub = sandbox.stub(
@@ -1804,6 +1903,21 @@ describe("ASRouter", () => {
       });
     });
 
+    describe("#onMessage: MODIFY_MESSAGE_JSON", () => {
+      it("should call `modifyMessageJson`", async () => {
+        const msg = fakeAsyncMessage({
+          type: "MODIFY_MESSAGE_JSON",
+          data: { content: {} },
+        });
+
+        sandbox.spy(Router, "modifyMessageJson");
+
+        await Router.onMessage(msg);
+
+        assert.calledOnce(Router.modifyMessageJson);
+      });
+    });
+
     describe("#onMessage: DISMISS_MESSAGE_BY_ID", () => {
       it("should reply with CLEAR_MESSAGE with the correct id", async () => {
         const msg = fakeAsyncMessage({
@@ -1910,6 +2024,36 @@ describe("ASRouter", () => {
         );
 
         assert.calledWithExactly(Router._storage.set, "providerBlockList", []);
+      });
+    });
+
+    describe("#onMessage: BLOCK_BUNDLE", () => {
+      it("should add all the ids in the bundle to the messageBlockList", async () => {
+        await Router.onMessage(
+          fakeAsyncMessage({
+            type: "BLOCK_BUNDLE",
+            data: { bundle: FAKE_BUNDLE },
+          })
+        );
+        assert.isTrue(
+          Router.state.messageBlockList.includes(FAKE_BUNDLE[0].id)
+        );
+        assert.isTrue(
+          Router.state.messageBlockList.includes(FAKE_BUNDLE[1].id)
+        );
+      });
+      it("should save the messageBlockList", async () => {
+        await Router.onMessage(
+          fakeAsyncMessage({
+            type: "BLOCK_BUNDLE",
+            data: { bundle: FAKE_BUNDLE },
+          })
+        );
+
+        assert.calledWithExactly(Router._storage.set, "messageBlockList", [
+          FAKE_BUNDLE[0].id,
+          FAKE_BUNDLE[1].id,
+        ]);
       });
     });
 
@@ -2501,6 +2645,22 @@ describe("ASRouter", () => {
           "tab"
         );
       });
+      it("should call openLinkIn with the entrypoint params on OPEN_ABOUT_PAGE", async () => {
+        let [testMessage] = Router.state.messages;
+        testMessage.button_action = {
+          type: "OPEN_ABOUT_PAGE",
+          data: { args: "something", entrypoint: "entryPoint=foo" },
+        };
+        const msg = fakeExecuteUserAction(testMessage.button_action);
+        await Router.onMessage(msg);
+
+        assert.calledOnce(msg.target.browser.ownerGlobal.openTrustedLinkIn);
+        assert.calledWith(
+          msg.target.browser.ownerGlobal.openTrustedLinkIn,
+          "about:something?entryPoint=foo",
+          "tab"
+        );
+      });
       it("should call MigrationUtils.showMigrationWizard on SHOW_MIGRATION_WIZARD", async () => {
         let [testMessage] = Router.state.messages;
         testMessage.button_action = {
@@ -2562,6 +2722,37 @@ describe("ASRouter", () => {
         assert.calledWith(
           msg.target.browser.ownerGlobal.openPreferences,
           "something"
+        );
+      });
+      it("should call openPreferences with the correct params on OPEN_PREFERENCES_PAGE (snippets payload)", async () => {
+        let [testMessage] = Router.state.messages;
+        testMessage.button_action = {
+          type: "OPEN_PREFERENCES_PAGE",
+          data: { args: "arg_from_snippets" },
+        };
+        const msg = fakeExecuteUserAction(testMessage.button_action);
+        await Router.onMessage(msg);
+
+        assert.calledOnce(msg.target.browser.ownerGlobal.openPreferences);
+        assert.calledWith(
+          msg.target.browser.ownerGlobal.openPreferences,
+          "arg_from_snippets"
+        );
+      });
+      it("should call openPreferences with the correct entrypoint if defined", async () => {
+        let [testMessage] = Router.state.messages;
+        testMessage.button_action = {
+          type: "OPEN_PREFERENCES_PAGE",
+          data: { category: "something", entrypoint: "unittest" },
+        };
+        const msg = fakeExecuteUserAction(testMessage.button_action);
+        await Router.onMessage(msg);
+
+        assert.calledOnce(msg.target.browser.ownerGlobal.openPreferences);
+        assert.calledWithExactly(
+          msg.target.browser.ownerGlobal.openPreferences,
+          "something",
+          { urlParams: { entrypoint: "unittest" } }
         );
       });
     });
@@ -3945,7 +4136,10 @@ describe("ASRouter", () => {
   describe("#setGroupState", () => {
     it("should clear group impressions", async () => {
       await Router.setState({
-        groups: [{ id: "foo", enabled: true }, { id: "bar", enabled: true }],
+        groups: [
+          { id: "foo", enabled: true },
+          { id: "bar", enabled: true },
+        ],
         groupImpressions: { foo: [1], bar: [2] },
       });
 
@@ -4020,6 +4214,71 @@ describe("ASRouter", () => {
     });
   });
   describe("#loadMessagesForProvider", () => {
+    it("should fetch messages from the ExperimentAPI", async () => {
+      const args = {
+        type: "remote-experiments",
+        messageGroups: ["asrouter"],
+      };
+
+      await MessageLoaderUtils.loadMessagesForProvider(args);
+
+      assert.calledOnce(global.ExperimentAPI.getExperiment);
+      assert.calledWithExactly(global.ExperimentAPI.getExperiment, {
+        group: "asrouter",
+      });
+    });
+    it("should handle the case of no experiments in the ExperimentAPI", async () => {
+      const args = {
+        type: "remote-experiments",
+        messageGroups: ["asrouter"],
+      };
+
+      global.ExperimentAPI.getExperiment.throws();
+      const stub = sandbox.stub(MessageLoaderUtils, "reportError");
+
+      await MessageLoaderUtils.loadMessagesForProvider(args);
+
+      assert.calledOnce(stub);
+    });
+    it("should handle the case of no experiments in the ExperimentAPI", async () => {
+      const args = {
+        type: "remote-experiments",
+        messageGroups: ["asrouter"],
+      };
+
+      global.ExperimentAPI.getExperiment.returns(null);
+
+      const result = await MessageLoaderUtils.loadMessagesForProvider(args);
+
+      assert.lengthOf(result.messages, 0);
+    });
+    it("should normally load ExperimentAPI messages", async () => {
+      const args = {
+        type: "remote-experiments",
+        messageGroups: ["asrouter"],
+      };
+
+      global.ExperimentAPI.getExperiment.returns({
+        branch: { value: ["foo", "bar"] },
+      });
+
+      const result = await MessageLoaderUtils.loadMessagesForProvider(args);
+
+      assert.lengthOf(result.messages, 2);
+    });
+    it("should fetch messages from the ExperimentAPI", async () => {
+      global.ExperimentAPI.ready.throws();
+      const args = {
+        type: "remote-experiments",
+        messageGroups: ["asrouter"],
+      };
+      const stub = sandbox.stub(MessageLoaderUtils, "reportError");
+
+      await MessageLoaderUtils.loadMessagesForProvider(args);
+
+      assert.notCalled(global.ExperimentAPI.getExperiment);
+      assert.calledOnce(stub);
+    });
     it("should fetch json from url", async () => {
       let result = await MessageLoaderUtils.loadMessagesForProvider({
         location: "http://fake.com/endpoint",

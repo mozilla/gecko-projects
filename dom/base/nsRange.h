@@ -97,10 +97,10 @@ class nsRange final : public mozilla::dom::AbstractRange,
    */
   bool IsInSelection() const { return !!mSelection; }
 
-  /**
-   * Called when the range is added/removed from a Selection.
-   */
-  void SetSelection(mozilla::dom::Selection* aSelection);
+  MOZ_CAN_RUN_SCRIPT void RegisterSelection(
+      mozilla::dom::Selection& aSelection);
+
+  void UnregisterSelection();
 
   /**
    * Returns pointer to a Selection if the range is associated with a Selection.
@@ -206,7 +206,7 @@ class nsRange final : public mozilla::dom::AbstractRange,
       const mozilla::dom::GlobalObject& global, mozilla::ErrorResult& aRv);
 
   already_AddRefed<mozilla::dom::DocumentFragment> CreateContextualFragment(
-      const nsAString& aString, ErrorResult& aError);
+      const nsAString& aString, ErrorResult& aError) const;
   already_AddRefed<mozilla::dom::DocumentFragment> CloneContents(
       ErrorResult& aErr);
   int16_t CompareBoundaryPoints(uint16_t aHow, nsRange& aOther,

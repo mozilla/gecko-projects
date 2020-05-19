@@ -112,7 +112,6 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
 
         bootstrap_env['L10NBASEDIR'] = abs_dirs['abs_l10n_dir']
         if self.query_is_nightly():
-            bootstrap_env["IS_NIGHTLY"] = "yes"
             # we might set update_channel explicitly
             if config.get('update_channel'):
                 update_channel = config['update_channel']
@@ -370,6 +369,7 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
     def make_installers(self, locale):
         """wrapper for make installers-(locale)"""
         env = self.query_l10n_env()
+        env['PYTHONIOENCODING'] = 'utf-8'
         self._copy_mozconfig()
         dirs = self.query_abs_dirs()
         cwd = os.path.join(dirs['abs_locales_dir'])

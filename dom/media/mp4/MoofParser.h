@@ -202,16 +202,16 @@ class Sbgp final : public Atom  // SampleToGroup box.
 // schemes. I.e. it is used for both cenc and cbcs, not just cenc.
 struct CencSampleEncryptionInfoEntry final {
  public:
-  CencSampleEncryptionInfoEntry() {}
+  CencSampleEncryptionInfoEntry() = default;
 
   Result<Ok, nsresult> Init(BoxReader& aReader);
 
   bool mIsEncrypted = false;
   uint8_t mIVSize = 0;
-  nsTArray<uint8_t> mKeyId;
+  CopyableTArray<uint8_t> mKeyId;
   uint8_t mCryptByteBlock = 0;
   uint8_t mSkipByteBlock = 0;
-  nsTArray<uint8_t> mConsantIV;
+  CopyableTArray<uint8_t> mConsantIV;
 };
 
 class Sgpd final : public Atom  // SampleGroupDescription box.

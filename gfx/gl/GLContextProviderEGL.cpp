@@ -63,6 +63,7 @@
 #include "LayersLogging.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/widget/CompositorWidget.h"
@@ -84,6 +85,10 @@
 #  include <gdk/gdkwayland.h>
 #  include <wayland-egl.h>
 #  include <dlfcn.h>
+
+#  define IS_WAYLAND_DISPLAY()    \
+    (gdk_display_get_default() && \
+     !GDK_IS_X11_DISPLAY(gdk_display_get_default()))
 #endif
 
 using namespace mozilla::gfx;
@@ -110,7 +115,7 @@ static nsDataHashtable<nsPtrHashKey<void>, WaylandGLSurface*> sWaylandGLSurface;
 void DeleteWaylandGLSurface(EGLSurface surface) {
   // We're running on Wayland which means our EGLSurface may
   // have attached Wayland backend data which must be released.
-  if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (IS_WAYLAND_DISPLAY()) {
     auto entry = sWaylandGLSurface.Lookup(surface);
     if (entry) {
       delete entry.Data();
@@ -131,8 +136,10 @@ void DeleteWaylandGLSurface(EGLSurface surface) {
     (_array).AppendElement(_k); \
   } while (0)
 
-static bool CreateConfig(GLLibraryEGL*, EGLConfig* aConfig,
-                         bool aEnableDepthBuffer);
+static bool CreateConfigScreen(GLLibraryEGL* const egl,
+                               EGLConfig* const aConfig,
+                               const bool aEnableDepthBuffer,
+                               const bool aUseGles);
 
 // append three zeros at the end of attribs list to work around
 // EGL implementation bugs that iterate until they find 0, instead of
@@ -236,14 +243,16 @@ class GLContextEGLFactory {
  public:
   static already_AddRefed<GLContext> Create(EGLNativeWindowType aWindow,
                                             bool aWebRender);
+  static already_AddRefed<GLContext> CreateImpl(EGLNativeWindowType aWindow,
+                                                bool aWebRender, bool aUseGles);
 
  private:
-  GLContextEGLFactory() {}
-  ~GLContextEGLFactory() {}
+  GLContextEGLFactory() = default;
+  ~GLContextEGLFactory() = default;
 };
 
-already_AddRefed<GLContext> GLContextEGLFactory::Create(
-    EGLNativeWindowType aWindow, bool aWebRender) {
+already_AddRefed<GLContext> GLContextEGLFactory::CreateImpl(
+    EGLNativeWindowType aWindow, bool aWebRender, bool aUseGles) {
   nsCString discardFailureId;
   if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
     gfxCriticalNote << "Failed to load EGL library 3!";
@@ -259,12 +268,13 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
     // formart
     const int bpp = 32;
     const bool withDepth = true;
-    if (!CreateConfig(egl, &config, bpp, withDepth)) {
+    if (!CreateConfig(egl, &config, bpp, withDepth, aUseGles)) {
       gfxCriticalNote << "Failed to create EGLConfig for WebRender ANGLE!";
       return nullptr;
     }
   } else {
-    if (!CreateConfig(egl, &config, aWebRender)) {
+    if (!CreateConfigScreen(egl, &config, /* aEnableDepthBuffer */ aWebRender,
+                            aUseGles)) {
       gfxCriticalNote << "Failed to create EGLConfig!";
       return nullptr;
     }
@@ -276,12 +286,16 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
   }
 
   CreateContextFlags flags = CreateContextFlags::NONE;
-  if (aWebRender) {
+  if (aWebRender && aUseGles) {
     flags |= CreateContextFlags::PREFER_ES3;
   }
+  if (!aWebRender) {
+    flags |= CreateContextFlags::REQUIRE_COMPAT_PROFILE;
+  }
+
   SurfaceCaps caps = SurfaceCaps::Any();
   RefPtr<GLContextEGL> gl = GLContextEGL::CreateGLContext(
-      egl, flags, caps, false, config, surface, &discardFailureId);
+      egl, flags, caps, false, config, surface, aUseGles, &discardFailureId);
   if (!gl) {
     const auto err = egl->fGetError();
     gfxCriticalNote << "Failed to create EGLContext!: " << gfx::hexa(err);
@@ -293,8 +307,7 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
   gl->SetIsDoubleBuffered(doubleBuffered);
 
 #if defined(MOZ_WAYLAND)
-  if (surface != EGL_NO_SURFACE &&
-      !GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (surface != EGL_NO_SURFACE && IS_WAYLAND_DISPLAY()) {
     // Make eglSwapBuffers() non-blocking on wayland
     egl->fSwapInterval(egl->Display(), 0);
   }
@@ -304,6 +317,16 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
     egl->fSwapInterval(egl->Display(), 0);
   }
   return gl.forget();
+}
+
+already_AddRefed<GLContext> GLContextEGLFactory::Create(
+    EGLNativeWindowType aWindow, bool aWebRender) {
+  RefPtr<GLContext> glContext = CreateImpl(aWindow, aWebRender,
+                                           /* aUseGles */ false);
+  if (!glContext) {
+    glContext = CreateImpl(aWindow, aWebRender, /* aUseGles */ true);
+  }
+  return glContext.forget();
 }
 
 #if defined(MOZ_WAYLAND) || defined(MOZ_WIDGET_ANDROID)
@@ -471,7 +494,7 @@ bool GLContextEGL::RenewSurface(CompositorWidget* aWidget) {
   const bool ok = MakeCurrent(true);
   MOZ_ASSERT(ok);
 #if defined(MOZ_WAYLAND)
-  if (mSurface && !GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (mSurface && IS_WAYLAND_DISPLAY()) {
     // Make eglSwapBuffers() non-blocking on wayland
     mEgl->fSwapInterval(mEgl->Display(), 0);
   }
@@ -550,20 +573,40 @@ void GLContextEGL::HoldSurface(gfxASurface* aSurf) { mThebesSurface = aSurf; }
 
 already_AddRefed<GLContextEGL> GLContextEGL::CreateGLContext(
     GLLibraryEGL* const egl, CreateContextFlags flags, const SurfaceCaps& caps,
-    bool isOffscreen, EGLConfig config, EGLSurface surface,
+    bool isOffscreen, EGLConfig config, EGLSurface surface, const bool useGles,
     nsACString* const out_failureId) {
-  if (egl->fBindAPI(LOCAL_EGL_OPENGL_ES_API) == LOCAL_EGL_FALSE) {
-    *out_failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_EGL_ES");
-    NS_WARNING("Failed to bind API to GLES!");
-    return nullptr;
-  }
-
   std::vector<EGLint> required_attribs;
-  required_attribs.push_back(LOCAL_EGL_CONTEXT_CLIENT_VERSION);
-  if (flags & CreateContextFlags::PREFER_ES3) {
-    required_attribs.push_back(3);
+
+  if (useGles) {
+    if (egl->fBindAPI(LOCAL_EGL_OPENGL_ES_API) == LOCAL_EGL_FALSE) {
+      *out_failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_EGL_ES");
+      NS_WARNING("Failed to bind API to GLES!");
+      return nullptr;
+    }
+    required_attribs.push_back(LOCAL_EGL_CONTEXT_MAJOR_VERSION);
+    if (flags & CreateContextFlags::PREFER_ES3) {
+      required_attribs.push_back(3);
+    } else {
+      required_attribs.push_back(2);
+    }
   } else {
-    required_attribs.push_back(2);
+    if (egl->fBindAPI(LOCAL_EGL_OPENGL_API) == LOCAL_EGL_FALSE) {
+      *out_failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_EGL");
+      NS_WARNING("Failed to bind API to GL!");
+      return nullptr;
+    }
+    if (flags & CreateContextFlags::REQUIRE_COMPAT_PROFILE) {
+      required_attribs.push_back(LOCAL_EGL_CONTEXT_OPENGL_PROFILE_MASK);
+      required_attribs.push_back(
+          LOCAL_EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT);
+      required_attribs.push_back(LOCAL_EGL_CONTEXT_MAJOR_VERSION);
+      required_attribs.push_back(2);
+    } else {
+      required_attribs.push_back(LOCAL_EGL_CONTEXT_MAJOR_VERSION);
+      required_attribs.push_back(3);
+      required_attribs.push_back(LOCAL_EGL_CONTEXT_MINOR_VERSION);
+      required_attribs.push_back(1);
+    }
   }
 
   if ((flags & CreateContextFlags::PREFER_EXACT_VERSION) && egl->IsANGLE()) {
@@ -747,82 +790,64 @@ EGLSurface GLContextEGL::CreateWaylandBufferSurface(
 }
 #endif
 
-static const EGLint kEGLConfigAttribsOffscreenPBuffer[] = {
-    LOCAL_EGL_SURFACE_TYPE, LOCAL_EGL_PBUFFER_BIT, LOCAL_EGL_RENDERABLE_TYPE,
-    LOCAL_EGL_OPENGL_ES2_BIT,
-    // Old versions of llvmpipe seem to need this to properly create the pbuffer
-    // (bug 981856)
-    LOCAL_EGL_RED_SIZE, 8, LOCAL_EGL_GREEN_SIZE, 8, LOCAL_EGL_BLUE_SIZE, 8,
-    LOCAL_EGL_ALPHA_SIZE, 0,
-    EGL_ATTRIBS_LIST_SAFE_TERMINATION_WORKING_AROUND_BUGS};
-
 static const EGLint kEGLConfigAttribsRGB16[] = {
-    LOCAL_EGL_SURFACE_TYPE,
-    LOCAL_EGL_WINDOW_BIT,
-    LOCAL_EGL_RENDERABLE_TYPE,
-    LOCAL_EGL_OPENGL_ES2_BIT,
-    LOCAL_EGL_RED_SIZE,
-    5,
-    LOCAL_EGL_GREEN_SIZE,
-    6,
-    LOCAL_EGL_BLUE_SIZE,
-    5,
-    LOCAL_EGL_ALPHA_SIZE,
-    0,
-    EGL_ATTRIBS_LIST_SAFE_TERMINATION_WORKING_AROUND_BUGS};
+    LOCAL_EGL_SURFACE_TYPE, LOCAL_EGL_WINDOW_BIT,
+    LOCAL_EGL_RED_SIZE,     5,
+    LOCAL_EGL_GREEN_SIZE,   6,
+    LOCAL_EGL_BLUE_SIZE,    5,
+    LOCAL_EGL_ALPHA_SIZE,   0};
 
 static const EGLint kEGLConfigAttribsRGB24[] = {
-    LOCAL_EGL_SURFACE_TYPE,
-    LOCAL_EGL_WINDOW_BIT,
-    LOCAL_EGL_RENDERABLE_TYPE,
-    LOCAL_EGL_OPENGL_ES2_BIT,
-    LOCAL_EGL_RED_SIZE,
-    8,
-    LOCAL_EGL_GREEN_SIZE,
-    8,
-    LOCAL_EGL_BLUE_SIZE,
-    8,
-    LOCAL_EGL_ALPHA_SIZE,
-    0,
-    EGL_ATTRIBS_LIST_SAFE_TERMINATION_WORKING_AROUND_BUGS};
+    LOCAL_EGL_SURFACE_TYPE, LOCAL_EGL_WINDOW_BIT,
+    LOCAL_EGL_RED_SIZE,     8,
+    LOCAL_EGL_GREEN_SIZE,   8,
+    LOCAL_EGL_BLUE_SIZE,    8,
+    LOCAL_EGL_ALPHA_SIZE,   0};
 
 static const EGLint kEGLConfigAttribsRGBA32[] = {
-    LOCAL_EGL_SURFACE_TYPE,
-    LOCAL_EGL_WINDOW_BIT,
-    LOCAL_EGL_RENDERABLE_TYPE,
-    LOCAL_EGL_OPENGL_ES2_BIT,
-    LOCAL_EGL_RED_SIZE,
-    8,
-    LOCAL_EGL_GREEN_SIZE,
-    8,
-    LOCAL_EGL_BLUE_SIZE,
-    8,
-    LOCAL_EGL_ALPHA_SIZE,
-    8,
-    EGL_ATTRIBS_LIST_SAFE_TERMINATION_WORKING_AROUND_BUGS};
+    LOCAL_EGL_SURFACE_TYPE, LOCAL_EGL_WINDOW_BIT,
+    LOCAL_EGL_RED_SIZE,     8,
+    LOCAL_EGL_GREEN_SIZE,   8,
+    LOCAL_EGL_BLUE_SIZE,    8,
+    LOCAL_EGL_ALPHA_SIZE,   8};
 
 bool CreateConfig(GLLibraryEGL* const egl, EGLConfig* aConfig, int32_t depth,
-                  bool aEnableDepthBuffer) {
+                  bool aEnableDepthBuffer, bool aUseGles) {
   EGLConfig configs[64];
-  const EGLint* attribs;
+  std::vector<EGLint> attribs;
   EGLint ncfg = ArrayLength(configs);
 
   switch (depth) {
     case 16:
-      attribs = kEGLConfigAttribsRGB16;
+      for (const auto& cur : kEGLConfigAttribsRGB16) {
+        attribs.push_back(cur);
+      }
       break;
     case 24:
-      attribs = kEGLConfigAttribsRGB24;
+      for (const auto& cur : kEGLConfigAttribsRGB24) {
+        attribs.push_back(cur);
+      }
       break;
     case 32:
-      attribs = kEGLConfigAttribsRGBA32;
+      for (const auto& cur : kEGLConfigAttribsRGBA32) {
+        attribs.push_back(cur);
+      }
       break;
     default:
       NS_ERROR("Unknown pixel depth");
       return false;
   }
 
-  if (!egl->fChooseConfig(egl->Display(), attribs, configs, ncfg, &ncfg) ||
+  if (aUseGles) {
+    attribs.push_back(LOCAL_EGL_RENDERABLE_TYPE);
+    attribs.push_back(LOCAL_EGL_OPENGL_ES2_BIT);
+  }
+  for (const auto& cur : kTerminationAttribs) {
+    attribs.push_back(cur);
+  }
+
+  if (!egl->fChooseConfig(egl->Display(), attribs.data(), configs, ncfg,
+                          &ncfg) ||
       ncfg < 1) {
     return false;
   }
@@ -860,20 +885,22 @@ bool CreateConfig(GLLibraryEGL* const egl, EGLConfig* aConfig, int32_t depth,
 //
 // NB: It's entirely legal for the returned EGLConfig to be valid yet
 // have the value null.
-static bool CreateConfig(GLLibraryEGL* const egl, EGLConfig* const aConfig,
-                         const bool aEnableDepthBuffer) {
+static bool CreateConfigScreen(GLLibraryEGL* const egl,
+                               EGLConfig* const aConfig,
+                               const bool aEnableDepthBuffer,
+                               const bool aUseGles) {
   int32_t depth = gfxVars::ScreenDepth();
-  if (!CreateConfig(egl, aConfig, depth, aEnableDepthBuffer)) {
+  if (!CreateConfig(egl, aConfig, depth, aEnableDepthBuffer, aUseGles)) {
 #ifdef MOZ_WIDGET_ANDROID
     // Bug 736005
     // Android doesn't always support 16 bit so also try 24 bit
     if (depth == 16) {
-      return CreateConfig(egl, aConfig, 24, aEnableDepthBuffer);
+      return CreateConfig(egl, aConfig, 24, aEnableDepthBuffer, aUseGles);
     }
     // Bug 970096
     // Some devices that have 24 bit screens only support 16 bit OpenGL?
     if (depth == 24) {
-      return CreateConfig(egl, aConfig, 16, aEnableDepthBuffer);
+      return CreateConfig(egl, aConfig, 16, aEnableDepthBuffer, aUseGles);
     }
 #endif
     return false;
@@ -924,8 +951,8 @@ EGLSurface GLContextEGL::CreateCompatibleSurface(void* aWindow) {
 }
 
 /* static */
-EGLSurface GLContextProviderEGL::CreateEGLSurface(void* aWindow,
-                                                  EGLConfig aConfig) {
+static EGLSurface CreateEGLSurfaceImpl(void* aWindow, EGLConfig aConfig,
+                                       bool aUseGles) {
   // NOTE: aWindow is an ANativeWindow
   nsCString discardFailureId;
   if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
@@ -933,18 +960,27 @@ EGLSurface GLContextProviderEGL::CreateEGLSurface(void* aWindow,
   }
   auto* egl = gl::GLLibraryEGL::Get();
   EGLConfig config = aConfig;
-  if (!config && !CreateConfig(egl, &config, /* aEnableDepthBuffer */ false)) {
-    MOZ_CRASH("GFX: Failed to create EGLConfig 2!");
+  if (!config && !CreateConfigScreen(egl, &config,
+                                     /* aEnableDepthBuffer */ false,
+                                     /* useGles */ aUseGles)) {
+    return EGL_NO_SURFACE;
   }
 
   MOZ_ASSERT(aWindow);
+  return egl->fCreateWindowSurface(egl->Display(), config, aWindow, 0);
+}
 
+/* static */
+EGLSurface GLContextProviderEGL::CreateEGLSurface(void* aWindow,
+                                                  EGLConfig aConfig) {
   EGLSurface surface =
-      egl->fCreateWindowSurface(egl->Display(), config, aWindow, 0);
+      CreateEGLSurfaceImpl(aWindow, aConfig, /* aUseGles */ false);
   if (surface == EGL_NO_SURFACE) {
-    MOZ_CRASH("GFX: Failed to create EGLSurface 2!");
+    surface = CreateEGLSurfaceImpl(aWindow, aConfig, /* aUseGles */ true);
+    if (surface == EGL_NO_SURFACE) {
+      MOZ_CRASH("GFX: Failed to create EGLSurface 2!");
+    }
   }
-
   return surface;
 }
 
@@ -959,11 +995,12 @@ void GLContextProviderEGL::DestroyEGLSurface(EGLSurface surface) {
 }
 #endif  // defined(ANDROID)
 
-static void FillContextAttribs(bool alpha, bool depth, bool stencil, bool bpp16,
-                               bool es3, nsTArray<EGLint>* out) {
+static void FillOffscreenContextAttribs(bool alpha, bool depth, bool stencil,
+                                        bool bpp16, bool es3, bool useGles,
+                                        nsTArray<EGLint>* out) {
   out->AppendElement(LOCAL_EGL_SURFACE_TYPE);
 #if defined(MOZ_WAYLAND)
-  if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (IS_WAYLAND_DISPLAY()) {
     // Wayland on desktop does not support PBuffer or FBO.
     // We create a dummy wl_egl_window instead.
     out->AppendElement(LOCAL_EGL_WINDOW_BIT);
@@ -974,11 +1011,13 @@ static void FillContextAttribs(bool alpha, bool depth, bool stencil, bool bpp16,
   out->AppendElement(LOCAL_EGL_PBUFFER_BIT);
 #endif
 
-  out->AppendElement(LOCAL_EGL_RENDERABLE_TYPE);
-  if (es3) {
-    out->AppendElement(LOCAL_EGL_OPENGL_ES3_BIT_KHR);
-  } else {
-    out->AppendElement(LOCAL_EGL_OPENGL_ES2_BIT);
+  if (useGles) {
+    out->AppendElement(LOCAL_EGL_RENDERABLE_TYPE);
+    if (es3) {
+      out->AppendElement(LOCAL_EGL_OPENGL_ES3_BIT_KHR);
+    } else {
+      out->AppendElement(LOCAL_EGL_OPENGL_ES2_BIT);
+    }
   }
 
   out->AppendElement(LOCAL_EGL_RED_SIZE);
@@ -1031,13 +1070,16 @@ static GLint GetAttrib(GLLibraryEGL* egl, EGLConfig config, EGLint attrib) {
   return bits;
 }
 
-static EGLConfig ChooseConfig(GLLibraryEGL* egl, CreateContextFlags flags,
-                              const SurfaceCaps& minCaps,
-                              SurfaceCaps* const out_configCaps) {
+static EGLConfig ChooseConfigOffscreen(GLLibraryEGL* egl,
+                                       CreateContextFlags flags,
+                                       const SurfaceCaps& minCaps,
+                                       bool aUseGles,
+                                       SurfaceCaps* const out_configCaps) {
   nsTArray<EGLint> configAttribList;
-  FillContextAttribs(
-      minCaps.alpha, minCaps.depth, minCaps.stencil, minCaps.bpp16,
-      bool(flags & CreateContextFlags::PREFER_ES3), &configAttribList);
+  FillOffscreenContextAttribs(minCaps.alpha, minCaps.depth, minCaps.stencil,
+                              minCaps.bpp16,
+                              bool(flags & CreateContextFlags::PREFER_ES3),
+                              aUseGles, &configAttribList);
 
   const EGLint* configAttribs = configAttribList.Elements();
 
@@ -1067,9 +1109,11 @@ static EGLConfig ChooseConfig(GLLibraryEGL* egl, CreateContextFlags flags,
 }
 
 /*static*/
-already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
+already_AddRefed<GLContextEGL>
+GLContextEGL::CreateEGLPBufferOffscreenContextImpl(
     CreateContextFlags flags, const mozilla::gfx::IntSize& size,
-    const SurfaceCaps& minCaps, nsACString* const out_failureId) {
+    const SurfaceCaps& minCaps, bool aUseGles,
+    nsACString* const out_failureId) {
   bool forceEnableHardware =
       bool(flags & CreateContextFlags::FORCE_ENABLE_HARDWARE);
   if (!GLLibraryEGL::EnsureInitialized(forceEnableHardware, out_failureId)) {
@@ -1078,7 +1122,8 @@ already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
 
   auto* egl = gl::GLLibraryEGL::Get();
   SurfaceCaps configCaps;
-  EGLConfig config = ChooseConfig(egl, flags, minCaps, &configCaps);
+  EGLConfig config =
+      ChooseConfigOffscreen(egl, flags, minCaps, aUseGles, &configCaps);
   if (config == EGL_NO_CONFIG) {
     *out_failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_EGL_NO_CONFIG");
     NS_WARNING("Failed to find a compatible config.");
@@ -1092,7 +1137,7 @@ already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
   mozilla::gfx::IntSize pbSize(size);
   EGLSurface surface = nullptr;
 #if defined(MOZ_WAYLAND)
-  if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (IS_WAYLAND_DISPLAY()) {
     surface = GLContextEGL::CreateWaylandBufferSurface(egl, config, pbSize);
   } else
 #endif
@@ -1107,7 +1152,7 @@ already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
   }
 
   RefPtr<GLContextEGL> gl = GLContextEGL::CreateGLContext(
-      egl, flags, configCaps, true, config, surface, out_failureId);
+      egl, flags, configCaps, true, config, surface, aUseGles, out_failureId);
   if (!gl) {
     NS_WARNING("Failed to create GLContext from PBuffer");
     egl->fDestroySurface(egl->Display(), surface);
@@ -1117,6 +1162,18 @@ already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
     return nullptr;
   }
 
+  return gl.forget();
+}
+
+already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
+    CreateContextFlags flags, const mozilla::gfx::IntSize& size,
+    const SurfaceCaps& minCaps, nsACString* const out_failureId) {
+  RefPtr<GLContextEGL> gl = CreateEGLPBufferOffscreenContextImpl(
+      flags, size, minCaps, /* aUseGles */ false, out_failureId);
+  if (!gl) {
+    gl = CreateEGLPBufferOffscreenContextImpl(
+        flags, size, minCaps, /* aUseGles */ true, out_failureId);
+  }
   return gl.forget();
 }
 

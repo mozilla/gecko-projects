@@ -92,6 +92,12 @@ impl PseudoElement {
         EAGER_PSEUDOS[i].clone()
     }
 
+    /// Whether the current pseudo element is animatable.
+    #[inline]
+    pub fn is_animatable(&self) -> bool {
+        matches!(*self, Self::Before | Self::After | Self::Marker)
+    }
+
     /// Whether the current pseudo element is ::before or ::after.
     #[inline]
     pub fn is_before_or_after(&self) -> bool {
@@ -134,12 +140,6 @@ impl PseudoElement {
         *self == PseudoElement::FirstLine
     }
 
-    /// Whether this pseudo-element is ::-moz-fieldset-content.
-    #[inline]
-    pub fn is_fieldset_content(&self) -> bool {
-        *self == PseudoElement::FieldsetContent
-    }
-
     /// Whether this pseudo-element is the ::-moz-color-swatch pseudo.
     #[inline]
     pub fn is_color_swatch(&self) -> bool {
@@ -159,7 +159,13 @@ impl PseudoElement {
 
     /// Whether this pseudo-element is enabled for all content.
     pub fn enabled_in_content(&self) -> bool {
-        (self.flags() & structs::CSS_PSEUDO_ELEMENT_ENABLED_IN_UA_SHEETS_AND_CHROME) == 0
+        if (self.flags() & structs::CSS_PSEUDO_ELEMENT_ENABLED_IN_UA_SHEETS_AND_CHROME) != 0 {
+            return false;
+        }
+        match *self {
+            PseudoElement::MozFocusOuter => static_prefs::pref!("layout.css.moz-focus-outer.enabled"),
+            _ => true,
+        }
     }
 
     /// Whether this pseudo is enabled explicitly in UA sheets.
