@@ -24,6 +24,7 @@ RELEASE_PROJECTS = {
     'comm-beta',
     'comm-esr68',
     'oak',
+    'maple',
 }
 
 RELEASE_PROMOTION_PROJECTS = {
