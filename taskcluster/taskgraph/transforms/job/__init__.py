@@ -279,6 +279,16 @@ def use_fetches(config, jobs):
                         fetch['dest'] = dest
                     job_fetches.append(fetch)
 
+        # Make sure we don't try to fetch multiple artifacts with the same name
+        # to the same destination
+        fetch_destinations = set()
+        for fetch in job_fetches:
+            name_dest = (fetch['artifact'], fetch.get('dest'))
+            if name_dest in fetch_destinations:
+                raise ValueError("{} is being fetched more than once with the same destination"
+                                 .format(fetch['artifact']))
+            fetch_destinations.add(name_dest)
+
         job_artifact_prefixes = {
             mozpath.dirname(fetch["artifact"])
             for fetch in job_fetches

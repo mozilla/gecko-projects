@@ -361,6 +361,7 @@ win32-shippable/opt:
             beta: true
             release.*: true
             esr.*: false
+            maple: true
             default:
                 by-project:
                     # browser/confvars.sh looks for nightly-try
@@ -1044,6 +1045,7 @@ win32-devedition/opt:
             nightly: true
             beta: true
             release.*: true
+            maple: true
             default:
                 by-project:
                     # browser/confvars.sh looks for nightly-try
